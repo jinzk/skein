@@ -25,6 +25,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "ast.h"
@@ -257,11 +258,24 @@ static void note_for_name_token() {
 static std::string input_line;
 static size_t input_pos = 0;
 
+// 内存输入时 input_line 直接指向源缓冲区，不再为每一行复制一份。
+static bool input_line_is_view = false;
+static const char *input_line_view = NULL;
+static size_t input_line_view_size = 0;
+
 // 内嵌包、include 和已被完整读入的脚本可以直接从内存扫描，避免为了
 // 传给 flex 而先写入 tmpfile。data 必须活到本次解析结束。
 static const char *input_memory = NULL;
 static size_t input_memory_size = 0;
 static size_t input_memory_pos = 0;
+
+static const char *active_input_data() {
+    return input_line_is_view ? input_line_view : input_line.data();
+}
+
+static size_t active_input_size() {
+    return input_line_is_view ? input_line_view_size : input_line.size();
+}
 
 enum input_status {
     INPUT_LINE,       // 读到完整的一行（含 \n）
@@ -286,6 +300,9 @@ static void strip_utf8_bom_once() {
 static input_status read_input_line() {
     input_line.clear();
     input_pos = 0;
+    input_line_is_view = false;
+    input_line_view = NULL;
+    input_line_view_size = 0;
     diag_start_input_line();
 
     if (input_memory) {
@@ -294,16 +311,29 @@ static input_status read_input_line() {
         if (input_memory_pos >= input_memory_size)
             return INPUT_EOF;
         const size_t begin = input_memory_pos;
-        size_t end = begin;
-        while (end < input_memory_size && input_memory[end] != '\n')
-            ++end;
-        const bool complete = end < input_memory_size;
-        if (complete)
-            ++end;
-        input_line.assign(input_memory + begin, end - begin);
+        const void *newline = std::memchr(input_memory + begin, '\n',
+                                          input_memory_size - begin);
+        const bool complete = newline != NULL;
+        size_t end = complete
+                         ? static_cast<size_t>(
+                               static_cast<const char *>(newline) -
+                               input_memory) +
+                               1
+                         : input_memory_size;
+        input_line_view = input_memory + begin;
+        input_line_view_size = end - begin;
+        if (begin == 0 && input_line_view_size >= 3 &&
+            (unsigned char)input_line_view[0] == 0xEF &&
+            (unsigned char)input_line_view[1] == 0xBB &&
+            (unsigned char)input_line_view[2] == 0xBF) {
+            input_line_view += 3;
+            input_line_view_size -= 3;
+        }
+        input_line_is_view = true;
         input_memory_pos = end;
-        strip_utf8_bom_once();
-        diag_record_line(diag_current_line(), input_line);
+        diag_record_line(
+            diag_current_line(),
+            std::string_view(input_line_view, input_line_view_size));
         return complete ? INPUT_LINE : INPUT_PARTIAL;
     }
 
@@ -374,15 +404,18 @@ static input_status read_input_line() {
         if (g_interrupted) {                                \
             result = YY_NULL;                               \
         } else {                                            \
-            if (input_pos >= input_line.size()) {           \
+            if (input_pos >= active_input_size()) {         \
                 input_status st = read_input_line();        \
                 if (st == INPUT_EOF)                        \
                     g_stdin_eof = 1;                        \
             }                                               \
-            size_t n = 0;                                   \
-            while (n < static_cast<size_t>(max_size) &&     \
-                   input_pos < input_line.size())           \
-                buf[n++] = input_line[input_pos++];         \
+            const char *data = active_input_data();         \
+            const size_t size = active_input_size();        \
+            size_t n = size - input_pos;                    \
+            if (n > static_cast<size_t>(max_size))          \
+                n = static_cast<size_t>(max_size);          \
+            std::memcpy(buf, data + input_pos, n);          \
+            input_pos += n;                                 \
             result = static_cast<int>(n);                   \
         }                                                   \
     } while (0)
@@ -1225,6 +1258,9 @@ static void reset_scanner_common() {
     clear_func_locations();
     input_line.clear();
     input_pos = 0;
+    input_line_is_view = false;
+    input_line_view = NULL;
+    input_line_view_size = 0;
     last_token = 0;
     prev_token = 0;
     last_token_line = 0;
@@ -1276,6 +1312,9 @@ struct scanner_checkpoint {
     size_t memory_size;
     size_t memory_pos;
     std::string input;
+    bool input_is_view;
+    const char *input_view;
+    size_t input_view_size;
     size_t position;
     std::string strings;
     int string_line;
@@ -1320,6 +1359,9 @@ scanner_checkpoint *scanner_checkpoint_save() {
     checkpoint->memory_size = input_memory_size;
     checkpoint->memory_pos = input_memory_pos;
     checkpoint->input = input_line;
+    checkpoint->input_is_view = input_line_is_view;
+    checkpoint->input_view = input_line_view;
+    checkpoint->input_view_size = input_line_view_size;
     checkpoint->position = input_pos;
     checkpoint->strings = string_buffer;
     checkpoint->string_line = string_start_line;
@@ -1368,6 +1410,9 @@ void scanner_checkpoint_restore(scanner_checkpoint *checkpoint) {
         reset_scanner_state(checkpoint->in);
     input_line = checkpoint->input;
     input_pos = checkpoint->position;
+    input_line_is_view = checkpoint->input_is_view;
+    input_line_view = checkpoint->input_view;
+    input_line_view_size = checkpoint->input_view_size;
     if (checkpoint->memory)
         input_memory_pos = checkpoint->memory_pos;
     string_buffer = checkpoint->strings;

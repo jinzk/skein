@@ -618,4 +618,7 @@ struct ast *append_struct_init(struct ast *head, struct ast *init);
 
 void treefree(struct ast *);
 
+/* Release a node struct allocated by the ast.cpp node arena. */
+void ast_node_free(void *ptr);
+
 #endif

@@ -369,34 +369,37 @@ std.string.builder          29 ms
 - 字符串会进入序列化、FFI 和跨线程边界，表示变更影响面大
 - AST 的 COW 阈值与 VM 不同（无栈副本时只允许 1 个 owner）
 
-#### 启动解析优化（计划）
+#### 启动解析优化（已完成）
 
-已完成：`SKEIN_STARTUP_STATS` + `tools/startup_profile.py`，以及去掉
+已完成：`SKEIN_STARTUP_STATS` + `tools/startup_profile.py`、去掉
 `tmpfile()`、跳过内嵌 std 包类型检查、避免入口目录的 eager
-`weakly_canonical()`。Windows RelWithDebInfo 下空脚本 `main()` 约 0.4 ms，
-`import std` 约 0.9 ms，`import std.web` 约 1.5 ms。
+`weakly_canonical()`、AST arena 和内存输入 fast path。Windows
+RelWithDebInfo 下空脚本 `main()` 约 0.4 ms，`import std` 约 0.85 ms，
+`import std.web` 约 1.55 ms。
 
-`import std.web` 的剩余成本大致为：纯解析约 0.5 ms、包求值约 0.12 ms、
-`std` 命名空间约 0.09 ms、adapter 约 0.17 ms。**解析器优化只影响冷启动，
-不影响 HTTP 请求解析或请求处理热路径。**
+`import std.web` 的剩余成本大致为：解析 + 包求值约 0.78 ms、`std` 命名空间
+约 0.09 ms、adapter 约 0.17 ms。**解析器优化只影响冷启动，不影响 HTTP
+请求解析或请求处理热路径。**
 
-计划项（按顺序；触发条件：冷启动被确认为明确目标）：
-
-1. **AST arena**（中等风险）
-   - 现状：`ast.cpp` 的节点和标识符逐个 `malloc` / `free`
-   - 目标：每次解析使用 bump allocator，`treefree` 对 arena 节点改为整块回收
-   - 约束：区分临时语句 AST 与长期保留的函数/包 AST；跑
-     `process_memory_test`、`gc_stress_test` 和 JIT 差分测试
-   - 预期：纯解析降低 20–40%，约 0.1–0.2 ms/包
-2. **内存输入 fast path**（低风险）
-   - 现状：`reset_scanner_state_memory()` 仍按行 `input_line.assign()`，
-     再拷贝给 flex 的 `YY_INPUT`
-   - 目标：内存输入直接按块喂 flex，行号与诊断行记录独立维护
-   - 预期：每包约 0.03–0.08 ms
-
-两项合计预计让 `import std.web` 少约 0.2–0.3 ms，对约 12 ms 的进程 wall
-time 约 2–3%。先用 `tools/startup_profile.py` 在目标平台确认解析占比；
-若主要成本仍是进程创建 / 动态库初始化，则不启动这些改动。
+1. **AST arena（已完成）**
+   - `ast.cpp` 的节点改由 size-class arena 分配；`treefree` 通过
+     `ast_node_free()` 归还，节点不再逐次 `malloc` / `free`
+   - 块来自进程级 64 KiB chunk，按线程 free list 复用；chunk 保持到进程
+     退出，以支持跨线程释放且不需要每次加锁
+   - `SKEIN_AST_ARENA=0` 可回退到逐节点 `malloc`，用于排查
+   - 实测（Windows RelWithDebInfo，60 次中位数）：`parse std.web`
+     0.83 → 0.80 ms，`parse std.auth` 0.94 → 0.89 ms，
+     `parse std.cache` 0.92 → 0.86 ms；整体 `main()` 下降约 0.03–0.06 ms
+   - 结论：分配不是主要瓶颈，收益低于原估计；保留该实现，但不再扩展
+2. **内存输入 fast path（已完成）**
+   - 内存输入不再把每行复制到 `input_line`：`input_line` 直接引用源缓冲区，
+     `YY_INPUT` 从视图读取
+   - `diag_record_line` 接受 `string_view`，去掉中间 `std::string` 拷贝
+   - scanner checkpoint 保存/恢复行视图，嵌套解析和 REPL 路径不变
+   - 实测：`parse std.web` 0.80 → 0.78 ms，`std.auth` 0.89 → 0.87 ms，
+     `std.cache` 0.86 → 0.84 ms；`main()` 再降约 0.02–0.03 ms
+   - 结论：解析和诊断行存储仍是剩余成本；除非冷启动成为硬指标，否则
+     不再继续拆分 `read_input_line` / `source_lines`
 
 不做：
 
@@ -627,7 +630,7 @@ Session / 限流共享 store。Redis / Valkey 不放入 `std.db`，避免和 SQL
 - 未确认公共生态前，不先做 vendor / workspace。
 - 没有明确的全量拼接/切片需求前，不引入 rope / 分块字符串表示；透明 `s = s + x` 已完成，批量构建仍推荐 `std.string.builder`。
 - SQLite 单文件 `std.kv` 已完成；没有明确的高写入/大数据量需求前，不实现 LevelDB / RocksDB 目录后端，也不承诺单文件。
-- 冷启动只保留已完成的 profiling、内存扫描、内嵌 std 包类型检查跳过和入口目录规范化；没有明确的冷启动目标前，不启动 AST arena / 内存输入 fast path，也不单独做跨进程 AST 缓存。
+- 冷启动已完成 profiling、内存扫描、内嵌 std 包类型检查跳过、入口目录规范化和 AST arena；没有明确的冷启动目标前，不启动内存输入 fast path，也不单独做跨进程 AST 缓存。
 
 ---
 

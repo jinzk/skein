@@ -4,10 +4,12 @@
 #include "scopestack.h"
 #include "vm.h"
 
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <mutex>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -22,6 +24,156 @@ static char *copy_string(const char *text) {
     }
     std::memcpy(copy, text, len);
     return copy;
+}
+
+/*
+ * AST nodes are numerous and short-lived, and every node is released through
+ * treefree() or one of the two helpers below.  malloc/free per node is a
+ * measurable part of parsing large packages, so node structs come from a
+ * size-class arena.  Names, type constraints and symbol lists keep using
+ * malloc because they are owned by other subsystems.
+ *
+ * Blocks are carved from process-wide 64 KiB chunks and recycled through
+ * per-thread free lists.  Chunks stay alive until process exit: an AST
+ * allocated while parsing one thread may be freed by another when a function
+ * code object is released, and keeping the chunks reachable makes that safe
+ * without a lock on every free.
+ */
+namespace {
+
+constexpr size_t kAstAlign = alignof(std::max_align_t);
+constexpr size_t kAstMaxPayload = 512;
+constexpr size_t kAstClassCount = kAstMaxPayload / kAstAlign;
+constexpr size_t kAstChunkSize = 64 * 1024;
+constexpr uint32_t kAstLargeClass = 0xffffffffu;
+
+struct ast_free_block {
+    ast_free_block *next;
+};
+
+constexpr uint32_t kAstMagic = 0x41535442u; /* "ASTB" */
+
+struct ast_block_header {
+    uint32_t magic;
+    uint32_t class_index;
+    uint64_t reserved;
+};
+static_assert(sizeof(ast_block_header) == kAstAlign,
+              "AST block header must match the arena alignment");
+
+struct ast_chunk {
+    ast_chunk *next;
+};
+
+struct ast_thread_pool {
+    ast_free_block *free_lists[kAstClassCount] = {};
+    unsigned char *cursor = nullptr;
+    unsigned char *limit = nullptr;
+};
+
+std::mutex g_ast_chunk_mutex;
+ast_chunk *g_ast_chunks = nullptr;
+thread_local ast_thread_pool g_ast_pool;
+
+bool ast_arena_enabled() {
+    static const bool enabled = []() {
+        const char *value = std::getenv("SKEIN_AST_ARENA");
+        if (!value || !*value)
+            return true;
+        return std::strcmp(value, "0") != 0 &&
+               std::strcmp(value, "false") != 0;
+    }();
+    return enabled;
+}
+
+void ast_add_chunk(size_t need) {
+    const size_t capacity = need > kAstChunkSize ? need : kAstChunkSize;
+    ast_chunk *chunk = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(g_ast_chunk_mutex);
+        chunk = static_cast<ast_chunk *>(
+            std::malloc(sizeof(ast_chunk) + capacity + kAstAlign));
+        if (!chunk) {
+            yyerror("out of space");
+            std::exit(0);
+        }
+        chunk->next = g_ast_chunks;
+        g_ast_chunks = chunk;
+    }
+    unsigned char *data = reinterpret_cast<unsigned char *>(chunk + 1);
+    uintptr_t address = reinterpret_cast<uintptr_t>(data);
+    address = (address + kAstAlign - 1) & ~(uintptr_t)(kAstAlign - 1);
+    g_ast_pool.cursor = reinterpret_cast<unsigned char *>(address);
+    g_ast_pool.limit = g_ast_pool.cursor + capacity;
+}
+
+void *ast_node_alloc(size_t size) {
+    if (!ast_arena_enabled())
+        return std::malloc(size);
+    const size_t payload = (size + kAstAlign - 1) & ~(kAstAlign - 1);
+    if (payload <= kAstMaxPayload) {
+        const size_t index = payload / kAstAlign - 1;
+        ast_free_block *block = g_ast_pool.free_lists[index];
+        if (block) {
+            g_ast_pool.free_lists[index] = block->next;
+            return block;
+        }
+        const size_t block_size = sizeof(ast_block_header) + payload;
+        if (!g_ast_pool.cursor ||
+            static_cast<size_t>(g_ast_pool.limit - g_ast_pool.cursor) <
+                block_size) {
+            ast_add_chunk(block_size);
+        }
+        ast_block_header *header =
+            reinterpret_cast<ast_block_header *>(g_ast_pool.cursor);
+        header->magic = kAstMagic;
+        header->class_index = static_cast<uint32_t>(index);
+        header->reserved = 0;
+        g_ast_pool.cursor += block_size;
+        return header + 1;
+    }
+    ast_block_header *header = static_cast<ast_block_header *>(
+        std::malloc(sizeof(ast_block_header) + payload));
+    if (!header) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    header->magic = kAstMagic;
+    header->class_index = kAstLargeClass;
+    header->reserved = 0;
+    return header + 1;
+}
+
+} // namespace
+
+void ast_node_free(void *ptr) {
+    if (!ptr)
+        return;
+    if (!ast_arena_enabled()) {
+        std::free(ptr);
+        return;
+    }
+    ast_block_header *header =
+        reinterpret_cast<ast_block_header *>(ptr) - 1;
+    if (header->magic != kAstMagic) {
+#ifndef NDEBUG
+        std::fprintf(stderr,
+                     "internal error: ast_node_free on non-arena pointer %p\n",
+                     ptr);
+        std::abort();
+#else
+        /* Defensive fallback for a node allocated outside the arena. */
+        std::free(ptr);
+        return;
+#endif
+    }
+    if (header->class_index == kAstLargeClass) {
+        std::free(header);
+        return;
+    }
+    ast_free_block *block = static_cast<ast_free_block *>(ptr);
+    block->next = g_ast_pool.free_lists[header->class_index];
+    g_ast_pool.free_lists[header->class_index] = block;
 }
 
 template <typename T>
@@ -47,7 +199,7 @@ void clear_func_locations() {
 }
 
 struct ast *newast(int nodetype, struct ast *l, struct ast *r) {
-    struct ast *a = (struct ast *)std::malloc(sizeof(struct ast));
+    struct ast *a = (struct ast *)ast_node_alloc(sizeof(struct ast));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -60,7 +212,7 @@ struct ast *newast(int nodetype, struct ast *l, struct ast *r) {
 }
 
 struct ast *newint(long long i) {
-    struct val *a = (struct val *)std::malloc(sizeof(struct val));
+    struct val *a = (struct val *)ast_node_alloc(sizeof(struct val));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -72,7 +224,7 @@ struct ast *newint(long long i) {
 }
 
 struct ast *newvalnode(value_t *value) {
-    struct val *a = (struct val *)std::malloc(sizeof(struct val));
+    struct val *a = (struct val *)ast_node_alloc(sizeof(struct val));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -84,7 +236,7 @@ struct ast *newvalnode(value_t *value) {
 }
 
 struct ast *newfloat(double d) {
-    struct val *a = (struct val *)std::malloc(sizeof(struct val));
+    struct val *a = (struct val *)ast_node_alloc(sizeof(struct val));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -96,7 +248,7 @@ struct ast *newfloat(double d) {
 }
 
 struct ast *newbool(bool b) {
-    struct val *a = (struct val *)std::malloc(sizeof(struct val));
+    struct val *a = (struct val *)ast_node_alloc(sizeof(struct val));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -108,7 +260,7 @@ struct ast *newbool(bool b) {
 }
 
 struct ast *newstr(const char *s) {
-    struct val *a = (struct val *)std::malloc(sizeof(struct val));
+    struct val *a = (struct val *)ast_node_alloc(sizeof(struct val));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -120,7 +272,7 @@ struct ast *newstr(const char *s) {
 }
 
 struct ast *newchar(long long c) {
-    struct val *a = (struct val *)std::malloc(sizeof(struct val));
+    struct val *a = (struct val *)ast_node_alloc(sizeof(struct val));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -132,7 +284,7 @@ struct ast *newchar(long long c) {
 }
 
 struct ast *newbuiltin(int functype) {
-    struct val *a = (struct val *)std::malloc(sizeof(struct val));
+    struct val *a = (struct val *)ast_node_alloc(sizeof(struct val));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -144,7 +296,7 @@ struct ast *newbuiltin(int functype) {
 }
 
 struct ast *newnullast() {
-    struct val *a = (struct val *)std::malloc(sizeof(struct val));
+    struct val *a = (struct val *)ast_node_alloc(sizeof(struct val));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -156,7 +308,7 @@ struct ast *newnullast() {
 }
 
 struct ast *newcmp(int cmptype, struct ast *l, struct ast *r) {
-    struct ast *a = (struct ast *)std::malloc(sizeof(struct ast));
+    struct ast *a = (struct ast *)ast_node_alloc(sizeof(struct ast));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -169,7 +321,8 @@ struct ast *newcmp(int cmptype, struct ast *l, struct ast *r) {
 }
 
 struct ast *newcall(struct ast *callee, struct ast *l) {
-    struct ufncall *a = (struct ufncall *)std::malloc(sizeof(struct ufncall));
+    struct ufncall *a =
+        (struct ufncall *)ast_node_alloc(sizeof(struct ufncall));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -185,7 +338,7 @@ struct ast *newcall(struct ast *callee, struct ast *l) {
 }
 
 struct ast *newref(char *s) {
-    struct symref *a = (struct symref *)std::malloc(sizeof(struct symref));
+    struct symref *a = (struct symref *)ast_node_alloc(sizeof(struct symref));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -197,7 +350,8 @@ struct ast *newref(char *s) {
 }
 
 struct ast *newasgn(struct ast *target, struct ast *v) {
-    struct symasgn *a = (struct symasgn *)std::malloc(sizeof(struct symasgn));
+    struct symasgn *a =
+        (struct symasgn *)ast_node_alloc(sizeof(struct symasgn));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -211,7 +365,7 @@ struct ast *newasgn(struct ast *target, struct ast *v) {
 
 struct ast *newcompound(struct ast *target, int op, struct ast *v) {
     struct compound_asgn *a =
-        (struct compound_asgn *)std::malloc(sizeof(struct compound_asgn));
+        (struct compound_asgn *)ast_node_alloc(sizeof(struct compound_asgn));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -226,7 +380,7 @@ struct ast *newcompound(struct ast *target, int op, struct ast *v) {
 
 struct ast *newincdec(struct ast *target, int delta, bool prefix) {
     struct incdec_node *a =
-        (struct incdec_node *)std::malloc(sizeof(struct incdec_node));
+        (struct incdec_node *)ast_node_alloc(sizeof(struct incdec_node));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -240,7 +394,7 @@ struct ast *newincdec(struct ast *target, int delta, bool prefix) {
 }
 
 struct ast *newscope(struct ast *v) {
-    struct nscope *a = (struct nscope *)std::malloc(sizeof(struct nscope));
+    struct nscope *a = (struct nscope *)ast_node_alloc(sizeof(struct nscope));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -253,7 +407,7 @@ struct ast *newscope(struct ast *v) {
 
 struct ast *newvar(char *s, struct ast *v, bool exported, bool is_const,
                    struct type_constraint *type) {
-    struct symdef *a = (struct symdef *)std::malloc(sizeof(struct symdef));
+    struct symdef *a = (struct symdef *)ast_node_alloc(sizeof(struct symdef));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -270,9 +424,8 @@ struct ast *newvar(char *s, struct ast *v, bool exported, bool is_const,
 
 struct ast *newdestructure(struct ast *pattern, struct ast *value,
                            bool is_const) {
-    struct destructure_node *a =
-        (struct destructure_node *)std::malloc(
-            sizeof(struct destructure_node));
+    struct destructure_node *a = (struct destructure_node *)
+        ast_node_alloc(sizeof(struct destructure_node));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -286,7 +439,7 @@ struct ast *newdestructure(struct ast *pattern, struct ast *value,
 }
 
 struct ast *newret(struct ast *v) {
-    struct fnret *a = (struct fnret *)std::malloc(sizeof(struct fnret));
+    struct fnret *a = (struct fnret *)ast_node_alloc(sizeof(struct fnret));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -298,7 +451,7 @@ struct ast *newret(struct ast *v) {
 }
 
 struct ast *newbrk(char *label, int line, int column) {
-    struct nbreak *a = (struct nbreak *)std::malloc(sizeof(struct nbreak));
+    struct nbreak *a = (struct nbreak *)ast_node_alloc(sizeof(struct nbreak));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -310,7 +463,8 @@ struct ast *newbrk(char *label, int line, int column) {
 }
 
 struct ast *newctn(char *label, int line, int column) {
-    struct ncontinue *a = (struct ncontinue *)std::malloc(sizeof(struct ncontinue));
+    struct ncontinue *a =
+        (struct ncontinue *)ast_node_alloc(sizeof(struct ncontinue));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -323,7 +477,7 @@ struct ast *newctn(char *label, int line, int column) {
 
 struct ast *newlabel(char *name, struct ast *stmt) {
     struct label_node *a =
-        (struct label_node *)std::malloc(sizeof(struct label_node));
+        (struct label_node *)ast_node_alloc(sizeof(struct label_node));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -337,7 +491,7 @@ struct ast *newlabel(char *name, struct ast *stmt) {
 
 struct ast *newfail(struct ast *v) {
     struct control_stmt *a =
-        (struct control_stmt *)std::malloc(sizeof(struct control_stmt));
+        (struct control_stmt *)ast_node_alloc(sizeof(struct control_stmt));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -350,7 +504,7 @@ struct ast *newfail(struct ast *v) {
 
 struct ast *newrecover(struct ast *v) {
     struct control_stmt *a =
-        (struct control_stmt *)std::malloc(sizeof(struct control_stmt));
+        (struct control_stmt *)ast_node_alloc(sizeof(struct control_stmt));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -363,7 +517,7 @@ struct ast *newrecover(struct ast *v) {
 
 struct ast *newpass(struct ast *v) {
     struct control_stmt *a =
-        (struct control_stmt *)std::malloc(sizeof(struct control_stmt));
+        (struct control_stmt *)ast_node_alloc(sizeof(struct control_stmt));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -376,7 +530,7 @@ struct ast *newpass(struct ast *v) {
 
 struct ast *newonerror(struct ast *call, char *name, struct ast *body) {
     struct on_error_node *a =
-        (struct on_error_node *)std::malloc(sizeof(struct on_error_node));
+        (struct on_error_node *)ast_node_alloc(sizeof(struct on_error_node));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -390,7 +544,8 @@ struct ast *newonerror(struct ast *call, char *name, struct ast *body) {
 }
 
 struct ast *newis(struct ast *value, struct type_constraint *type) {
-    struct is_node *a = (struct is_node *)std::malloc(sizeof(struct is_node));
+    struct is_node *a =
+        (struct is_node *)ast_node_alloc(sizeof(struct is_node));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -404,7 +559,7 @@ struct ast *newis(struct ast *value, struct type_constraint *type) {
 
 struct ast *newcast(struct ast *value, struct type_constraint *type) {
     struct cast_node *a =
-        (struct cast_node *)std::malloc(sizeof(struct cast_node));
+        (struct cast_node *)ast_node_alloc(sizeof(struct cast_node));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -418,7 +573,7 @@ struct ast *newcast(struct ast *value, struct type_constraint *type) {
 
 struct ast *newspread(struct ast *value) {
     struct spread_node *a =
-        (struct spread_node *)std::malloc(sizeof(struct spread_node));
+        (struct spread_node *)ast_node_alloc(sizeof(struct spread_node));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -430,7 +585,7 @@ struct ast *newspread(struct ast *value) {
 }
 
 struct ast *newflow(int nodetype, struct ast *cond, struct ast *tl, struct ast *el) {
-    struct flow *a = (struct flow *)std::malloc(sizeof(struct flow));
+    struct flow *a = (struct flow *)ast_node_alloc(sizeof(struct flow));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -444,7 +599,8 @@ struct ast *newflow(int nodetype, struct ast *cond, struct ast *tl, struct ast *
 }
 
 struct ast *newfor(struct ast *init, struct ast *cond, struct ast *step, struct ast *body) {
-    struct forloop *a = (struct forloop *)std::malloc(sizeof(struct forloop));
+    struct forloop *a =
+        (struct forloop *)ast_node_alloc(sizeof(struct forloop));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -461,7 +617,7 @@ struct ast *newfor(struct ast *init, struct ast *cond, struct ast *step, struct 
 struct ast *newforin(char *name, char *value_name, struct ast *iterable,
                      struct ast *body) {
     struct forinloop *a =
-        (struct forinloop *)std::malloc(sizeof(struct forinloop));
+        (struct forinloop *)ast_node_alloc(sizeof(struct forinloop));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -477,7 +633,7 @@ struct ast *newforin(char *name, char *value_name, struct ast *iterable,
 
 struct ast *newswitch(struct ast *expr, struct ast *cases) {
     struct switch_node *a =
-        (struct switch_node *)std::malloc(sizeof(struct switch_node));
+        (struct switch_node *)ast_node_alloc(sizeof(struct switch_node));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -491,7 +647,7 @@ struct ast *newswitch(struct ast *expr, struct ast *cases) {
 
 struct ast *newcase(struct ast *values, struct ast *body, struct ast *next) {
     struct case_node *a =
-        (struct case_node *)std::malloc(sizeof(struct case_node));
+        (struct case_node *)ast_node_alloc(sizeof(struct case_node));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -515,7 +671,7 @@ struct ast *append_case(struct ast *head, struct ast *node) {
 
 struct ast *newmatch(struct ast *expr, struct ast *arms) {
     struct match_node *a =
-        (struct match_node *)std::malloc(sizeof(struct match_node));
+        (struct match_node *)ast_node_alloc(sizeof(struct match_node));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -530,7 +686,7 @@ struct ast *newmatch(struct ast *expr, struct ast *arms) {
 struct ast *newmatcharm(struct ast *pattern, struct ast *guard,
                         struct ast *body, struct ast *next) {
     struct match_arm *a =
-        (struct match_arm *)std::malloc(sizeof(struct match_arm));
+        (struct match_arm *)ast_node_alloc(sizeof(struct match_arm));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -566,7 +722,7 @@ struct ast *append_matcharm(struct ast *head, struct ast *node) {
 
 static struct pattern_node *new_pattern_node(int nodetype) {
     struct pattern_node *a =
-        (struct pattern_node *)std::malloc(sizeof(struct pattern_node));
+        (struct pattern_node *)ast_node_alloc(sizeof(struct pattern_node));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -687,7 +843,7 @@ struct ast *newpatternvariant(char *name, char *source, char *variant,
 struct pattern_field *newpatternfield(char *key, struct ast *pattern,
                                       struct pattern_field *next) {
     struct pattern_field *f =
-        (struct pattern_field *)std::malloc(sizeof(struct pattern_field));
+        (struct pattern_field *)ast_node_alloc(sizeof(struct pattern_field));
     if (!f) {
         yyerror("out of space");
         std::exit(0);
@@ -702,7 +858,7 @@ struct pattern_field *newpatternfield(char *key, struct ast *pattern,
 struct pattern_field *newpatternrestfield(char *name,
                                           struct pattern_field *next) {
     struct pattern_field *f =
-        (struct pattern_field *)std::malloc(sizeof(struct pattern_field));
+        (struct pattern_field *)ast_node_alloc(sizeof(struct pattern_field));
     if (!f) {
         yyerror("out of space");
         std::exit(0);
@@ -736,7 +892,8 @@ struct ast *append_patternitem(struct ast *head, struct ast *node) {
 struct ast *newfunc(char *s, struct symlist *sl, struct ast *ast,
                     bool exported, bool is_generator,
                     struct type_constraint *ret_type) {
-    struct funcdef *a = (struct funcdef *)std::malloc(sizeof(struct funcdef));
+    struct funcdef *a =
+        (struct funcdef *)ast_node_alloc(sizeof(struct funcdef));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -773,7 +930,7 @@ struct ast *newdefer(struct ast *value) {
 
 struct ast *newpackage(char *name, struct ast *body) {
     struct package_node *a =
-        (struct package_node *)std::malloc(sizeof(struct package_node));
+        (struct package_node *)ast_node_alloc(sizeof(struct package_node));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -787,7 +944,7 @@ struct ast *newpackage(char *name, struct ast *body) {
 
 struct ast *newimport(char *path, char *alias) {
     struct import_node *a =
-        (struct import_node *)std::malloc(sizeof(struct import_node));
+        (struct import_node *)ast_node_alloc(sizeof(struct import_node));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -802,7 +959,7 @@ struct ast *newimport(char *path, char *alias) {
 
 struct ast *newinclude(char *path) {
     struct include_node *a =
-        (struct include_node *)std::malloc(sizeof(struct include_node));
+        (struct include_node *)ast_node_alloc(sizeof(struct include_node));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -1004,7 +1161,8 @@ void ast_thread_shutdown() {
 }
 
 struct ast *newlist(struct ast *v, struct ast *l) {
-    struct list_node *p = (struct list_node *)std::malloc(sizeof(struct list_node));
+    struct list_node *p =
+        (struct list_node *)ast_node_alloc(sizeof(struct list_node));
     if (!p) {
         yyerror("out of space");
         std::exit(0);
@@ -1023,7 +1181,8 @@ struct ast *newtuple(struct ast *v, struct ast *l) {
 }
 
 struct ast *newdict(struct ast *k, struct ast *v, struct ast *l) {
-    struct dict_node *p = (struct dict_node *)std::malloc(sizeof(struct dict_node));
+    struct dict_node *p =
+        (struct dict_node *)ast_node_alloc(sizeof(struct dict_node));
     if (!p) {
         yyerror("out of space");
         std::exit(0);
@@ -1039,7 +1198,7 @@ struct ast *newdict(struct ast *k, struct ast *v, struct ast *l) {
 struct ast *newstructdecl(char *name, char *source,
                           struct struct_member *members, bool exported) {
     struct struct_node *a =
-        (struct struct_node *)std::malloc(sizeof(struct struct_node));
+        (struct struct_node *)ast_node_alloc(sizeof(struct struct_node));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -1056,7 +1215,7 @@ struct ast *newstructdecl(char *name, char *source,
 
 struct ast *newstructfield(char *name, struct type_constraint *type) {
     struct struct_member *a =
-        (struct struct_member *)std::malloc(sizeof(struct struct_member));
+        (struct struct_member *)ast_node_alloc(sizeof(struct struct_member));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -1074,7 +1233,7 @@ struct ast *newstructfield(char *name, struct type_constraint *type) {
 
 struct ast *newstructmethod(char *name, struct ast *func) {
     struct struct_member *a =
-        (struct struct_member *)std::malloc(sizeof(struct struct_member));
+        (struct struct_member *)ast_node_alloc(sizeof(struct struct_member));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -1101,7 +1260,7 @@ struct ast *append_struct_member(struct ast *head, struct ast *member) {
 struct ast *newimpl(char *type_name, char *trait_name, char *source,
                     struct struct_member *methods) {
     struct impl_node *a =
-        (struct impl_node *)std::malloc(sizeof(struct impl_node));
+        (struct impl_node *)ast_node_alloc(sizeof(struct impl_node));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -1118,7 +1277,7 @@ struct ast *newimpl(char *type_name, char *trait_name, char *source,
 struct ast *newtraitdecl(char *name, char *source,
                          struct trait_method *methods, bool exported) {
     struct trait_node *a =
-        (struct trait_node *)std::malloc(sizeof(struct trait_node));
+        (struct trait_node *)ast_node_alloc(sizeof(struct trait_node));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -1136,7 +1295,7 @@ struct ast *newtraitdecl(char *name, char *source,
 struct ast *newtraitmethod(char *name, struct symlist *params,
                            struct ast *func) {
     struct trait_method *a =
-        (struct trait_method *)std::malloc(sizeof(struct trait_method));
+        (struct trait_method *)ast_node_alloc(sizeof(struct trait_method));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -1161,7 +1320,8 @@ struct ast *append_trait_method(struct ast *head, struct ast *method) {
 struct ast *newstructlit(char *name, char *source,
                          struct struct_init *fields) {
     struct struct_lit_node *a =
-        (struct struct_lit_node *)std::malloc(sizeof(struct struct_lit_node));
+        (struct struct_lit_node *)
+            ast_node_alloc(sizeof(struct struct_lit_node));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -1177,7 +1337,7 @@ struct ast *newstructlit(char *name, char *source,
 struct ast *newenumdecl(char *name, char *source,
                         struct enum_variant *variants, bool exported) {
     struct enum_node *a =
-        (struct enum_node *)std::malloc(sizeof(struct enum_node));
+        (struct enum_node *)ast_node_alloc(sizeof(struct enum_node));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -1195,7 +1355,7 @@ struct ast *newenumdecl(char *name, char *source,
 struct ast *newenumvariant(char *name, struct struct_member *fields,
                            struct enum_variant *next) {
     struct enum_variant *a =
-        (struct enum_variant *)std::malloc(sizeof(struct enum_variant));
+        (struct enum_variant *)ast_node_alloc(sizeof(struct enum_variant));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -1221,7 +1381,7 @@ struct enum_variant *append_enumvariant(struct enum_variant *head,
 struct ast *newenumlit(char *name, char *source, char *variant,
                        struct struct_init *fields) {
     struct enum_lit_node *a =
-        (struct enum_lit_node *)std::malloc(sizeof(struct enum_lit_node));
+        (struct enum_lit_node *)ast_node_alloc(sizeof(struct enum_lit_node));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -1237,7 +1397,7 @@ struct ast *newenumlit(char *name, char *source, char *variant,
 
 struct ast *newstructinit(char *name, struct ast *value) {
     struct struct_init *a =
-        (struct struct_init *)std::malloc(sizeof(struct struct_init));
+        (struct struct_init *)ast_node_alloc(sizeof(struct struct_init));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -1264,7 +1424,7 @@ static void freepatternfields(struct pattern_field *field) {
         std::free(field->key);
         std::free(field->rest_name);
         treefree(field->pattern);
-        std::free(field);
+        ast_node_free(field);
         field = next;
     }
 }
@@ -1651,5 +1811,5 @@ void treefree(struct ast *a) {
             std::fprintf(stderr, "internal error: bad node %c\n", a->nodetype);
             break;
     }
-    std::free(a);
+    ast_node_free(a);
 }

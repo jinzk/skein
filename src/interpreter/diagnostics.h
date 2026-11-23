@@ -2,6 +2,7 @@
 #define SKEIN_DIAGNOSTICS_H
 
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "error_info.h"
@@ -30,7 +31,7 @@ void diag_scan_token(const char *text, int length);
 void diag_scan_rewind(const char *text, int length);
 
 /* Remember a physical source line for snippets. */
-void diag_record_line(int line, const std::string &text);
+void diag_record_line(int line, std::string_view text);
 
 /* Runtime location handling. */
 void diag_set_location(int line, int column);

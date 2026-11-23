@@ -85,6 +85,9 @@ python3 tools/startup_profile.py --bin ./build/skein --verbose
   需要重新检查它们时设置 `SKEIN_TYPECHECK_EMBEDDED=1`
   （`tests/cases/typecheck.py` 用它做回归）；
 - 源码直接从内存扫描，不再为内嵌包或已读入的脚本创建 `tmpfile()`；
+  内存输入按行视图读取，不再复制到 `input_line`；
+- AST 节点由 size-class arena 分配；`SKEIN_AST_ARENA=0` 可回退到逐节点
+  `malloc`（用于排查分配相关问题）；
 - 想缩短短脚本启动时间，应优先看进程/动态库初始化和解析器，而不是把
   `std.*` 改成懒加载。
 

@@ -916,7 +916,7 @@ static struct ast *append_tuple_explist(struct ast *chain,
     if (items->nodetype == 'L') {
         chain = append_tuple_explist(chain, items->l);
         chain = append_tuple_explist(chain, items->r);
-        std::free(items);
+        ast_node_free(items);
         return chain;
     }
     struct ast *node = newlist(items, NULL);

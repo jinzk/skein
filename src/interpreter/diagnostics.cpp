@@ -101,16 +101,14 @@ void diag_scan_rewind(const char *text, int length) {
     }
 }
 
-void diag_record_line(int line, const std::string &text) {
+void diag_record_line(int line, std::string_view text) {
     if (line <= 0)
         return;
     if ((size_t)line > source_lines.size())
         source_lines.resize((size_t)line);
-    std::string display = text;
-    while (!display.empty() &&
-           (display.back() == '\n' || display.back() == '\r'))
-        display.pop_back();
-    source_lines[(size_t)line - 1] = display;
+    while (!text.empty() && (text.back() == '\n' || text.back() == '\r'))
+        text.remove_suffix(1);
+    source_lines[(size_t)line - 1].assign(text.data(), text.size());
 }
 
 static void diagnostic_offsets(int line, int column, std::size_t &byte_offset,

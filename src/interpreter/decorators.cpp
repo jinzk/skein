@@ -54,7 +54,7 @@ void free_decorator_wrappers(struct ast *node) {
         return;
     free_decorator_wrappers(node->l);
     free_decorator_wrappers(node->r);
-    std::free(node);
+    ast_node_free(node);
 }
 
 std::string function_hidden_name(const char *kind,

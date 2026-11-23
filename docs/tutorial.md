@@ -1,34 +1,45 @@
 # Skein 教程
 
-本教程从运行脚本开始，依次介绍语言基础、包与模块、并发、网络和常用
-标准库用法。语法细节查 [SYNTAX.md](../SYNTAX.md)，标准库 API 查
-[标准库指南](stdlib.md)。
+本教程按「先跑起来，再学语言，再查标准库，最后做工程化」的顺序组织。第一次阅读建议按第一、二部分顺序走一遍；后面几部分更像是按场景查阅的手册。
+
+语法细节查 [SYNTAX.md](../SYNTAX.md)，标准库 API 查 [标准库指南](stdlib.md)，只想快速浏览语言特性可以看 [README](../README.md)。
 
 ## 本教程内容
 
-- [脚本模式与 REPL](#脚本模式与-repl)
-- [开发期自动重启](#开发期自动重启)
-- [包与导入](#包与导入)
-- [语言概览](#语言概览)
-- [语法约定](#语法约定)
-- [类型与转换](#类型与转换)
-- [对象生命周期](#对象生命周期)
-- [格式化](#格式化)
-- [外部命令](#外部命令)
-- [字符串处理](#字符串处理)
-- [控制台输入](#控制台输入)
-- [文件读写](#文件读写)
-- [字符、字节与编码](#字符字节与编码)
-- [正则表达式](#正则表达式)
-- [时间、随机数和 UUID](#时间随机数和-uuid)
-- [Base64、URL 和哈希](#base64url-和哈希)
-- [环境变量和进程捕获](#环境变量和进程捕获)
-- [目录、路径和压缩](#目录路径和压缩)
-- [用 dict + 闭包封装文件对象](#用-dict--闭包封装文件对象)
-- [线程、Channel 与并发](#线程channel-与并发)
-- [错误信息](#错误信息)
+- [第一部分：入门](#第一部分入门)
+  - [脚本模式与 REPL](#脚本模式与-repl)
+  - [交互模式](#交互模式)
+- [第二部分：语言基础](#第二部分语言基础)
+  - [语言概览](#语言概览)
+  - [语法约定](#语法约定)
+  - [类型与转换](#类型与转换)
+  - [对象生命周期](#对象生命周期)
+  - [格式化](#格式化)
+  - [错误信息](#错误信息)
+- [第三部分：常用标准库](#第三部分常用标准库)
+  - [字符串处理](#字符串处理)
+  - [控制台输入](#控制台输入)
+  - [文件读写](#文件读写)
+  - [用 dict + 闭包封装文件对象](#用-dict--闭包封装文件对象)
+  - [字符、字节与编码](#字符字节与编码)
+  - [正则表达式](#正则表达式)
+  - [时间、随机数和 UUID](#时间随机数和-uuid)
+  - [Base64、URL 和哈希](#base64url-和哈希)
+  - [目录、路径和压缩](#目录路径和压缩)
+- [第四部分：并发与进程](#第四部分并发与进程)
+  - [线程、Channel 与并发](#线程channel-与并发)
+  - [环境变量和进程捕获](#环境变量和进程捕获)
+  - [外部命令](#外部命令)
+- [第五部分：工程化](#第五部分工程化)
+  - [包与导入](#包与导入)
+  - [开发期自动重启](#开发期自动重启)
+  - [生产部署与优雅关闭](#生产部署与优雅关闭)
 
-## 脚本模式与 REPL
+## 第一部分：入门
+
+目标：把脚本跑起来，知道 REPL、源文件编码和最小脚本写法。
+
+### 脚本模式与 REPL
 
 可以直接把脚本文件作为第一个参数运行：
 
@@ -78,52 +89,17 @@ build\skein.exe script.skein
 
 shebang 行同样会被跳过。
 
-### 开发期自动重启
 
-`--watch` 用子进程方式做开发期热重启，不需要修改脚本：
+最小示例：
 
-```bash
-./build/skein --watch server.skein
-./build/skein --watch --watch-dir ../shared server.skein
+```skein
+print("hello, skein");
 ```
 
-- 默认递归监听脚本所在目录下的 `.skein` 文件；
-- 每 200ms 轮询一次 `mtime` / `size`，不依赖平台的 inotify / FSEvents；
-- `--watch-dir DIR` / `--watch-dir=DIR` 可以增加监听目录；
-- 已有的 `-I` / `--package-path` 目录也会加入监听；
-- 文件变化后先停止旧进程，再从干净运行时启动新进程；
-- 编译或运行失败时新进程退出，watcher 保留并等待下一次文件变化；
-- `Ctrl-C` 会停止子进程并退出 watcher，`SIGTERM` 同样会先停止子进程再退出；
-- `.git`、`.cache`、`node_modules`、`build*` 等目录会被跳过。
+保存为 `hello.skein` 后运行 `./build/skein hello.skein`。
 
-`--watch` 是进程级重启：模块状态、全局变量和内存数据都会重置。需要保留的状态请放到
-外部存储或由父进程持有。它不改变语言运行时，也不是进程内热更新。
 
-### 生产部署与优雅关闭
-
-生产环境使用“平台滚动更新 + 运行时 SIGTERM drain”，不需要 `--watch` 或
-`reuse_port` 监听句柄交接：
-
-```bash
-SKEIN_DRAIN_TIMEOUT_MS=15000 ./build/skein server.skein
-```
-
-- 收到 `SIGTERM` 后停止 accept、关闭监听 socket，等待在途请求完成；
-- 超过 `SKEIN_DRAIN_TIMEOUT_MS`（默认 20000，`0` 表示不设截止时间）后强制
-  关闭剩余连接；
-- `serve_processes` 会把 `SIGTERM` 转发给 worker 并等待其退出；
-- drain 完成时退出码为 `0`；`Ctrl-C`（`SIGINT`）仍然是中断语义；
-- Windows 没有可捕获的 `SIGTERM`，drain 由控制台关闭/关机/注销事件触发
-  （关闭窗口最多等待 5 秒）；`taskkill` 不会触发 drain；
-- Windows 不支持 `reuse_port`，`serve_processes` 自动使用 `dispatch`，
-  关闭时通过关闭 worker 的 stdin 让其在完成当前请求后退出；
-- Kubernetes 中让 `terminationGracePeriodSeconds` 大于 drain 截止时间，
-  并用 `preStop` 留出摘流时间；readiness 探针可以直接用 `std.http` 实现。
-
-完整行为、`ProcessServer` / `ThreadServer` 的超时规则和 Kubernetes 示例见
-`docs/stdlib.md` 的“优雅关闭（SIGTERM drain）”。
-
-交互模式：
+### 交互模式
 
 - 只有 stdin 是终端时才显示 `> ` / `...> ` 提示符；管道输入不显示提示符；
 - 使用 `skein -i` 可以强制显示提示符；
@@ -157,294 +133,14 @@ SKEIN_DRAIN_TIMEOUT_MS=15000 ./build/skein server.skein
 > :quit
 ```
 
-## 包与导入
 
-入口脚本的包固定是 `main`，可以显式写 `package main {}`，也可以省略。包文件使用显式包块：
+## 第二部分：语言基础
 
-```text
-package cc {
-  export let value = 42;
-  export const fixed = 7;
+目标：掌握日常写 Skein 需要的语法、类型系统和错误模型。
 
-  export func hello(name) {
-    return "hi " + name;
-  }
+### 语言概览
 
-  func private_helper() {
-    return 1;
-  }
-}
-```
-
-- `package name {}` 创建独立作用域；
-- `export let` / `export const` / `export func` 导出标识符；
-- 也可以使用 `export name = expr;` 简写；
-- `export` 目前支持 `let`、`const`、命名 `func`、`struct` 和 `trait`；
-- 没有 `export` 的定义是包私有的；
-- 入口脚本的包固定是 `main`；`package main {}` 可以位于任意目录，也可以省略；
-- 入口脚本声明其他包名会报错；普通包文件不能直接作为入口运行；
-- 被 `import` 的包名必须与所在文件夹名相同，且不能是 `main`；可以多层嵌套；
-- `main` 不能被 `import`；
-- stdin / REPL 没有文件包身份，`package name {}` 仍可创建临时命名空间。
-
-### 目录结构
-
-每个可导入包必须是真实存在的 `.skein` 文件：
-
-```text
-aa/
-  bb.skein            # package bb
-  bb/
-    cc.skein          # package cc
-    cc/
-      dd.skein        # package dd
-```
-
-```text
-import aa.bb;
-print(bb.value);
-```
-
-- 包块名只写叶子名：`aa/bb/cc.skein` 写 `package cc`；
-- 可导入包必须有对应文件；`<name>/<name>.skein`、`index.skein`、单文件目录都不再支持；
-- 目录只用于组织路径，不能作为包或隐式命名空间；
-- 子包默认随父包暴露：`import aa.bb` 后可用 `bb.cc`，前提是
-  `aa/bb/cc.skein` 存在；
-- `bb.cc.dd` 需要 `aa/bb/cc.skein` 和 `aa/bb/cc/dd.skein` 都存在；
-- 直接 `import aa.bb.cc.dd` 按文件路径解析，不要求中间包文件存在。
-
-### import 规则
-
-```text
-import aa.bb.cc;       // 绑定 cc
-import aa.bb;          // 绑定 bb；子包通过 bb.cc 访问
-import aa;             // 绑定 aa；子包通过 aa.bb 访问
-import aa.bb.cc as c;  // 绑定到别名 c
-import std as s;       // 标准库也可使用别名
-
-import .sibling;       // 当前文件目录
-import ..common;       // 上一级目录
-import @top.pkg;       // 项目根目录
-```
-
-- `import aa.bb` 的普通包基准是主脚本目录；
-- `import @aa.bb` 只从项目根解析；
-- 项目根优先通过从主脚本目录向上查找 `skein.mod` 确定，其次兼容 `.skeinroot`；都没有时使用主脚本目录；
-- `project_root` 惰性解析：单文件脚本、只 import `std`、只 import module 时不需要；
-- `-I` / `SKEIN_PACKAGE_PATH` 只作为 module 搜索路径，不解析普通文件包；
-- 普通文件包必须在 `project_root` 内；外部复用请组织成 module；
-- module 内相对 import 不能越过 module root；
-- 裸 `std` 是内置标准库；`.std`、`..std`、`@std` 按文件系统包路径解析；
-- `main` 不能被导入；`import main;` 和 `import main.*;` 会报错；
-- 普通包文件不能声明 `package main {}`；
-- 别名必须是普通标识符，`as` 是保留字；
-- 同一个包只加载一次，之后复用缓存；
-- 循环导入会报错，不会递归挂起；
-- 当前不提供通配导入。
-
-### 第三方包
-
-第三方 module 使用带引号的导入路径，和本地点号路径明确区分：
-
-```text
-import "github.com/acme/util/json";              // 默认绑定 json
-import "github.com/acme/util/json" as jsonutil;  // 显式别名
-```
-
-先初始化工程，再用 `skein get` 拉取并登记版本：
-
-```text
-skein mod init github.com/acme/myapp
-skein get github.com/acme/util@v1.2.3
-```
-
-`get` 通过 git 克隆仓库 tag，遍历所有依赖的 `skein.mod` 并用 MVS 选出每个 module path 的最高 semver 版本，然后写回主项目 `skein.mod`（非直接依赖标记为 `// indirect`）与 `skein.sum` 的 `h1:` 校验和；不写版本时选择最高的 semver tag。不兼容的 major 版本使用 `/vN` 路径并存，例如 `example.com/c` 与 `example.com/c/v2` 是两个独立 module。缓存默认在 `~/.skein/mod`（Windows 为 `%LOCALAPPDATA%\skein\mod`），可用 `SKEINMODCACHE` 覆盖。运行时按最长 `require` 前缀解析路径并校验缓存；缺少依赖或校验失败会直接报错，不会隐式下载。`lint`、`fmt`、`lsp` 也不下载或执行外部包。
-
-`skein.sum` 是校验和的唯一信任根：`skein get` **不会**在校验失败时静默重新下载并改写它。缓存内容与 `skein.sum` 不一致、或已有校验和但缓存未下载而新下载内容不匹配，都会硬失败；只有显式 `skein get --force <module>@<version>` 才会在已有校验和时刷新缓存并重写对应校验和。缓存存在但当前项目没有校验和时不会直接信任它，而是重新下载并写入新的 `h1:`。
-
-网络不可达时可用 `SKEIN_MODULE_URL` 把模块改写到镜像。它既支持单个 URL，也支持 `path=url,path=url` 映射；两种形式都支持 `{path}` 和 `{version}` 模板，例如：
-
-```text
-SKEIN_MODULE_URL=https://mirror.example/skein/{path}
-SKEIN_MODULE_URL=github.com/acme/util=https://mirror.example/acme/util,example.test/x=https://mirror.example/x
-```
-
-`{version}` 在 `@latest` 的 tag 列举阶段不可用，会直接报错并要求显式版本。模板只解决“从哪里拉取”，完整性仍由 `skein.sum` 校验。
-
-并发操作通过多层文件锁协调：`skein get` 持有项目级独占锁 `<project>/.skein/lock`，`skein build` 持有项目共享锁；两者同时持有缓存共享锁，并按 `module@version` 在缓存根 `.locks/` 下加模块锁。运行中的脚本首次加载外部 module 时也会懒获取缓存共享锁，因此 `skein mod clean` 会等待正在运行的 `get` / `build` 和脚本退出，不会在读取、下载或构建过程中删除缓存。锁随进程退出自动释放；需要等待时会在 stderr 提示。`.skein/` 是本地锁状态目录，不应提交到版本库。
-
-`skein.mod` 和 `skein.sum` 通过临时文件替换写入。`skein get` 成功时批量写入新的 `skein.sum` 条目，然后更新 `skein.mod`；如果后续模块失败，`skein.mod` 保持原样，`skein.sum` 最多保留已经完成模块的有效校验和，不会出现半写文件或未校验缓存。
-
-`skein mod clean` 删除整个全局缓存根（`SKEINMODCACHE` 或默认目录），不会影响项目里的 `skein.mod` 和 `skein.sum`。`--dry-run` 只打印将要清理的目录；如果缓存根被显式设成 home 目录、当前目录或文件系统根目录，需要额外传 `--force` 才允许清理。
-
-常用维护命令：
-
-```text
-skein mod verify                 # 校验 skein.mod 中每个 require 的缓存与 skein.sum
-skein mod download               # 按 skein.mod 预取缓存，不修改 skein.mod
-skein get <module>@<version> --offline
-skein mod tidy [--offline]       # 从直接依赖重算传递依赖，移除不再使用的 // indirect
-skein mod prune [--all]           # 默认只列出当前项目未引用的缓存版本
-```
-
-`--offline` 完全禁止网络：`@latest` 必须改成显式版本；缓存缺失，或缓存存在但当前项目没有校验和时，会直接失败并要求先在线执行一次 `skein get`。`mod download` 会为首次下载的模块补写 `skein.sum`，但不会改写 `skein.mod`。`mod prune` 默认只预览；全局缓存可能被其他项目共享，只有显式 `--all` 才会删除未引用版本及对应 native 构建产物。锁等待默认无限；设置 `SKEIN_LOCK_TIMEOUT_MS=<毫秒>` 可让等待超时并报错。
-
-### 源码形式发布的原生 module（MVP）
-
-module 可以在 `module.skein` 里声明可选的 `native { ... }` 块，随源码一起
-发布 C/C++ 实现，由宿主显式编译成动态库：
-
-```text
-module myutil {
-  export package api;
-  native {
-    sources "native/add.cpp" "native/extra.cpp";
-    includes "native/include";
-    defines "MYUTIL_TRACE=1";
-    libs "m";
-    output "myutil";
-  }
-}
-```
-
-- `skein get` 仍然只下载、校验并登记源码；**不会**在 import 时编译；
-- `skein build [<module/path>[@version]]` 在已下载的缓存上编译，不传参数时
-  编译 `skein.mod` 中全部依赖；编译器默认取 `SKEIN_CXX`、`CXX`，否则 `c++`；
-- 产物放在源码缓存旁边的 `.build/<平台>-<架构>-<编译器>/` 目录，**不进入**
-  `skein.sum` 的源码 dirhash，因此构建不会破坏校验和；
-- `skein build` 会在产物旁写入 `artifact.meta`，记录源码 hash、产物 hash、编译器、
-  编译器版本、构建 flags 和规范化命令 hash；`std.module.native` 只返回通过源码
-  hash、产物 hash（以及可用时的编译器版本）校验的产物，篡改或源码变更后必须重新
-  `skein build`；
-- 构建默认启用可复现选项：GCC/Clang 使用 `-ffile-prefix-map`，MinGW 使用
-  `--no-insert-timestamp`，MSVC 使用 `/Brepro`，并设置 `SOURCE_DATE_EPOCH=0`；
-  相同输入连续构建应产生相同产物字节；
-- Skein 封装包通过 `std.module.dir(path)` / `std.module.native(path)` 取得源码
-  目录和构建产物路径，再用 `std.plugin.load(...)` 加载；`std.ffi.open(...)`
-  同理；
-- 主脚本里的原生调用保持原行为；**第三方 module 内**的 `std.plugin.load` /
-  `std.ffi.open` 默认禁止，必须显式设置 `SKEIN_ALLOW_NATIVE=1`
-  （设为 `0` / `false` / `off` / `no` 则全局禁止）；
-- `skein_module.h` 是纯 C ABI 头，module 应自带一份，不需要链接 Skein 符号；
-  ABI v2 的异步导出规则见 `docs/stdlib.md`。
-
-### include 声明包含
-
-`include` 是给项目外文件留的声明级 escape hatch，行为类似 C 的声明包含：
-
-```text
-include "shared/helpers.skein";
-```
-
-- 只允许在声明层（顶层或 `package {}` 内），函数体内报错；
-- 只导入声明类语句：`import`、`include`、`func`、`struct`、`enum`、
-  `trait`、`impl`、`let` / `const`；
-- 被包含文件可以 `import std`；相对 import 以被包含文件目录为基准；
-- 被包含文件不能声明 `package` / `module`，不能包含顶层可执行代码；
-- 默认 include-once：按 `(package, module, 规范化路径)` 去重；
-- 自动检测循环并限制嵌套深度；
-- 相对路径基于当前包含文件目录；允许 `..` 和绝对路径；
-  不受 `project_root` / `-I` / `SKEIN_PACKAGE_PATH` 限制；
-- 被包含的声明继承包含者的 package/module，`source` 指向被包含文件；
-- 同一个头文件被 main 和包分别 include 会产生两份声明，身份分别属于各自包。
-
-`include` 不做命名空间隔离，不建议作为长期库接口；外部库仍应使用 module。
-
-包内也可以导入其他包，既可以放在包块内，也可以放在文件顶层：
-
-```text
-import aa.util;
-
-package bb {
-  export func get() {
-    return util.value;
-  }
-}
-```
-
-### Module
-
-Module 是唯一的模块机制；源码层不存在 Module v1 或兼容层。顶层目录包含 `module.skein` 时，该目录成为 module。module 内仍然只使用文件包：
-
-```text
-math/                 # module: math
-  module.skein        # 公共导出清单
-  add.skein           # package: add      → math.add
-  vector.skein        # package: vector   → math.vector
-  internal/
-    helpers.skein     # package: helpers  → math.internal.helpers
-```
-
-不再支持 `math/add/add.skein` 这种目录包布局。
-
-```skein
-// math/module.skein
-module math {
-  export add.add;
-  export vector.sum as sum;
-  export internal.helpers.normalize as normalize;
-  export package internal.helpers as helpers;
-}
-```
-
-外部：
-
-```skein
-import math;
-
-math.add(1, 2);
-math.sum([1, 2]);
-math.normalize(x);
-math.helpers.normalize(x);
-
-import math.helpers as helpers;
-```
-
-规则：
-
-- module 名必须与顶层目录名一致；
-- package 名必须与文件名一致（只写叶子名）；
-- 无 `export` 的符号是 package 私有；
-- package 的 `export` 只提升到 module 内部；
-- 只有 `module.skein` 中声明的符号/package 才能从外部访问；
-- `export package internal.helpers as helpers;` 把 `math/internal/helpers.skein`
-  暴露为 `math.helpers`；
-- 外部不能通过物理路径 `import math.internal.helpers`；
-- module 内部使用普通相对导入，例如 `import .internal.helpers`；
-- module 内部写绝对 `import math` / `import math.helpers` 时也解析为公共 API；
-  访问未导出的内部 package 请使用相对导入；
-- module 内相对导入不能越过 module root；
-- module 根目录不能包含 `<module>.skein` 或 `index.skein`；
-- 禁止嵌套 `module.skein`；
-- 直接运行 module 内的文件会按独立 `main` 入口处理，不继承 module 身份；
-- 清单中的符号必须已在目标 package 中 `export`，否则启动报错；
-- 重复别名、缺失 package、module 名不匹配都会报错；
-- 同一个 module 只加载一次并复用缓存；
-- `python3 tools/check_modules.py <project-root>` 可以离线校验 manifest 结构，
-  `--list` 列出公共导出；它不执行 package 代码。
-
-module 内类型和包的元数据：
-
-```text
-type_package(x)      // "math.add" / "math.internal.helpers"
-type_module_name(x)  // "math"
-type_source(x)       // 源文件路径
-```
-
-入口脚本和普通文件包的 `type_module_name(x)` 为空字符串。
-
-
-### 作用域与导出值
-
-- 导入包在独立作用域中执行，不能读取主包的全局变量；
-- 主文件中的 `package` 块也是独立作用域，需要的 `import` 应放在块内；
-- 包内函数保留自己的闭包环境；
-- `export let` / `export const` 的值在包加载时复制到命名空间；之后导出变量本身再变化，不会自动同步到已导入的命名空间；
-- 导出函数仍然可以访问并修改包内部状态。
-
-## 语言概览
-
-### 基本运算
+#### 基本运算
 
 ```text
 1 + 2
@@ -461,7 +157,7 @@ type_source(x)       // 源文件路径
 支持 `%`、`&&`、`||`、`!`、`&`、`|`、`^`、`~`、`<<`、`>>`。
 `&&` / `||` 短路求值。
 
-### 管道与占位符
+#### 管道与占位符
 
 管道 `|>` 把左侧值作为右侧调用的第一个参数：
 
@@ -507,7 +203,7 @@ swapped(1, 2)              // 3
 - 嵌套调用中的占位符绑定到最近的调用，需要外层占位时请显式写 lambda；
 - `_` 仍然是 REPL 的上一次结果别名，不会被占位符占用。
 
-### 三元表达式
+#### 三元表达式
 
 三元表达式：
 
@@ -518,7 +214,7 @@ x > 0 ? "positive" : "non-positive"
 
 `? :` 右结合，优先级低于 `||`，高于赋值。
 
-### 变量与常量
+#### 变量与常量
 
 变量：
 
@@ -543,7 +239,7 @@ a              // [9, 2]
 `null`）在同一个编译单元内可参与编译期常量折叠；不改变运行时语义，可用
 `SKEIN_NO_CONST_PROP=1` 关闭。
 
-### 类型标注
+#### 类型标注
 
 变量可以带类型标注：
 
@@ -589,7 +285,7 @@ let c: int? = b;               // 允许
 let d: union[int, string]? = null;
 ```
 
-### 容器泛型
+#### 容器泛型
 
 容器可以写泛型参数，参数只参与静态检查，运行时擦除：
 
@@ -624,7 +320,7 @@ let first = (raw as list[int])[0];  // 对 cast 结果取下标要加括号
 - `std.list.map` 会推断简单表达式 lambda 或单 return lambda 的返回类型，`std.list.zip` 会检查第二个参数是 list；
 - 未注解的 `let` 会从初始化表达式推断类型；它不是固定标注，重新赋值为其他类型时会更新推断。
 
-### 函数类型
+#### 函数类型
 
 函数值可以写函数类型：
 
@@ -676,7 +372,7 @@ struct Handler {
 - `std.list.append` / `std.dict.keys` / `std.set.from_list` 等容器 builtin 作为一等值时保留类型变量模板：`let f = std.list.append; f([1], 2)` 得到 `list[int]`，`f([1], "a")` 会报错；该支持仅限已知容器 builtin，不扩展到用户自定义泛型函数；
 - `is` 和模式类型不接受函数类型签名。
 
-### 自增、自减与复合赋值
+#### 自增、自减与复合赋值
 
 自增和自减：
 
@@ -718,7 +414,7 @@ x >>= 1;
 
 变量名可以包含下划线：`my_value`。
 
-### 列表、字典与切片
+#### 列表、字典与切片
 
 列表和字典：
 
@@ -774,7 +470,7 @@ p["x"] + p["y"]
 
 嵌套访问同样使用下标：`p["a"]["b"] = 1`。
 
-### 控制流
+#### 控制流
 
 控制流：
 
@@ -870,7 +566,7 @@ label outer: for (let i in [1, 2, 3]) {
 - `continue NAME;` 继续指定循环的下一轮；
 - 标签只能直接放在循环或 switch 前。
 
-### switch
+#### switch
 
 `switch` 值匹配：
 
@@ -897,7 +593,7 @@ switch (x) {
 - case 值必须是值，不能写 `case x > 1 && x < 5` 这种条件；条件判断用 `if/else`；
 - `case int` 不是类型模式，而是内置函数值，会作为不支持的 case 值报错。
 
-### match
+#### match
 
 `match` 模式匹配（表达式）：
 
@@ -933,7 +629,7 @@ let next = match (state) {
 - 模式不能调用函数或写比较表达式；
 - 不支持 float 字面量。
 
-### 错误处理
+#### 错误处理
 
 错误处理：
 
@@ -1014,7 +710,7 @@ let n = do {
 
 `return` / `break` / `continue` 会直接穿出块。`do { ... } while (...)` 仍是 do-while 语句，`while` 必须和 `}` 同一行；如果要写“块表达式后接 while 循环”，用分号分开。
 
-### 日志
+#### 日志
 
 设计说明见 [logging.md](logging.md)。
 
@@ -1083,7 +779,7 @@ let lg = std.log.new({
 
 > 数学函数 `log` 位于 `std.math`（需要 `import std;`），示例中的 logger 变量使用 `lg`。
 
-### 函数与闭包
+#### 函数与闭包
 
 函数、匿名函数与闭包：
 
@@ -1303,7 +999,7 @@ sum(0, ...xs)    // 6
 
 展开项必须是 `list`，可以和普通参数混用。
 
-### 结构体、impl 与 trait
+#### 结构体、impl 与 trait
 
 结构体、`impl` 与 `trait`：
 
@@ -1556,7 +1252,7 @@ let result = c.get("/api");
 - 需要显式 task 句柄时使用 `launch c.get(...)`，再 `task.wait()`；
 - 装饰器包装的是普通方法；如果被包装方法会挂起，wrapper 调用它时也会在当前 fiber 挂起。
 
-### 枚举
+#### 枚举
 
 枚举（带载荷变体）：
 
@@ -1613,7 +1309,7 @@ impl Drawable for Shape {
 }
 ```
 
-### 运行时类型检查
+#### 运行时类型检查
 
 运行时类型检查：
 
@@ -1643,7 +1339,7 @@ for (let value in values) {
 
 `is` 只接受类型名或 trait 名作为右操作数；结构体类型名按包解析。
 
-### 内置函数
+#### 内置函数
 
 内置函数（无需 `import`）：`len`、`range`、`print`、`println`、`input`、`list`、`dict`、`int`、`float`、`bool`、`str`、`char`、`byte`、`kind_of`、`type_name`、`type_package`、`type_module_name`、`type_source`。数学、字符串、格式化、文件与 bytes 函数位于 `std.math`、`std.string`、`std.fs`、`std.bytes`，使用前需要 `import std;`。内置函数同样是一等值：
 
@@ -1667,7 +1363,8 @@ apply(std.math.sqrt, 16)
 
 字符串支持常用转义：`\n`、`\t`、`\r`、`\\`、`\"`、`\'`。
 
-## 语法约定
+
+### 语法约定
 
 - 顶层可以直接写表达式，不需要分号。
 - 块 `{ ... }` 内的普通表达式语句需要以 `;` 结尾。
@@ -1682,7 +1379,8 @@ apply(std.math.sqrt, 16)
 - 闭包捕获定义处的词法作用域；闭包环境会在程序退出时统一清理。
 - 用户函数调用深度上限为 1000，超出时报告 `maximum recursion depth`。
 
-## 类型与转换
+
+### 类型与转换
 
 - `int` 是 64 位有符号整数；十进制整数字面量超出 64 位范围时按 `float` 解析，`0x` / `0b` / `0o` 字面量超出 `int64` 范围时报词法错误，整数运算溢出会报 `integer overflow`。
 - 整数字面量支持 `0x` / `0X`、`0b` / `0B`、`0o` / `0O` 进制前缀，浮点字面量支持科学计数法（如 `1e3`、`1.5e-2`）；数字之间可以用 `_` 分隔，例如 `1_000_000`、`0xFF_FF`、`1.5e1_0`。下划线只能位于两个数字之间。
@@ -1706,7 +1404,8 @@ apply(std.math.sqrt, 16)
 - 浮点数输出使用可往返的最短表示并保留 `.0`：`1.0` 显示为 `1.0`，`1.23456` 显示为 `1.23456`。
 - 没有字符串与数字之间的隐式转换，`1 + "2"` 会报错；需要时请使用 `int()` / `float()` / `str()`。
 
-## 对象生命周期
+
+### 对象生命周期
 
 - 普通值由引用计数管理；`list` / `dict` / `struct` / `bytes` 的 payload 会被别名共享，写入时才分离；`string` / `bytes` 使用引用计数缓冲；
 - 函数值复制时共享函数代码和闭包环境，文件句柄等原生资源共享底层句柄；
@@ -1717,7 +1416,8 @@ apply(std.math.sqrt, 16)
 - 这不是完整的逐值 tracing GC：值本身仍由引用计数管理，没有压缩、移动或 finalizer；
 - 如果未来原生资源也能保存语言值，需要扩展回收器的遍历规则。
 
-## 格式化
+
+### 格式化
 
 `std.string.format(fmt, ...)` 返回格式化后的字符串（需要 `import std;`）；`print` 支持两种参数形式：
 
@@ -1753,7 +1453,1173 @@ print("x = {:.2f}", 1.5)
 
 自动编号 `{}` 和显式编号 `{0}` 不能混用；参数不足会报错，多余参数会被忽略。注意 `print("x", 1)` 按格式模式处理，输出 `x` 并忽略多余的 `1`。
 
-## 外部命令
+
+### 错误信息
+
+错误输出统一包含位置、类别和源码片段：
+
+```text
+3:1: runtime error: division by zero
+  1/0;
+  ^
+```
+
+- 行号和列号从 `1` 开始；
+- 列号按终端显示宽度计算，中文、日文、韩文等宽字符占两列；
+- 类别分为 `lexical error`、`syntax error`、`runtime error`；
+- 运行时错误指向实际出错的 AST 节点，而不是语句结束位置；
+- 源码行下的 `^` 指向出错列；
+- 源码必须是合法 UTF-8，非法 UTF-8 字节会报 `invalid UTF-8 byte 0x..`；
+- 词法错误会显示字符和十六进制字节，例如 `unexpected character '`' (0x60)`；非法 Unicode 字符使用 `U+....` 表示；
+- 语法错误会列出出错 token 和部分期望 token：
+
+```text
+1:9: syntax error: unexpected ';', expecting float, integer, identifier, ...
+  let x = ;
+          ^
+```
+
+函数调用中的运行时错误会附带调用栈：
+
+```text
+2:10: runtime error: division by zero
+    return 10 / 0;
+           ^
+  in g() called from line 5
+  in f() called from line 7
+```
+
+调用栈最多显示最近的 8 层。
+
+#### 错误恢复
+
+- 运行时错误中止当前语句/函数，不回滚已经发生的副作用；
+- 显式 `fail`、运行时错误和 `result.err` 可以被 `on error` 捕获；未捕获的 `fail` 在脚本顶层报错并停止；
+- `on error` 对 `result.ok(v)` 解包为 `v`；
+- 除零、越界、网络和 FFI 错误会转换成 `error`，并可由 `on error` 或 `std.result.capture` 捕获；
+- 语法错误、内部不变量错误和控制流误用不会转换成 `result`；
+- 函数出错时不返回部分结果；
+- `let` 初始化失败不会创建绑定；普通赋值失败会保留旧值；
+- 给 `const` 绑定重新赋值会报 `cannot assign to constant`，但修改其容器内容仍然允许；
+- 脚本模式默认在第一条错误后停止；
+- `-k` / `--keep-going` 让脚本继续执行下一条顶层语句，但最终退出码仍为 `1`；
+- REPL 在错误后回到提示符，正常 EOF 退出码为 `0`；
+- 语法错误和词法错误按行恢复；
+- 同一行最多报告一条词法错误，并抑制由此产生的重复语法错误；
+- 包加载失败是原子失败：`import` 不会绑定部分命名空间；
+- `input()` 的 EOF 返回 `null`，不是错误；
+- `std.process.command()` 的退出状态不是解释器错误，需要状态时使用 `std.process.command_status()`。
+
+#### 退出码
+
+| 情况 | 退出码 |
+|---|---:|
+| 正常结束 | `0` |
+| REPL 正常 EOF | `0` |
+| 脚本语言错误（词法/语法/运行时/包） | `1` |
+| 命令行参数错误 | `2` |
+| 脚本文件无法打开 | `2` |
+| 源文件编码声明冲突或转码失败 | `2` |
+| 脚本被 Ctrl-C 中断 | `130` |
+
+外部命令的退出状态通过 `std.process.command_status()` / `std.process.run_command()` 返回，不会直接成为解释器退出码。
+
+## 第三部分：常用标准库
+
+目标：按任务查找字符串、文件、编码、正则、时间和哈希等常用 API。
+
+### 字符串处理
+
+```text
+import std;
+
+std.string.trim(text)                     → 去掉首尾空白
+std.string.split(text, separator)         → list<string>
+std.string.split_ws(text)                 → list<string>
+std.string.find(text, substring)          → 码点下标 / -1
+std.string.substr(text, start[, length])  → string
+```
+
+示例：
+
+```text
+import std;
+
+std.string.trim("  hello\t\n")          → "hello"
+std.string.split("a,b,c", ",")          → ["a", "b", "c"]
+std.string.split(",a,", ",")            → ["", "a", ""]
+std.string.split_ws("  a  b\tc ")       → ["a", "b", "c"]
+std.string.find("hello", "ll")          → 2
+std.string.find("hello", "x")           → -1
+std.string.substr("hello", 1, 3)        → "ell"
+std.string.substr("你好世界", 1, 2)      → "好世"
+```
+
+规则：
+
+- `std.string.trim` 和 `std.string.split_ws` 只把 ASCII 空白（空格、Tab、换行等）视为空白；
+- `std.string.split` 使用非重叠匹配，保留首尾空字段；
+- `std.string.split` 的分隔符不能为空字符串；
+- `std.string.find` 返回 **UTF-8 码点下标**，找不到返回 `-1`，空子串返回 `0`；
+- `std.string.substr` 的 `start` 和 `length` 都是码点单位；`start` 超出长度返回空字符串，`length` 超出末尾会截断；
+- `start` 和 `length` 不能为负数。
+
+组合使用：
+
+```text
+import std;
+
+let parts = std.string.split_ws(input("请输入两个数: "));
+let a = int(parts[0]);
+let b = int(parts[1]);
+print(a + b);
+```
+
+#### 构建器
+
+频繁追加时使用 builder，避免每次复制整个 list / string：
+
+```text
+import std;
+
+let lb = std.list.builder();
+for (let i in range(1000)) {
+  lb.push(i);
+}
+let xs = lb.build();
+
+let sb = std.string.builder();
+for (let i in range(1000)) {
+  sb.push("x");
+}
+let text = sb.build();
+```
+
+规则：
+
+- `push` / `extend` 是 O(1) 摊销，`build()` 每次返回独立值；
+- `std.list.append(xs, v)` 在 `xs = std.list.append(xs, v)` 形式下（VM/JIT 后端）使用 COW 原地增长；
+- `s = s + "x"` / `s = s + 'c'` 在 VM 与 AST 下使用 COW 原地追加，别名仍保留旧值；
+- 复杂拼接（例如 `s + str(i)`）仍建议使用 `std.string.builder`；
+- 其他调用形式仍保持“返回新 list / 新字符串，不修改参数”的语义；
+- builder 是可变对象，赋值会共享同一个 builder。
+
+
+### 控制台输入
+
+`input([prompt])` 从 stdin 读取一行：
+
+```text
+let name = input("Name: ");
+print("hello " + name);
+```
+
+- 返回的字符串不包含末尾换行；
+- 可选的 `prompt` 会原样输出到 stdout，不经过 `std.string.format`；
+- 读到 EOF 时返回 `null`；
+- 空行返回空字符串；
+- CRLF 会被处理，末尾 `\r\n` 不会进入结果；
+- 控制台负责行编辑和退格；管道输入中的退格会由 `input` 过滤；
+- 脚本模式下仍然从原始 stdin 读取，不会读脚本文件本身；
+- `input` 是普通一等内置函数，可以保存和传递。
+
+```text
+let read = input;
+read("> ")
+```
+
+示例：
+
+```text
+import std;
+
+let name = input("Name: ");
+print(std.string.format("hello {}", name));
+```
+
+
+### 文件读写
+
+```text
+std.fs.read_file(path)          → 文件全部内容
+std.fs.write_file(path, text)   → null，覆盖写入
+std.fs.append_file(path, text)  → null，追加写入
+std.fs.exists(path)             → 1 / 0
+```
+
+需要 `import std;`。
+
+示例：
+
+```text
+import std;
+
+std.fs.write_file("out.txt", "hello\n");
+std.fs.append_file("out.txt", "world\n");
+print(std.fs.read_file("out.txt"));
+
+std.fs.exists("out.txt")
+```
+
+规则：
+
+- `std.fs.read_file` 读取整个文件并返回字符串；空文件返回空字符串；
+- `std.fs.write_file` 创建或截断文件；
+- `std.fs.append_file` 创建或追加；
+- 文件以二进制模式打开，不会自动转换 CRLF，也不会去掉末尾换行；
+- 读写内容按 UTF-8 文本处理；
+- `std.fs.read_file` 遇到 NUL 字节会报错，避免内部 C 字符串截断；读取二进制请使用 `std.fs.read_bytes`；
+- 不会自动创建父目录；
+- 文件操作失败时报告 `read_file: ...` / `write_file: ...` / `append_file: ...`；
+- Windows/MinGW 下文件路径会转换为 UTF-16 后使用 `_wfopen`。
+
+#### 带编码的文本文件
+
+需要在 UTF-8 之外的文本编码之间读写时，使用：
+
+```text
+std.fs.read_text(path, encoding[, errors])       → string
+std.fs.write_text(path, text, encoding[, errors]) → null
+```
+
+`encoding` 使用 `std.encoding` 支持的编码名，`errors` 支持 `strict`（默认）、
+`replace`、`ignore`。
+
+示例：
+
+```text
+import std;
+
+std.fs.write_text("out-gbk.txt", "中国", "gbk");
+std.fs.read_text("out-gbk.txt", "gbk")          // 中国
+
+std.fs.write_text("out-utf16.txt", "中", "utf-16");
+std.fs.read_text("out-utf16.txt", "utf-16")     // 中
+```
+
+规则：
+
+- `read_text` 先读取字节，再按指定编码解码为 UTF-8 `string`；
+- `write_text` 先把 `string` 编码成字节，再覆盖写入文件；
+- `errors = "replace"` 时，解码用 `U+FFFD` 替换，编码用 `?` 替换；
+- `errors = "ignore"` 时跳过非法序列或不可表示字符；
+- 解码结果包含 `U+0000` 时报错；
+- `utf-16` / `utf-32` 会按 BOM 规则处理；显式字节序版本不自动剥离 BOM；
+- `utf-8` 不自动剥离 UTF-8 BOM，BOM 会作为 `U+FEFF` 保留；
+- `std.fs.read_file` / `std.fs.write_file` / `std.fs.read` / `std.fs.write` 仍然只按 UTF-8 字节处理；
+- 文件句柄 API 不携带编码，需要其它编码时使用 `std.fs.read_bytes` / `std.fs.write_bytes` 或 `std.fs.read_text` / `write_text`。
+
+#### 文件句柄
+
+需要多次操作同一个文件时，可以使用低层文件句柄：
+
+```text
+std.fs.open(path, mode)              → file handle
+std.fs.read(handle[, n])             → string
+std.fs.write(handle, text)           → null
+std.fs.seek(handle, offset[, whence]) → null
+std.fs.tell(handle)                  → int
+std.fs.eof(handle)                   → 1 / 0
+std.fs.close(handle)                 → null
+std.fs.flush(handle)                 → null
+```
+
+`mode` 支持 `r`、`w`、`a`、`r+`、`w+`、`a+`，也接受带 `b`/`t` 的写法；内部统一按二进制模式打开。
+
+示例：
+
+```text
+import std;
+
+let h = std.fs.open("data.txt", "w+");
+std.fs.write(h, "hello world");
+std.fs.seek(h, 0);
+std.fs.read(h, 5)
+std.fs.close(h)
+```
+
+- 文件句柄是不可打印底层指针的资源对象，打印显示为 `<file: path>`；
+- 句柄复制会共享同一个底层文件，关闭其中一个会影响所有副本；
+- `std.fs.read(h)` 读取剩余全部内容，`std.fs.read(h, n)` 最多读取 n 字节；`n = 0` 等价于读取全部；
+- `std.fs.seek` 的 `whence`：`0` 文件开头、`1` 当前位置、`2` 文件末尾；
+- 关闭后继续读写会报 `file is closed`；
+- `std.fs.read` 读取到 NUL 字节会报错；读取二进制请使用 `std.fs.file_read_bytes`；
+- 最终未关闭的句柄会随进程退出关闭。
+
+
+### 用 dict + 闭包封装文件对象
+
+
+当前语言没有方法绑定，但可以用 dict + 闭包实现类似接口：
+
+```text
+func open_file(path) {
+  let h = std.fs.open(path, "r");
+
+  func read(n) { return std.fs.read(h, n); }
+  func seek(n) { return std.fs.seek(h, n); }
+  func close() { return std.fs.close(h); }
+
+  return {"read": read, "seek": seek, "close": close};
+}
+
+let f = open_file("data.txt");
+f["read"](10)
+f["close"]()
+```
+
+底层文件资源使用通用的原生 userdata 生命周期管理；上层对象接口可以用语言本身扩展，不需要修改内置实现。
+
+文件函数可以访问进程有权限的任意路径，只应在可信脚本中使用。
+
+
+### 字符、字节与编码
+
+
+`char` 表示一个 Unicode 标量值，使用单引号字面量：
+
+```text
+'a'
+'你'
+'\n'
+'\u0041'
+'\u{1F600}'
+```
+
+- `len('a') == 1`；
+- 字符串下标和 `for ... in` 字符串返回 `char`；
+- `int('A') == 65`，`str('A') == "A"`，`char(65) == 'A'`；
+- `char` 可与字符串拼接：`'a' + "bc"`；
+- `std.bytes.from_char(c)` / `std.bytes.to_char(b)` / `char(b)` 做 UTF-8 字节互转；
+- JSON 编码为单字符字符串；
+- 空、多字符、代理区、超过 `0x10FFFF` 报错。
+
+#### 字节值 byte
+
+`byte` 表示 `0..255` 的字节值，没有字面量：
+
+```text
+byte(0)
+byte(65)
+byte(255)
+```
+
+- `int(byte)` 取回 `0..255`；
+- `byte(int)` 超出范围报错；
+- `byte` 可以作 dict key、`switch` 值；
+- JSON 编码为整数；
+- `bytes[i]` / `std.bytes.get` 仍返回 `int`。
+
+#### 二进制 buffer
+
+文本字符串按 UTF-8 处理，不能保存任意字节。二进制数据使用独立的 `bytes` 类型：
+
+```text
+std.bytes.from_string(text)        → bytes
+std.bytes.to_string(bytes)         → string
+std.bytes.len(bytes)               → int
+std.bytes.get(bytes, index)        → 0..255
+std.bytes.slice(bytes, start[, length]) → bytes
+std.bytes.concat(a, b)             → bytes
+std.bytes.hex(bytes)               → 十六进制字符串
+std.bytes.from_hex(text)            → bytes
+std.bytes.to_int(bytes, size, byteorder[, offset[, signed]]) → int
+std.bytes.from_int(value, size, byteorder) → bytes
+std.fs.read_bytes(path)            → bytes
+std.fs.write_bytes(path, bytes)    → null，覆盖写入
+std.fs.append_bytes(path, bytes)   → null，追加写入
+std.fs.file_read_bytes(handle[, n]) → bytes
+std.fs.file_write_bytes(handle, bytes) → null
+bytes[index]                       → 0..255
+bytes[index] = 0..255
+```
+
+需要 `import std;`。
+
+示例：
+
+```text
+import std;
+
+let b = std.bytes.from_hex("00ff10");
+std.bytes.len(b)                     → 3
+std.bytes.hex(b)                     → "00ff10"
+std.bytes.get(b, 1)                  → 255
+std.bytes.hex(std.bytes.slice(b, 1, 2)) → "ff10"
+
+let c = std.bytes.from_string("abc");
+c[1] = 255;
+std.bytes.hex(c)                     → "61ff63"
+
+std.bytes.to_int(std.bytes.from_hex("78563412"), 4, "little")
+                                     → 305419896
+std.bytes.to_int(std.bytes.from_hex("78563412"), 4, "big")
+                                     → 2018915346
+std.bytes.to_int(std.bytes.from_hex("ffff"), 2, "little", 0, 1)
+                                     → -1
+std.bytes.hex(std.bytes.from_int(305419896, 4, "little"))
+                                     → "78563412"
+std.bytes.hex(std.bytes.from_int(-1, 2, "little"))
+                                     → "ffff"
+```
+
+规则：
+
+- `bytes` 可以保存任意字节，包括 `0x00`，长度由字节数决定；
+- 直接打印 `bytes` 时显示为 `<bytes: N>`，不会把原始二进制写到终端；需要查看内容时使用 `std.bytes.hex`；
+- `std.bytes.len`、`std.bytes.get`、`std.bytes.slice`、索引和 `std.fs.seek` 都使用**字节下标**，不是 UTF-8 码点；
+- 索引读取返回 `0..255` 的整数，索引赋值只接受 `0..255`；
+- `std.bytes.slice` 的 `start` / `length` 不能为负数，越界会截断；
+- `std.bytes.from_hex` 只接受偶数个十六进制数字，大小写均可；
+- `std.bytes.to_int` 的 `size` 为 1..8，`byteorder` 支持 `"little"` / `"big"`（也接受 `"le"` / `"be"`）；
+- `std.bytes.to_int` 的 `offset` 默认 0，`signed` 默认 0；`offset + size` 超出 buffer 会报错，不会静默截断；
+- `std.bytes.to_int(..., signed = 1)` 按二补码解释；无符号 64 位值超过 `int64` 上限时会报错；
+- `std.bytes.from_int` 的 `size` 为 1..8；值可以落在有符号下限到无符号上限之间，按低 `size` 字节编码；
+- 负数写入使用二补码，例如 `std.bytes.from_int(-1, 2, "little")` 得到 `ff ff`；
+- `std.bytes.to_string` 要求内容是合法 UTF-8 且不含 NUL，否则报错；
+- `std.fs.read_bytes` / `std.fs.write_bytes` / `std.fs.append_bytes` 不做文本 NUL 检查；
+- `std.fs.file_read_bytes(h)` 读取剩余全部内容，`std.fs.file_read_bytes(h, n)` 最多读取 n 字节；
+- `bytes` 是值类型，赋值和复制都会复制内容。
+
+#### 编码转换
+
+设计说明见 [encoding.md](encoding.md)。
+
+`std.encoding` 在 `bytes` 和 UTF-8 `string` 之间做显式转码：
+
+```text
+std.encoding.decode(bytes, encoding[, errors])  → string
+std.encoding.encode(string, encoding[, errors]) → bytes
+std.encoding.supports(encoding)                 → bool
+```
+
+支持的编码：
+
+```text
+utf-8  ascii  latin-1  windows-1252
+utf-16le  utf-16be  utf-16
+utf-32le  utf-32be  utf-32
+gbk / cp936
+gb18030
+```
+
+`errors` 支持：
+
+```text
+"strict"   默认，非法序列或不可表示字符报错
+"replace"  decode 用 U+FFFD 替换；encode 用 "?" 替换
+"ignore"   跳过非法序列或不可表示字符
+```
+
+示例：
+
+```text
+import std;
+
+let s = std.encoding.decode(std.bytes.from_hex("d6d0b9fa"), "gbk");
+print(s);                                      // 中国
+
+print(std.bytes.hex(std.encoding.encode("中国", "gbk")));
+                                               // d6d0b9fa
+
+print(std.bytes.hex(std.encoding.encode("€", "gbk")));
+                                               // 80
+
+print(std.bytes.hex(std.encoding.encode("€", "gb18030")));
+                                               // a2e3
+
+std.encoding.supports("gbk")                   // true
+std.encoding.supports("gb18030")               // true
+```
+
+规则：
+
+- GBK 和 GB18030 使用内置码表，不依赖 iconv 或 Windows 代码页；
+- `gbk` 的 `0x80` 解码为 `€`；`gb18030` 的 `€` 是 `A2 E3`；
+- `std.encoding` 的 `utf-16` / `utf-32` 要求 BOM，显式字节序版本不自动处理 BOM；
+- `utf-16` / `utf-32` 编码固定输出 BOM + 小端；
+- 解码结果包含 `U+0000` 时始终报错，因为 `string` 不能保存内嵌 NUL；
+- `std.bytes.to_string` 仍然是严格 UTF-8 的快捷方式，不参与 GBK / GB18030 转换。
+
+#### Unicode 归一化
+
+设计说明见 [unicode.md](unicode.md)。
+
+`std.unicode` 提供显式的 NFC / NFD / NFKC / NFKD 归一化：
+
+```text
+std.unicode.normalize(text, form)      → string
+std.unicode.is_normalized(text, form)  → bool
+std.unicode.version()                  → string
+```
+
+`form` 支持 `nfc`、`nfd`、`nfkc`、`nfkd`，大小写不敏感。底层使用 vendored
+`utf8proc` 2.10.0，Unicode 版本为 16.0.0。
+
+示例：
+
+```text
+import std;
+
+let decomposed = std.encoding.decode(std.bytes.from_hex("65cc81"), "utf-8");
+let composed = std.unicode.normalize(decomposed, "nfc");
+std.bytes.hex(std.encoding.encode(composed, "utf-8"))  // c3a9
+
+std.unicode.is_normalized(decomposed, "nfc")       // false
+std.unicode.is_normalized(composed, "nfc")         // true
+
+let circled = std.encoding.decode(std.bytes.from_hex("e291a0"), "utf-8");
+std.unicode.normalize(circled, "nfkc")             // "1"
+std.unicode.version()                              // "16.0.0"
+```
+
+规则：
+
+- 归一化只在显式调用 `std.unicode.normalize` 时发生；
+- 字符串比较、拼接、下标和 `len` 不会自动归一化；
+- 标识符按 NFC 归一化，不做 NFKC；
+- 输入必须是合法 UTF-8 `string`，输出也保持合法 UTF-8；
+- 归一化不会产生内嵌 NUL。
+
+#### 大小写转换与大小写折叠
+
+```text
+std.string.to_lower(text)              → string
+std.string.to_upper(text)              → string
+std.unicode.casefold(text)             → string
+```
+
+`to_lower` / `to_upper` 使用 Unicode **默认完整大小写映射**（与 locale 无关），
+用于展示；`casefold` 是**完整大小写折叠**，用于大小写不敏感比较。
+
+```text
+import std;
+
+std.string.to_lower("ABC")        // "abc"
+std.string.to_upper("ß")          // "SS"
+std.string.to_upper("Straße")     // "STRASSE"
+std.string.to_upper("ﬁ")          // "FI"
+std.string.to_lower("İ")          // "i" + U+0307
+std.string.to_lower("ΟΣ")         // "ος"（词尾 ς）
+std.string.to_lower("ΟΣΑ")        // "οσα"
+
+std.unicode.casefold("Straße")    // "strasse"
+std.unicode.casefold("STRASSE")   // "strasse"
+std.unicode.casefold("ς")         // "σ"
+```
+
+规则：
+
+- 完整映射允许 `1 → N`，输出长度可能与输入不同；
+- 映射是**有损、不可逆**的：`to_upper("ß") == to_upper("ss")`，
+  且 `to_lower(to_upper("ß")) == "ss"` 而不是 `"ß"`；
+- 不要用它们做大小写不敏感比较：`"Straße"` 与 `"STRASSE"` 转换后仍不相等；
+- 比较应先 NFC，再 `casefold`，再比较；
+- `casefold` 的结果同样可能变长，仅用于比较和查找，不要直接展示；
+- 两者都拒绝非法 UTF-8，且都不会顺带做归一化。
+
+
+### 正则表达式
+
+
+```text
+std.regex.match(pattern, text[, flags])       → bool（整串匹配）
+std.regex.search(pattern, text[, flags])      → dict / null
+std.regex.find_all(pattern, text[, flags[, limit]]) → list
+std.regex.replace(pattern, text, replacement[, flags]) → string
+std.regex.split(pattern, text[, flags])       → list
+```
+
+示例：
+
+```text
+import std;
+
+std.regex.match("a+", "aaa")                  // true
+std.regex.match("abc", "ABC", "i")            // true
+std.regex.match(".", "你", "u")               // true
+std.regex.match("\\p{L}+", "中文", "u")        // true
+
+let m = std.regex.search("(a+)(b)", "xxaaabyy");
+m["text"]                                     // aaab
+m["start"]                                    // 2
+m["groups"]                                   // [aaa, b]
+
+let u = std.regex.search("(\\p{L}+)", "123中文456", "u");
+u["text"]                                     // 中文
+u["start"]                                    // 3（码点偏移）
+u["end"]                                      // 5（码点偏移）
+
+std.regex.replace("(a+)", "xxaaabyy", "[$1]") // xx[aaa]byy
+std.regex.split(",", "a,b,c")                  // [a, b, c]
+```
+
+规则：
+
+- 使用 PCRE2 正则语法，兼容常用 ECMAScript 写法；Unicode 码点转义使用 `\x{...}`（如 `\x{4f60}`），不是 `\uXXXX`；
+- `flags` 支持 `i`（忽略大小写）、`m`（多行）和 `u`（Unicode 模式）；
+- 不带 `u` 时按 UTF-8 字节匹配，`search` / `find_all` 的 `start` / `end` 是字节偏移；
+- 带 `u` 时按 Unicode 码点匹配，支持 `\p{...}`、Unicode 字符类和 Unicode 大小写折叠，`start` / `end` 是码点偏移；
+- `u` 模式要求模式和文本是合法 UTF-8；
+- `replace` 使用 `$1` / `${1}` 形式引用捕获组；
+- 非法正则会报运行时错误。
+
+
+### 时间、随机数和 UUID
+
+
+```text
+std.time.now()                    → Unix 秒
+std.time.now_ms()                 → Unix 毫秒
+std.time.monotonic_ms()           → 进程内单调毫秒
+std.time.utc_offset()             → 本地时区偏移秒数
+std.time.format(ts[, format[, utc]]) → string
+std.time.parse(text[, format[, utc]]) → int
+std.time.sleep(ms)                → null
+
+std.random.seed(n)
+std.random.int(min, max)          → 闭区间整数
+std.random.float()                → [0, 1)
+std.random.bytes(n)               → bytes
+std.random.choice(list)
+std.random.shuffle(list)          → 新 list
+std.random.uuid()                 → UUID v4 字符串
+```
+
+默认时间格式是 `%Y-%m-%d %H:%M:%S`，默认使用本地时间；第三个参数传 `true`
+使用 UTC。
+
+
+### Base64、URL 和哈希
+
+
+```text
+std.encoding.base64_encode(bytes) → string
+std.encoding.base64_decode(string) → bytes
+std.encoding.url_encode(string) → string
+std.encoding.url_decode(string) → string
+
+std.crypto.sha256(data)            → 小写 hex
+std.crypto.hmac_sha256(key, data)  → 小写 hex
+```
+
+`sha256` / `hmac_sha256` 接受 `string` 或 `bytes`。`url_decode` 会把 `+`
+当作空格，并校验解码结果是合法 UTF-8。
+
+
+### 目录、路径和压缩
+
+
+```text
+std.fs.listdir(path)              → list[string]
+std.fs.mkdir(path[, recursive])
+std.fs.remove(path)
+std.fs.rename(old, new)
+std.fs.stat(path)                 → dict
+std.fs.cwd()
+std.fs.chdir(path)
+
+std.fs.path_join(parts...)
+std.fs.path_basename(path)
+std.fs.path_dirname(path)
+std.fs.path_extname(path)
+std.fs.path_abs(path)
+std.fs.path_normalize(path)
+std.fs.temp_dir([prefix])         → string
+std.fs.remove_all(path)
+std.fs.copy(src, dst)
+std.fs.which(name)                → string
+std.fs.glob(pattern)              → list[string]
+```
+
+- `std.fs.temp_dir` 在系统临时目录下创建唯一目录；`prefix` 不能包含路径分隔符；
+- `std.fs.remove_all` 递归删除，路径不存在时视为成功；
+- `std.fs.copy` 支持文件或目录：目录目标不能已存在；文件目标已有内容时覆盖；
+  如果目标是目录，则复制到 `dst/src_name`；
+- `std.fs.which` 按当前线程的 `PATH` 查找可执行文件，Windows 会尝试 `PATHEXT`；
+  找不到返回空字符串；
+- `std.fs.glob` 只支持最后一段路径中的 `*` / `?`，返回排序后的绝对路径；
+  `std.fs.mkdir(path, true)` 可递归创建目录。
+
+`std.fs.cwd` / `std.fs.chdir` 是线程局部工作目录：相对路径的 `std.fs` 操作、`std.fs.open` / 文件读写、`std.process.spawn_command` / `std.process.run_command` / `std.process.command` 默认使用当前线程的工作目录；不会改变进程级 OS cwd。新线程在启动时继承创建线程的工作目录。
+
+std.compress.gzip(bytes)          → bytes
+std.compress.gunzip(bytes)        → bytes
+std.compress.zlib(bytes)          → bytes
+std.compress.unzlib(bytes)        → bytes
+std.compress.deflate(bytes)       → bytes
+std.compress.inflate(bytes)       → bytes
+```
+
+`std.fs.stat` 返回：
+
+```text
+{"type": "file" / "dir" / "other", "size": int, "mtime": int}
+```
+
+压缩函数需要构建时启用 zlib；未启用时调用会报告 `zlib support is disabled`。
+
+二进制文件读写：
+
+```text
+let h = std.fs.open("data.bin", "r+b");
+std.fs.seek(h, 8);
+std.fs.file_write_bytes(h, std.bytes.from_hex("00ff"));
+std.fs.seek(h, 0);
+std.bytes.hex(std.fs.file_read_bytes(h, 16))
+std.fs.close(h)
+```
+
+读取固定宽度整数：
+
+```text
+let h = std.fs.open("data.bin", "rb");
+let magic = std.bytes.to_int(std.fs.file_read_bytes(h, 4), 4, "big");
+let length = std.bytes.to_int(std.fs.file_read_bytes(h, 4), 4, "little");
+std.fs.close(h);
+```
+
+
+## 第四部分：并发与进程
+
+目标：理解 fiber/task、线程 Channel、环境变量和外部命令的边界与用法。
+
+### 线程、Channel 与并发
+
+
+```text
+std.thread.Channel(capacity) -> channel
+std.thread.Channel.bounded(capacity) -> channel
+std.thread.Channel.new(capacity) -> channel
+std.thread.Channel.unbounded() -> channel
+std.thread.Message.from(payload[, handles]) -> message
+
+channel.send(message)
+channel.try_send(message) -> bool
+channel.recv([timeout_ms]) -> message | null
+channel.try_recv() -> {"ok": bool, "closed": bool, "value": message?}
+channel.close()
+
+channel.closed
+channel.capacity
+channel.length
+channel.waiters
+channel.send_waiters
+channel.recv_waiters
+channel.total_sends
+channel.total_recvs
+channel.send_timeouts
+channel.recv_timeouts
+channel.stats -> dict
+```
+
+- `capacity >= 1` 为有界队列；`capacity == 0` 为 rendezvous；`capacity == -1`
+  为无界队列；
+- `Channel.unbounded()` 返回无界 Channel，`capacity == -1`；
+  `Channel.bounded(n)` / `Channel.new(n)` 等价于 `Channel(n)`；
+  旧名 `unbounded_channel()` 已移除；
+- Channel 只接收 `std.thread.Message`；
+- `Message.from` 共享 payload（COW）；发送方后续写入会分离，不影响消息；
+- payload 支持标量、`error` / `result`、`list` / `dict`、`lru` / `deque` / `set`、`struct` / `enum`；`heap` 因比较器函数不能跨线程，暂不支持；LRU 现在是普通 struct，函数 / heap 等特殊值不能嵌套在 LRU 字段中传输；
+- `handles` 是字符串到线程 handle 的 dict，目前支持 `Channel`；
+- `send` 在队列满时阻塞；rendezvous（capacity 0）下阻塞到有接收者等待；
+  `try_send` 不阻塞，无空间/无接收者时返回 `false`；
+- `recv` 在队列空时阻塞；关闭且排空后返回 `null`；
+- `recv(timeout_ms)` 超时抛错；
+- `close()` 幂等，保留队列中未读消息，并唤醒所有 send/recv/select 等待者；
+- fiber 中的 Channel send/recv/select 通过事件循环 async wake 挂起/唤醒；
+  非 fiber 上下文使用 OS 线程等待；
+- 等待者按 FIFO 唤醒（OS 线程等待者优先于 fiber 等待者）；
+- `std.thread.select` 使用 round-robin 起点，避免固定顺序造成饥饿；
+- `waiters` / `send_waiters` / `recv_waiters` 返回当前等待者数量；
+- `total_sends` / `total_recvs` / `send_timeouts` / `recv_timeouts` 为累计统计；
+- `stats` 返回包含上述字段的 dict；
+
+示例：
+
+```skein
+import std;
+
+let ch = std.thread.Channel(2);
+let msg = std.thread.Message.from({"x": 1});
+ch.send(msg);
+
+let r = ch.try_recv();
+print(r["value"].payload["x"]);
+print(ch.stats["total_sends"]);
+
+ch.close();
+```
+
+无界与 rendezvous：
+
+```skein
+let a = std.thread.Channel.unbounded();
+let b = std.thread.Channel(0);   // send 等待 recv
+```
+
+#### 线程池
+
+```text
+std.thread.pool(size, script[, options]) -> pool
+
+pool.submit(value[, timeout_ms]) -> future
+future.wait([timeout_ms]) -> {"ok": bool, "value"?: any, "error"?: error}
+future.try_wait() -> {"ok": bool, "closed": bool, "canceled"?: bool, "value"?: message}
+future.cancel() -> bool
+
+pool.close()
+pool.join()
+pool.stats() -> dict
+```
+
+`options`：
+
+```text
+entry         默认 "handle"
+queue         默认 1024；正整数或 "unbounded"
+restart_limit 默认 0；worker 异常退出后的重启次数
+worker_vm     默认 false；启用后 worker 使用 VM/JIT（已验证并发 stress/TSAN）
+```
+
+worker 脚本导出 `handle(payload)`：
+
+```skein
+# worker.skein
+func handle(payload) {
+    return {"n": payload["n"] * 2};
+}
+```
+
+使用：
+
+```skein
+import std;
+
+let pool = std.thread.pool(2, "worker.skein");
+let f1 = pool.submit({"n": 21});
+let f2 = pool.submit({"n": 5});
+let r1 = f1.wait();
+let r2 = f2.wait();
+print(r1["value"]["n"]);
+print(r2["value"]["n"]);
+pool.close();
+pool.join();
+```
+
+规则：
+
+- 每个 worker 是独立 runtime，加载一次脚本并循环处理 job；
+- `handle` 抛错时返回 `{"ok": false, "error": ...}`，worker 继续；
+- worker 返回值必须是 data-only；generator / userdata / 函数值等会返回错误；
+- worker 发生未捕获的原生异常时，当前 job 的 future 返回 `error("thread.worker_crashed", ...)`；
+- `restart_limit > 0` 时异常退出的 worker 会被重启，最多重启该次数；
+- 所有 worker 死亡后，新的 `submit` 报 `thread.pool_failed`；
+- `pool.submit` 共享经过校验的 payload（容器 COW，string/bytes 共享底层 buffer），写入时分离；`submit(value, timeout_ms)` 超时抛 `thread.timeout`；
+- `future.cancel()` 关闭结果通道；之后的 `wait()` 抛 `thread.cancelled`，`try_wait()` 返回 `canceled: true`；尚未开始的排队 job 会被 worker 跳过，正在执行的 job 无法中断；
+- `pool.close()` 停止接收新 job，worker 排空后退出；
+- `pool.join()` 等待 worker 线程结束；
+- `stats()` 返回 `size/workers/ready/alive/dead/restarts/restart_limit/submitted/completed/failed/active/queued`；
+- 支持在被导入模块的顶层创建 pool/spawn；解析器在求值顶层语句时会释放解析锁，worker 可以在该窗口解析入口脚本。
+
+#### 单线程
+
+```text
+std.thread.spawn_script(script, message[, options]) -> thread
+std.thread.spawn_source(source, message[, options]) -> thread
+std.thread.spawn_function(function, message) -> thread
+std.entry.encode(function) -> bytes
+std.thread.spawn_entry(bytes, message) -> thread
+
+旧名 `std.thread.spawn` 已移除；请使用 `spawn_script`。
+
+thread.join([timeout_ms]) -> {"ok": bool, "value"?: any, "error"?: error}
+thread.detach()
+thread.is_alive() -> bool
+thread.cancel() -> bool
+thread.id
+```
+
+`options`：
+
+```text
+entry     默认 "main"
+```
+
+`spawn_source` 直接接收脚本文本，内部写入当前线程工作目录下的临时文件，等待子线程解析完成后删除；相对导入按当前线程 cwd 解析，仍会在子线程重新解析源码。需要复用 Proto/bytecode 时使用 `func` 或 `std.thread.spawn_function`。
+
+Proto 入口：
+
+```skein
+func worker(ctx) {
+    return {"v": ctx.payload["n"] + 1};
+}
+
+let t = std.thread.spawn_function(worker, std.thread.Message.from({"n": 4}));
+```
+
+- `Message.from` 的 payload 允许 `heap`，包括容器内的 heap；heap comparator 必须是不捕获闭包的函数；
+- heap 是持久化数据结构，跨线程/进程入口共享只读结构；payload 仍不允许 standalone function 值；
+- `std.thread.pool` 的 submit payload 和线程返回值同样支持 heap。
+
+- 任何满足入口签名的函数都可以作为线程入口，不需要额外声明标记；
+- 入口签名要求固定的单个参数；入口内可以使用嵌套函数和 `defer`；捕获的 upvalue 在 spawn 时按值做 data-only 快照；
+- 函数体在父线程编译成不可变 Proto，子线程克隆后通过 VM 执行，不再解析源码；
+- 函数体可使用参数、语言 builtin、自动注入的基础 `std`、捕获的 upvalue 和父线程全局数据值；父线程函数值会按 Proto 传递，并递归带上其捕获值与依赖的全局数据/函数；
+- 嵌套函数和 `defer` 以 Proto/声明元数据传递，子线程在自身栈帧上重新捕获局部变量；用户 `import` 会在父线程加载并把命名空间快照传入子线程，子线程通过路径种子复用命名空间，不再要求模块源码存在；模块导出需能按 data/function 规则传递；
+- `std.thread.spawn_function` 可直接传入满足条件的普通函数，作为低层 Proto 入口；
+- `std.entry.encode(fn)` 把入口及依赖图（Proto、upvalue、全局、模块命名空间）序列化为 `bytes`；`std.thread.spawn_entry(bytes, Message)` 可在另一个进程反序列化并启动线程：
+  ```skein
+  std.fs.write_bytes("entry.bin", std.entry.encode(worker));
+  # 另一个进程：
+  let t = std.thread.spawn_entry(std.fs.read_bytes("entry.bin"), msg);
+  ```
+  当前可序列化的 Proto 支持入口内的局部 `struct` / `enum` / `trait` / `impl` 声明、嵌套函数和 `defer`；结构/枚举字段默认值和 impl 方法会随声明元数据传递，局部方法参数默认值当前仍受限。data 值支持 null/bool/int/float/char/byte/string/bytes/error/result/list/dict/set/deque、struct/enum（字段/variant 元数据随 payload 注册；字段默认值，以及带默认/模式/可变参数、数据捕获和全局数据依赖的方法也会传输；方法若捕获函数/heap/命名空间，当前会给出明确诊断并拒绝）以及 builtin 函数常量。`list` / `dict` / `set` / `deque` 现在会递归携带嵌套值，因此可以跨线程/进程传递函数表、heap 容器和多层混合容器；LRU 是普通 struct，遵循 struct 的传输规则，不能嵌套函数 / heap 等特殊值。
+
+线程入口接收一个 Message：
+
+```skein
+# thread_worker.skein
+func main(ctx) {
+    let signal = ctx.handles["signal"];
+    signal.send(std.thread.Message.from({"x": ctx.payload["x"]}));
+    return {"x": ctx.payload["x"]};
+}
+```
+
+使用：
+
+```skein
+import std;
+
+let ch = std.thread.Channel(1);
+let msg = std.thread.Message.from(
+    {"x": 5},
+    {"signal": ch}
+);
+
+let t = std.thread.spawn_script("thread_worker.skein", msg);
+let signal = ch.recv();
+let result = t.join();
+
+print(signal.payload["x"]);
+print(result["ok"]);
+print(result["value"]["x"]);
+```
+
+规则：
+
+- `spawn_script` 等待脚本加载和入口解析完成后返回；
+- 子线程拥有自己的 runtime、eval context、AST/function 缓存；
+- 入口函数默认 `main`，接收一个 Message 参数；
+- `join()` 返回 `{ok, value}` 或 `{ok:false, error}`；
+- `detach()` 后线程自行运行和退出；
+- `cancel()` 只设置协作取消标记，不能抢占执行中的线程；
+- 子线程结果必须是 data-only 值；返回值经校验后按 COW 共享，调用方写入时分离。
+
+#### 双向 duplex
+
+```text
+std.thread.duplex(capacity) -> link
+link.child -> endpoint
+
+link.send(message)
+link.try_send(message) -> bool
+link.recv([timeout_ms]) -> message | null
+link.try_recv() -> {"ok": bool, "closed": bool, "value": message?}
+link.close_send()
+link.close_recv()
+link.close()
+link.closed
+link.capacity
+link.length
+
+std.thread.spawn_script_with_channel(script, message, capacity[, options]) -> thread
+std.thread.spawn_script_with_duplex(script, message, capacity[, options]) -> thread
+thread.channel
+thread.link
+```
+
+- `duplex` 内部有 `parent_to_child` 和 `child_to_parent` 两条 lane；
+- `link.send` 发往 child，`link.recv` 接收 child 发来的消息；
+- `link.child` 是反方向端点：`child.send` 发往 parent，`child.recv` 接收 parent 的消息；
+- `close_send` 只关闭 out 方向；对端 `recv` 排空后得到 `null`；
+- `close_recv` 只关闭 in 方向；`closed` 反映 in 方向是否关闭；
+- `select` 接受 Channel 或 duplex endpoint，endpoint 使用其 in 方向；`broadcast` 仅接受 Channel；
+- `spawn_script_with_channel` 自动创建 Channel 并注入 `ctx.handles["channel"]`，父端通过 `thread.channel` 访问；
+- `spawn_script_with_duplex` 自动创建 duplex，子端注入 `ctx.handles["link"]`，父端通过 `thread.link` 访问。
+- `std.thread.collect()` 主动回收不可达的 Message/Channel/duplex 环；仅在没有活动 worker 线程时执行。
+- `std.thread.debug_counts()` 返回 `messages/channels/duplexes/endpoints/collected` 诊断计数。
+
+#### select / broadcast
+
+```text
+std.thread.select(channels[, timeout_ms]) -> dict
+std.thread.try_broadcast(channels, message) -> dict
+std.thread.broadcast(channels, message) -> null
+```
+
+`select` 返回：
+
+```text
+{"index": 0, "value": message}
+{"index": 1, "closed": true}
+{"index": -1, "timeout": true}
+```
+
+示例：
+
+```skein
+let a = std.thread.Channel(1);
+let b = std.thread.Channel(1);
+b.send(std.thread.Message.from({"v": "b"}));
+
+let r = std.thread.select([a, b], 1000);
+print(r["index"]);
+print(r["value"].payload["v"]);
+```
+
+规则：
+
+- 当前只支持 Channel；
+- 多个 channel 同时就绪时使用轮转起点，避免总是选 0 号；
+- 有数据优先，排空后才返回 closed；
+- `timeout_ms = 0` 表示不超时；
+- `try_broadcast` 返回：
+  ```text
+  {"sent": [0, 1], "full": [], "closed": []}
+  ```
+- `broadcast` 逐个阻塞发送；任一失败时抛错，已发送的不回滚。
+
+#### 能力查询
+
+```text
+std.thread.capabilities() -> dict
+```
+
+返回全局能力：
+
+```text
+{
+  "schema": 1,
+  "platform": "linux",
+  "strategy": "auto",
+  "strategies": ["dispatch", "reuse_port"],
+  "reuse_port": true,
+  "dispatch": true,
+  "http1": true,
+  "http2": true,
+  "tls": true,
+  "keep_alive": true,
+  "stream_request_body": true,
+  "stream_response": true,
+  "websocket": false,
+  "sse": false,
+  "raw_socket": false
+}
+```
+
+`ThreadServer.capabilities` 返回实际策略的能力，并包含同样的
+`schema` / `platform` / `strategy` / `strategies` 字段。
+
+HTTP 侧也可以按策略查询：
+
+```skein
+let caps = std.http.thread_capabilities({"strategy": "auto"});
+let dispatch = std.http.thread_capabilities({"strategy": "dispatch"});
+```
+
+- `"auto"`：Linux 解析为 `reuse_port`，Windows 解析为 `dispatch`；
+- `"reuse_port"`：不支持的平台会报错；
+- 返回字段与 `std.thread.capabilities()` 一致。
+
+`serve_threads` 的 `require` / `on_unsupported`：
+
+```skein
+let ts = std.http.serve_threads(
+  s, 4, "worker.skein",
+  {"require": ["http2"],
+   "on_unsupported": "501"});
+```
+
+- `"error"`：缺失能力时启动失败；
+- `"warn"`：输出警告并继续；
+- `"501"`：启动成功，但请求返回 501。
+
+
+### 环境变量和进程捕获
+
+
+```text
+std.env.get(name[, default])
+std.env.has(name)
+std.env.set(name, value)
+std.env.unset(name)
+std.env.all()                     → dict
+
+std.process.run_command(command[, options]) → dict
+```
+
+`std.env` 的读写是线程局部覆盖层：读取先查当前线程覆盖，再回退到进程环境；`set` / `unset` 不修改进程环境。新线程在启动时继承创建线程的环境快照；`std.process.spawn_command` / `std.process.run_command` / `std.process.command` 会把当前线程的环境覆盖应用到子进程。
+
+线程局部 env/cwd、FFI 回调的 owner 线程约束和 `ffi.call_task` 的环境可见性限制见
+[env-ffi-thread-safety.md](env-ffi-thread-safety.md)。
+
+`std.sys` 暴露脚本调用信息：
+
+```text
+std.sys.args()        → list[string]  // 脚本路径之后的参数
+std.sys.script()      → string        // 脚本路径；stdin/REPL 为空
+std.sys.executable()  → string        // 解释器可执行文件
+std.sys.exit([code])                  // 停止脚本并以 code（0–255）退出
+std.sys.is_main()     → bool          // 当前代码是否属于入口 main 包
+```
+
+解释器选项必须写在脚本路径之前；脚本路径之后的所有参数（包括以 `-` 开头的）
+都原样传给脚本。示例：
+
+```text
+skein tool.skein --bin build/skein --check "a b"
+```
+
+脚本内 `std.sys.args()` 返回 `["--bin", "build/skein", "--check", "a b"]`。
+`std.sys.exit(code)` 用于命令行工具：立即停止当前脚本（不再执行后续语句），
+刷新标准流后以 `code` 退出；省略 `code` 等价于 `0`。
+`std.sys.is_main()` 按定义代码的包判断：入口脚本、stdin/REPL 和被入口脚本调用的
+main 包函数返回 `true`；被 import 的包及其函数返回 `false`。
+
+旧名 `std.process.run` 已移除；请使用 `run_command`。
+
+`std.process.run_command` 的 `options` 支持：
+
+```text
+stdin   string / bytes，默认空
+cwd     工作目录
+env     dict，覆盖子进程环境
+```
+
+返回：
+
+```text
+{"status": int, "stdout": bytes, "stderr": bytes}
+```
+
+示例：
+
+```text
+import std;
+
+let r = std.process.run_command("printf hello");
+print(std.bytes.to_string(r["stdout"]));
+
+let r2 = std.process.run_command("cat", {"stdin": "abc"});
+std.bytes.to_string(r2["stdout"])
+```
+
+注意：当前实现通过 shell 重定向捕获输出，不提供超时和流式读写。
+
+
+### 外部命令
 
 通过 `std.process` 执行 shell 命令。全局 `command` / `command_status` 已移除。
 
@@ -1799,7 +2665,7 @@ r["status"]
 std.bytes.to_string(r["stdout"])
 ```
 
-### 编码进程入口
+#### 编码进程入口
 
 ```text
 std.process.run_entry(blob, message[, options]) → envelope
@@ -1848,7 +2714,7 @@ r["value"]["v"]   // 42
   或直接用 `spawn_function` / `run_function`；
 - 子进程通过 `--run-entry` 反序列化执行，不依赖入口源码。
 
-### 长驻进程与管道
+#### 长驻进程与管道
 
 ```text
 std.process.spawn_command(file[, options]) → process
@@ -1919,7 +2785,7 @@ let data = std.io.read_task(p["stdout"], 4096).wait();
 - 管道不支持 `seek` / `tell`；
 - `wait` 超时后不会自动杀死进程。
 
-#### JSON Lines worker 示例
+##### JSON Lines worker 示例
 
 worker 脚本：
 
@@ -1955,7 +2821,7 @@ std.io.close(p["stdin"]);
 print(std.process.wait(p));
 ```
 
-### Worker 池
+#### Worker 池
 
 在 spawn + JSON Lines 协议之上提供进程池：
 
@@ -2119,1149 +2985,339 @@ Windows/MinGW 下命令使用 `CreateProcessW` 传递 Unicode 命令行和 Unico
 
 **安全提示**：这些函数会执行任意 shell 命令，只应对可信输入使用。
 
-## 字符串处理
+
+## 第五部分：工程化
+
+目标：组织多文件项目、导入依赖，并处理开发期重启与生产部署。
+
+### 包与导入
+
+入口脚本的包固定是 `main`，可以显式写 `package main {}`，也可以省略。包文件使用显式包块：
 
 ```text
-import std;
-
-std.string.trim(text)                     → 去掉首尾空白
-std.string.split(text, separator)         → list<string>
-std.string.split_ws(text)                 → list<string>
-std.string.find(text, substring)          → 码点下标 / -1
-std.string.substr(text, start[, length])  → string
-```
-
-示例：
-
-```text
-import std;
-
-std.string.trim("  hello\t\n")          → "hello"
-std.string.split("a,b,c", ",")          → ["a", "b", "c"]
-std.string.split(",a,", ",")            → ["", "a", ""]
-std.string.split_ws("  a  b\tc ")       → ["a", "b", "c"]
-std.string.find("hello", "ll")          → 2
-std.string.find("hello", "x")           → -1
-std.string.substr("hello", 1, 3)        → "ell"
-std.string.substr("你好世界", 1, 2)      → "好世"
-```
-
-规则：
-
-- `std.string.trim` 和 `std.string.split_ws` 只把 ASCII 空白（空格、Tab、换行等）视为空白；
-- `std.string.split` 使用非重叠匹配，保留首尾空字段；
-- `std.string.split` 的分隔符不能为空字符串；
-- `std.string.find` 返回 **UTF-8 码点下标**，找不到返回 `-1`，空子串返回 `0`；
-- `std.string.substr` 的 `start` 和 `length` 都是码点单位；`start` 超出长度返回空字符串，`length` 超出末尾会截断；
-- `start` 和 `length` 不能为负数。
-
-组合使用：
-
-```text
-import std;
-
-let parts = std.string.split_ws(input("请输入两个数: "));
-let a = int(parts[0]);
-let b = int(parts[1]);
-print(a + b);
-```
-
-### 构建器
-
-频繁追加时使用 builder，避免每次复制整个 list / string：
-
-```text
-import std;
-
-let lb = std.list.builder();
-for (let i in range(1000)) {
-  lb.push(i);
-}
-let xs = lb.build();
-
-let sb = std.string.builder();
-for (let i in range(1000)) {
-  sb.push("x");
-}
-let text = sb.build();
-```
-
-规则：
-
-- `push` / `extend` 是 O(1) 摊销，`build()` 每次返回独立值；
-- `std.list.append(xs, v)` 在 `xs = std.list.append(xs, v)` 形式下（VM/JIT 后端）使用 COW 原地增长；
-- `s = s + "x"` / `s = s + 'c'` 在 VM 与 AST 下使用 COW 原地追加，别名仍保留旧值；
-- 复杂拼接（例如 `s + str(i)`）仍建议使用 `std.string.builder`；
-- 其他调用形式仍保持“返回新 list / 新字符串，不修改参数”的语义；
-- builder 是可变对象，赋值会共享同一个 builder。
-
-## 控制台输入
-
-`input([prompt])` 从 stdin 读取一行：
-
-```text
-let name = input("Name: ");
-print("hello " + name);
-```
-
-- 返回的字符串不包含末尾换行；
-- 可选的 `prompt` 会原样输出到 stdout，不经过 `std.string.format`；
-- 读到 EOF 时返回 `null`；
-- 空行返回空字符串；
-- CRLF 会被处理，末尾 `\r\n` 不会进入结果；
-- 控制台负责行编辑和退格；管道输入中的退格会由 `input` 过滤；
-- 脚本模式下仍然从原始 stdin 读取，不会读脚本文件本身；
-- `input` 是普通一等内置函数，可以保存和传递。
-
-```text
-let read = input;
-read("> ")
-```
-
-示例：
-
-```text
-import std;
-
-let name = input("Name: ");
-print(std.string.format("hello {}", name));
-```
-
-## 文件读写
-
-```text
-std.fs.read_file(path)          → 文件全部内容
-std.fs.write_file(path, text)   → null，覆盖写入
-std.fs.append_file(path, text)  → null，追加写入
-std.fs.exists(path)             → 1 / 0
-```
-
-需要 `import std;`。
-
-示例：
-
-```text
-import std;
-
-std.fs.write_file("out.txt", "hello\n");
-std.fs.append_file("out.txt", "world\n");
-print(std.fs.read_file("out.txt"));
-
-std.fs.exists("out.txt")
-```
-
-规则：
-
-- `std.fs.read_file` 读取整个文件并返回字符串；空文件返回空字符串；
-- `std.fs.write_file` 创建或截断文件；
-- `std.fs.append_file` 创建或追加；
-- 文件以二进制模式打开，不会自动转换 CRLF，也不会去掉末尾换行；
-- 读写内容按 UTF-8 文本处理；
-- `std.fs.read_file` 遇到 NUL 字节会报错，避免内部 C 字符串截断；读取二进制请使用 `std.fs.read_bytes`；
-- 不会自动创建父目录；
-- 文件操作失败时报告 `read_file: ...` / `write_file: ...` / `append_file: ...`；
-- Windows/MinGW 下文件路径会转换为 UTF-16 后使用 `_wfopen`。
-
-### 带编码的文本文件
-
-需要在 UTF-8 之外的文本编码之间读写时，使用：
-
-```text
-std.fs.read_text(path, encoding[, errors])       → string
-std.fs.write_text(path, text, encoding[, errors]) → null
-```
-
-`encoding` 使用 `std.encoding` 支持的编码名，`errors` 支持 `strict`（默认）、
-`replace`、`ignore`。
-
-示例：
-
-```text
-import std;
-
-std.fs.write_text("out-gbk.txt", "中国", "gbk");
-std.fs.read_text("out-gbk.txt", "gbk")          // 中国
-
-std.fs.write_text("out-utf16.txt", "中", "utf-16");
-std.fs.read_text("out-utf16.txt", "utf-16")     // 中
-```
-
-规则：
-
-- `read_text` 先读取字节，再按指定编码解码为 UTF-8 `string`；
-- `write_text` 先把 `string` 编码成字节，再覆盖写入文件；
-- `errors = "replace"` 时，解码用 `U+FFFD` 替换，编码用 `?` 替换；
-- `errors = "ignore"` 时跳过非法序列或不可表示字符；
-- 解码结果包含 `U+0000` 时报错；
-- `utf-16` / `utf-32` 会按 BOM 规则处理；显式字节序版本不自动剥离 BOM；
-- `utf-8` 不自动剥离 UTF-8 BOM，BOM 会作为 `U+FEFF` 保留；
-- `std.fs.read_file` / `std.fs.write_file` / `std.fs.read` / `std.fs.write` 仍然只按 UTF-8 字节处理；
-- 文件句柄 API 不携带编码，需要其它编码时使用 `std.fs.read_bytes` / `std.fs.write_bytes` 或 `std.fs.read_text` / `write_text`。
-
-### 文件句柄
-
-需要多次操作同一个文件时，可以使用低层文件句柄：
-
-```text
-std.fs.open(path, mode)              → file handle
-std.fs.read(handle[, n])             → string
-std.fs.write(handle, text)           → null
-std.fs.seek(handle, offset[, whence]) → null
-std.fs.tell(handle)                  → int
-std.fs.eof(handle)                   → 1 / 0
-std.fs.close(handle)                 → null
-std.fs.flush(handle)                 → null
-```
-
-`mode` 支持 `r`、`w`、`a`、`r+`、`w+`、`a+`，也接受带 `b`/`t` 的写法；内部统一按二进制模式打开。
-
-示例：
-
-```text
-import std;
-
-let h = std.fs.open("data.txt", "w+");
-std.fs.write(h, "hello world");
-std.fs.seek(h, 0);
-std.fs.read(h, 5)
-std.fs.close(h)
-```
-
-- 文件句柄是不可打印底层指针的资源对象，打印显示为 `<file: path>`；
-- 句柄复制会共享同一个底层文件，关闭其中一个会影响所有副本；
-- `std.fs.read(h)` 读取剩余全部内容，`std.fs.read(h, n)` 最多读取 n 字节；`n = 0` 等价于读取全部；
-- `std.fs.seek` 的 `whence`：`0` 文件开头、`1` 当前位置、`2` 文件末尾；
-- 关闭后继续读写会报 `file is closed`；
-- `std.fs.read` 读取到 NUL 字节会报错；读取二进制请使用 `std.fs.file_read_bytes`；
-- 最终未关闭的句柄会随进程退出关闭。
-
-## 字符、字节与编码
-
-
-`char` 表示一个 Unicode 标量值，使用单引号字面量：
-
-```text
-'a'
-'你'
-'\n'
-'\u0041'
-'\u{1F600}'
-```
-
-- `len('a') == 1`；
-- 字符串下标和 `for ... in` 字符串返回 `char`；
-- `int('A') == 65`，`str('A') == "A"`，`char(65) == 'A'`；
-- `char` 可与字符串拼接：`'a' + "bc"`；
-- `std.bytes.from_char(c)` / `std.bytes.to_char(b)` / `char(b)` 做 UTF-8 字节互转；
-- JSON 编码为单字符字符串；
-- 空、多字符、代理区、超过 `0x10FFFF` 报错。
-
-### 字节值 byte
-
-`byte` 表示 `0..255` 的字节值，没有字面量：
-
-```text
-byte(0)
-byte(65)
-byte(255)
-```
-
-- `int(byte)` 取回 `0..255`；
-- `byte(int)` 超出范围报错；
-- `byte` 可以作 dict key、`switch` 值；
-- JSON 编码为整数；
-- `bytes[i]` / `std.bytes.get` 仍返回 `int`。
-
-### 二进制 buffer
-
-文本字符串按 UTF-8 处理，不能保存任意字节。二进制数据使用独立的 `bytes` 类型：
-
-```text
-std.bytes.from_string(text)        → bytes
-std.bytes.to_string(bytes)         → string
-std.bytes.len(bytes)               → int
-std.bytes.get(bytes, index)        → 0..255
-std.bytes.slice(bytes, start[, length]) → bytes
-std.bytes.concat(a, b)             → bytes
-std.bytes.hex(bytes)               → 十六进制字符串
-std.bytes.from_hex(text)            → bytes
-std.bytes.to_int(bytes, size, byteorder[, offset[, signed]]) → int
-std.bytes.from_int(value, size, byteorder) → bytes
-std.fs.read_bytes(path)            → bytes
-std.fs.write_bytes(path, bytes)    → null，覆盖写入
-std.fs.append_bytes(path, bytes)   → null，追加写入
-std.fs.file_read_bytes(handle[, n]) → bytes
-std.fs.file_write_bytes(handle, bytes) → null
-bytes[index]                       → 0..255
-bytes[index] = 0..255
-```
-
-需要 `import std;`。
-
-示例：
-
-```text
-import std;
-
-let b = std.bytes.from_hex("00ff10");
-std.bytes.len(b)                     → 3
-std.bytes.hex(b)                     → "00ff10"
-std.bytes.get(b, 1)                  → 255
-std.bytes.hex(std.bytes.slice(b, 1, 2)) → "ff10"
-
-let c = std.bytes.from_string("abc");
-c[1] = 255;
-std.bytes.hex(c)                     → "61ff63"
-
-std.bytes.to_int(std.bytes.from_hex("78563412"), 4, "little")
-                                     → 305419896
-std.bytes.to_int(std.bytes.from_hex("78563412"), 4, "big")
-                                     → 2018915346
-std.bytes.to_int(std.bytes.from_hex("ffff"), 2, "little", 0, 1)
-                                     → -1
-std.bytes.hex(std.bytes.from_int(305419896, 4, "little"))
-                                     → "78563412"
-std.bytes.hex(std.bytes.from_int(-1, 2, "little"))
-                                     → "ffff"
-```
-
-规则：
-
-- `bytes` 可以保存任意字节，包括 `0x00`，长度由字节数决定；
-- 直接打印 `bytes` 时显示为 `<bytes: N>`，不会把原始二进制写到终端；需要查看内容时使用 `std.bytes.hex`；
-- `std.bytes.len`、`std.bytes.get`、`std.bytes.slice`、索引和 `std.fs.seek` 都使用**字节下标**，不是 UTF-8 码点；
-- 索引读取返回 `0..255` 的整数，索引赋值只接受 `0..255`；
-- `std.bytes.slice` 的 `start` / `length` 不能为负数，越界会截断；
-- `std.bytes.from_hex` 只接受偶数个十六进制数字，大小写均可；
-- `std.bytes.to_int` 的 `size` 为 1..8，`byteorder` 支持 `"little"` / `"big"`（也接受 `"le"` / `"be"`）；
-- `std.bytes.to_int` 的 `offset` 默认 0，`signed` 默认 0；`offset + size` 超出 buffer 会报错，不会静默截断；
-- `std.bytes.to_int(..., signed = 1)` 按二补码解释；无符号 64 位值超过 `int64` 上限时会报错；
-- `std.bytes.from_int` 的 `size` 为 1..8；值可以落在有符号下限到无符号上限之间，按低 `size` 字节编码；
-- 负数写入使用二补码，例如 `std.bytes.from_int(-1, 2, "little")` 得到 `ff ff`；
-- `std.bytes.to_string` 要求内容是合法 UTF-8 且不含 NUL，否则报错；
-- `std.fs.read_bytes` / `std.fs.write_bytes` / `std.fs.append_bytes` 不做文本 NUL 检查；
-- `std.fs.file_read_bytes(h)` 读取剩余全部内容，`std.fs.file_read_bytes(h, n)` 最多读取 n 字节；
-- `bytes` 是值类型，赋值和复制都会复制内容。
-
-### 编码转换
-
-设计说明见 [encoding.md](encoding.md)。
-
-`std.encoding` 在 `bytes` 和 UTF-8 `string` 之间做显式转码：
-
-```text
-std.encoding.decode(bytes, encoding[, errors])  → string
-std.encoding.encode(string, encoding[, errors]) → bytes
-std.encoding.supports(encoding)                 → bool
-```
-
-支持的编码：
-
-```text
-utf-8  ascii  latin-1  windows-1252
-utf-16le  utf-16be  utf-16
-utf-32le  utf-32be  utf-32
-gbk / cp936
-gb18030
-```
-
-`errors` 支持：
-
-```text
-"strict"   默认，非法序列或不可表示字符报错
-"replace"  decode 用 U+FFFD 替换；encode 用 "?" 替换
-"ignore"   跳过非法序列或不可表示字符
-```
-
-示例：
-
-```text
-import std;
-
-let s = std.encoding.decode(std.bytes.from_hex("d6d0b9fa"), "gbk");
-print(s);                                      // 中国
-
-print(std.bytes.hex(std.encoding.encode("中国", "gbk")));
-                                               // d6d0b9fa
-
-print(std.bytes.hex(std.encoding.encode("€", "gbk")));
-                                               // 80
-
-print(std.bytes.hex(std.encoding.encode("€", "gb18030")));
-                                               // a2e3
-
-std.encoding.supports("gbk")                   // true
-std.encoding.supports("gb18030")               // true
-```
-
-规则：
-
-- GBK 和 GB18030 使用内置码表，不依赖 iconv 或 Windows 代码页；
-- `gbk` 的 `0x80` 解码为 `€`；`gb18030` 的 `€` 是 `A2 E3`；
-- `std.encoding` 的 `utf-16` / `utf-32` 要求 BOM，显式字节序版本不自动处理 BOM；
-- `utf-16` / `utf-32` 编码固定输出 BOM + 小端；
-- 解码结果包含 `U+0000` 时始终报错，因为 `string` 不能保存内嵌 NUL；
-- `std.bytes.to_string` 仍然是严格 UTF-8 的快捷方式，不参与 GBK / GB18030 转换。
-
-### Unicode 归一化
-
-设计说明见 [unicode.md](unicode.md)。
-
-`std.unicode` 提供显式的 NFC / NFD / NFKC / NFKD 归一化：
-
-```text
-std.unicode.normalize(text, form)      → string
-std.unicode.is_normalized(text, form)  → bool
-std.unicode.version()                  → string
-```
-
-`form` 支持 `nfc`、`nfd`、`nfkc`、`nfkd`，大小写不敏感。底层使用 vendored
-`utf8proc` 2.10.0，Unicode 版本为 16.0.0。
-
-示例：
-
-```text
-import std;
-
-let decomposed = std.encoding.decode(std.bytes.from_hex("65cc81"), "utf-8");
-let composed = std.unicode.normalize(decomposed, "nfc");
-std.bytes.hex(std.encoding.encode(composed, "utf-8"))  // c3a9
-
-std.unicode.is_normalized(decomposed, "nfc")       // false
-std.unicode.is_normalized(composed, "nfc")         // true
-
-let circled = std.encoding.decode(std.bytes.from_hex("e291a0"), "utf-8");
-std.unicode.normalize(circled, "nfkc")             // "1"
-std.unicode.version()                              // "16.0.0"
-```
-
-规则：
-
-- 归一化只在显式调用 `std.unicode.normalize` 时发生；
-- 字符串比较、拼接、下标和 `len` 不会自动归一化；
-- 标识符按 NFC 归一化，不做 NFKC；
-- 输入必须是合法 UTF-8 `string`，输出也保持合法 UTF-8；
-- 归一化不会产生内嵌 NUL。
-
-### 大小写转换与大小写折叠
-
-```text
-std.string.to_lower(text)              → string
-std.string.to_upper(text)              → string
-std.unicode.casefold(text)             → string
-```
-
-`to_lower` / `to_upper` 使用 Unicode **默认完整大小写映射**（与 locale 无关），
-用于展示；`casefold` 是**完整大小写折叠**，用于大小写不敏感比较。
-
-```text
-import std;
-
-std.string.to_lower("ABC")        // "abc"
-std.string.to_upper("ß")          // "SS"
-std.string.to_upper("Straße")     // "STRASSE"
-std.string.to_upper("ﬁ")          // "FI"
-std.string.to_lower("İ")          // "i" + U+0307
-std.string.to_lower("ΟΣ")         // "ος"（词尾 ς）
-std.string.to_lower("ΟΣΑ")        // "οσα"
-
-std.unicode.casefold("Straße")    // "strasse"
-std.unicode.casefold("STRASSE")   // "strasse"
-std.unicode.casefold("ς")         // "σ"
-```
-
-规则：
-
-- 完整映射允许 `1 → N`，输出长度可能与输入不同；
-- 映射是**有损、不可逆**的：`to_upper("ß") == to_upper("ss")`，
-  且 `to_lower(to_upper("ß")) == "ss"` 而不是 `"ß"`；
-- 不要用它们做大小写不敏感比较：`"Straße"` 与 `"STRASSE"` 转换后仍不相等；
-- 比较应先 NFC，再 `casefold`，再比较；
-- `casefold` 的结果同样可能变长，仅用于比较和查找，不要直接展示；
-- 两者都拒绝非法 UTF-8，且都不会顺带做归一化。
-
-## 正则表达式
-
-
-```text
-std.regex.match(pattern, text[, flags])       → bool（整串匹配）
-std.regex.search(pattern, text[, flags])      → dict / null
-std.regex.find_all(pattern, text[, flags[, limit]]) → list
-std.regex.replace(pattern, text, replacement[, flags]) → string
-std.regex.split(pattern, text[, flags])       → list
-```
-
-示例：
-
-```text
-import std;
-
-std.regex.match("a+", "aaa")                  // true
-std.regex.match("abc", "ABC", "i")            // true
-std.regex.match(".", "你", "u")               // true
-std.regex.match("\\p{L}+", "中文", "u")        // true
-
-let m = std.regex.search("(a+)(b)", "xxaaabyy");
-m["text"]                                     // aaab
-m["start"]                                    // 2
-m["groups"]                                   // [aaa, b]
-
-let u = std.regex.search("(\\p{L}+)", "123中文456", "u");
-u["text"]                                     // 中文
-u["start"]                                    // 3（码点偏移）
-u["end"]                                      // 5（码点偏移）
-
-std.regex.replace("(a+)", "xxaaabyy", "[$1]") // xx[aaa]byy
-std.regex.split(",", "a,b,c")                  // [a, b, c]
-```
-
-规则：
-
-- 使用 PCRE2 正则语法，兼容常用 ECMAScript 写法；Unicode 码点转义使用 `\x{...}`（如 `\x{4f60}`），不是 `\uXXXX`；
-- `flags` 支持 `i`（忽略大小写）、`m`（多行）和 `u`（Unicode 模式）；
-- 不带 `u` 时按 UTF-8 字节匹配，`search` / `find_all` 的 `start` / `end` 是字节偏移；
-- 带 `u` 时按 Unicode 码点匹配，支持 `\p{...}`、Unicode 字符类和 Unicode 大小写折叠，`start` / `end` 是码点偏移；
-- `u` 模式要求模式和文本是合法 UTF-8；
-- `replace` 使用 `$1` / `${1}` 形式引用捕获组；
-- 非法正则会报运行时错误。
-
-## 时间、随机数和 UUID
-
-
-```text
-std.time.now()                    → Unix 秒
-std.time.now_ms()                 → Unix 毫秒
-std.time.monotonic_ms()           → 进程内单调毫秒
-std.time.utc_offset()             → 本地时区偏移秒数
-std.time.format(ts[, format[, utc]]) → string
-std.time.parse(text[, format[, utc]]) → int
-std.time.sleep(ms)                → null
-
-std.random.seed(n)
-std.random.int(min, max)          → 闭区间整数
-std.random.float()                → [0, 1)
-std.random.bytes(n)               → bytes
-std.random.choice(list)
-std.random.shuffle(list)          → 新 list
-std.random.uuid()                 → UUID v4 字符串
-```
-
-默认时间格式是 `%Y-%m-%d %H:%M:%S`，默认使用本地时间；第三个参数传 `true`
-使用 UTC。
-
-## Base64、URL 和哈希
-
-
-```text
-std.encoding.base64_encode(bytes) → string
-std.encoding.base64_decode(string) → bytes
-std.encoding.url_encode(string) → string
-std.encoding.url_decode(string) → string
-
-std.crypto.sha256(data)            → 小写 hex
-std.crypto.hmac_sha256(key, data)  → 小写 hex
-```
-
-`sha256` / `hmac_sha256` 接受 `string` 或 `bytes`。`url_decode` 会把 `+`
-当作空格，并校验解码结果是合法 UTF-8。
-
-## 环境变量和进程捕获
-
-
-```text
-std.env.get(name[, default])
-std.env.has(name)
-std.env.set(name, value)
-std.env.unset(name)
-std.env.all()                     → dict
-
-std.process.run_command(command[, options]) → dict
-```
-
-`std.env` 的读写是线程局部覆盖层：读取先查当前线程覆盖，再回退到进程环境；`set` / `unset` 不修改进程环境。新线程在启动时继承创建线程的环境快照；`std.process.spawn_command` / `std.process.run_command` / `std.process.command` 会把当前线程的环境覆盖应用到子进程。
-
-线程局部 env/cwd、FFI 回调的 owner 线程约束和 `ffi.call_task` 的环境可见性限制见
-[env-ffi-thread-safety.md](env-ffi-thread-safety.md)。
-
-`std.sys` 暴露脚本调用信息：
-
-```text
-std.sys.args()        → list[string]  // 脚本路径之后的参数
-std.sys.script()      → string        // 脚本路径；stdin/REPL 为空
-std.sys.executable()  → string        // 解释器可执行文件
-std.sys.exit([code])                  // 停止脚本并以 code（0–255）退出
-std.sys.is_main()     → bool          // 当前代码是否属于入口 main 包
-```
-
-解释器选项必须写在脚本路径之前；脚本路径之后的所有参数（包括以 `-` 开头的）
-都原样传给脚本。示例：
-
-```text
-skein tool.skein --bin build/skein --check "a b"
-```
-
-脚本内 `std.sys.args()` 返回 `["--bin", "build/skein", "--check", "a b"]`。
-`std.sys.exit(code)` 用于命令行工具：立即停止当前脚本（不再执行后续语句），
-刷新标准流后以 `code` 退出；省略 `code` 等价于 `0`。
-`std.sys.is_main()` 按定义代码的包判断：入口脚本、stdin/REPL 和被入口脚本调用的
-main 包函数返回 `true`；被 import 的包及其函数返回 `false`。
-
-旧名 `std.process.run` 已移除；请使用 `run_command`。
-
-`std.process.run_command` 的 `options` 支持：
-
-```text
-stdin   string / bytes，默认空
-cwd     工作目录
-env     dict，覆盖子进程环境
-```
-
-返回：
-
-```text
-{"status": int, "stdout": bytes, "stderr": bytes}
-```
-
-示例：
-
-```text
-import std;
-
-let r = std.process.run_command("printf hello");
-print(std.bytes.to_string(r["stdout"]));
-
-let r2 = std.process.run_command("cat", {"stdin": "abc"});
-std.bytes.to_string(r2["stdout"])
-```
-
-注意：当前实现通过 shell 重定向捕获输出，不提供超时和流式读写。
-
-## 目录、路径和压缩
-
-
-```text
-std.fs.listdir(path)              → list[string]
-std.fs.mkdir(path[, recursive])
-std.fs.remove(path)
-std.fs.rename(old, new)
-std.fs.stat(path)                 → dict
-std.fs.cwd()
-std.fs.chdir(path)
-
-std.fs.path_join(parts...)
-std.fs.path_basename(path)
-std.fs.path_dirname(path)
-std.fs.path_extname(path)
-std.fs.path_abs(path)
-std.fs.path_normalize(path)
-std.fs.temp_dir([prefix])         → string
-std.fs.remove_all(path)
-std.fs.copy(src, dst)
-std.fs.which(name)                → string
-std.fs.glob(pattern)              → list[string]
-```
-
-- `std.fs.temp_dir` 在系统临时目录下创建唯一目录；`prefix` 不能包含路径分隔符；
-- `std.fs.remove_all` 递归删除，路径不存在时视为成功；
-- `std.fs.copy` 支持文件或目录：目录目标不能已存在；文件目标已有内容时覆盖；
-  如果目标是目录，则复制到 `dst/src_name`；
-- `std.fs.which` 按当前线程的 `PATH` 查找可执行文件，Windows 会尝试 `PATHEXT`；
-  找不到返回空字符串；
-- `std.fs.glob` 只支持最后一段路径中的 `*` / `?`，返回排序后的绝对路径；
-  `std.fs.mkdir(path, true)` 可递归创建目录。
-
-`std.fs.cwd` / `std.fs.chdir` 是线程局部工作目录：相对路径的 `std.fs` 操作、`std.fs.open` / 文件读写、`std.process.spawn_command` / `std.process.run_command` / `std.process.command` 默认使用当前线程的工作目录；不会改变进程级 OS cwd。新线程在启动时继承创建线程的工作目录。
-
-std.compress.gzip(bytes)          → bytes
-std.compress.gunzip(bytes)        → bytes
-std.compress.zlib(bytes)          → bytes
-std.compress.unzlib(bytes)        → bytes
-std.compress.deflate(bytes)       → bytes
-std.compress.inflate(bytes)       → bytes
-```
-
-`std.fs.stat` 返回：
-
-```text
-{"type": "file" / "dir" / "other", "size": int, "mtime": int}
-```
-
-压缩函数需要构建时启用 zlib；未启用时调用会报告 `zlib support is disabled`。
-
-二进制文件读写：
-
-```text
-let h = std.fs.open("data.bin", "r+b");
-std.fs.seek(h, 8);
-std.fs.file_write_bytes(h, std.bytes.from_hex("00ff"));
-std.fs.seek(h, 0);
-std.bytes.hex(std.fs.file_read_bytes(h, 16))
-std.fs.close(h)
-```
-
-读取固定宽度整数：
-
-```text
-let h = std.fs.open("data.bin", "rb");
-let magic = std.bytes.to_int(std.fs.file_read_bytes(h, 4), 4, "big");
-let length = std.bytes.to_int(std.fs.file_read_bytes(h, 4), 4, "little");
-std.fs.close(h);
-```
-
-## 用 dict + 闭包封装文件对象
-
-
-当前语言没有方法绑定，但可以用 dict + 闭包实现类似接口：
-
-```text
-func open_file(path) {
-  let h = std.fs.open(path, "r");
-
-  func read(n) { return std.fs.read(h, n); }
-  func seek(n) { return std.fs.seek(h, n); }
-  func close() { return std.fs.close(h); }
-
-  return {"read": read, "seek": seek, "close": close};
-}
-
-let f = open_file("data.txt");
-f["read"](10)
-f["close"]()
-```
-
-底层文件资源使用通用的原生 userdata 生命周期管理；上层对象接口可以用语言本身扩展，不需要修改内置实现。
-
-文件函数可以访问进程有权限的任意路径，只应在可信脚本中使用。
-
-
-## 线程、Channel 与并发
-
-
-```text
-std.thread.Channel(capacity) -> channel
-std.thread.Channel.bounded(capacity) -> channel
-std.thread.Channel.new(capacity) -> channel
-std.thread.Channel.unbounded() -> channel
-std.thread.Message.from(payload[, handles]) -> message
-
-channel.send(message)
-channel.try_send(message) -> bool
-channel.recv([timeout_ms]) -> message | null
-channel.try_recv() -> {"ok": bool, "closed": bool, "value": message?}
-channel.close()
-
-channel.closed
-channel.capacity
-channel.length
-channel.waiters
-channel.send_waiters
-channel.recv_waiters
-channel.total_sends
-channel.total_recvs
-channel.send_timeouts
-channel.recv_timeouts
-channel.stats -> dict
-```
-
-- `capacity >= 1` 为有界队列；`capacity == 0` 为 rendezvous；`capacity == -1`
-  为无界队列；
-- `Channel.unbounded()` 返回无界 Channel，`capacity == -1`；
-  `Channel.bounded(n)` / `Channel.new(n)` 等价于 `Channel(n)`；
-  旧名 `unbounded_channel()` 已移除；
-- Channel 只接收 `std.thread.Message`；
-- `Message.from` 共享 payload（COW）；发送方后续写入会分离，不影响消息；
-- payload 支持标量、`error` / `result`、`list` / `dict`、`lru` / `deque` / `set`、`struct` / `enum`；`heap` 因比较器函数不能跨线程，暂不支持；LRU 现在是普通 struct，函数 / heap 等特殊值不能嵌套在 LRU 字段中传输；
-- `handles` 是字符串到线程 handle 的 dict，目前支持 `Channel`；
-- `send` 在队列满时阻塞；rendezvous（capacity 0）下阻塞到有接收者等待；
-  `try_send` 不阻塞，无空间/无接收者时返回 `false`；
-- `recv` 在队列空时阻塞；关闭且排空后返回 `null`；
-- `recv(timeout_ms)` 超时抛错；
-- `close()` 幂等，保留队列中未读消息，并唤醒所有 send/recv/select 等待者；
-- fiber 中的 Channel send/recv/select 通过事件循环 async wake 挂起/唤醒；
-  非 fiber 上下文使用 OS 线程等待；
-- 等待者按 FIFO 唤醒（OS 线程等待者优先于 fiber 等待者）；
-- `std.thread.select` 使用 round-robin 起点，避免固定顺序造成饥饿；
-- `waiters` / `send_waiters` / `recv_waiters` 返回当前等待者数量；
-- `total_sends` / `total_recvs` / `send_timeouts` / `recv_timeouts` 为累计统计；
-- `stats` 返回包含上述字段的 dict；
-
-示例：
-
-```skein
-import std;
-
-let ch = std.thread.Channel(2);
-let msg = std.thread.Message.from({"x": 1});
-ch.send(msg);
-
-let r = ch.try_recv();
-print(r["value"].payload["x"]);
-print(ch.stats["total_sends"]);
-
-ch.close();
-```
-
-无界与 rendezvous：
-
-```skein
-let a = std.thread.Channel.unbounded();
-let b = std.thread.Channel(0);   // send 等待 recv
-```
-
-### 线程池
-
-```text
-std.thread.pool(size, script[, options]) -> pool
-
-pool.submit(value[, timeout_ms]) -> future
-future.wait([timeout_ms]) -> {"ok": bool, "value"?: any, "error"?: error}
-future.try_wait() -> {"ok": bool, "closed": bool, "canceled"?: bool, "value"?: message}
-future.cancel() -> bool
-
-pool.close()
-pool.join()
-pool.stats() -> dict
-```
-
-`options`：
-
-```text
-entry         默认 "handle"
-queue         默认 1024；正整数或 "unbounded"
-restart_limit 默认 0；worker 异常退出后的重启次数
-worker_vm     默认 false；启用后 worker 使用 VM/JIT（已验证并发 stress/TSAN）
-```
-
-worker 脚本导出 `handle(payload)`：
-
-```skein
-# worker.skein
-func handle(payload) {
-    return {"n": payload["n"] * 2};
+package cc {
+  export let value = 42;
+  export const fixed = 7;
+
+  export func hello(name) {
+    return "hi " + name;
+  }
+
+  func private_helper() {
+    return 1;
+  }
 }
 ```
 
-使用：
+- `package name {}` 创建独立作用域；
+- `export let` / `export const` / `export func` 导出标识符；
+- 也可以使用 `export name = expr;` 简写；
+- `export` 目前支持 `let`、`const`、命名 `func`、`struct` 和 `trait`；
+- 没有 `export` 的定义是包私有的；
+- 入口脚本的包固定是 `main`；`package main {}` 可以位于任意目录，也可以省略；
+- 入口脚本声明其他包名会报错；普通包文件不能直接作为入口运行；
+- 被 `import` 的包名必须与所在文件夹名相同，且不能是 `main`；可以多层嵌套；
+- `main` 不能被 `import`；
+- stdin / REPL 没有文件包身份，`package name {}` 仍可创建临时命名空间。
+
+#### 目录结构
+
+每个可导入包必须是真实存在的 `.skein` 文件：
+
+```text
+aa/
+  bb.skein            # package bb
+  bb/
+    cc.skein          # package cc
+    cc/
+      dd.skein        # package dd
+```
+
+```text
+import aa.bb;
+print(bb.value);
+```
+
+- 包块名只写叶子名：`aa/bb/cc.skein` 写 `package cc`；
+- 可导入包必须有对应文件；`<name>/<name>.skein`、`index.skein`、单文件目录都不再支持；
+- 目录只用于组织路径，不能作为包或隐式命名空间；
+- 子包默认随父包暴露：`import aa.bb` 后可用 `bb.cc`，前提是
+  `aa/bb/cc.skein` 存在；
+- `bb.cc.dd` 需要 `aa/bb/cc.skein` 和 `aa/bb/cc/dd.skein` 都存在；
+- 直接 `import aa.bb.cc.dd` 按文件路径解析，不要求中间包文件存在。
+
+#### import 规则
+
+```text
+import aa.bb.cc;       // 绑定 cc
+import aa.bb;          // 绑定 bb；子包通过 bb.cc 访问
+import aa;             // 绑定 aa；子包通过 aa.bb 访问
+import aa.bb.cc as c;  // 绑定到别名 c
+import std as s;       // 标准库也可使用别名
+
+import .sibling;       // 当前文件目录
+import ..common;       // 上一级目录
+import @top.pkg;       // 项目根目录
+```
+
+- `import aa.bb` 的普通包基准是主脚本目录；
+- `import @aa.bb` 只从项目根解析；
+- 项目根优先通过从主脚本目录向上查找 `skein.mod` 确定，其次兼容 `.skeinroot`；都没有时使用主脚本目录；
+- `project_root` 惰性解析：单文件脚本、只 import `std`、只 import module 时不需要；
+- `-I` / `SKEIN_PACKAGE_PATH` 只作为 module 搜索路径，不解析普通文件包；
+- 普通文件包必须在 `project_root` 内；外部复用请组织成 module；
+- module 内相对 import 不能越过 module root；
+- 裸 `std` 是内置标准库；`.std`、`..std`、`@std` 按文件系统包路径解析；
+- `main` 不能被导入；`import main;` 和 `import main.*;` 会报错；
+- 普通包文件不能声明 `package main {}`；
+- 别名必须是普通标识符，`as` 是保留字；
+- 同一个包只加载一次，之后复用缓存；
+- 循环导入会报错，不会递归挂起；
+- 当前不提供通配导入。
+
+#### 第三方包
+
+第三方 module 使用带引号的导入路径，和本地点号路径明确区分：
+
+```text
+import "github.com/acme/util/json";              // 默认绑定 json
+import "github.com/acme/util/json" as jsonutil;  // 显式别名
+```
+
+先初始化工程，再用 `skein get` 拉取并登记版本：
+
+```text
+skein mod init github.com/acme/myapp
+skein get github.com/acme/util@v1.2.3
+```
+
+`get` 通过 git 克隆仓库 tag，遍历所有依赖的 `skein.mod` 并用 MVS 选出每个 module path 的最高 semver 版本，然后写回主项目 `skein.mod`（非直接依赖标记为 `// indirect`）与 `skein.sum` 的 `h1:` 校验和；不写版本时选择最高的 semver tag。不兼容的 major 版本使用 `/vN` 路径并存，例如 `example.com/c` 与 `example.com/c/v2` 是两个独立 module。缓存默认在 `~/.skein/mod`（Windows 为 `%LOCALAPPDATA%\skein\mod`），可用 `SKEINMODCACHE` 覆盖。运行时按最长 `require` 前缀解析路径并校验缓存；缺少依赖或校验失败会直接报错，不会隐式下载。`lint`、`fmt`、`lsp` 也不下载或执行外部包。
+
+`skein.sum` 是校验和的唯一信任根：`skein get` **不会**在校验失败时静默重新下载并改写它。缓存内容与 `skein.sum` 不一致、或已有校验和但缓存未下载而新下载内容不匹配，都会硬失败；只有显式 `skein get --force <module>@<version>` 才会在已有校验和时刷新缓存并重写对应校验和。缓存存在但当前项目没有校验和时不会直接信任它，而是重新下载并写入新的 `h1:`。
+
+网络不可达时可用 `SKEIN_MODULE_URL` 把模块改写到镜像。它既支持单个 URL，也支持 `path=url,path=url` 映射；两种形式都支持 `{path}` 和 `{version}` 模板，例如：
+
+```text
+SKEIN_MODULE_URL=https://mirror.example/skein/{path}
+SKEIN_MODULE_URL=github.com/acme/util=https://mirror.example/acme/util,example.test/x=https://mirror.example/x
+```
+
+`{version}` 在 `@latest` 的 tag 列举阶段不可用，会直接报错并要求显式版本。模板只解决“从哪里拉取”，完整性仍由 `skein.sum` 校验。
+
+并发操作通过多层文件锁协调：`skein get` 持有项目级独占锁 `<project>/.skein/lock`，`skein build` 持有项目共享锁；两者同时持有缓存共享锁，并按 `module@version` 在缓存根 `.locks/` 下加模块锁。运行中的脚本首次加载外部 module 时也会懒获取缓存共享锁，因此 `skein mod clean` 会等待正在运行的 `get` / `build` 和脚本退出，不会在读取、下载或构建过程中删除缓存。锁随进程退出自动释放；需要等待时会在 stderr 提示。`.skein/` 是本地锁状态目录，不应提交到版本库。
+
+`skein.mod` 和 `skein.sum` 通过临时文件替换写入。`skein get` 成功时批量写入新的 `skein.sum` 条目，然后更新 `skein.mod`；如果后续模块失败，`skein.mod` 保持原样，`skein.sum` 最多保留已经完成模块的有效校验和，不会出现半写文件或未校验缓存。
+
+`skein mod clean` 删除整个全局缓存根（`SKEINMODCACHE` 或默认目录），不会影响项目里的 `skein.mod` 和 `skein.sum`。`--dry-run` 只打印将要清理的目录；如果缓存根被显式设成 home 目录、当前目录或文件系统根目录，需要额外传 `--force` 才允许清理。
+
+常用维护命令：
+
+```text
+skein mod verify                 # 校验 skein.mod 中每个 require 的缓存与 skein.sum
+skein mod download               # 按 skein.mod 预取缓存，不修改 skein.mod
+skein get <module>@<version> --offline
+skein mod tidy [--offline]       # 从直接依赖重算传递依赖，移除不再使用的 // indirect
+skein mod prune [--all]           # 默认只列出当前项目未引用的缓存版本
+```
+
+`--offline` 完全禁止网络：`@latest` 必须改成显式版本；缓存缺失，或缓存存在但当前项目没有校验和时，会直接失败并要求先在线执行一次 `skein get`。`mod download` 会为首次下载的模块补写 `skein.sum`，但不会改写 `skein.mod`。`mod prune` 默认只预览；全局缓存可能被其他项目共享，只有显式 `--all` 才会删除未引用版本及对应 native 构建产物。锁等待默认无限；设置 `SKEIN_LOCK_TIMEOUT_MS=<毫秒>` 可让等待超时并报错。
+
+#### 源码形式发布的原生 module（MVP）
+
+module 可以在 `module.skein` 里声明可选的 `native { ... }` 块，随源码一起
+发布 C/C++ 实现，由宿主显式编译成动态库：
+
+```text
+module myutil {
+  export package api;
+  native {
+    sources "native/add.cpp" "native/extra.cpp";
+    includes "native/include";
+    defines "MYUTIL_TRACE=1";
+    libs "m";
+    output "myutil";
+  }
+}
+```
+
+- `skein get` 仍然只下载、校验并登记源码；**不会**在 import 时编译；
+- `skein build [<module/path>[@version]]` 在已下载的缓存上编译，不传参数时
+  编译 `skein.mod` 中全部依赖；编译器默认取 `SKEIN_CXX`、`CXX`，否则 `c++`；
+- 产物放在源码缓存旁边的 `.build/<平台>-<架构>-<编译器>/` 目录，**不进入**
+  `skein.sum` 的源码 dirhash，因此构建不会破坏校验和；
+- `skein build` 会在产物旁写入 `artifact.meta`，记录源码 hash、产物 hash、编译器、
+  编译器版本、构建 flags 和规范化命令 hash；`std.module.native` 只返回通过源码
+  hash、产物 hash（以及可用时的编译器版本）校验的产物，篡改或源码变更后必须重新
+  `skein build`；
+- 构建默认启用可复现选项：GCC/Clang 使用 `-ffile-prefix-map`，MinGW 使用
+  `--no-insert-timestamp`，MSVC 使用 `/Brepro`，并设置 `SOURCE_DATE_EPOCH=0`；
+  相同输入连续构建应产生相同产物字节；
+- Skein 封装包通过 `std.module.dir(path)` / `std.module.native(path)` 取得源码
+  目录和构建产物路径，再用 `std.plugin.load(...)` 加载；`std.ffi.open(...)`
+  同理；
+- 主脚本里的原生调用保持原行为；**第三方 module 内**的 `std.plugin.load` /
+  `std.ffi.open` 默认禁止，必须显式设置 `SKEIN_ALLOW_NATIVE=1`
+  （设为 `0` / `false` / `off` / `no` 则全局禁止）；
+- `skein_module.h` 是纯 C ABI 头，module 应自带一份，不需要链接 Skein 符号；
+  ABI v2 的异步导出规则见 `docs/stdlib.md`。
+
+#### include 声明包含
+
+`include` 是给项目外文件留的声明级 escape hatch，行为类似 C 的声明包含：
+
+```text
+include "shared/helpers.skein";
+```
+
+- 只允许在声明层（顶层或 `package {}` 内），函数体内报错；
+- 只导入声明类语句：`import`、`include`、`func`、`struct`、`enum`、
+  `trait`、`impl`、`let` / `const`；
+- 被包含文件可以 `import std`；相对 import 以被包含文件目录为基准；
+- 被包含文件不能声明 `package` / `module`，不能包含顶层可执行代码；
+- 默认 include-once：按 `(package, module, 规范化路径)` 去重；
+- 自动检测循环并限制嵌套深度；
+- 相对路径基于当前包含文件目录；允许 `..` 和绝对路径；
+  不受 `project_root` / `-I` / `SKEIN_PACKAGE_PATH` 限制；
+- 被包含的声明继承包含者的 package/module，`source` 指向被包含文件；
+- 同一个头文件被 main 和包分别 include 会产生两份声明，身份分别属于各自包。
+
+`include` 不做命名空间隔离，不建议作为长期库接口；外部库仍应使用 module。
+
+包内也可以导入其他包，既可以放在包块内，也可以放在文件顶层：
+
+```text
+import aa.util;
+
+package bb {
+  export func get() {
+    return util.value;
+  }
+}
+```
+
+#### Module
+
+Module 是唯一的模块机制；源码层不存在 Module v1 或兼容层。顶层目录包含 `module.skein` 时，该目录成为 module。module 内仍然只使用文件包：
+
+```text
+math/                 # module: math
+  module.skein        # 公共导出清单
+  add.skein           # package: add      → math.add
+  vector.skein        # package: vector   → math.vector
+  internal/
+    helpers.skein     # package: helpers  → math.internal.helpers
+```
+
+不再支持 `math/add/add.skein` 这种目录包布局。
 
 ```skein
-import std;
+// math/module.skein
+module math {
+  export add.add;
+  export vector.sum as sum;
+  export internal.helpers.normalize as normalize;
+  export package internal.helpers as helpers;
+}
+```
 
-let pool = std.thread.pool(2, "worker.skein");
-let f1 = pool.submit({"n": 21});
-let f2 = pool.submit({"n": 5});
-let r1 = f1.wait();
-let r2 = f2.wait();
-print(r1["value"]["n"]);
-print(r2["value"]["n"]);
-pool.close();
-pool.join();
+外部：
+
+```skein
+import math;
+
+math.add(1, 2);
+math.sum([1, 2]);
+math.normalize(x);
+math.helpers.normalize(x);
+
+import math.helpers as helpers;
 ```
 
 规则：
 
-- 每个 worker 是独立 runtime，加载一次脚本并循环处理 job；
-- `handle` 抛错时返回 `{"ok": false, "error": ...}`，worker 继续；
-- worker 返回值必须是 data-only；generator / userdata / 函数值等会返回错误；
-- worker 发生未捕获的原生异常时，当前 job 的 future 返回 `error("thread.worker_crashed", ...)`；
-- `restart_limit > 0` 时异常退出的 worker 会被重启，最多重启该次数；
-- 所有 worker 死亡后，新的 `submit` 报 `thread.pool_failed`；
-- `pool.submit` 共享经过校验的 payload（容器 COW，string/bytes 共享底层 buffer），写入时分离；`submit(value, timeout_ms)` 超时抛 `thread.timeout`；
-- `future.cancel()` 关闭结果通道；之后的 `wait()` 抛 `thread.cancelled`，`try_wait()` 返回 `canceled: true`；尚未开始的排队 job 会被 worker 跳过，正在执行的 job 无法中断；
-- `pool.close()` 停止接收新 job，worker 排空后退出；
-- `pool.join()` 等待 worker 线程结束；
-- `stats()` 返回 `size/workers/ready/alive/dead/restarts/restart_limit/submitted/completed/failed/active/queued`；
-- 支持在被导入模块的顶层创建 pool/spawn；解析器在求值顶层语句时会释放解析锁，worker 可以在该窗口解析入口脚本。
+- module 名必须与顶层目录名一致；
+- package 名必须与文件名一致（只写叶子名）；
+- 无 `export` 的符号是 package 私有；
+- package 的 `export` 只提升到 module 内部；
+- 只有 `module.skein` 中声明的符号/package 才能从外部访问；
+- `export package internal.helpers as helpers;` 把 `math/internal/helpers.skein`
+  暴露为 `math.helpers`；
+- 外部不能通过物理路径 `import math.internal.helpers`；
+- module 内部使用普通相对导入，例如 `import .internal.helpers`；
+- module 内部写绝对 `import math` / `import math.helpers` 时也解析为公共 API；
+  访问未导出的内部 package 请使用相对导入；
+- module 内相对导入不能越过 module root；
+- module 根目录不能包含 `<module>.skein` 或 `index.skein`；
+- 禁止嵌套 `module.skein`；
+- 直接运行 module 内的文件会按独立 `main` 入口处理，不继承 module 身份；
+- 清单中的符号必须已在目标 package 中 `export`，否则启动报错；
+- 重复别名、缺失 package、module 名不匹配都会报错；
+- 同一个 module 只加载一次并复用缓存；
+- `python3 tools/check_modules.py <project-root>` 可以离线校验 manifest 结构，
+  `--list` 列出公共导出；它不执行 package 代码。
 
-### 单线程
-
-```text
-std.thread.spawn_script(script, message[, options]) -> thread
-std.thread.spawn_source(source, message[, options]) -> thread
-std.thread.spawn_function(function, message) -> thread
-std.entry.encode(function) -> bytes
-std.thread.spawn_entry(bytes, message) -> thread
-
-旧名 `std.thread.spawn` 已移除；请使用 `spawn_script`。
-
-thread.join([timeout_ms]) -> {"ok": bool, "value"?: any, "error"?: error}
-thread.detach()
-thread.is_alive() -> bool
-thread.cancel() -> bool
-thread.id
-```
-
-`options`：
+module 内类型和包的元数据：
 
 ```text
-entry     默认 "main"
+type_package(x)      // "math.add" / "math.internal.helpers"
+type_module_name(x)  // "math"
+type_source(x)       // 源文件路径
 ```
 
-`spawn_source` 直接接收脚本文本，内部写入当前线程工作目录下的临时文件，等待子线程解析完成后删除；相对导入按当前线程 cwd 解析，仍会在子线程重新解析源码。需要复用 Proto/bytecode 时使用 `func` 或 `std.thread.spawn_function`。
+入口脚本和普通文件包的 `type_module_name(x)` 为空字符串。
 
-Proto 入口：
 
-```skein
-func worker(ctx) {
-    return {"v": ctx.payload["n"] + 1};
-}
+#### 作用域与导出值
 
-let t = std.thread.spawn_function(worker, std.thread.Message.from({"n": 4}));
+- 导入包在独立作用域中执行，不能读取主包的全局变量；
+- 主文件中的 `package` 块也是独立作用域，需要的 `import` 应放在块内；
+- 包内函数保留自己的闭包环境；
+- `export let` / `export const` 的值在包加载时复制到命名空间；之后导出变量本身再变化，不会自动同步到已导入的命名空间；
+- 导出函数仍然可以访问并修改包内部状态。
+
+
+### 开发期自动重启
+
+`--watch` 用子进程方式做开发期热重启，不需要修改脚本：
+
+```bash
+./build/skein --watch server.skein
+./build/skein --watch --watch-dir ../shared server.skein
 ```
 
-- `Message.from` 的 payload 允许 `heap`，包括容器内的 heap；heap comparator 必须是不捕获闭包的函数；
-- heap 是持久化数据结构，跨线程/进程入口共享只读结构；payload 仍不允许 standalone function 值；
-- `std.thread.pool` 的 submit payload 和线程返回值同样支持 heap。
+- 默认递归监听脚本所在目录下的 `.skein` 文件；
+- 每 200ms 轮询一次 `mtime` / `size`，不依赖平台的 inotify / FSEvents；
+- `--watch-dir DIR` / `--watch-dir=DIR` 可以增加监听目录；
+- 已有的 `-I` / `--package-path` 目录也会加入监听；
+- 文件变化后先停止旧进程，再从干净运行时启动新进程；
+- 编译或运行失败时新进程退出，watcher 保留并等待下一次文件变化；
+- `Ctrl-C` 会停止子进程并退出 watcher，`SIGTERM` 同样会先停止子进程再退出；
+- `.git`、`.cache`、`node_modules`、`build*` 等目录会被跳过。
 
-- 任何满足入口签名的函数都可以作为线程入口，不需要额外声明标记；
-- 入口签名要求固定的单个参数；入口内可以使用嵌套函数和 `defer`；捕获的 upvalue 在 spawn 时按值做 data-only 快照；
-- 函数体在父线程编译成不可变 Proto，子线程克隆后通过 VM 执行，不再解析源码；
-- 函数体可使用参数、语言 builtin、自动注入的基础 `std`、捕获的 upvalue 和父线程全局数据值；父线程函数值会按 Proto 传递，并递归带上其捕获值与依赖的全局数据/函数；
-- 嵌套函数和 `defer` 以 Proto/声明元数据传递，子线程在自身栈帧上重新捕获局部变量；用户 `import` 会在父线程加载并把命名空间快照传入子线程，子线程通过路径种子复用命名空间，不再要求模块源码存在；模块导出需能按 data/function 规则传递；
-- `std.thread.spawn_function` 可直接传入满足条件的普通函数，作为低层 Proto 入口；
-- `std.entry.encode(fn)` 把入口及依赖图（Proto、upvalue、全局、模块命名空间）序列化为 `bytes`；`std.thread.spawn_entry(bytes, Message)` 可在另一个进程反序列化并启动线程：
-  ```skein
-  std.fs.write_bytes("entry.bin", std.entry.encode(worker));
-  # 另一个进程：
-  let t = std.thread.spawn_entry(std.fs.read_bytes("entry.bin"), msg);
-  ```
-  当前可序列化的 Proto 支持入口内的局部 `struct` / `enum` / `trait` / `impl` 声明、嵌套函数和 `defer`；结构/枚举字段默认值和 impl 方法会随声明元数据传递，局部方法参数默认值当前仍受限。data 值支持 null/bool/int/float/char/byte/string/bytes/error/result/list/dict/set/deque、struct/enum（字段/variant 元数据随 payload 注册；字段默认值，以及带默认/模式/可变参数、数据捕获和全局数据依赖的方法也会传输；方法若捕获函数/heap/命名空间，当前会给出明确诊断并拒绝）以及 builtin 函数常量。`list` / `dict` / `set` / `deque` 现在会递归携带嵌套值，因此可以跨线程/进程传递函数表、heap 容器和多层混合容器；LRU 是普通 struct，遵循 struct 的传输规则，不能嵌套函数 / heap 等特殊值。
+`--watch` 是进程级重启：模块状态、全局变量和内存数据都会重置。需要保留的状态请放到
+外部存储或由父进程持有。它不改变语言运行时，也不是进程内热更新。
 
-线程入口接收一个 Message：
 
-```skein
-# thread_worker.skein
-func main(ctx) {
-    let signal = ctx.handles["signal"];
-    signal.send(std.thread.Message.from({"x": ctx.payload["x"]}));
-    return {"x": ctx.payload["x"]};
-}
+### 生产部署与优雅关闭
+
+生产环境使用“平台滚动更新 + 运行时 SIGTERM drain”，不需要 `--watch` 或
+`reuse_port` 监听句柄交接：
+
+```bash
+SKEIN_DRAIN_TIMEOUT_MS=15000 ./build/skein server.skein
 ```
 
-使用：
+- 收到 `SIGTERM` 后停止 accept、关闭监听 socket，等待在途请求完成；
+- 超过 `SKEIN_DRAIN_TIMEOUT_MS`（默认 20000，`0` 表示不设截止时间）后强制
+  关闭剩余连接；
+- `serve_processes` 会把 `SIGTERM` 转发给 worker 并等待其退出；
+- drain 完成时退出码为 `0`；`Ctrl-C`（`SIGINT`）仍然是中断语义；
+- Windows 没有可捕获的 `SIGTERM`，drain 由控制台关闭/关机/注销事件触发
+  （关闭窗口最多等待 5 秒）；`taskkill` 不会触发 drain；
+- Windows 不支持 `reuse_port`，`serve_processes` 自动使用 `dispatch`，
+  关闭时通过关闭 worker 的 stdin 让其在完成当前请求后退出；
+- Kubernetes 中让 `terminationGracePeriodSeconds` 大于 drain 截止时间，
+  并用 `preStop` 留出摘流时间；readiness 探针可以直接用 `std.http` 实现。
 
-```skein
-import std;
-
-let ch = std.thread.Channel(1);
-let msg = std.thread.Message.from(
-    {"x": 5},
-    {"signal": ch}
-);
-
-let t = std.thread.spawn_script("thread_worker.skein", msg);
-let signal = ch.recv();
-let result = t.join();
-
-print(signal.payload["x"]);
-print(result["ok"]);
-print(result["value"]["x"]);
-```
-
-规则：
-
-- `spawn_script` 等待脚本加载和入口解析完成后返回；
-- 子线程拥有自己的 runtime、eval context、AST/function 缓存；
-- 入口函数默认 `main`，接收一个 Message 参数；
-- `join()` 返回 `{ok, value}` 或 `{ok:false, error}`；
-- `detach()` 后线程自行运行和退出；
-- `cancel()` 只设置协作取消标记，不能抢占执行中的线程；
-- 子线程结果必须是 data-only 值；返回值经校验后按 COW 共享，调用方写入时分离。
-
-### 双向 duplex
-
-```text
-std.thread.duplex(capacity) -> link
-link.child -> endpoint
-
-link.send(message)
-link.try_send(message) -> bool
-link.recv([timeout_ms]) -> message | null
-link.try_recv() -> {"ok": bool, "closed": bool, "value": message?}
-link.close_send()
-link.close_recv()
-link.close()
-link.closed
-link.capacity
-link.length
-
-std.thread.spawn_script_with_channel(script, message, capacity[, options]) -> thread
-std.thread.spawn_script_with_duplex(script, message, capacity[, options]) -> thread
-thread.channel
-thread.link
-```
-
-- `duplex` 内部有 `parent_to_child` 和 `child_to_parent` 两条 lane；
-- `link.send` 发往 child，`link.recv` 接收 child 发来的消息；
-- `link.child` 是反方向端点：`child.send` 发往 parent，`child.recv` 接收 parent 的消息；
-- `close_send` 只关闭 out 方向；对端 `recv` 排空后得到 `null`；
-- `close_recv` 只关闭 in 方向；`closed` 反映 in 方向是否关闭；
-- `select` 接受 Channel 或 duplex endpoint，endpoint 使用其 in 方向；`broadcast` 仅接受 Channel；
-- `spawn_script_with_channel` 自动创建 Channel 并注入 `ctx.handles["channel"]`，父端通过 `thread.channel` 访问；
-- `spawn_script_with_duplex` 自动创建 duplex，子端注入 `ctx.handles["link"]`，父端通过 `thread.link` 访问。
-- `std.thread.collect()` 主动回收不可达的 Message/Channel/duplex 环；仅在没有活动 worker 线程时执行。
-- `std.thread.debug_counts()` 返回 `messages/channels/duplexes/endpoints/collected` 诊断计数。
-
-### select / broadcast
-
-```text
-std.thread.select(channels[, timeout_ms]) -> dict
-std.thread.try_broadcast(channels, message) -> dict
-std.thread.broadcast(channels, message) -> null
-```
-
-`select` 返回：
-
-```text
-{"index": 0, "value": message}
-{"index": 1, "closed": true}
-{"index": -1, "timeout": true}
-```
-
-示例：
-
-```skein
-let a = std.thread.Channel(1);
-let b = std.thread.Channel(1);
-b.send(std.thread.Message.from({"v": "b"}));
-
-let r = std.thread.select([a, b], 1000);
-print(r["index"]);
-print(r["value"].payload["v"]);
-```
-
-规则：
-
-- 当前只支持 Channel；
-- 多个 channel 同时就绪时使用轮转起点，避免总是选 0 号；
-- 有数据优先，排空后才返回 closed；
-- `timeout_ms = 0` 表示不超时；
-- `try_broadcast` 返回：
-  ```text
-  {"sent": [0, 1], "full": [], "closed": []}
-  ```
-- `broadcast` 逐个阻塞发送；任一失败时抛错，已发送的不回滚。
-
-### 能力查询
-
-```text
-std.thread.capabilities() -> dict
-```
-
-返回全局能力：
-
-```text
-{
-  "schema": 1,
-  "platform": "linux",
-  "strategy": "auto",
-  "strategies": ["dispatch", "reuse_port"],
-  "reuse_port": true,
-  "dispatch": true,
-  "http1": true,
-  "http2": true,
-  "tls": true,
-  "keep_alive": true,
-  "stream_request_body": true,
-  "stream_response": true,
-  "websocket": false,
-  "sse": false,
-  "raw_socket": false
-}
-```
-
-`ThreadServer.capabilities` 返回实际策略的能力，并包含同样的
-`schema` / `platform` / `strategy` / `strategies` 字段。
-
-HTTP 侧也可以按策略查询：
-
-```skein
-let caps = std.http.thread_capabilities({"strategy": "auto"});
-let dispatch = std.http.thread_capabilities({"strategy": "dispatch"});
-```
-
-- `"auto"`：Linux 解析为 `reuse_port`，Windows 解析为 `dispatch`；
-- `"reuse_port"`：不支持的平台会报错；
-- 返回字段与 `std.thread.capabilities()` 一致。
-
-`serve_threads` 的 `require` / `on_unsupported`：
-
-```skein
-let ts = std.http.serve_threads(
-  s, 4, "worker.skein",
-  {"require": ["http2"],
-   "on_unsupported": "501"});
-```
-
-- `"error"`：缺失能力时启动失败；
-- `"warn"`：输出警告并继续；
-- `"501"`：启动成功，但请求返回 501。
-
-## 错误信息
-
-错误输出统一包含位置、类别和源码片段：
-
-```text
-3:1: runtime error: division by zero
-  1/0;
-  ^
-```
-
-- 行号和列号从 `1` 开始；
-- 列号按终端显示宽度计算，中文、日文、韩文等宽字符占两列；
-- 类别分为 `lexical error`、`syntax error`、`runtime error`；
-- 运行时错误指向实际出错的 AST 节点，而不是语句结束位置；
-- 源码行下的 `^` 指向出错列；
-- 源码必须是合法 UTF-8，非法 UTF-8 字节会报 `invalid UTF-8 byte 0x..`；
-- 词法错误会显示字符和十六进制字节，例如 `unexpected character '`' (0x60)`；非法 Unicode 字符使用 `U+....` 表示；
-- 语法错误会列出出错 token 和部分期望 token：
-
-```text
-1:9: syntax error: unexpected ';', expecting float, integer, identifier, ...
-  let x = ;
-          ^
-```
-
-函数调用中的运行时错误会附带调用栈：
-
-```text
-2:10: runtime error: division by zero
-    return 10 / 0;
-           ^
-  in g() called from line 5
-  in f() called from line 7
-```
-
-调用栈最多显示最近的 8 层。
-
-### 错误恢复
-
-- 运行时错误中止当前语句/函数，不回滚已经发生的副作用；
-- 显式 `fail`、运行时错误和 `result.err` 可以被 `on error` 捕获；未捕获的 `fail` 在脚本顶层报错并停止；
-- `on error` 对 `result.ok(v)` 解包为 `v`；
-- 除零、越界、网络和 FFI 错误会转换成 `error`，并可由 `on error` 或 `std.result.capture` 捕获；
-- 语法错误、内部不变量错误和控制流误用不会转换成 `result`；
-- 函数出错时不返回部分结果；
-- `let` 初始化失败不会创建绑定；普通赋值失败会保留旧值；
-- 给 `const` 绑定重新赋值会报 `cannot assign to constant`，但修改其容器内容仍然允许；
-- 脚本模式默认在第一条错误后停止；
-- `-k` / `--keep-going` 让脚本继续执行下一条顶层语句，但最终退出码仍为 `1`；
-- REPL 在错误后回到提示符，正常 EOF 退出码为 `0`；
-- 语法错误和词法错误按行恢复；
-- 同一行最多报告一条词法错误，并抑制由此产生的重复语法错误；
-- 包加载失败是原子失败：`import` 不会绑定部分命名空间；
-- `input()` 的 EOF 返回 `null`，不是错误；
-- `std.process.command()` 的退出状态不是解释器错误，需要状态时使用 `std.process.command_status()`。
-
-### 退出码
-
-| 情况 | 退出码 |
-|---|---:|
-| 正常结束 | `0` |
-| REPL 正常 EOF | `0` |
-| 脚本语言错误（词法/语法/运行时/包） | `1` |
-| 命令行参数错误 | `2` |
-| 脚本文件无法打开 | `2` |
-| 源文件编码声明冲突或转码失败 | `2` |
-| 脚本被 Ctrl-C 中断 | `130` |
-
-外部命令的退出状态通过 `std.process.command_status()` / `std.process.run_command()` 返回，不会直接成为解释器退出码。
+完整行为、`ProcessServer` / `ThreadServer` 的超时规则和 Kubernetes 示例见
+`docs/stdlib.md` 的“优雅关闭（SIGTERM drain）”。

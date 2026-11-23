@@ -119,7 +119,7 @@ Helpers:
 | `match_types` (sorting) | Skein (partial) | 13 Skein cases in `match_types_sorting.skein`; sort error diagnostics stay in Python. |
 | `match_types` (char/byte) | Skein (partial) | 22 Skein cases in `match_types_char_byte.skein`; literal/conversion diagnostics stay in Python. |
 | `match_types` (enum/struct decode) | Skein (partial) | 14 Skein cases in `match_types_decode.skein`; decode diagnostics and temp-package tests stay in Python. |
-| `task_methods` | Skein (partial) | 20 Skein cases in `task_methods_basic.skein` and `task_methods_launch.skein`; GC/error/temp-package cases stay in Python. |
+| `task_methods` | Skein (partial) | 22 Skein cases in `task_methods_basic.skein` and `task_methods_launch.skein`; GC/error/temp-package cases stay in Python. |
 | `runtime` (strings) | Skein (partial) | 23 Skein cases in `runtime_strings.skein`; string error/arity diagnostics stay in Python. |
 | `runtime` (range) | Skein (partial) | 6 Skein cases in `runtime_range.skein`; range error diagnostics stay in Python. |
 | `runtime` (list/dict copy-on-write) | Skein (partial) | 31 Skein cases in `runtime_collections.skein`; access/assignment diagnostics stay in Python. |
@@ -127,7 +127,7 @@ Helpers:
 | `runtime` (loop/control flow) | Skein (partial) | 20 Skein cases in `runtime_control.skein`; loop/range/import diagnostics stay in Python. |
 | `runtime` (const/value semantics) | Skein (partial) | 8 Skein cases in `runtime_misc.skein`; const/package/error cases stay in Python. |
 
-Current coverage: 600 Skein cases across the files above.
+Current coverage: 602 Skein cases across the files above.
 
 `diagnostics`, `typecheck`, `lint`, `fmt`, `lsp`, `build`, `get`, `net`,
 `io_scripts`, `ffi_real`, stress/differential tests, and all host/REPL checks

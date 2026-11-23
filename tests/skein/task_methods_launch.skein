@@ -124,4 +124,18 @@ ts_test("launch detach removes structured wait", func() {
   ts_eq(task_log, ["parent", "child"]);
 });
 
+ts_test("std.task.detach free function", func() {
+  let t = launch task_id(7);
+  let d = std.task.detach(t);
+  ts_true(d.detached());
+  ts_eq(d.wait(), 7);
+});
+
+ts_test("task pipe wait and detach", func() {
+  ts_eq((launch task_id(9) |> std.task.wait), 9);
+  let d = launch task_id(3) |> std.task.detach;
+  ts_true(d.detached());
+  ts_eq(d.wait(), 3);
+});
+
 ts_finish();

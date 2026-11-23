@@ -179,7 +179,7 @@ let desc = match (event) {
 
 - `|>` 把左侧值插入右侧调用的第一个参数；
 - 调用参数中的 `$` / `$1`–`$9` 是占位符，`add($, 2)` 生成新函数，`add($1, $1)` 复用同一参数；
-- `match` 是表达式，支持字面量、绑定、dict / list / struct 模式、or-pattern、整数范围和守卫；
+- `match` 是表达式，支持字面量、绑定、dict / list / tuple / struct 模式、or-pattern、整数范围和守卫；
 - 支持 Python 风格切片、`for ... in`、标签跳转和 `switch`。
 
 ### 组织代码：struct、trait 与枚举

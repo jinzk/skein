@@ -368,7 +368,7 @@ struct Handler {
 - tuple/pair 可以作为 `dict` key 或 `set` 元素，前提是所有元素递归地属于合法 key 类型（`int/float/bool/string/char/byte/bytes/null`、嵌套 tuple/pair、可哈希 struct/enum）；含可变 list/dict、NaN 等元素的 tuple 不能作为 key；
 - struct 也可以作为 `dict` key 或 `set` 元素：所有字段递归地属于合法 key 类型时可以自动哈希；否则可以实现 `std.dict_key.DictKey` 并提供纯函数 `dict_hash(self) -> int` 来自定义哈希；如果还需要自定义 key 相等，再实现 `std.dict_key.KeyEq` 的 `key_eq(self, other) -> bool`，它只影响 dict/set 的 key 语义，不改变普通 `==`；含可变 list/dict、NaN 等字段且没有自定义 hash 的 struct 不能作为 key；
 - key 的完整规则、错误和 `std.dict.index_by` 用法见 [key-semantics.md](key-semantics.md)；
-- `match (a, b)` 统一按 tuple/pair subject 处理，模式 `[x, y]` 按位置解构；传单个 tuple 参数使用 `f((a, b))`；
+- `match (a, b)` 的 subject 是 tuple/pair；tuple 模式 `(x, y)` 只匹配 pair/tuple，序列模式 `[x, y]` 匹配任意二元素序列；传单个 tuple 参数使用 `f((a, b))`；
 - `std.list.append` / `std.dict.keys` / `std.set.from_list` 等容器 builtin 作为一等值时保留类型变量模板：`let f = std.list.append; f([1], 2)` 得到 `list[int]`，`f([1], "a")` 会报错；该支持仅限已知容器 builtin，不扩展到用户自定义泛型函数；
 - `is` 和模式类型不接受函数类型签名。
 
@@ -613,16 +613,29 @@ let next = match (state) {
 };
 ```
 
+tuple/pair subject 可以用 tuple 模式严格按位置解构：
+
+```skein
+let point = (3, 4);
+
+let sum = match point {
+  case (x, y) => x + y;
+  default => 0;
+};
+```
+
 - `match` 是表达式，返回第一个匹配 arm 的值；
 - arm 体是单条语句或代码块，块的值是最后一条语句的值；
-- 支持字面量、绑定、`_`、dict（开放匹配 + `...rest`）、list（定长 + `...rest`）、struct（按字段）；
+- 支持字面量、绑定、`_`、dict（开放匹配 + `...rest`）、list（定长 + `...rest`）、tuple（固定长度，只匹配 pair/tuple，禁止 `...rest`）、struct（按字段）；
 - 支持 or-pattern：`case 1 | 2 | 3`、`case E.A | E.B`；
 - 支持整数范围模式：`case 1..9`（包含两端）；
 - `case is Type` 是类型模式，例如 `case is int`、`case is Point`、`case is callable`；
 - enum 匹配在没有 `default` 且缺少变体时报告 `match is not exhaustive`；
 - `case pattern as name` 把整个匹配值绑定到 `name`；
 - `case == IDLE` 匹配常量、名字或无载荷枚举变体；
-- `match (a, b)` 是 tuple/pair subject，模式 `[x, y]` 按位置解构；
+- `match (a, b)` 的 subject 是 tuple/pair，不是两个匹配值；传单个 tuple 参数使用 `f((a, b))`；
+- tuple 模式 `(x, y, ...)` 至少两个元素，只匹配 pair/tuple，长度必须一致，禁止 `...rest`；`(a)` 是分组表达式，不是单元素 tuple 模式；这些规则也适用于 `let (x, y) = ...` 和函数参数模式；
+- `[x, y]` 是宽松序列模式，可以匹配 list、pair 和 tuple；需要限定为 pair/tuple 时使用 `(x, y)`；
 - 守卫写成 `case pattern if expr => ...`；
 - 绑定只读，作用域限于该 arm；
 - 无 arm 命中且无 `default` 时运行时报错；

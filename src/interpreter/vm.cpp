@@ -330,14 +330,14 @@ public:
         context_.handler_depth = saved_handler_depth_;
     }
 
-    enum class HandlerOpResult { Continue, Abort };
+    enum class OpResult { Continue, Abort };
 
     /*
      * Handler, defer, and result-control opcodes are cold relative to the
      * arithmetic/name/slot paths.  Keeping them in a separate method makes the
      * main dispatch loop easier to navigate without changing its hot cases.
      */
-    HandlerOpResult run_handler_defer_op(Op op, const Instr &ins) {
+    OpResult run_handler_defer_op(Op op, const Instr &ins) {
         switch (op) {
             case Op::PushFailHandler:
             case Op::PushRecoverHandler: {
@@ -362,24 +362,24 @@ public:
                 if (vm_stats_enabled &&
                     handlers_.size() > vm_stats.max_handler_depth)
                     vm_stats.max_handler_depth = handlers_.size();
-                return HandlerOpResult::Continue;
+                return OpResult::Continue;
             }
 
             case Op::PopHandler: {
                 if (handlers_.empty()) {
                     yyerror("internal bytecode handler underflow");
-                    return HandlerOpResult::Abort;
+                    return OpResult::Abort;
                 }
                 value_t *error = end_handler_capture(handlers_.back());
                 freeval(error);
                 handlers_.pop_back();
-                return HandlerOpResult::Continue;
+                return OpResult::Continue;
             }
 
             case Op::PopHandlers: {
                 if (handlers_.size() < ins.a) {
                     yyerror("internal bytecode handler underflow");
-                    return HandlerOpResult::Abort;
+                    return OpResult::Abort;
                 }
                 while (handlers_.size() > ins.a) {
                     value_t *error =
@@ -389,16 +389,16 @@ public:
                 }
                 handler_body_depth_ = ins.flags;
                 context_.handler_depth = saved_handler_depth_ + ins.flags;
-                return HandlerOpResult::Continue;
+                return OpResult::Continue;
             }
 
             case Op::CheckResult: {
                 value_t *value = pop_checked();
                 if (!value)
-                    return HandlerOpResult::Abort;
+                    return OpResult::Abort;
                 if (value->type != T_result) {
                     push(value);
-                    return HandlerOpResult::Continue;
+                    return OpResult::Continue;
                 }
                 struct result_value_t *result =
                     (struct result_value_t *)value;
@@ -406,7 +406,7 @@ public:
                     value_t *inner = dupval(result->value);
                     freeval(value);
                     push(inner ? inner : newnull());
-                    return HandlerOpResult::Continue;
+                    return OpResult::Continue;
                 }
                 value_t *error = dupval(result->error);
                 freeval(value);
@@ -415,26 +415,26 @@ public:
                 if (has_handler(UnwindKind::Fail))
                     throw_unwind(UnwindKind::Fail, error);
                 skein_vm_eval_raise(error);
-                return HandlerOpResult::Abort;
+                return OpResult::Abort;
             }
 
             case Op::EnterHandlerBody:
                 ++handler_body_depth_;
                 ++context_.handler_depth;
-                return HandlerOpResult::Continue;
+                return OpResult::Continue;
 
             case Op::LeaveHandlerBody:
                 if (handler_body_depth_ > 0)
                     --handler_body_depth_;
                 if (context_.handler_depth > saved_handler_depth_)
                     --context_.handler_depth;
-                return HandlerOpResult::Continue;
+                return OpResult::Continue;
 
             case Op::DeferPush: {
                 if (ins.b >= proto().defer_protos.size() ||
                     defer_scopes_.empty()) {
                     yyerror("invalid bytecode defer descriptor");
-                    return HandlerOpResult::Abort;
+                    return OpResult::Abort;
                 }
                 defer_record record;
                 record.proto = proto().defer_protos[ins.b];
@@ -446,7 +446,7 @@ public:
                         std::shared_ptr<struct upvalue_cell> cell =
                             capture_defer_cell(capture);
                         if (!cell)
-                            return HandlerOpResult::Abort;
+                            return OpResult::Abort;
                         record.upvalues.push_back(std::move(cell));
                     }
                 }
@@ -456,11 +456,158 @@ public:
                     (uint64_t)context_.vm_defer_count >
                         vm_stats.max_defer_depth)
                     vm_stats.max_defer_depth = context_.vm_defer_count;
-                return HandlerOpResult::Continue;
+                return OpResult::Continue;
             }
 
             default:
-                return HandlerOpResult::Continue;
+                return OpResult::Continue;
+        }
+    }
+
+    OpResult run_module_op(Op op, const Instr &ins) {
+        switch (op) {
+            case Op::DeclarePackage: {
+                if (ins.b >= proto().packages.size()) {
+                    yyerror("invalid bytecode package descriptor");
+                    return OpResult::Abort;
+                }
+                const skein::bc::PackageDesc &desc = proto().packages[ins.b];
+                if (!desc.body) {
+                    yyerror("invalid package body");
+                    return OpResult::Abort;
+                }
+
+                int package_errors = context_.runtime_error_count;
+                std::string error;
+                if (package_is_loading())
+                    skein_vm_eval_pushscope();
+                else
+                    skein_vm_eval_push_isolated_scope();
+
+                std::string saved_package = diag_current_package_name();
+                std::string package_name =
+                    (saved_package.empty() || saved_package == "main")
+                        ? desc.name
+                        : saved_package;
+                diag_set_package_name(package_name);
+                value_t *body_ret = execute_proto(*desc.body);
+                bool invalid_control =
+                    body_ret && (body_ret->type == T_return ||
+                                 body_ret->type == T_break ||
+                                 body_ret->type == T_continue);
+                if (invalid_control) {
+                    yyerror("invalid control flow in package %s",
+                            desc.name.c_str());
+                }
+
+                value_t *ns = NULL;
+                if (context_.runtime_error_count == package_errors)
+                    ns = package_build_namespace(current_scope().get(), error);
+                skein_vm_eval_popscope();
+                diag_set_package_name(saved_package);
+                freeval(body_ret);
+
+                if (!ns) {
+                    if (context_.runtime_error_count == package_errors) {
+                        yyerror("package %s: %s", desc.name.c_str(),
+                                error.empty() ? "cannot build namespace"
+                                              : error.c_str());
+                    }
+                    return OpResult::Abort;
+                }
+                if (!package_publish(desc.name.c_str(), ns, error)) {
+                    yyerror("package %s: %s", desc.name.c_str(),
+                            error.c_str());
+                    freeval(ns);
+                    return OpResult::Abort;
+                }
+                push(newnull());
+                return OpResult::Continue;
+            }
+
+            case Op::Import: {
+                if (ins.a >= proto().imports.size()) {
+                    yyerror("invalid bytecode import descriptor");
+                    return OpResult::Abort;
+                }
+                const skein::bc::ImportDesc &desc = proto().imports[ins.a];
+                std::string error;
+                std::string imported_package;
+                std::string display_path = desc.path;
+                if (!display_path.empty() && display_path[0] == '\x02')
+                    display_path.erase(0, 1);
+                int errors_before_import = diag_error_count();
+                value_t *ns = package_import(
+                    desc.path.c_str(),
+                    desc.base.empty() ? NULL : desc.base.c_str(),
+                    &imported_package, error);
+                if (!ns) {
+                    if (diag_error_count() == errors_before_import) {
+                        yyerror("import %s: %s", display_path.c_str(),
+                                error.c_str());
+                    } else {
+                        diag_mark_script_failure();
+                    }
+                    return OpResult::Abort;
+                }
+
+                const char *name =
+                    desc.alias.empty()
+                        ? skein_vm_import_binding_name(desc.path.c_str())
+                        : desc.alias.c_str();
+                if (direct_slots_ && ins.b != UINT32_MAX &&
+                    ins.b < slot_values_.size()) {
+                    freeval(slot_values_[ins.b]);
+                    slot_values_[ins.b] = ns;
+                    if (ins.b < slot_const_.size())
+                        slot_const_[ins.b] = 0;
+                } else {
+                    if (isrepeated(name)) {
+                        struct symbol *existing = lookupsym(name);
+                        bool same_namespace =
+                            existing && existing->val && ns &&
+                            existing->val->type == T_dict &&
+                            ns->type == T_dict &&
+                            ((struct dict_value_t *)existing->val)->payload ==
+                                ((struct dict_value_t *)ns)->payload;
+                        if (!same_namespace) {
+                            yyerror("import name already exists: %s", name);
+                            freeval(ns);
+                            return OpResult::Abort;
+                        }
+                        freeval(ns);
+                    } else {
+                        struct symbol *sym = newsym(name);
+                        sym->val = ns;
+                        savesym(sym);
+                        if (ins.b != UINT32_MAX &&
+                            ins.b < slot_symbols_.size())
+                            slot_symbols_[ins.b] = sym;
+                        invalidate_name_cache(name);
+                    }
+                }
+
+                const std::string &path = desc.path;
+                if (!path.empty() && path[0] != '.' && path[0] != '@') {
+                    const char *alias =
+                        desc.alias.empty() ? NULL : desc.alias.c_str();
+                    if (!alias) {
+                        size_t dot = path.rfind('.');
+                        alias = dot == std::string::npos
+                                    ? path.c_str()
+                                    : path.c_str() + dot + 1;
+                    }
+                    structtype_register_alias(
+                        diag_current_source_name().c_str(), alias,
+                        imported_package.empty() ? path.c_str()
+                                                 : imported_package.c_str());
+                }
+                push(newnull());
+                return OpResult::Continue;
+            }
+
+            default:
+                return OpResult::Continue;
         }
     }
 
@@ -2425,7 +2572,7 @@ public:
                 case Op::LeaveHandlerBody:
                 case Op::DeferPush:
                     if (run_handler_defer_op(static_cast<Op>(ins.op), ins) ==
-                        HandlerOpResult::Abort)
+                        OpResult::Abort)
                         return abort_error();
                     break;
 
@@ -2454,151 +2601,12 @@ public:
                     break;
                 }
 
-                case Op::DeclarePackage: {
-                    if (ins.b >= proto().packages.size()) {
-                        yyerror("invalid bytecode package descriptor");
+                case Op::DeclarePackage:
+                case Op::Import:
+                    if (run_module_op(static_cast<Op>(ins.op), ins) ==
+                        OpResult::Abort)
                         return abort_error();
-                    }
-                    const skein::bc::PackageDesc &desc =
-                        proto().packages[ins.b];
-                    if (!desc.body) {
-                        yyerror("invalid package body");
-                        return abort_error();
-                    }
-
-                    int package_errors = context_.runtime_error_count;
-                    std::string error;
-                    if (package_is_loading())
-                        skein_vm_eval_pushscope();
-                    else
-                        skein_vm_eval_push_isolated_scope();
-
-                    std::string saved_package = diag_current_package_name();
-                    std::string package_name =
-                        (saved_package.empty() || saved_package == "main")
-                            ? desc.name
-                            : saved_package;
-                    diag_set_package_name(package_name);
-                    value_t *body_ret = execute_proto(*desc.body);
-                    bool invalid_control =
-                        body_ret && (body_ret->type == T_return ||
-                                     body_ret->type == T_break ||
-                                     body_ret->type == T_continue);
-                    if (invalid_control) {
-                        yyerror("invalid control flow in package %s",
-                                desc.name.c_str());
-                    }
-
-                    value_t *ns = NULL;
-                    if (context_.runtime_error_count == package_errors)
-                        ns = package_build_namespace(current_scope().get(),
-                                                     error);
-                    skein_vm_eval_popscope();
-                    diag_set_package_name(saved_package);
-                    freeval(body_ret);
-
-                    if (!ns) {
-                        if (context_.runtime_error_count == package_errors) {
-                            yyerror("package %s: %s", desc.name.c_str(),
-                                    error.empty() ? "cannot build namespace"
-                                                  : error.c_str());
-                        }
-                        return abort_error();
-                    }
-                    if (!package_publish(desc.name.c_str(), ns, error)) {
-                        yyerror("package %s: %s", desc.name.c_str(),
-                                error.c_str());
-                        freeval(ns);
-                        return abort_error();
-                    }
-                    push(newnull());
                     break;
-                }
-
-                case Op::Import: {
-                    if (ins.a >= proto().imports.size()) {
-                        yyerror("invalid bytecode import descriptor");
-                        return abort_error();
-                    }
-                    const skein::bc::ImportDesc &desc =
-                        proto().imports[ins.a];
-                    std::string error;
-                    std::string imported_package;
-                    std::string display_path = desc.path;
-                    if (!display_path.empty() && display_path[0] == '\x02')
-                        display_path.erase(0, 1);
-                    int errors_before_import = diag_error_count();
-                    value_t *ns = package_import(
-                        desc.path.c_str(),
-                        desc.base.empty() ? NULL : desc.base.c_str(),
-                        &imported_package, error);
-                    if (!ns) {
-                        if (diag_error_count() == errors_before_import) {
-                            yyerror("import %s: %s", display_path.c_str(),
-                                    error.c_str());
-                        } else {
-                            diag_mark_script_failure();
-                        }
-                        return abort_error();
-                    }
-
-                    const char *name =
-                        desc.alias.empty()
-                            ? skein_vm_import_binding_name(desc.path.c_str())
-                            : desc.alias.c_str();
-                    if (direct_slots_ && ins.b != UINT32_MAX &&
-                        ins.b < slot_values_.size()) {
-                        freeval(slot_values_[ins.b]);
-                        slot_values_[ins.b] = ns;
-                        if (ins.b < slot_const_.size())
-                            slot_const_[ins.b] = 0;
-                    } else {
-                        if (isrepeated(name)) {
-                            struct symbol *existing = lookupsym(name);
-                            bool same_namespace =
-                                existing && existing->val && ns &&
-                                existing->val->type == T_dict &&
-                                ns->type == T_dict &&
-                                ((struct dict_value_t *)existing->val)
-                                        ->payload ==
-                                    ((struct dict_value_t *)ns)->payload;
-                            if (!same_namespace) {
-                                yyerror("import name already exists: %s",
-                                        name);
-                                freeval(ns);
-                                return abort_error();
-                            }
-                            freeval(ns);
-                        } else {
-                            struct symbol *sym = newsym(name);
-                            sym->val = ns;
-                            savesym(sym);
-                            if (ins.b != UINT32_MAX &&
-                                ins.b < slot_symbols_.size())
-                                slot_symbols_[ins.b] = sym;
-                            invalidate_name_cache(name);
-                        }
-                    }
-
-                    const std::string &path = desc.path;
-                    if (!path.empty() && path[0] != '.' && path[0] != '@') {
-                        const char *alias =
-                            desc.alias.empty() ? NULL
-                                               : desc.alias.c_str();
-                        if (!alias) {
-                            size_t dot = path.rfind('.');
-                            alias = dot == std::string::npos
-                                        ? path.c_str()
-                                        : path.c_str() + dot + 1;
-                        }
-                        structtype_register_alias(
-                            diag_current_source_name().c_str(), alias,
-                            imported_package.empty() ? path.c_str()
-                                                     : imported_package.c_str());
-                    }
-                    push(newnull());
-                    break;
-                }
 
                 case Op::CallSpread: {
                     if (ins.b >= proto().call_descs.size()) {

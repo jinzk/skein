@@ -100,6 +100,27 @@ print("hello, skein");
 保存为 `hello.skein` 后运行 `./build/skein hello.skein`。
 
 
+### 读取输入
+
+`input([prompt])` 从 stdin 读取一行，返回字符串（不含末尾换行）：
+
+```skein
+let name = input("Name: ");
+if (name == null) {
+  println("no input");
+} else {
+  println("hello " + name);
+}
+```
+
+- 可选的 `prompt` 必须是字符串，会原样输出到 stdout；
+- 空行返回空字符串 `""`；
+- 读到 EOF 且没有剩余内容时返回 `null`；最后一行没有换行符时仍返回该行；
+- 读取多个值时，可以用 `std.string.split` 拆分后再转换类型（需要 `import std;`）。
+
+更完整的规则见后面的“控制台输入”一节。
+
+
 ### 交互模式
 
 - 只有 stdin 是终端时才显示 `> ` / `...> ` 提示符；管道输入不显示提示符；
@@ -1562,8 +1583,8 @@ print("x = {:.2f}", 1.5)
 import std;
 
 std.string.trim(text)                     → 去掉首尾空白
-std.string.split(text, separator)         → list<string>
-std.string.split_ws(text)                 → list<string>
+std.string.split(text[, separator])       → list<string>
+std.string.split_ws(text)                 → list<string>（同 split(text)）
 std.string.find(text, substring)          → 码点下标 / -1
 std.string.substr(text, start[, length])  → string
 ```
@@ -1576,7 +1597,7 @@ import std;
 std.string.trim("  hello\t\n")          → "hello"
 std.string.split("a,b,c", ",")          → ["a", "b", "c"]
 std.string.split(",a,", ",")            → ["", "a", ""]
-std.string.split_ws("  a  b\tc ")       → ["a", "b", "c"]
+std.string.split("  a  b\tc ")          → ["a", "b", "c"]
 std.string.find("hello", "ll")          → 2
 std.string.find("hello", "x")           → -1
 std.string.substr("hello", 1, 3)        → "ell"
@@ -1585,9 +1606,12 @@ std.string.substr("你好世界", 1, 2)      → "好世"
 
 规则：
 
-- `std.string.trim` 和 `std.string.split_ws` 只把 ASCII 空白（空格、Tab、换行等）视为空白；
-- `std.string.split` 使用非重叠匹配，保留首尾空字段；
-- `std.string.split` 的分隔符不能为空字符串；
+- `std.string.trim` 和 `std.string.split(text)` 只把 ASCII 空白（空格、Tab、换行等）视为空白；
+- `std.string.split(text)` 按连续空白切分，并丢弃首尾空字段；
+- `std.string.split(text, separator)` 按精确分隔符切分，保留首尾空字段；
+- `separator` 不能为空字符串；
+- `std.string.split("")` 返回 `[]`，`std.string.split("", ",")` 返回 `[""]`；
+- `std.string.split_ws(text)` 是 `split(text)` 的兼容别名；
 - `std.string.find` 返回 **UTF-8 码点下标**，找不到返回 `-1`，空子串返回 `0`；
 - `std.string.substr` 的 `start` 和 `length` 都是码点单位；`start` 超出长度返回空字符串，`length` 超出末尾会截断；
 - `start` 和 `length` 不能为负数。
@@ -1597,7 +1621,7 @@ std.string.substr("你好世界", 1, 2)      → "好世"
 ```text
 import std;
 
-let parts = std.string.split_ws(input("请输入两个数: "));
+let parts = std.string.split(input("请输入两个数: "));
 let a = int(parts[0]);
 let b = int(parts[1]);
 print(a + b);
@@ -1643,17 +1667,28 @@ print("hello " + name);
 ```
 
 - 返回的字符串不包含末尾换行；
-- 可选的 `prompt` 会原样输出到 stdout，不经过 `std.string.format`；
-- 读到 EOF 时返回 `null`；
+- 可选的 `prompt` 必须是字符串，会原样输出到 stdout，不经过 `std.string.format`；
+- 读到 EOF 且没有剩余内容时返回 `null`；最后一行没有换行符时仍返回该行；
 - 空行返回空字符串；
-- CRLF 会被处理，末尾 `\r\n` 不会进入结果；
+- CRLF 会被处理，`\r` 不会进入结果；
 - 控制台负责行编辑和退格；管道输入中的退格会由 `input` 过滤；
 - 脚本模式下仍然从原始 stdin 读取，不会读脚本文件本身；
-- `input` 是普通一等内置函数，可以保存和传递。
+- `input` 是普通一等内置函数，可以保存和传递；`std.io.input` 是同一个函数。
 
 ```text
 let read = input;
 read("> ")
+```
+
+读取多个值：
+
+```text
+import std;
+
+let parts = std.string.split(input("x y: "));
+let x = int(parts[0]);
+let y = int(parts[1]);
+println(x + y);
 ```
 
 示例：

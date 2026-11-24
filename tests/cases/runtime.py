@@ -521,8 +521,11 @@ def run_cases():
           stderr="substr length must be a non-negative integer")
     check("string split type", 'std.string.split(1, ",")\n',
           stderr="type error: expected string, got int")
-    check("string split arity", 'std.string.split("a")\n',
-          stderr="split expects 2 arguments")
+    check("string split arity", 'std.string.split()\n',
+          stderr="split expects 1 or 2 arguments")
+    check("string split too many arguments",
+          'std.string.split("a", ",", "x")\n',
+          stderr="expects at most 2 argument")
     check("string find arity", 'std.string.find("a")\n',
           stderr="find expects 2 arguments")
     check("string substr arity", 'std.string.substr("a")\n',

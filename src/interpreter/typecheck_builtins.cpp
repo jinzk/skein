@@ -1091,9 +1091,9 @@ const TypeNode *builtin_function_type(int functype) {
         case B_error_format_trace:
             return builtin_sig({type_builtin(TYPE_ERROR)}, text());
         case B_split:
-            return builtin_sig(
+            return poly_builtin(
                 {text(), text()},
-                type_container(TYPE_LIST, {text()}));
+                type_container(TYPE_LIST, {text()}), 1);
         case B_split_ws:
             return builtin_sig(
                 {text()},

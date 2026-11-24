@@ -760,10 +760,15 @@ struct value_t *call_builtin(int functype,
                     (int)args.size());
             return NULL;
         }
-    } else if (functype == B_split || functype == B_find) {
+    } else if (functype == B_split) {
+        if (args.size() < 1 || args.size() > 2) {
+            yyerror("split expects 1 or 2 arguments, got %d",
+                    (int)args.size());
+            return NULL;
+        }
+    } else if (functype == B_find) {
         if (args.size() != 2) {
-            yyerror("%s expects 2 arguments, got %d",
-                    functype == B_split ? "split" : "find",
+            yyerror("find expects 2 arguments, got %d",
                     (int)args.size());
             return NULL;
         }

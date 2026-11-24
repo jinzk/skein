@@ -3609,6 +3609,36 @@ std.thread.capabilities
 - DNS 超时依赖 libuv 取消系统解析请求，极端情况下可能延迟返回；
 - 全局函数目前仍作为兼容别名保留，新代码建议使用 `std.*`。
 
+### 控制台输入
+
+`input([prompt])` 从 stdin 读取一行，返回字符串（不含末尾换行）；`std.io.input` 与全局 `input` 是同一个函数。
+
+```text
+let name = input("Name: ");
+if (name == null) {
+  println("no input");
+} else {
+  println("hello " + name);
+}
+```
+
+- `prompt` 必须是字符串，会原样输出到 stdout；
+- 空行返回空字符串 `""`；
+- 读到 EOF 且没有剩余内容时返回 `null`；最后一行没有换行符时仍返回该行；
+- `\r`（CRLF）会被去掉；
+- 交互终端支持行编辑和退格，管道输入中的退格也会被过滤。
+
+读取多个值：
+
+```text
+import std;
+
+let parts = std.string.split(input("x y: "));
+let x = int(parts[0]);
+let y = int(parts[1]);
+println(x + y);
+```
+
 ### 流式读写
 
 文件句柄和 TCP socket 共用 `std.io` 流接口：

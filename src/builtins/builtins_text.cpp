@@ -30,18 +30,44 @@ static std::string utf8_substr(const char *s, size_t start, size_t count) {
     return std::string(s + begin, pos - begin);
 }
 
+/* Split on runs of ASCII whitespace, dropping leading/trailing empty fields. */
+static struct list_value_t *split_whitespace(const char *text) {
+    struct list_value_t *parts = newlistval();
+    const char *p = text;
+    while (*p) {
+        while (*p && std::isspace((unsigned char)*p))
+            ++p;
+        if (!*p)
+            break;
+        const char *start = p;
+        while (*p && !std::isspace((unsigned char)*p))
+            ++p;
+        std::string part(start, (size_t)(p - start));
+        parts->payload->items.push_back(newstrval(part.c_str()));
+    }
+    return parts;
+}
+
 struct value_t *call_text_builtin(
     int functype, const std::vector<struct value_t *> &args) {
     struct value_t *arg = args.empty() ? NULL : args[0];
     struct value_t *ret = NULL;
     switch (functype) {
         case B_split: {
-            if (args[0]->type != T_string || args[1]->type != T_string) {
-                yyerror("split expects string text and separator, got %s and %s",
-                        typename_of(args[0]), typename_of(args[1]));
+            if (arg->type != T_string) {
+                yyerror("split expects a string, got %s", typename_of(arg));
                 break;
             }
-            const char *text = ((struct string_value_t *)args[0])->value;
+            const char *text = ((struct string_value_t *)arg)->value;
+            if (args.size() == 1) {
+                ret = (struct value_t *)split_whitespace(text);
+                break;
+            }
+            if (args[1]->type != T_string) {
+                yyerror("split separator must be a string, got %s",
+                        typename_of(args[1]));
+                break;
+            }
             const char *separator = ((struct string_value_t *)args[1])->value;
             if (!separator[0]) {
                 yyerror("split separator must not be empty");
@@ -71,20 +97,7 @@ struct value_t *call_text_builtin(
                 break;
             }
             const char *text = ((struct string_value_t *)arg)->value;
-            struct list_value_t *parts = newlistval();
-            const char *p = text;
-            while (*p) {
-                while (*p && std::isspace((unsigned char)*p))
-                    ++p;
-                if (!*p)
-                    break;
-                const char *start = p;
-                while (*p && !std::isspace((unsigned char)*p))
-                    ++p;
-                std::string part(start, (size_t)(p - start));
-                parts->payload->items.push_back(newstrval(part.c_str()));
-            }
-            ret = (struct value_t *)parts;
+            ret = (struct value_t *)split_whitespace(text);
             break;
         }
         case B_trim: {

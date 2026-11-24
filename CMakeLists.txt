@@ -522,13 +522,14 @@ if(WIN32 AND MINGW)
   # let the interpreter's depth check fire first.
   set_property(TARGET ${PROJECT_NAME} APPEND_STRING PROPERTY
     LINK_FLAGS " -Wl,--stack,16777216")
-  # GCC 16 at -O3 miscompiles the forced unwind used to destroy unstarted or
+  # GCC 16.2 at -O3 miscompiles the forced unwind used to destroy unstarted or
   # suspended boost.context fibers: the SEH unwinder crashes in
-  # RtlVirtualUnwind2.  -O2 in this translation unit avoids the bad codegen
-  # while leaving the evaluator and VM hot paths fully optimised.
+  # RtlVirtualUnwind2.  The trigger is SLP vectorisation of fiber_entry(), the
+  # catch landing pad; disabling it in this translation unit avoids the bad
+  # codegen while keeping -O3 and leaving evaluator/VM hot paths untouched.
   set_source_files_properties(
     ${CMAKE_CURRENT_SOURCE_DIR}/src/interpreter/fiber.cpp
-    PROPERTIES COMPILE_OPTIONS "$<$<CONFIG:Release>:-O2>")
+    PROPERTIES COMPILE_OPTIONS "$<$<CONFIG:Release>:-O3;-fno-tree-slp-vectorize>")
 endif()
 
 if(SKEIN_COPY_RUNTIME_DLLS)

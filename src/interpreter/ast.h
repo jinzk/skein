@@ -45,6 +45,8 @@ constexpr int NODE_ENUM_DECL = '<';
 constexpr int NODE_ENUM_VARIANT = '>';
 constexpr int NODE_ENUM_LITERAL = '?';
 constexpr int NODE_INCLUDE = 0x130;
+constexpr int NODE_GOTO = 0x140;
+constexpr int NODE_FUNCTION_BODY = 0x142;
 
 
 struct ast {
@@ -74,6 +76,13 @@ struct ncontinue {
     int line;
     int column;
     char *label;
+};
+
+struct goto_node {
+    int nodetype;
+    int line;
+    int column;
+    char *name;
 };
 
 struct label_node {
@@ -539,6 +548,7 @@ struct ast *newret(struct ast *v);
 struct ast *newbrk(char *label = NULL, int line = 0, int column = 0);
 struct ast *newctn(char *label = NULL, int line = 0, int column = 0);
 struct ast *newlabel(char *name, struct ast *stmt);
+struct ast *newgoto(char *name, int line, int column);
 struct ast *newfail(struct ast *v);
 struct ast *newrecover(struct ast *v);
 struct ast *newpass(struct ast *v);

@@ -623,8 +623,9 @@ RelWithDebInfo 下空脚本 `main()` 约 0.4 ms，`import std` 约 0.85 ms，
   `on error` handler，原始错误视为已处理。含 `yield` 的函数禁止 goto；
   含 `wait` / `launch` 的函数允许 goto，普通 `.wait()`、
   `std.task.wait(...)`、`std.task.scope(...)` 不受限制。实现时在 `stmt`
-  位置识别 `NAME ':' non_empty_stmt`，按函数收集 label 并做两遍解析。该
-  设计已定稿，尚未实现。
+  位置识别 `NAME ':' non_empty_stmt`，按函数收集 label 并做两遍解析。当前已
+  实现同 statement list 内的 `label NAME:` + `goto NAME;` MVP（AST/VM，
+  跨块跳转、label 唯一性/前向引用/未使用 warning、裸 `NAME:` 迁移仍待做）。
 
 ---
 

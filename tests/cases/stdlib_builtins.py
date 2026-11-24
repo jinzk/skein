@@ -2208,9 +2208,14 @@ def run_cases():
         stdout="after\n",
     )
     check(
-        "label on non-loop rejected",
+        "label on non-loop allowed",
         "label bad: if (1) { print(1); }\n",
-        stderr="label must be attached to a loop or switch",
+        stdout="1",
+    )
+    check(
+        "goto target not found in block",
+        "func f() { goto missing; }\nf();\n",
+        stderr="goto target not found in this block",
     )
     check(
         "block scope",

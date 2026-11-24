@@ -222,6 +222,23 @@ ts_test("handler break runs block defers", func() {
   ts_eq(out, ["inner", "loop"]);
 });
 
+ts_test("goto forward same block", func() {
+  let out = [];
+  goto done;
+  out = std.list.append(out, "skipped");
+  label done: out = std.list.append(out, "done");
+  ts_eq(out, ["done"]);
+});
+
+ts_test("goto label on return", func() {
+  let f = func() {
+    goto done;
+    return 1;
+    label done: return 2;
+  };
+  ts_eq(f(), 2);
+});
+
 ts_test("nested handler break exits outer loop", func() {
   let boom = func() { fail "handler-test"; };
   let hits = 0;

@@ -2918,6 +2918,10 @@ struct Checker : public BuiltinContext {
                                   type_any(), env, false, false);
             case 'g':
                 return check_stmt(((struct label_node *)stmt)->stmt, env);
+            case NODE_FUNCTION_BODY:
+                return check_stmt(stmt->l, env);
+            case NODE_GOTO:
+                return true;
             case 'K':
                 return check_stmt(((struct package_node *)stmt)->body, env);
             default:

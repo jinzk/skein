@@ -47,6 +47,76 @@ struct value_release_guard {
 
 } // namespace
 
+static value_t *eval_statement_list(struct ast *body) {
+    std::vector<struct ast *> items;
+    for (struct ast *item = body; item;) {
+        if (item->nodetype == 'L') {
+            items.push_back(item->l);
+            item = item->r;
+        } else {
+            items.push_back(item);
+            break;
+        }
+    }
+    if (items.empty() && body)
+        items.push_back(body);
+
+    size_t pc = 0;
+    struct value_t *last = NULL;
+    while (pc < items.size()) {
+        const int errors_before = eval_ctx().runtime_error_count;
+        struct value_t *value = eval(items[pc++]);
+        if (eval_ctx().control != EVAL_CONTROL_NONE) {
+            freeval(last);
+            return value;
+        }
+        if (eval_ctx().runtime_error_count != errors_before) {
+            freeval(last);
+            freeval(value);
+            return NULL;
+        }
+        if (value && value->type == T_goto) {
+            const char *name = ((struct control_value_t *)value)->label;
+            size_t target = items.size();
+            for (size_t i = 0; i < items.size(); ++i) {
+                struct ast *item = items[i];
+                if (item->nodetype == 'g') {
+                    struct label_node *label = (struct label_node *)item;
+                    if (name && label->name &&
+                        std::strcmp(name, label->name) == 0) {
+                        target = i;
+                        break;
+                    }
+                }
+            }
+            if (target != items.size()) {
+                freeval(last);
+                last = NULL;
+                freeval(value);
+                pc = target;
+                continue;
+            }
+            freeval(value);
+            freeval(last);
+            yyerror("goto target not found in this block");
+            return NULL;
+        }
+        if (value && (value->type == T_return || value->type == T_break ||
+                      value->type == T_continue ||
+                      value->type == T_goto)) {
+            freeval(last);
+            return value;
+        }
+        freeval(last);
+        last = value;
+    }
+    return last;
+}
+
+static value_t *eval_body(struct ast *body) {
+    return eval_statement_list(body);
+}
+
 struct value_t *eval(struct ast *a) {
     if (!a) return NULL;
     if (g_interrupted) return NULL;
@@ -351,15 +421,21 @@ struct value_t *eval(struct ast *a) {
             ret = newcontinue(((struct ncontinue *)a)->label);
             break;
 
+        case NODE_FUNCTION_BODY:
+            ret = eval_body(a->l);
+            break;
+
+        case NODE_GOTO:
+            ret = newgotoval(((struct goto_node *)a)->name);
+            break;
+
         case 'g': {
             struct label_node *node = (struct label_node *)a;
-            if (!label_directly_applies(node->stmt)) {
-                yyerror("label must be attached to a loop or switch");
-                break;
-            }
-            eval_ctx().pending_label = node->name;
+            const char *saved = eval_ctx().pending_label;
+            if (label_directly_applies(node->stmt))
+                eval_ctx().pending_label = node->name;
             ret = eval(node->stmt);
-            eval_ctx().pending_label = NULL;
+            eval_ctx().pending_label = saved;
             break;
         }
 
@@ -480,7 +556,8 @@ struct value_t *eval(struct ast *a) {
                 break;
             }
             if (body && (body->type == T_return || body->type == T_break ||
-                         body->type == T_continue)) {
+                         body->type == T_continue ||
+                         body->type == T_goto)) {
                 ret = body;
                 break;
             }
@@ -496,7 +573,7 @@ struct value_t *eval(struct ast *a) {
         case 'X': {
             int errors_before = eval_ctx().runtime_error_count;
             eval_pushscope();
-            ret = eval(((struct nscope *)a)->ast);
+            ret = eval_body(((struct nscope *)a)->ast);
             eval_popscope();
             /*
              * A block used as an expression yields null when its last

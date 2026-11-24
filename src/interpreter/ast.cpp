@@ -489,6 +489,19 @@ struct ast *newlabel(char *name, struct ast *stmt) {
     return (struct ast *)a;
 }
 
+struct ast *newgoto(char *name, int line, int column) {
+    struct goto_node *a =
+        (struct goto_node *)ast_node_alloc(sizeof(struct goto_node));
+    if (!a) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    a->nodetype = NODE_GOTO;
+    set_loc(a, line, column);
+    a->name = name;
+    return (struct ast *)a;
+}
+
 struct ast *newfail(struct ast *v) {
     struct control_stmt *a =
         (struct control_stmt *)ast_node_alloc(sizeof(struct control_stmt));
@@ -907,6 +920,12 @@ struct ast *newfunc(char *s, struct symlist *sl, struct ast *ast,
     }
     a->name = s;
     a->sl = sl;
+    if (ast && ast->nodetype == 'L') {
+        struct ast *body = newast(NODE_FUNCTION_BODY, ast, NULL);
+        body->line = ast->line;
+        body->column = ast->column;
+        ast = body;
+    }
     a->ast = ast;
     a->ret_type = ret_type;
     a->moved = 0;
@@ -1453,6 +1472,7 @@ void treefree(struct ast *a) {
         case '5':
         case '6':
         case 'L':
+        case NODE_FUNCTION_BODY:
             treefree(a->r);
             treefree(a->l);
             break;
@@ -1482,6 +1502,9 @@ void treefree(struct ast *a) {
             std::free(n->name);
             break;
         }
+        case NODE_GOTO:
+            std::free(((struct goto_node *)a)->name);
+            break;
         case 'u':
         case 'v':
         case 'p':

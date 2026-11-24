@@ -1127,7 +1127,7 @@ static struct type_constraint *runtime_type_or_error(
 %token MATCH "match"
 %token RETURN "return" BREAK "break" CONTINUE "continue"
 %token FAIL "fail" ON "on" ERROR "error" RECOVER "recover" PASS "pass"
-%token IS "is" LABEL "label"
+%token IS "is" LABEL "label" GOTO "goto"
 %token COLONCOLON "::"
 %token PLUS_ASSIGN "+=" MINUS_ASSIGN "-=" MUL_ASSIGN "*=" DIV_ASSIGN "/="
 %token MOD_ASSIGN "%=" AND_ASSIGN "&=" OR_ASSIGN "|=" XOR_ASSIGN "^="
@@ -1331,6 +1331,7 @@ stmt: IF HEADER_LPAREN exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, 
                              (struct enum_variant *)$7, true, true);
       }
     | LABEL NAME ':' stmt                { $$ = newlabel($2, $4); }
+    | LABEL NAME ':' line ';'            { $$ = newlabel($2, $4); }
     | struct_decl
     | impl_decl
     | trait_decl
@@ -1882,6 +1883,9 @@ line: returnstart exp                     { $$ = newret($2); }
     | continuestart NAME                  {
         $$ = newctn($2, flow_keyword_line, flow_keyword_column);
       }
+    | gotostart NAME                      {
+        $$ = newgoto($2, flow_keyword_line, flow_keyword_column);
+      }
     | FAIL exp                            { $$ = newfail($2); }
     | FAIL                                { $$ = newfail(NULL); }
     | RECOVER exp                         { $$ = newrecover($2); }
@@ -1902,6 +1906,12 @@ breakstart: BREAK {
     ;
 
 continuestart: CONTINUE {
+        flow_keyword_line = g_token_line;
+        flow_keyword_column = g_token_column;
+      }
+    ;
+
+gotostart: GOTO {
         flow_keyword_line = g_token_line;
         flow_keyword_column = g_token_column;
       }

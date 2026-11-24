@@ -68,9 +68,9 @@ def run_cases():
         stderr="1:32: runtime error: cannot assign through this expression",
     )
     check(
-        "diagnostic invalid label location",
+        "diagnostic label on non-loop",
         "label x: if (1) { print(1); }\n",
-        stderr="1:14: runtime error: label must be attached to a loop or switch",
+        stdout="1",
     )
     check(
         "diagnostic fail trace",

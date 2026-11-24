@@ -65,6 +65,13 @@ struct value_t *newcontinue(const char *label) {
     return (struct value_t *)v;
 }
 
+struct value_t *newgotoval(const char *label) {
+    struct control_value_t *v = new control_value_t;
+    v->type = T_goto;
+    v->label = label ? dupstr(label) : NULL;
+    return (struct value_t *)v;
+}
+
 namespace {
 
 constexpr long long SMALL_INT_MIN = -512;
@@ -936,6 +943,8 @@ struct value_t *dupval(struct value_t *v) {
             return newbreak(((struct control_value_t *)v)->label);
         case T_continue:
             return newcontinue(((struct control_value_t *)v)->label);
+        case T_goto:
+            return newgotoval(((struct control_value_t *)v)->label);
         default:
             return NULL;
     }
@@ -1037,7 +1046,8 @@ void freeval(struct value_t *v) {
             delete v;
             break;
         case T_break:
-        case T_continue: {
+        case T_continue:
+        case T_goto: {
             struct control_value_t *c = (struct control_value_t *)v;
             std::free(c->label);
             delete c;
@@ -1085,6 +1095,7 @@ const char *typename_of(const struct value_t *v) {
         case T_return: return "return";
         case T_break: return "break";
         case T_continue: return "continue";
+        case T_goto: return "goto";
         default: return "unknown";
     }
 }
@@ -1269,6 +1280,8 @@ std::string value_to_string(const struct value_t *v) {
             return "<break>";
         case T_continue:
             return "<continue>";
+        case T_goto:
+            return "<goto>";
         default:
             return "<unknown>";
     }

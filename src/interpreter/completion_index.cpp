@@ -30,6 +30,7 @@ const char *keyword_detail(const std::string &word) {
         {"import", "import"},         {"include", "include"},
         {"export", "export"},         {"return", "return"},
         {"break", "break"},           {"continue", "continue"},
+        {"goto", "jump to a label"},
         {"yield", "yield"},           {"defer", "defer"},
         {"launch", "launch"},         {"wait", "wait for a task"},
         {"try", "exception handling"},

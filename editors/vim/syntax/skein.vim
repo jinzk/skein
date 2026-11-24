@@ -52,7 +52,7 @@ syntax keyword skeinKeyword let const func yield defer launch wait
 syntax keyword skeinKeyword in is as
 syntax keyword skeinConditional if else switch case default match
 syntax keyword skeinRepeat while do for
-syntax keyword skeinStatement return break continue fail on error recover pass
+syntax keyword skeinStatement return break continue goto fail on error recover pass
 syntax keyword skeinDeclaration package import include export extern
 syntax keyword skeinDeclaration struct impl trait enum
 syntax keyword skeinBoolean true false

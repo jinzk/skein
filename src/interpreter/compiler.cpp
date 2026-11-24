@@ -1158,6 +1158,10 @@ struct Compiler {
             case 'g':
                 return has_local_declarations(
                     ((struct label_node *)node)->stmt);
+            case NODE_FUNCTION_BODY:
+                return has_local_declarations(node->l);
+            case NODE_GOTO:
+                return false;
             case 'l':
         case NODE_TUPLE: {
                 for (struct list_node *item = (struct list_node *)node; item;
@@ -1345,6 +1349,10 @@ struct Compiler {
             case 'g':
                 return can_use_slots(
                     ((struct label_node *)node)->stmt);
+            case NODE_FUNCTION_BODY:
+                return can_use_slots(node->l);
+            case NODE_GOTO:
+                return true;
             case 'l':
         case NODE_TUPLE: {
                 for (struct list_node *item = (struct list_node *)node; item;
@@ -1670,6 +1678,11 @@ struct Compiler {
             case 'g':
                 collect_local_declared_names(
                     ((struct label_node *)node)->stmt, names);
+                return;
+            case NODE_FUNCTION_BODY:
+                collect_local_declared_names(node->l, names);
+                return;
+            case NODE_GOTO:
                 return;
             case 'l':
         case NODE_TUPLE: {
@@ -2541,11 +2554,15 @@ struct Compiler {
                     compile(child);
                     pending_label = saved;
                 } else {
-                    compile_runtime_error(
-                        "label must be attached to a loop or switch", here);
+                    compile(child);
                 }
                 return;
             }
+
+            case NODE_GOTO:
+                compile_runtime_error("goto target not found in this block",
+                                      here);
+                return;
 
             case 'l':
                 compile_list(node, false);
@@ -2646,6 +2663,10 @@ struct Compiler {
 
             case 'L':
                 compile_statement_list(node);
+                return;
+
+            case NODE_FUNCTION_BODY:
+                compile_statement_list(node->l);
                 return;
 
             case '`': {
@@ -2913,12 +2934,69 @@ struct Compiler {
             emit(Op::LoadNull, 0, 0, 0, loc_of(node));
             return;
         }
+
+        std::unordered_map<std::string, size_t> labels;
+        std::unordered_map<std::string, std::vector<size_t>> pending;
+
+        auto compile_label = [&](ast *item) {
+            struct label_node *lab = (struct label_node *)item;
+            std::string name = lab->name ? lab->name : "";
+            if (labels.count(name)) {
+                yyerror("duplicate label %s", name.c_str());
+                ok = false;
+                return;
+            }
+            labels[name] = proto.code.size();
+            ast *child = lab->stmt;
+            if (child && (child->nodetype == 'W' || child->nodetype == 'E' ||
+                          child->nodetype == 'P' || child->nodetype == 'F' ||
+                          child->nodetype == 'S')) {
+                std::string saved = pending_label;
+                pending_label = name;
+                compile(child);
+                pending_label = saved;
+            } else {
+                compile(child);
+            }
+            auto it = pending.find(name);
+            if (it != pending.end()) {
+                for (size_t at : it->second)
+                    patch(at, labels[name]);
+                pending.erase(it);
+            }
+        };
+
         for (size_t i = 0; i < items.size(); ++i) {
-            if (!ok) return;
-            compile(items[i]);
-            if (!ok) return;
+            if (!ok)
+                return;
+            ast *item = items[i];
+            if (item->nodetype == 'g') {
+                compile_label(item);
+            } else if (item->nodetype == NODE_GOTO) {
+                std::string name = ((struct goto_node *)item)->name
+                                       ? ((struct goto_node *)item)->name
+                                       : "";
+                auto it = labels.find(name);
+                if (it != labels.end()) {
+                    emit(Op::Jump, 0, 0, static_cast<uint32_t>(it->second),
+                         loc_of(item));
+                } else {
+                    pending[name].push_back(emit_jump(Op::Jump, loc_of(item)));
+                }
+                continue;
+            } else {
+                compile(item);
+            }
+            if (!ok)
+                return;
             if (i + 1 < items.size())
-                emit(Op::Pop, 0, 0, 0, loc_of(items[i]));
+                emit(Op::Pop, 0, 0, 0, loc_of(item));
+        }
+
+        for (const auto &entry : pending) {
+            yyerror("goto target %s not found in this block",
+                    entry.first.c_str());
+            ok = false;
         }
     }
 

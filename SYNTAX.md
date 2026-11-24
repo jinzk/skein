@@ -1564,14 +1564,23 @@ label outer: for (let i in [1, 2, 3]) {
 }
 ```
 
+`goto`：
+
+```text
+func f() {
+  goto done;
+  print("skipped");
+  label done: return 1;
+}
+```
+
 规则：
 
-- 标签写法为 `label NAME: loop_or_switch`；
-- `label` 只能直接放在 `for`、`for ... in`、`while`、`do while` 或 `switch` 前；
-- `break NAME;` 跳出指定标签；
-- `continue NAME;` 继续指定标签对应的循环；
+- 标签写法为 `label NAME: statement`；
+- `label` 可以放在任意语句前；`break NAME;` / `continue NAME;` 只对循环或 switch 标签有意义；
+- `goto NAME;` 跳到当前 statement list 内的标签；跨块跳转暂未支持；
 - 无标签的 `break` / `continue` 仍然作用于最近的循环或 switch；
-- 标签找不到时按普通越界 `break` / `continue` 报错。
+- 标签找不到时按普通越界 `break` / `continue` 报错；`goto` 找不到当前块内的标签时报 `goto target not found in this block`。
 
 ### 5.10 错误处理
 

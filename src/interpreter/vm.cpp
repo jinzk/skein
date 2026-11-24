@@ -1105,6 +1105,82 @@ public:
         return OpResult::Continue;
     }
 
+    OpResult run_switch_op(Op op, const Instr &ins) {
+        switch (op) {
+            case Op::IsType: {
+                const Constant *c = constant_at(proto(), ins.b);
+                if (!c || c->kind != ConstantKind::Type) {
+                    yyerror("invalid bytecode type constant");
+                    return OpResult::Abort;
+                }
+                value_t *value = pop_checked();
+                if (!value)
+                    return OpResult::Abort;
+                if (!validate_type_constraint(c->type)) {
+                    freeval(value);
+                    return OpResult::Abort;
+                }
+                bool matched = type_constraint_matches(c->type, value);
+                freeval(value);
+                push(newboolval(matched));
+                return OpResult::Continue;
+            }
+
+            case Op::SwitchCheck: {
+                if (stack_.empty()) {
+                    yyerror("internal bytecode stack underflow");
+                    return OpResult::Abort;
+                }
+                value_t *subject = stack_.back();
+                if (!skein_vm_switch_value_supported(subject)) {
+                    yyerror("switch does not support %s",
+                            typename_of(subject));
+                    return OpResult::Abort;
+                }
+                return OpResult::Continue;
+            }
+
+            case Op::CaseMatch: {
+                value_t *values = pop_checked();
+                if (!values)
+                    return OpResult::Abort;
+                if (stack_.empty()) {
+                    freeval(values);
+                    yyerror("internal bytecode stack underflow");
+                    return OpResult::Abort;
+                }
+                value_t *subject = stack_.back();
+                if (values->type != T_list) {
+                    yyerror("switch case values must be a list");
+                    freeval(values);
+                    return OpResult::Abort;
+                }
+                struct list_value_t *list = (struct list_value_t *)values;
+                for (value_t *item : list->payload->items) {
+                    if (!skein_vm_switch_value_supported(item)) {
+                        yyerror("switch does not support %s case value",
+                                typename_of(item));
+                        freeval(values);
+                        return OpResult::Abort;
+                    }
+                }
+                bool matched = false;
+                for (value_t *item : list->payload->items) {
+                    if (value_equals(subject, item)) {
+                        matched = true;
+                        break;
+                    }
+                }
+                freeval(values);
+                push(newboolval(matched));
+                return OpResult::Continue;
+            }
+
+            default:
+                return OpResult::Continue;
+        }
+    }
+
     value_t *run() {
         while (true) {
             if (pc_ >= proto().code.size()) {
@@ -2004,76 +2080,13 @@ public:
                     break;
                 }
 
-                case Op::IsType: {
-                    const Constant *c = constant_at(proto(), ins.b);
-                    if (!c || c->kind != ConstantKind::Type) {
-                        yyerror("invalid bytecode type constant");
+                case Op::IsType:
+                case Op::SwitchCheck:
+                case Op::CaseMatch:
+                    if (run_switch_op(static_cast<Op>(ins.op), ins) ==
+                        OpResult::Abort)
                         return abort_error();
-                    }
-                    value_t *value = pop_checked();
-                    if (!value)
-                        return abort_error();
-                    if (!validate_type_constraint(c->type)) {
-                        freeval(value);
-                        return abort_error();
-                    }
-                    bool matched =
-                        type_constraint_matches(c->type, value);
-                    freeval(value);
-                    push(newboolval(matched));
                     break;
-                }
-
-                case Op::SwitchCheck: {
-                    if (stack_.empty()) {
-                        yyerror("internal bytecode stack underflow");
-                        return abort_error();
-                    }
-                    value_t *subject = stack_.back();
-                    if (!skein_vm_switch_value_supported(subject)) {
-                        yyerror("switch does not support %s",
-                                typename_of(subject));
-                        return abort_error();
-                    }
-                    break;
-                }
-
-                case Op::CaseMatch: {
-                    value_t *values = pop_checked();
-                    if (!values)
-                        return abort_error();
-                    if (stack_.empty()) {
-                        freeval(values);
-                        yyerror("internal bytecode stack underflow");
-                        return abort_error();
-                    }
-                    value_t *subject = stack_.back();
-                    if (values->type != T_list) {
-                        yyerror("switch case values must be a list");
-                        freeval(values);
-                        return abort_error();
-                    }
-                    struct list_value_t *list =
-                        (struct list_value_t *)values;
-                    for (value_t *item : list->payload->items) {
-                        if (!skein_vm_switch_value_supported(item)) {
-                            yyerror("switch does not support %s case value",
-                                    typename_of(item));
-                            freeval(values);
-                            return abort_error();
-                        }
-                    }
-                    bool matched = false;
-                    for (value_t *item : list->payload->items) {
-                        if (value_equals(subject, item)) {
-                            matched = true;
-                            break;
-                        }
-                    }
-                    freeval(values);
-                    push(newboolval(matched));
-                    break;
-                }
 
                 case Op::Jump:
                     pc_ = ins.b;

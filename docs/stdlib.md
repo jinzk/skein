@@ -2950,7 +2950,8 @@ drive-relative 的 `C:foo` 和普通相对路径为 `false`。
 ```text
 std.list.slice(xs, start, length)         // length 省略时到末尾
 std.list.unique([1, 2, 1, 3, 2])        // [1, 2, 3]
-std.list.unique_by(xs, key)             // 按 key 保序去重
+std.list.unique(xs[, key])              // key 省略时按值去重
+std.list.unique_by(xs, key)             // 同 unique(xs, key)
 std.list.group_by(xs, key)              // {key: [items]}
 std.list.chunk([1, 2, 3, 4, 5], 2)      // [[1, 2], [3, 4], [5]]
 std.list.window([1, 2, 3, 4], 2)        // [[1, 2], [2, 3], [3, 4]]

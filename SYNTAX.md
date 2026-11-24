@@ -1010,7 +1010,7 @@ struct Handler {
   - 变参函数值显示为 `(...int) -> int`，rest 类型会在通过函数值调用时检查；
   - 不匹配的 rest 类型仍会报错，例如 `(...int) -> int` 不能赋给 `(string) -> int`；
 - `obj.method` 会生成去掉 `self` 的函数类型；
-- `list.map/filter/reduce/sort_by/group_by/unique_by` 会检查回调签名，并从 `map` / `group_by` 的回调结果推断返回类型；
+- `list.map/filter/reduce/sort_by/group_by/unique/unique_by` 会检查回调签名，并从 `map` / `group_by` 的回调结果推断返回类型；
 - `std.iter.map/filter` 会检查回调签名；`std.fn.compose/pipe` 只接受两个函数并推导完整组合类型，更多函数请嵌套组合；
 - `task[T]` 可用于变量、参数和返回类型；task 方法有静态类型：
   `t.wait() -> T`、`t.try_wait() -> result[T, error]`、`t.detach() -> task[T]`；
@@ -2707,8 +2707,8 @@ std.list.is_sorted(xs, cmp = null)
 列表算法：
 
 ```text
-std.list.unique(xs)                 // 保序去重
-std.list.unique_by(xs, key)         // 按 key 保序去重
+std.list.unique(xs[, key])          // 保序去重；key 省略时按值
+std.list.unique_by(xs, key)         // 同 unique(xs, key)
 std.list.group_by(xs, key)          // dict: key -> list
 std.list.chunk(xs, n)               // [[...], [...], ...]
 std.list.window(xs, n[, step])      // 滑动窗口，step 默认 1
@@ -2717,7 +2717,7 @@ std.list.top_k(xs, k, cmp = null)        // 排序后取前 k 个（O(n log k)�
 std.list.binary_search(xs, value, cmp = null) -> {found, index}
 ```
 
-- `unique` / `unique_by` 保留第一次出现的元素；
+- `unique` / `unique_by` 保留第一次出现的元素；`unique(xs)` 按值去重，`unique(xs, key)` / `unique_by(xs, key)` 按 key 去重；
 - `group_by` 的 key 必须是合法 dict key（包括 tuple/pair、字段递归可哈希的 struct/enum 或实现 `std.dict_key.DictKey` 的 struct/enum），结果 dict 保持首次出现顺序；
 - `chunk` / `window` 的 `n` 必须 >= 1，`window` 的 `step` 必须 >= 1；
 - `chunk` 最后一块可以不满；`window` 只返回完整窗口；

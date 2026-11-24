@@ -368,7 +368,7 @@ struct Handler {
 - 变参函数保留 rest 类型，可以赋给能接受相应参数的函数类型；例如 `(...int) -> int` 可赋给 `(int, int) -> int`；
 - 静态检查会拒绝多传参数；少传参数仍交给默认值或运行时处理；
 - `obj.method` 会生成去掉 `self` 的函数类型；
-- `list.map/filter/reduce/sort_by/group_by/unique_by` 会检查回调签名，并从 `map` / `group_by` 的回调结果推断返回类型；
+- `list.map/filter/reduce/sort_by/group_by/unique/unique_by` 会检查回调签名，并从 `map` / `group_by` 的回调结果推断返回类型；
 - `std.iter.map/filter` 会检查回调签名；`std.fn.compose/pipe` 只接受两个函数并推导完整组合类型，更多函数请嵌套组合；
 - `task[T]` 可用于变量、参数和返回类型；`launch f()` 推导为 `task[T]`；
 - task 方法有静态类型：`t.wait() -> T`、`t.try_wait() -> result[T, error]`、`t.detach() -> task[T]`；`task[T]` 采用 invariant；

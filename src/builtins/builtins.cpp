@@ -971,14 +971,15 @@ struct value_t *call_builtin(int functype,
                     (int)args.size());
             return NULL;
         }
-    } else if (functype == B_list_unique ||
-               functype == B_list_unique_by) {
-        size_t expected = functype == B_list_unique ? 1 : 2;
-        if (args.size() != expected) {
-            yyerror("%s expects %d argument%s, got %d",
-                    functype == B_list_unique ? "std.list.unique"
-                                              : "std.list.unique_by",
-                    (int)expected, expected == 1 ? "" : "s",
+    } else if (functype == B_list_unique) {
+        if (args.size() < 1 || args.size() > 2) {
+            yyerror("std.list.unique expects 1 or 2 arguments, got %d",
+                    (int)args.size());
+            return NULL;
+        }
+    } else if (functype == B_list_unique_by) {
+        if (args.size() != 2) {
+            yyerror("std.list.unique_by expects 2 arguments, got %d",
                     (int)args.size());
             return NULL;
         }

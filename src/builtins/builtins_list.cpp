@@ -954,7 +954,7 @@ struct value_t *call_list_builtin(
             }
             ret = list_unique_impl(
                 (struct list_value_t *)args[0],
-                functype == B_list_unique_by ? args[1] : NULL,
+                args.size() == 2 ? args[1] : NULL,
                 functype == B_list_unique ? "std.list.unique"
                                           : "std.list.unique_by");
             break;

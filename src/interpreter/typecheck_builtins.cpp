@@ -216,8 +216,7 @@ bool check_builtin(BuiltinContext &context, const std::string &path,
             return true;
         }
         if (name == "reverse" || name == "sort" ||
-            name == "sort_desc" || name == "unique" ||
-            name == "top_k") {
+            name == "sort_desc" || name == "top_k") {
             if (name == "top_k" && !check_arg(1, type_builtin(TYPE_INT),
                                               false))
                 return true;
@@ -233,7 +232,8 @@ bool check_builtin(BuiltinContext &context, const std::string &path,
             result = target_list;
             return true;
         }
-        if (name == "sort_by" || name == "unique_by") {
+        if (name == "sort_by" || name == "unique" ||
+            name == "unique_by") {
             if (args.size() > 1 &&
                 !context.check_expr(args[1],
                                     function_type({element}, type_any()),
@@ -727,8 +727,11 @@ const TypeNode *builtin_polymorphic_type(const std::string &path) {
         return poly_builtin({list_t}, list_t);
     if (path == "std.list.sort")
         return poly_builtin({list_t, any_type()}, list_t, 1);
-    if (path == "std.list.sort_desc" || path == "std.list.unique")
+    if (path == "std.list.sort_desc")
         return poly_builtin({list_t}, list_t);
+    if (path == "std.list.unique")
+        return poly_builtin({list_t, poly_callback({T}, U)}, list_t,
+                            1);
     if (path == "std.list.is_sorted")
         return poly_builtin({list_t, any_type()}, bool_type, 1);
     if (path == "std.list.append")

@@ -13,6 +13,12 @@ def run_cases():
     run_skein("collections_containers.skein")
     run_skein("collections_more.skein")
     run_skein("collections_mutation.skein")
+    check("list unique arity",
+          "import std;\nstd.list.unique()\n",
+          stderr="std.list.unique expects 1 or 2 arguments")
+    check("list unique_by arity",
+          "import std;\nstd.list.unique_by([1])\n",
+          stderr="std.list.unique_by expects 2 arguments")
     check(
         "collections containers golden",
         "import std;\n"

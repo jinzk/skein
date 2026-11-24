@@ -31,11 +31,12 @@
 | --- | --- | --- |
 | JSON API 生产化（M6，P1） | 基础完成 | 账户锁定、OpenTelemetry exporter、完整 stack 捕获按部署需求推进 |
 | 包管理安全与运维（M1） | 核心完成 | macOS `flock` 验证暂缓；交叉编译按需 |
-| 包生态与信任（M3） | 待决策 | 先确认是否做公共生态，再排 SumDB / proxy / 私有认证 |
-| JIT / VM 与 GC（M4） | 优化冻结 | 等待 moving GC / AOT / 字节码缓存决策；已完成记录见第 3 节 |
+| 包生态与信任（M3） | 按需 | 公共生态暂缓，先支持私有/本地生态；SumDB / proxy / 私有认证按私有需求推进 |
+| JIT / VM 与 GC（M4） | 优化冻结 | moving GC 与 AOT / 字节码缓存均已确认不做；已完成记录见第 3 节 |
 | 长尾能力与体验（M5） | 按需 | 旧编码、HTTP/2 CONNECT、REPL / LSP 体验、LevelDB / RocksDB |
+| 对象抽象 / `protocol` / `ref` / Channel 模型（M8） | 待实现 | protocol-only、直接删除 trait、duplex 端点对作为唯一 Channel 已确认；一次性迁移后实现 `ref` / `weak` 与 GC 接入 |
 | `std.cache`（M7）/ `std.kv` | 已完成 | 维护；Valkey 独立 CI 服务可按需补 |
-| FFI 平台 CI / fuzz | 按需 | Windows / 32 位 / ARM 和 fuzz，见 `architecture.md`；不阻塞 P1 |
+| FFI 平台 CI / fuzz | 按需 | Windows x64（MinGW/MSVC）进入正式发布；32 位 / ARM 与 fuzz 按需，见 `architecture.md` |
 
 最近完成：
 
@@ -50,13 +51,18 @@
 1. P1 JSON API 基础已完成；账户锁定、外部 OpenTelemetry exporter 和完整
    stack 捕获按实际部署需求推进。
 2. M1 只剩 macOS `flock` 验证（暂缓）和交叉编译（按需）。
-3. 先确认公共包生态目标，再决定 M3 的 SumDB / proxy 范围。
-4. M4 的 GC root 审计、热点 opcode / frame 分配、字符串拼接、
-   启动解析优化和 JIT 默认启用已完成；剩余是 moving GC / AOT / 字节码缓存
-   的决策，以及移动 GC 决策后才会启动的 per-pc liveness / OSR / deopt。
-5. 测试稳定性已完成：服务端测试改为子进程内绑定端口 0 并回读实际端口；
+3. 公共生态已确认暂缓；M3 先支持私有/本地生态，SumDB / proxy / 私有认证
+   按私有需求推进。
+4. M8 已确认只保留 `protocol` 并直接删除 `trait`，且以 duplex 端点对作为
+   唯一 Channel 模型并删除旧共享队列；一次性迁移文档、stdlib、测试与 LSP；
+   `ref` / `weak` 复用现有 `collect_cycles()` / `gc_roots` / epoch sweep，
+   不另起一套全值 GC，并在新 channel 的 payload 校验处拒绝 `ref`。
+5. M4 的 GC root 审计、热点 opcode / frame 分配、字符串拼接、
+   启动解析优化和 JIT 默认启用已完成；moving GC 与 AOT / 字节码缓存均已
+   确认不做；per-pc liveness / OSR / deopt 保持不做。
+6. 测试稳定性已完成：服务端测试改为子进程内绑定端口 0 并回读实际端口；
    `thread_bench` 门槛使用多次重复中的最好成绩。
-6. 长尾能力按实际需求触发。
+7. 长尾能力按实际需求触发。
 
 ---
 
@@ -139,16 +145,17 @@
 不包含：SSR、HTML 模板、静态文件服务器、WebSocket / SSE、multipart、
 GraphQL、完整 ORM、OAuth 第三方登录。
 
-### 2.2 包生态与信任（M3；待决策）
+### 2.2 包生态与信任（M3；按需）
 
-前提：确认是否要做公共包生态。
+前提：公共生态已确认暂缓，先支持私有/本地生态；公共 proxy、公共 SumDB
+和公共模块发现暂不启动。
 
-范围：
+范围按私有/本地需求推进：
 
 1. SumDB / 首次下载信任
 2. Go 风格 proxy
 3. `direct` / `off` 回退
-4. 私有模块认证
+4. （暂不做）私有模块认证
 5. `mod graph` / `mod why`
 6. JSON 输出
 7. `retract` / `exclude`
@@ -193,7 +200,7 @@ GraphQL、完整 ORM、OAuth 第三方登录。
 
 ### 2.4 JIT / VM 性能与 GC（M4；优化冻结）
 
-前提：先决定 moving GC、AOT、字节码序列化是否在目标范围内。
+前提：moving / compacting GC、AOT 与字节码序列化均已确认不做。
 
 当前状态：
 
@@ -214,18 +221,18 @@ GraphQL、完整 ORM、OAuth 第三方登录。
 JIT 编译成本高于执行收益，且顶层 `global scope` 与 handler 记账更容易引入
 语义回归。
 
-若暂不做 moving GC：
+moving / compacting GC 不引入：
 
 - 只做 GC root 边界审计（已完成）
 - 继续优化 frame 分配与热点 opcode（已完成）
-- per-pc liveness 不阻塞主线
+- per-pc liveness / OSR / deopt 不因 GC 启动
 
 重启条件（满足其一）：
 
 - 真实负载的 p50/p95 明确退化，且 profiling 指向 JIT 覆盖或生成代码；
 - 具体程序的热点落在只有 OSR 才能覆盖的 VM 帧；
 - 内存 / 延迟成为明确需求；
-- 决定引入精确 / 移动 GC 或类型特化，需要 per-pc liveness / deopt。
+- 决定引入类型特化，需要 per-pc liveness / deopt。
 
 重启时先量化再写代码：
 
@@ -260,8 +267,8 @@ SKEIN_VM_STATS=1 SKEIN_JIT_DEBUG=1 ./build/skein <script>
 - Big5 / Shift_JIS / EUC-JP 等旧编码后端
 - Unicode 完整大小写映射与 case folding（已完成）/ grapheme cluster
 - HTTP/2 extended CONNECT
-- vendor / workspace
-- AOT / 字节码序列化、预编译 stdlib、字节码 ABI 冻结
+- （暂不做）vendor / workspace
+- （暂不做）AOT / 字节码序列化、预编译 stdlib、字节码 ABI 冻结
 - `std.kv`：SQLite 单文件默认后端已完成；LevelDB / RocksDB 仅作为可选
   目录后端，暂不实施，不放进 `std.db` 或 `std.cache`
 
@@ -276,6 +283,184 @@ REPL / 工具链体验：
 - 模糊补全排序
 - 补全候选弹窗 / 分栏
 - 多行历史条目
+
+### 2.6 对象抽象、`protocol` 与引用模型（M8；待实现）
+
+状态：protocol-only 与直接删除 `trait` 已确认；`ref` / `weak` 设计已明确，待实现。
+
+背景与问题：
+
+- 未标注调用按运行时能力工作，`struct` / `trait` 是名义式契约；两者分层
+  共存并不矛盾，但文档曾让读者把“动态类型”误读成完整鸭子类型；
+- 可选自引用字段可以表达形状，例如 `next: Node?`，但 `struct` 是 COW
+  值类型，`a.next = b; b.next = a;` 仍会报
+  `recursive value would create a cycle`；
+- 互递归 struct 类型声明目前不支持（`struct A { b: B? }` 会报未知类型名）；
+- `SYNTAX.md` 对 trait 默认方法前后描述不一致：前文支持默认方法和冲突
+  规则，规则列表又写“不支持 trait 默认方法”；实现是支持默认方法的，
+  先修文档再推进语言调整。
+
+产品方向：
+
+- 已确认只保留结构化 `protocol`，移除用户层 `trait` / `impl Trait for
+  Type`；`impl Type` 保留为具体类型写方法的机制；
+- 不把现有 `trait` 直接改成结构化语义，否则会破坏显式契约和已有诊断；
+- 不提供 deprecated alias；`trait` 与 `impl Trait for Type` 直接删除，一次性迁移。
+
+`protocol` 语义（待实现）：
+
+```skein
+protocol Drawable {
+  func draw(self);
+  func describe(self) { print("drawable"); }
+}
+
+struct Point {}
+
+impl Point {
+  func draw(self) { print("point"); }
+}
+
+func render(x: Drawable) { x.draw(); }
+
+render(Point {});   // 有匹配的 draw(self)，自动满足
+```
+
+规则：
+
+- 结构化匹配方法名、参数数量、参数类型、`self` 和返回类型；
+- 不需要 `impl Drawable for Point`；
+- 默认方法保留，具体类型写了同名方法则覆盖；
+- 多个 protocol 提供同名默认方法且具体类型未覆盖时报错，要求显式写方法；
+- `is protocol` 做结构化运行时检查；
+- `std.meta.protocols(type)` / `std.meta.implements(type, name)` 同步改为
+  结构化语义；
+- 如果 `T` 满足 protocol，则 `ref T` 也自动满足。
+
+`ref` / `weak` 语义（待实现）：
+
+```skein
+struct Node {
+  value: int;
+  next: ref Node? = null;   // 强引用，拥有后继
+  prev: weak Node? = null;  // 弱引用，只观察前驱
+}
+
+let a = ref Node { value: 1 };
+let b = ref Node { value: 2 };
+
+a.next = b;       // 强边：a -> b
+b.prev = a;       // 弱边：b -> a，不构成所有权环
+b.value = 9;
+print(a.next.value);  // 9，引用不是值快照
+```
+
+规则：
+
+- `ref T` 是类型化、受 GC 管理的安全指针 / 对象句柄；不做地址运算、
+  手工释放或裸指针暴露；
+- `T { ... }` 仍是普通值；只有 `ref T { ... }` 创建 GC 管理的引用对象；
+- 复制 `ref` 只复制句柄，别名看到同一对象；`let c = a` 不会复制目标；
+- `a = b` 是局部变量重新绑定；替换整个目标内容用 `a.* = ...` 或
+  `std.ref.set(a, ...)`；
+- 通过 `ref` 调用方法时 `self` 绑定为引用，方法内修改持久化；普通值接收者
+  仍保持“接收者副本”语义；
+- `weak T` 不保活；读取用 `std.ref.upgrade(w)` 得到 `ref T?`，并同期提供
+  通用 `?.` 可选链，可写 `b.prev?.value`；
+- 弱引用保存 `{id, generation}`，目标释放后 generation 失效，不会误指向
+  新对象；
+- 跨线程或序列化边界使用 `std.ref.snapshot(r)` 显式得到普通值快照。
+
+GC 接入（待实现）：
+
+- 现有 `collect_cycles()` 已具备 tracing 骨架：`gc_roots` / thread root
+  visitor、`for_each_value_child()` 递归 mark、upvalue cell 的 epoch sweep、
+  thread 模块的 userdata 图 collector；不另起一套全值 GC；
+- 新增 `ref_object` 注册表，作为现有 collector 的一类新 sweep 目标；
+- GC mark 沿强 `ref` 边走，不沿 `weak` 边走；
+- `value_reaches_any()` 的值环检查在 `T_ref` 边界停止：普通 `struct` /
+  `list` / `dict` 值环仍拒绝，强引用对象环交给 GC；
+- `freeval(ref)` 只释放句柄包装，不直接释放目标对象；
+- sweep 未标记 `ref_object` 时先断开其普通值字段，再 `freeval()`，最后递增
+  generation 使弱引用失效；
+- 触发条件在现有语句数 / scope 增长阈值之外增加 ref 分配计数；
+  `SKEIN_GC_STRESS` 覆盖该路径；
+- 已确认 `ref` / `weak` 不可跨线程发送：ref heap 严格线程本地，不做共享
+  ref heap、跨线程 GC root、锁或 generation 迁移；
+- 跨线程唯一入口是 channel；在 `thread_channel.cpp` 的
+  `validate_data_value()` 中拒绝 `T_ref` / weak payload，递归容器中的 ref
+  一并拒绝，错误提示引导使用 `std.ref.snapshot()` 或 `std.arena` id；
+- `std.arena` store 是值语义，发送 `(store, id)` 得到接收线程自己的快照，
+  不表示共享可变状态；需要共享状态时使用 owner 线程 + 消息协议；
+- `ref` 对象析构发生在 GC safepoint，不作为立即释放语义承诺。
+
+阶段与验收：
+
+1. 修 `SYNTAX.md` / `docs/tutorial.md` 的 trait 默认方法矛盾，并补
+   “动态调用看运行时能力，接口看显式/结构化契约”的说明；
+2. 新增 `protocol`，一次性迁移测试、stdlib、LSP 和文档，并删除 `trait` /
+   `impl Trait for Type`；
+3. 实现 `ref` / `weak` 内部值、`std.ref` API、通用 `?.` 可选链、GC sweep
+   与 channel payload 拒绝；
+4. 验收：强引用环可被回收，weak 在目标释放后升级为 `null`，普通值环仍
+   被拒绝，channel 发送 `ref` / weak（含嵌套）报错且 snapshot 可发送，
+   `SKEIN_GC_STRESS` 无漏根，JIT/VM 差分与语言核心测试稳定。
+
+### 2.7 Channel 模型调整（M8；待实现）
+
+状态：已确认以 duplex 端点对为唯一 Channel 模型；删除旧共享队列，不做兼容别名。
+
+背景与问题：
+
+- 当前 `std.thread.Channel` 是无方向共享队列，`std.thread.duplex` 是有方向
+  端点对；两者是两个独立 userdata 类型；
+- 现有跨线程用法主要是请求 / 响应、signal / reply，本身就带方向；共享队列
+  的方向完全靠约定，容易误用；
+- `broadcast` 的“多消费者共享队列”语义没有实际用户场景，测试中只有一处；
+- 之前确定的“跨线程只能通过 channel + owner 线程消息协议”更贴近端点对模型。
+
+新模型（待实现）：
+
+```skein
+let (parent, child) = std.thread.Channel(2);
+
+parent.send(req);        // parent -> child
+let res = parent.recv(); // parent <- child
+
+child.send(evt);         // child -> parent
+let got = parent.recv();
+```
+
+规则：
+
+- `std.thread.Channel(n)` 返回一对有方向端点（`parent` / `child`）；
+- 单向通信只使用其中一个方向，不再需要单独的共享队列类型；
+- 每条 lane 对应一个 `channel_state`；`capacity == 0` rendezvous 与
+  `-1` unbounded 对每条 lane 生效，放开当前 duplex 的 `>= 1` 限制；
+- `send` / `try_send` 沿 out 方向，`recv` / `try_recv` 沿 in 方向；
+  `close_send` / `close_recv` 保留，`close()` 关闭该端点的两个方向；
+- `select` 接受 endpoint，使用 in 方向；`broadcast` 重定义为“向一组
+  endpoint 的 out 方向各发一份”，不再表示多消费者共享队列；
+- `Message.handles` 携带 endpoint；`spawn_script_with_channel` 与
+  `spawn_script_with_duplex` 合并为同一路径：创建端点对，子端注入
+  `ctx.handles["channel"]`，父端通过 `thread.channel` 访问；
+- `std.thread.pool` 与 process result channel 内部改用端点对，脚本侧
+  `pool.submit` / `join` 不变；
+- 删除旧 `thread_channel` 共享队列 userdata、旧 `unbounded_channel` 等兼容
+  名，以及 `thread_duplex` 独立类型名；脚本可见类型统一为一种 endpoint；
+- `protocol` 落地后可定义通用 `Endpoint` 协议（`send` / `recv` / `try_*`），
+  但不是合并类型的必经步骤；
+- 与 `ref` 边界一致：`validate_data_value()` 继续拒绝 `ref` / weak payload
+  （含嵌套），channel / duplex 句柄只放在 `handles`。
+
+阶段与验收：
+
+1. 实现统一 endpoint 内部表示（in / out lane + peer），底层复用
+   `channel_state` 作为每条 lane 的队列；
+2. 一次性迁移 spawn helpers、select / broadcast、pool、文档、测试与 LSP，
+   删除旧共享队列 API 和两个 userdata meta 名；
+3. 验收：请求 / 响应双向通路、半关闭、rendezvous / unbounded、`select`
+   和重定义后的 `broadcast`、channel 发送 `ref` / weak 报错均通过。
 
 ---
 
@@ -469,8 +654,8 @@ VM 会丢失全局定义；该开关仅用于对比调试，默认路径不受�
 - FFI callback 仍然要求脚本保持 callback 值存活（既有生命周期契约）；
   userdata 的 `for_each_child` 会标记其中的脚本函数
 - 新增“C++ 长期持有脚本值”的代码必须显式登记，不能依赖调用时临时根
-- `thread.Message` / Channel 载荷跨线程序列化，不允许函数值，因此不需要主
-  collector 遍历通道缓冲
+- `thread.Message` / Channel endpoint 载荷跨线程序列化，不允许函数值，因此
+  不需要主 collector 遍历通道缓冲
 - per-pc liveness / safepoint 表仍未做，属于 moving GC 前置工作
 
 已知问题：在单条顶层语句内的长循环中创建闭包时，`scope ↔ closure` 环只能
@@ -559,13 +744,7 @@ RelWithDebInfo 下空脚本 `main()` 约 0.4 ms，`import std` 约 0.85 ms，
 
 ### 4.1 待决策
 
-1. 是否把 Skein 包生态做成公共生态？
-2. 是否引入 moving / compacting GC？
-3. 是否需要 AOT 或字节码磁盘缓存？
-4. Windows / MinGW 是否进入正式发布范围？
-5. 是否支持 vendor 和多模块 workspace？
-6. 私有模块认证与 proxy 鉴权做到什么程度？
-7. 是否需要 rope / 分块字符串表示来覆盖所有拼接与切片（路线 2，暂不做）？
+当前无待决策项。
 
 ### 4.2 已决定
 
@@ -630,6 +809,40 @@ RelWithDebInfo 下空脚本 `main()` 约 0.4 ms，`import std` 约 0.85 ms，
   defer / iterator / handler 清理（AST/VM）；已实现函数级 label 唯一性、
   重复 label 报错、未使用 label warning、生成器函数禁止 goto，以及同块内
   跨越 `let` / `const` 的检查。
+- 对象抽象方向（2026-11-25，已确认）：只保留结构化 `protocol`，移除用户层
+  `trait` / `impl Trait for Type`；`impl Type` 保留为具体类型方法容器。
+- `trait` 过渡策略（2026-11-25，已确认）：不提供 deprecated alias，直接删除
+  `trait` 与 `impl Trait for Type`，迁移一次性完成。
+- `ref` 跨线程（2026-11-25，已确认）：不可跨线程发送；ref heap 严格线程
+  本地。利用现有 channel payload 校验拒绝 `T_ref` / weak（含嵌套），不做
+  共享 ref heap、跨线程 GC root、锁或 generation 迁移；跨线程用
+  `std.ref.snapshot()` 或 `std.arena` id / owner 线程消息协议。
+- Channel 模型（2026-11-25，已确认）：以 duplex 端点对为唯一 Channel，
+  删除旧无方向共享队列，不做 `Queue` 兼容层；每条 lane 支持
+  `capacity 0 / -1`，`broadcast` 改为向 endpoint 列表的 out 方向发送。
+- `?.` 可选链（2026-11-25，已确认）：与 `ref` / `weak` 同期实现通用版本，
+  可写 `b.prev?.value`；不只做 weak 专用糖。
+- 公共包生态（2026-11-25，已确认）：暂缓，先支持私有/本地生态；公共 proxy、
+  公共 SumDB 和公共模块发现暂不启动。
+- moving / compacting GC（2026-11-25，已确认）：不引入；保持非移动引用计数
+  + 现有 scope / `ref` 对象 collector；per-pc liveness / OSR / deopt 不因
+  GC 启动。
+- AOT / 字节码磁盘缓存（2026-11-25，已确认）：都不做；不冻结字节码 ABI，
+  不预编译 stdlib，冷启动优化以现有解析 fast path 为止。
+- Windows 正式发布（2026-11-25，已确认）：Windows x64 进入发布矩阵，
+  MinGW / MSVC 构建与 CI 视为发布门槛；32 位、ARM 和 fuzz 仍按需。
+- vendor / workspace（2026-11-25，已确认）：暂不做；保持单模块项目 +
+  全局缓存，不为本地目录集合引入新的依赖模型。
+- 私有模块认证（2026-11-25，已确认）：暂不做；保持本地路径 / 全局缓存 /
+  离线模式，不引入 token、login 流程或 proxy 鉴权。
+- rope / 分块字符串表示（2026-11-25，已确认）：不做；保持现有字符串表示，
+  透明 `s = s + x` 与 `std.string.builder` 已覆盖实际需求。
+- `ref` / `weak` 语义（2026-11-25）：`ref T` 是类型化、受 GC 管理的指针/
+  句柄，进入 GC 图；`weak T` 不保活并通过 generation 失效；普通值继续
+  引用计数，`T { ... }` 不会隐式变成引用对象。
+- GC 接入（2026-11-25）：复用现有 `collect_cycles()` / `gc_roots` / epoch
+  sweep，强 `ref` 参与 mark，`weak` 不参与；值环检查在 `ref` 边界停止，
+  不把整个值系统改成 tracing GC。
 
 ---
 
@@ -637,21 +850,38 @@ RelWithDebInfo 下空脚本 `main()` 约 0.4 ms，`import std` 约 0.85 ms，
 
 本节按领域汇总明确不做或暂缓的能力，仅用于归类，不是里程碑划分。
 
+语言与对象模型：
+
+- 不把默认 `struct` / `list` / `dict` 改成 GC 对象；引用必须显式写 `ref`；
+- 不做地址运算、手工释放或裸指针暴露，`ref` 只提供类型化安全句柄；
+- 不做 `trait` deprecated alias；`trait` 与 `impl Trait for Type` 直接删除；
+- 不做全值 tracing GC，只把 `ref_object` 接入现有 collector；
+- 不做跨线程共享 ref heap；channel payload 校验拒绝 `ref` / weak，跨线程用
+  `std.ref.snapshot()` 或 `std.arena` id / owner 线程消息协议；
+- 不保留无方向共享队列 / `unbounded_channel` / `thread_channel` 旧类型；
+  Channel 统一为端点对，不做 `Queue` 兼容层；
+- 不做“多消费者共享一个 Channel”语义；一对多由用户建立多条端点链路；
+- 不自动把回边降级为 `weak`；回边是否保活由字段类型显式表达；
+- 暂不实现 `trait` 继承、关联类型、泛型 trait、运算符重载和动态添加方法。
+
 包管理与生态：
 
-- 没有可信镜像运营方前，不先做完整 proxy。
-- 未确认公共生态前，不先做 vendor / workspace。
+- 公共生态暂缓；不做面向公众的完整 proxy / SumDB / 模块发现。
+- vendor / workspace 已确认暂不做；保持单模块项目 + 全局缓存。
+- 私有模块认证与 proxy 鉴权已确认暂不做；保持本地路径 / 全局缓存 / 离线模式。
 - 没有实际用户需求前，不扩展旧编码后端。
 - SQLite 单文件 `std.kv` 已完成；没有明确的高写入/大数据量需求前，
   不实现 LevelDB / RocksDB 目录后端，也不承诺单文件。
 
 性能与运行时：
 
-- 没有明确性能目标前，不引入 moving GC。
+- moving / compacting GC 已确认不引入；保持非移动引用计数 + scope / `ref`
+  对象 collector。
+- AOT 与字节码磁盘缓存已确认不做；不冻结字节码 ABI。
 - JIT 优化已暂停；OSR/deopt、per-pc liveness 与顶层声明类 JIT 等明确
   场景再重启。
-- 没有明确的全量拼接/切片需求前，不引入 rope / 分块字符串表示；透明
-  `s = s + x` 已完成，批量构建仍推荐 `std.string.builder`。
+- rope / 分块字符串表示已确认不做；透明 `s = s + x` 已完成，批量构建仍
+  推荐 `std.string.builder`。
 - 冷启动已完成 profiling、内存扫描、内嵌 std 包类型检查跳过、入口目录
   规范化、AST arena 和内存输入 fast path；没有明确的冷启动目标前，不再
   继续拆分解析输入或诊断行存储，也不单独做跨进程 AST 缓存。

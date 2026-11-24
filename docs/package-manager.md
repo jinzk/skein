@@ -156,16 +156,17 @@ skein mod prune --all
 - 锁超时与诊断（已完成）
 - Linux/macOS 并发锁测试
 
-### Milestone 3
+### Milestone 3（按需）
 
 - SumDB / 首次下载信任
 - Go 风格 proxy
-- 私有模块认证
+- 私有模块认证（暂不做）
 - `mod graph` / `mod why`
 - JSON 输出
 - `retract` / `exclude`
 
 ### 暂缓
 
-- 没有可信镜像运营方前的完整 proxy
-- 未确认公共生态前的 vendor / workspace
+- 公共生态已确认暂缓；不做面向公众的完整 proxy / SumDB / 模块发现
+- vendor / workspace 已确认暂不做；保持单模块项目 + 全局缓存
+- 私有模块认证与 proxy 鉴权已确认暂不做；保持本地路径 / 全局缓存 / 离线模式

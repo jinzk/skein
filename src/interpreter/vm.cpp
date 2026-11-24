@@ -2234,6 +2234,287 @@ public:
         }
     }
 
+    OpResult run_slot_op(Op op, const Instr &ins, value_t *&control_out) {
+        switch (op) {
+            case Op::DefineSlot: {
+                if (ins.b >= proto().slots.size() ||
+                    (!direct_slots_ && ins.b >= slot_symbols_.size())) {
+                    yyerror("invalid bytecode slot");
+                    return OpResult::Abort;
+                }
+                const skein::bc::SlotDesc &slot = proto().slots[ins.b];
+                value_t *value = NULL;
+                if (ins.flags & 1) {
+                    value = pop_checked();
+                    if (!value)
+                        return OpResult::Abort;
+                } else {
+                    value = skein_vm_default_value_for_type(&slot.type);
+                    if (!value) {
+                        yyerror("variable %s of type %s requires an "
+                                "initializer", slot.name.c_str(),
+                                type_constraint_name(&slot.type));
+                        return OpResult::Abort;
+                    }
+                }
+                if (is_control(value)) {
+                    control_out = abort_control(value);
+                    return OpResult::Control;
+                }
+                if (isrepeated(slot.name.c_str())) {
+                    yyerror("symbol repeated %s", slot.name.c_str());
+                    freeval(value);
+                    return OpResult::Abort;
+                }
+                if (!validate_type_constraint(&slot.type)) {
+                    freeval(value);
+                    return OpResult::Abort;
+                }
+                if (!type_constraint_matches(&slot.type, value)) {
+                    yyerror("variable %s expects %s, got %s",
+                            slot.name.c_str(),
+                            type_constraint_name(&slot.type),
+                            typename_of(value));
+                    freeval(value);
+                    return OpResult::Abort;
+                }
+                if (direct_slots_) {
+                    if (ins.b >= slot_values_.size()) {
+                        yyerror("invalid bytecode slot");
+                        freeval(value);
+                        return OpResult::Abort;
+                    }
+                    freeval(slot_values_[ins.b]);
+                    slot_values_[ins.b] = value;
+                    if (ins.b < slot_const_.size())
+                        slot_const_[ins.b] = slot.is_const ? 1 : 0;
+                    push(newnull());
+                    return OpResult::Continue;
+                }
+                struct symbol *sym = NULL;
+                if (slot_pool_safe_)
+                    sym = take_pooled_symbol(slot_symbol_pool_,
+                                             slot.name.c_str());
+                if (sym) {
+                    reset_slot_symbol(sym, slot, value);
+                } else {
+                    sym = newsym(slot.name.c_str());
+                    sym->val = value;
+                    type_constraint_assign(&sym->type, &slot.type);
+                    sym->is_const = slot.is_const;
+                }
+                if (!slot_pool_safe_)
+                    savesym(sym);
+                slot_symbols_[ins.b] = sym;
+                invalidate_name_cache(slot.name.c_str());
+                push(newnull());
+                return OpResult::Continue;
+            }
+
+            case Op::LoadSlot: {
+                if (ins.b >= proto().slots.size() ||
+                    (!direct_slots_ && ins.b >= slot_symbols_.size())) {
+                    yyerror("invalid bytecode slot");
+                    return OpResult::Abort;
+                }
+                const skein::bc::SlotDesc &slot = proto().slots[ins.b];
+                if (direct_slots_) {
+                    if (ins.b >= slot_values_.size() ||
+                        !slot_values_[ins.b]) {
+                        yyerror("symbol not found %s", slot.name.c_str());
+                        return OpResult::Abort;
+                    }
+                    push(dupval(slot_values_[ins.b]));
+                    return OpResult::Continue;
+                }
+                struct symbol *sym = slot_symbols_[ins.b];
+                if (!sym)
+                    sym = lookupsym(slot.name.c_str());
+                if (!sym) {
+                    yyerror("symbol not found %s", slot.name.c_str());
+                    return OpResult::Abort;
+                }
+                if (sym->is_uninitialized) {
+                    yyerror("parameter %s is used before it is "
+                            "initialized", sym->name);
+                    return OpResult::Abort;
+                }
+                push(dupval(sym->val));
+                return OpResult::Continue;
+            }
+
+            case Op::StoreSlot: {
+                value_t *value = pop_checked();
+                if (!value)
+                    return OpResult::Abort;
+                if (ins.b >= proto().slots.size() ||
+                    (!direct_slots_ && ins.b >= slot_symbols_.size())) {
+                    yyerror("invalid bytecode slot");
+                    freeval(value);
+                    return OpResult::Abort;
+                }
+                const skein::bc::SlotDesc &slot = proto().slots[ins.b];
+                if (direct_slots_) {
+                    value_t *result = assign_direct_slot(ins.b, value);
+                    if (!result)
+                        return OpResult::Abort;
+                    if (is_control(result)) {
+                        control_out = abort_control(result);
+                        return OpResult::Control;
+                    }
+                    push(result);
+                    return OpResult::Continue;
+                }
+                value_t *result = NULL;
+                if (slot_symbols_[ins.b])
+                    result = skein_vm_assign_symbol_direct(
+                        slot_symbols_[ins.b], value);
+                else
+                    result = skein_vm_assign_symbol_value(
+                        slot.name.c_str(), value);
+                if (!result)
+                    return OpResult::Abort;
+                if (is_control(result)) {
+                    control_out = abort_control(result);
+                    return OpResult::Control;
+                }
+                push(result);
+                return OpResult::Continue;
+            }
+
+            case Op::CompoundSlot: {
+                value_t *value = pop_checked();
+                if (!value)
+                    return OpResult::Abort;
+                if (ins.b >= proto().slots.size() ||
+                    (!direct_slots_ && ins.b >= slot_symbols_.size())) {
+                    yyerror("invalid bytecode slot");
+                    freeval(value);
+                    return OpResult::Abort;
+                }
+                const skein::bc::SlotDesc &slot = proto().slots[ins.b];
+                if (direct_slots_) {
+                    value_t *result =
+                        compound_direct_slot(ins.b, (int)ins.flags, value);
+                    if (!result)
+                        return OpResult::Abort;
+                    if (is_control(result)) {
+                        control_out = abort_control(result);
+                        return OpResult::Control;
+                    }
+                    push(result);
+                    return OpResult::Continue;
+                }
+                value_t *result = NULL;
+                if (slot_symbols_[ins.b])
+                    result = skein_vm_compound_symbol_direct(
+                        slot_symbols_[ins.b], (int)ins.flags, value);
+                else
+                    result = skein_vm_compound_symbol_value(
+                        slot.name.c_str(), (int)ins.flags, value);
+                if (!result)
+                    return OpResult::Abort;
+                if (is_control(result)) {
+                    control_out = abort_control(result);
+                    return OpResult::Control;
+                }
+                push(result);
+                return OpResult::Continue;
+            }
+
+            case Op::IncDecSlot: {
+                if (ins.b >= proto().slots.size() ||
+                    (!direct_slots_ && ins.b >= slot_symbols_.size())) {
+                    yyerror("invalid bytecode slot");
+                    return OpResult::Abort;
+                }
+                const skein::bc::SlotDesc &slot = proto().slots[ins.b];
+                if (direct_slots_) {
+                    value_t *result = incdec_direct_slot(
+                        ins.b, ins.a ? 1 : -1, (ins.flags & 1) != 0);
+                    if (!result)
+                        return OpResult::Abort;
+                    if (is_control(result)) {
+                        control_out = abort_control(result);
+                        return OpResult::Control;
+                    }
+                    push(result);
+                    return OpResult::Continue;
+                }
+                value_t *result = NULL;
+                if (slot_symbols_[ins.b])
+                    result = skein_vm_increment_symbol_direct(
+                        slot_symbols_[ins.b], ins.a ? 1 : -1,
+                        (ins.flags & 1) != 0);
+                else
+                    result = skein_vm_increment_symbol_value(
+                        slot.name.c_str(), ins.a ? 1 : -1,
+                        (ins.flags & 1) != 0);
+                if (!result)
+                    return OpResult::Abort;
+                if (is_control(result)) {
+                    control_out = abort_control(result);
+                    return OpResult::Control;
+                }
+                push(result);
+                return OpResult::Continue;
+            }
+
+            case Op::BinarySlots:
+            case Op::BinarySlotConst: {
+                value_t *result =
+                    binary_slot_fused(ins, op == Op::BinarySlotConst);
+                if (!result)
+                    return OpResult::Abort;
+                if (is_control(result)) {
+                    control_out = abort_control(result);
+                    return OpResult::Control;
+                }
+                push(result);
+                return OpResult::Continue;
+            }
+
+            case Op::ClearSlot: {
+                if (direct_slots_) {
+                    if (ins.b < slot_values_.size()) {
+                        for (auto &cell : open_upvalues_) {
+                            if (cell->slot == &slot_values_[ins.b])
+                                close_upvalue(*cell);
+                        }
+                        freeval(slot_values_[ins.b]);
+                        slot_values_[ins.b] = NULL;
+                        if (ins.b < slot_const_.size())
+                            slot_const_[ins.b] = 0;
+                    }
+                    return OpResult::Continue;
+                }
+                if (ins.b < slot_symbols_.size()) {
+                    struct symbol *sym = slot_symbols_[ins.b];
+                    if (sym) {
+                        for (auto &cell : open_upvalues_) {
+                            if (cell->slot == &sym->val)
+                                close_upvalue(*cell);
+                        }
+                    }
+                    if (sym && slot_pool_safe_ && !sym->scope_owned) {
+                        freeval(sym->val);
+                        sym->val = NULL;
+                        sym->is_uninitialized = false;
+                        if (slot_symbol_pool_.size() < 256)
+                            slot_symbol_pool_.push_back(sym);
+                        else
+                            std::free(sym);
+                    }
+                    slot_symbols_[ins.b] = NULL;
+                }
+                return OpResult::Continue;
+            }
+
+            default:
+                return OpResult::Continue;
+        }
+    }
+
     value_t *run() {
         while (true) {
             if (pc_ >= proto().code.size()) {
@@ -2330,266 +2611,23 @@ public:
                     break;
                 }
 
-                case Op::DefineSlot: {
-                    if (ins.b >= proto().slots.size() ||
-                        (!direct_slots_ && ins.b >= slot_symbols_.size())) {
-                        yyerror("invalid bytecode slot");
-                        return abort_error();
-                    }
-                    const skein::bc::SlotDesc &slot = proto().slots[ins.b];
-                    value_t *value = NULL;
-                    if (ins.flags & 1) {
-                        value = pop_checked();
-                        if (!value)
-                            return abort_error();
-                    } else {
-                        value = skein_vm_default_value_for_type(&slot.type);
-                        if (!value) {
-                            yyerror(
-                                "variable %s of type %s requires an "
-                                "initializer", slot.name.c_str(),
-                                type_constraint_name(&slot.type));
-                            return abort_error();
-                        }
-                    }
-                    if (is_control(value))
-                        return abort_control(value);
-                    if (isrepeated(slot.name.c_str())) {
-                        yyerror("symbol repeated %s", slot.name.c_str());
-                        freeval(value);
-                        return abort_error();
-                    }
-                    if (!validate_type_constraint(&slot.type)) {
-                        freeval(value);
-                        return abort_error();
-                    }
-                    if (!type_constraint_matches(&slot.type, value)) {
-                        yyerror("variable %s expects %s, got %s",
-                                slot.name.c_str(),
-                                type_constraint_name(&slot.type),
-                                typename_of(value));
-                        freeval(value);
-                        return abort_error();
-                    }
-                    if (direct_slots_) {
-                        if (ins.b >= slot_values_.size()) {
-                            yyerror("invalid bytecode slot");
-                            freeval(value);
-                            return abort_error();
-                        }
-                        freeval(slot_values_[ins.b]);
-                        slot_values_[ins.b] = value;
-                        if (ins.b < slot_const_.size())
-                            slot_const_[ins.b] = slot.is_const ? 1 : 0;
-                        push(newnull());
-                        break;
-                    }
-                    struct symbol *sym = NULL;
-                    if (slot_pool_safe_)
-                        sym = take_pooled_symbol(slot_symbol_pool_,
-                                                 slot.name.c_str());
-                    if (sym) {
-                        reset_slot_symbol(sym, slot, value);
-                    } else {
-                        sym = newsym(slot.name.c_str());
-                        sym->val = value;
-                        type_constraint_assign(&sym->type, &slot.type);
-                        sym->is_const = slot.is_const;
-                    }
-                    if (!slot_pool_safe_)
-                        savesym(sym);
-                    slot_symbols_[ins.b] = sym;
-                    invalidate_name_cache(slot.name.c_str());
-                    push(newnull());
-                    break;
-                }
-
-                case Op::LoadSlot: {
-                    if (ins.b >= proto().slots.size() ||
-                        (!direct_slots_ && ins.b >= slot_symbols_.size())) {
-                        yyerror("invalid bytecode slot");
-                        return abort_error();
-                    }
-                    const skein::bc::SlotDesc &slot = proto().slots[ins.b];
-                    if (direct_slots_) {
-                        if (ins.b >= slot_values_.size() ||
-                            !slot_values_[ins.b]) {
-                            yyerror("symbol not found %s",
-                                    slot.name.c_str());
-                            return abort_error();
-                        }
-                        push(dupval(slot_values_[ins.b]));
-                        break;
-                    }
-                    struct symbol *sym = slot_symbols_[ins.b];
-                    if (!sym)
-                        sym = lookupsym(slot.name.c_str());
-                    if (!sym) {
-                        yyerror("symbol not found %s", slot.name.c_str());
-                        return abort_error();
-                    }
-                    if (sym->is_uninitialized) {
-                        yyerror("parameter %s is used before it is "
-                                "initialized", sym->name);
-                        return abort_error();
-                    }
-                    push(dupval(sym->val));
-                    break;
-                }
-
-                case Op::StoreSlot: {
-                    value_t *value = pop_checked();
-                    if (!value)
-                        return abort_error();
-                    if (ins.b >= proto().slots.size() ||
-                        (!direct_slots_ && ins.b >= slot_symbols_.size())) {
-                        yyerror("invalid bytecode slot");
-                        freeval(value);
-                        return abort_error();
-                    }
-                    const skein::bc::SlotDesc &slot = proto().slots[ins.b];
-                    if (direct_slots_) {
-                        value_t *result = assign_direct_slot(ins.b, value);
-                        if (!result)
-                            return abort_error();
-                        if (is_control(result))
-                            return abort_control(result);
-                        push(result);
-                        break;
-                    }
-                    value_t *result = NULL;
-                    if (slot_symbols_[ins.b])
-                        result = skein_vm_assign_symbol_direct(
-                            slot_symbols_[ins.b], value);
-                    else
-                        result = skein_vm_assign_symbol_value(slot.name.c_str(),
-                                                     value);
-                    if (!result)
-                        return abort_error();
-                    if (is_control(result))
-                        return abort_control(result);
-                    push(result);
-                    break;
-                }
-
-                case Op::CompoundSlot: {
-                    value_t *value = pop_checked();
-                    if (!value)
-                        return abort_error();
-                    if (ins.b >= proto().slots.size() ||
-                        (!direct_slots_ && ins.b >= slot_symbols_.size())) {
-                        yyerror("invalid bytecode slot");
-                        freeval(value);
-                        return abort_error();
-                    }
-                    const skein::bc::SlotDesc &slot = proto().slots[ins.b];
-                    if (direct_slots_) {
-                        value_t *result = compound_direct_slot(
-                            ins.b, (int)ins.flags, value);
-                        if (!result)
-                            return abort_error();
-                        if (is_control(result))
-                            return abort_control(result);
-                        push(result);
-                        break;
-                    }
-                    value_t *result = NULL;
-                    if (slot_symbols_[ins.b])
-                        result = skein_vm_compound_symbol_direct(
-                            slot_symbols_[ins.b], (int)ins.flags, value);
-                    else
-                        result = skein_vm_compound_symbol_value(
-                            slot.name.c_str(), (int)ins.flags, value);
-                    if (!result)
-                        return abort_error();
-                    if (is_control(result))
-                        return abort_control(result);
-                    push(result);
-                    break;
-                }
-
-                case Op::IncDecSlot: {
-                    if (ins.b >= proto().slots.size() ||
-                        (!direct_slots_ && ins.b >= slot_symbols_.size())) {
-                        yyerror("invalid bytecode slot");
-                        return abort_error();
-                    }
-                    const skein::bc::SlotDesc &slot = proto().slots[ins.b];
-                    if (direct_slots_) {
-                        value_t *result = incdec_direct_slot(
-                            ins.b, ins.a ? 1 : -1,
-                            (ins.flags & 1) != 0);
-                        if (!result)
-                            return abort_error();
-                        if (is_control(result))
-                            return abort_control(result);
-                        push(result);
-                        break;
-                    }
-                    value_t *result = NULL;
-                    if (slot_symbols_[ins.b])
-                        result = skein_vm_increment_symbol_direct(
-                            slot_symbols_[ins.b], ins.a ? 1 : -1,
-                            (ins.flags & 1) != 0);
-                    else
-                        result = skein_vm_increment_symbol_value(
-                            slot.name.c_str(), ins.a ? 1 : -1,
-                            (ins.flags & 1) != 0);
-                    if (!result)
-                        return abort_error();
-                    if (is_control(result))
-                        return abort_control(result);
-                    push(result);
-                    break;
-                }
-
+                case Op::DefineSlot:
+                case Op::LoadSlot:
+                case Op::StoreSlot:
+                case Op::CompoundSlot:
+                case Op::IncDecSlot:
                 case Op::BinarySlots:
-                case Op::BinarySlotConst: {
-                    value_t *result = binary_slot_fused(
-                        ins, static_cast<Op>(ins.op) ==
-                                 Op::BinarySlotConst);
-                    if (!result)
+                case Op::BinarySlotConst:
+                case Op::ClearSlot: {
+                    value_t *control_out = NULL;
+                    OpResult result = run_slot_op(
+                        static_cast<Op>(ins.op), ins, control_out);
+                    if (result == OpResult::Abort)
                         return abort_error();
-                    if (is_control(result))
-                        return abort_control(result);
-                    push(result);
+                    if (result == OpResult::Control)
+                        return control_out;
                     break;
                 }
-
-                case Op::ClearSlot:
-                    if (direct_slots_) {
-                        if (ins.b < slot_values_.size()) {
-                            for (auto &cell : open_upvalues_) {
-                                if (cell->slot == &slot_values_[ins.b])
-                                    close_upvalue(*cell);
-                            }
-                            freeval(slot_values_[ins.b]);
-                            slot_values_[ins.b] = NULL;
-                            if (ins.b < slot_const_.size())
-                                slot_const_[ins.b] = 0;
-                        }
-                        break;
-                    }
-                    if (ins.b < slot_symbols_.size()) {
-                        struct symbol *sym = slot_symbols_[ins.b];
-                        if (sym) {
-                            for (auto &cell : open_upvalues_) {
-                                if (cell->slot == &sym->val)
-                                    close_upvalue(*cell);
-                            }
-                        }
-                        if (sym && slot_pool_safe_ && !sym->scope_owned) {
-                            freeval(sym->val);
-                            sym->val = NULL;
-                            sym->is_uninitialized = false;
-                            if (slot_symbol_pool_.size() < 256)
-                                slot_symbol_pool_.push_back(sym);
-                            else
-                                std::free(sym);
-                        }
-                        slot_symbols_[ins.b] = NULL;
-                    }
-                    break;
 
                 case Op::LoadUpvalue:
                 case Op::StoreUpvalue:

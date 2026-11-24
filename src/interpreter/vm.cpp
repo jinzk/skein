@@ -1305,6 +1305,179 @@ public:
         return OpResult::Continue;
     }
 
+    OpResult run_member_read_op(Op op, const Instr &ins) {
+        switch (op) {
+            case Op::GetIndex:
+            case Op::GetField: {
+                value_t *index = pop_checked();
+                value_t *container = pop_checked();
+                if (!index || !container) {
+                    freeval(index);
+                    freeval(container);
+                    return OpResult::Abort;
+                }
+                value_t *result = skein_vm_read_member_value(
+                    container, index, op == Op::GetField);
+                freeval(container);
+                freeval(index);
+                if (!result)
+                    return OpResult::Abort;
+                push(result);
+                return OpResult::Continue;
+            }
+
+            case Op::GetIndexCached: {
+                value_t *index = pop_checked();
+                value_t *container = pop_checked();
+                if (!index || !container) {
+                    freeval(index);
+                    freeval(container);
+                    return OpResult::Abort;
+                }
+                skein::bc::IndexReadCacheEntry *cache = NULL;
+                if (ins.b < proto().index_read_ic.size())
+                    cache = &proto().index_read_ic[ins.b];
+                value_t *result = read_index_cached(container, index, cache);
+                freeval(container);
+                freeval(index);
+                if (!result)
+                    return OpResult::Abort;
+                push(result);
+                return OpResult::Continue;
+            }
+
+            case Op::GetIndexBaseCached: {
+                if (ins.b >= proto().index_ops.size()) {
+                    yyerror("invalid bytecode index descriptor");
+                    return OpResult::Abort;
+                }
+                const skein::bc::IndexDesc &desc =
+                    proto().index_ops[ins.b];
+                if (desc.fields.size() != 1) {
+                    yyerror("invalid bytecode index descriptor");
+                    return OpResult::Abort;
+                }
+                struct symbol *base = index_base_symbol(desc);
+                if (!base) {
+                    yyerror("symbol not found %s",
+                            desc.base_name.c_str());
+                    return OpResult::Abort;
+                }
+                if (base->is_uninitialized) {
+                    yyerror("parameter %s is used before it is "
+                            "initialized",
+                            desc.base_name.c_str());
+                    return OpResult::Abort;
+                }
+                if (!base->val) {
+                    if (desc.base_kind ==
+                        skein::bc::IndexBaseKind::Param)
+                        yyerror("parameter %s is used before it is "
+                                "initialized",
+                                desc.base_name.c_str());
+                    else
+                        yyerror("symbol not found %s",
+                                desc.base_name.c_str());
+                    return OpResult::Abort;
+                }
+                value_t *key = NULL;
+                bool owns_key = false;
+                if (desc.const_key != UINT32_MAX) {
+                    if (desc.const_key >= proto().consts.size() ||
+                        proto().consts[desc.const_key].kind !=
+                            skein::bc::ConstantKind::Value ||
+                        !proto().consts[desc.const_key].value) {
+                        yyerror("invalid bytecode constant");
+                        return OpResult::Abort;
+                    }
+                    key = proto().consts[desc.const_key].value.get();
+                } else {
+                    key = pop_checked();
+                    if (!key)
+                        return OpResult::Abort;
+                    owns_key = true;
+                }
+                skein::bc::IndexReadCacheEntry *cache = NULL;
+                if (desc.read_cache < proto().index_read_ic.size())
+                    cache = &proto().index_read_ic[desc.read_cache];
+                value_t *result = read_index_cached(base->val, key, cache);
+                if (owns_key)
+                    freeval(key);
+                if (!result)
+                    return OpResult::Abort;
+                push(result);
+                return OpResult::Continue;
+            }
+
+            case Op::GetFieldName: {
+                value_t *container = pop_checked();
+                if (!container)
+                    return OpResult::Abort;
+                value_t *result = read_field_cached(
+                    container, name_at(proto(), ins.b), member_cache(ins.b));
+                freeval(container);
+                if (!result)
+                    return OpResult::Abort;
+                push(result);
+                return OpResult::Continue;
+            }
+
+            case Op::GetFieldOrEnum: {
+                if (ins.b >= proto().field_or_enum.size()) {
+                    yyerror("invalid field-or-enum descriptor");
+                    return OpResult::Abort;
+                }
+                const skein::bc::FieldOrEnumDesc &desc =
+                    proto().field_or_enum[ins.b];
+                value_t *result = NULL;
+                struct symbol *base = lookupsym(desc.base.c_str());
+                if (base) {
+                    if (base->is_uninitialized) {
+                        yyerror("parameter %s is used before it is "
+                                "initialized",
+                                desc.base.c_str());
+                        return OpResult::Abort;
+                    }
+                    value_t *container = dupval(base->val);
+                    if (!container)
+                        return OpResult::Abort;
+                    result = read_field_cached(container, desc.field.c_str(),
+                                               NULL);
+                    freeval(container);
+                } else {
+                    structtype_lookup_result lookup;
+                    std::string error;
+                    structtype_lookup_status status = structtype_lookup_type(
+                        nullptr, desc.source.c_str(), desc.base.c_str(),
+                        lookup, error);
+                    if (status == STRUCTTYPE_LOOKUP_FOUND &&
+                        lookup.kind == STRUCTTYPE_LOOKUP_ENUM) {
+                        std::vector<std::pair<std::string, value_t *>> fields;
+                        std::vector<bool> spread;
+                        result = build_enum_value(
+                            lookup.enumeration->source.c_str(),
+                            lookup.enumeration->name.c_str(),
+                            desc.field.c_str(), fields, spread);
+                    } else if (status == STRUCTTYPE_LOOKUP_AMBIGUOUS ||
+                               status == STRUCTTYPE_LOOKUP_NOT_VISIBLE ||
+                               status == STRUCTTYPE_LOOKUP_ERROR) {
+                        yyerror("%s", error.c_str());
+                    } else {
+                        yyerror("symbol not found %s",
+                                desc.base.c_str());
+                    }
+                }
+                if (!result)
+                    return OpResult::Abort;
+                push(result);
+                return OpResult::Continue;
+            }
+
+            default:
+                return OpResult::Continue;
+        }
+    }
+
     value_t *run() {
         while (true) {
             if (pc_ >= proto().code.size()) {
@@ -2295,177 +2468,15 @@ public:
                 }
 
                 case Op::GetIndex:
-                case Op::GetField: {
-                    value_t *index = pop_checked();
-                    value_t *container = pop_checked();
-                    if (!index || !container) {
-                        freeval(index);
-                        freeval(container);
+                case Op::GetField:
+                case Op::GetIndexCached:
+                case Op::GetIndexBaseCached:
+                case Op::GetFieldName:
+                case Op::GetFieldOrEnum:
+                    if (run_member_read_op(static_cast<Op>(ins.op), ins) ==
+                        OpResult::Abort)
                         return abort_error();
-                    }
-                    value_t *result = skein_vm_read_member_value(
-                        container, index, static_cast<Op>(ins.op) == Op::GetField);
-                    freeval(container);
-                    freeval(index);
-                    if (!result)
-                        return abort_error();
-                    push(result);
                     break;
-                }
-
-                case Op::GetIndexCached: {
-                    value_t *index = pop_checked();
-                    value_t *container = pop_checked();
-                    if (!index || !container) {
-                        freeval(index);
-                        freeval(container);
-                        return abort_error();
-                    }
-                    skein::bc::IndexReadCacheEntry *cache = NULL;
-                    if (ins.b < proto().index_read_ic.size())
-                        cache = &proto().index_read_ic[ins.b];
-                    value_t *result =
-                        read_index_cached(container, index, cache);
-                    freeval(container);
-                    freeval(index);
-                    if (!result)
-                        return abort_error();
-                    push(result);
-                    break;
-                }
-
-                case Op::GetIndexBaseCached: {
-                    if (ins.b >= proto().index_ops.size()) {
-                        yyerror("invalid bytecode index descriptor");
-                        return abort_error();
-                    }
-                    const skein::bc::IndexDesc &desc =
-                        proto().index_ops[ins.b];
-                    if (desc.fields.size() != 1) {
-                        yyerror("invalid bytecode index descriptor");
-                        return abort_error();
-                    }
-                    struct symbol *base = index_base_symbol(desc);
-                    if (!base) {
-                        yyerror("symbol not found %s",
-                                desc.base_name.c_str());
-                        return abort_error();
-                    }
-                    if (base->is_uninitialized) {
-                        yyerror("parameter %s is used before it is "
-                                "initialized",
-                                desc.base_name.c_str());
-                        return abort_error();
-                    }
-                    if (!base->val) {
-                        if (desc.base_kind ==
-                            skein::bc::IndexBaseKind::Param)
-                            yyerror("parameter %s is used before it is "
-                                    "initialized",
-                                    desc.base_name.c_str());
-                        else
-                            yyerror("symbol not found %s",
-                                    desc.base_name.c_str());
-                        return abort_error();
-                    }
-                    value_t *key = NULL;
-                    bool owns_key = false;
-                    if (desc.const_key != UINT32_MAX) {
-                        if (desc.const_key >= proto().consts.size() ||
-                            proto().consts[desc.const_key].kind !=
-                                skein::bc::ConstantKind::Value ||
-                            !proto().consts[desc.const_key].value) {
-                            yyerror("invalid bytecode constant");
-                            return abort_error();
-                        }
-                        key = proto().consts[desc.const_key].value.get();
-                    } else {
-                        key = pop_checked();
-                        if (!key)
-                            return abort_error();
-                        owns_key = true;
-                    }
-                    skein::bc::IndexReadCacheEntry *cache = NULL;
-                    if (desc.read_cache < proto().index_read_ic.size())
-                        cache = &proto().index_read_ic[desc.read_cache];
-                    value_t *result =
-                        read_index_cached(base->val, key, cache);
-                    if (owns_key)
-                        freeval(key);
-                    if (!result)
-                        return abort_error();
-                    push(result);
-                    break;
-                }
-
-                case Op::GetFieldName: {
-                    value_t *container = pop_checked();
-                    if (!container)
-                        return abort_error();
-                    value_t *result = read_field_cached(
-                        container, name_at(proto(), ins.b),
-                        member_cache(ins.b));
-                    freeval(container);
-                    if (!result)
-                        return abort_error();
-                    push(result);
-                    break;
-                }
-
-                case Op::GetFieldOrEnum: {
-                    if (ins.b >= proto().field_or_enum.size()) {
-                        yyerror("invalid field-or-enum descriptor");
-                        return abort_error();
-                    }
-                    const skein::bc::FieldOrEnumDesc &desc =
-                        proto().field_or_enum[ins.b];
-                    value_t *result = NULL;
-                    struct symbol *base =
-                        lookupsym(desc.base.c_str());
-                    if (base) {
-                        if (base->is_uninitialized) {
-                            yyerror("parameter %s is used before it is "
-                                    "initialized",
-                                    desc.base.c_str());
-                            return abort_error();
-                        }
-                        value_t *container = dupval(base->val);
-                        if (!container)
-                            return abort_error();
-                        result = read_field_cached(
-                            container, desc.field.c_str(), NULL);
-                        freeval(container);
-                    } else {
-                        structtype_lookup_result lookup;
-                        std::string error;
-                        structtype_lookup_status status =
-                            structtype_lookup_type(
-                                nullptr, desc.source.c_str(),
-                                desc.base.c_str(), lookup, error);
-                        if (status == STRUCTTYPE_LOOKUP_FOUND &&
-                            lookup.kind == STRUCTTYPE_LOOKUP_ENUM) {
-                            std::vector<std::pair<std::string, value_t *>>
-                                fields;
-                            std::vector<bool> spread;
-                            result = build_enum_value(
-                                lookup.enumeration->source.c_str(),
-                                lookup.enumeration->name.c_str(),
-                                desc.field.c_str(), fields, spread);
-                        } else if (status == STRUCTTYPE_LOOKUP_AMBIGUOUS ||
-                                   status ==
-                                       STRUCTTYPE_LOOKUP_NOT_VISIBLE ||
-                                   status == STRUCTTYPE_LOOKUP_ERROR) {
-                            yyerror("%s", error.c_str());
-                        } else {
-                            yyerror("symbol not found %s",
-                                    desc.base.c_str());
-                        }
-                    }
-                    if (!result)
-                        return abort_error();
-                    push(result);
-                    break;
-                }
 
                 case Op::IterNew: {
                     uint32_t desc_index = ins.a;

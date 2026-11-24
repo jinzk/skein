@@ -330,7 +330,11 @@ public:
         context_.handler_depth = saved_handler_depth_;
     }
 
-    enum class OpResult { Continue, Abort };
+    /*
+     * Continue keeps dispatching, Abort returns the current error, and
+     * Control returns a pending break/continue/return value to the caller.
+     */
+    enum class OpResult { Continue, Abort, Control };
 
     /*
      * Handler, defer, and result-control opcodes are cold relative to the
@@ -977,6 +981,69 @@ public:
                 }
                 throw_unwind(UnwindKind::Recover, value);
                 return OpResult::Abort;
+            }
+
+            default:
+                return OpResult::Continue;
+        }
+    }
+
+    OpResult run_scope_op(Op op, const Instr &ins, const SourceLoc &loc,
+                          value_t *&control_out) {
+        switch (op) {
+            case Op::PushScope:
+                if (!block_scopes_) {
+                    ++skipped_scopes_;
+                    return OpResult::Continue;
+                }
+                /*
+                 * A fresh scope has no symbols yet, so it cannot shadow
+                 * anything.  Cached outer-symbol pointers remain valid
+                 * until a declaration in the new scope invalidates them.
+                 */
+                skein_vm_eval_pushscope();
+                if (proto().uses_defers)
+                    defer_scopes_.emplace_back();
+                return OpResult::Continue;
+
+            case Op::PopScope: {
+                if (!block_scopes_ && skipped_scopes_ > 0) {
+                    --skipped_scopes_;
+                    return OpResult::Continue;
+                }
+                /* Plain slot/param frames skip their function scope; the
+                 * trailing PopScope for that frame is a no-op. */
+                if (!frame_scope_pushed_ &&
+                    context_.scopes.restore_stack.size() <= scope_mark_)
+                    return OpResult::Continue;
+                scope_t *scope = topscope();
+                bool had_symbols = scope && !scope->syms.small.empty();
+                if (proto().uses_defers && !defer_scopes_.empty()) {
+                    run_defer_scope(defer_scopes_.back());
+                    defer_scopes_.pop_back();
+                }
+                close_scope_upvalues(scope);
+                skein_vm_eval_popscope();
+                if (had_symbols)
+                    invalidate_name_cache();
+                if (context_.control != EVAL_CONTROL_NONE)
+                    return OpResult::Abort;
+                if (context_.runtime_error_count != errors_before_)
+                    return OpResult::Abort;
+                return OpResult::Continue;
+            }
+
+            case Op::ControlBreak:
+            case Op::ControlContinue: {
+                const char *label = NULL;
+                if (ins.b != UINT32_MAX)
+                    label = name_at(proto(), ins.b);
+                diag_set_flow_location(
+                    loc.line > 0 ? loc.line : 0,
+                    loc.column > 0 ? loc.column : 0);
+                control_out = op == Op::ControlBreak ? newbreak(label)
+                                                     : newcontinue(label);
+                return OpResult::Control;
             }
 
             default:
@@ -3206,61 +3273,17 @@ public:
                 }
 
                 case Op::PushScope:
-                    if (!block_scopes_) {
-                        ++skipped_scopes_;
-                        break;
-                    }
-                    /*
-                     * A fresh scope has no symbols yet, so it cannot shadow
-                     * anything.  Cached outer-symbol pointers remain valid
-                     * until a declaration in the new scope invalidates them.
-                     */
-                    skein_vm_eval_pushscope();
-                    if (proto().uses_defers)
-                        defer_scopes_.emplace_back();
-                    break;
-
-                case Op::PopScope: {
-                    if (!block_scopes_ && skipped_scopes_ > 0) {
-                        --skipped_scopes_;
-                        break;
-                    }
-                    /* Plain slot/param frames skip their function scope; the
-                     * trailing PopScope for that frame is a no-op. */
-                    if (!frame_scope_pushed_ &&
-                        context_.scopes.restore_stack.size() <= scope_mark_)
-                        break;
-                    scope_t *scope = topscope();
-                    bool had_symbols =
-                        scope && !scope->syms.small.empty();
-                    if (proto().uses_defers && !defer_scopes_.empty()) {
-                        run_defer_scope(defer_scopes_.back());
-                        defer_scopes_.pop_back();
-                    }
-                    close_scope_upvalues(scope);
-                    skein_vm_eval_popscope();
-                    if (had_symbols)
-                        invalidate_name_cache();
-                    if (context_.control != EVAL_CONTROL_NONE)
-                        return abort_error();
-                    if (context_.runtime_error_count != errors_before_)
-                        return abort_error();
-                    break;
-                }
-
+                case Op::PopScope:
                 case Op::ControlBreak:
                 case Op::ControlContinue: {
-                    const char *label = NULL;
-                    if (ins.b != UINT32_MAX)
-                        label = name_at(proto(), ins.b);
-                    diag_set_flow_location(
-                        loc.line > 0 ? loc.line : 0,
-                        loc.column > 0 ? loc.column : 0);
-                    value_t *control =
-                        static_cast<Op>(ins.op) == Op::ControlBreak
-                            ? newbreak(label)
-                            : newcontinue(label);
-                    return abort_control(control);
+                    value_t *control_out = NULL;
+                    OpResult result = run_scope_op(
+                        static_cast<Op>(ins.op), ins, loc, control_out);
+                    if (result == OpResult::Abort)
+                        return abort_error();
+                    if (result == OpResult::Control)
+                        return control_out;
+                    break;
                 }
 
                 case Op::RuntimeError: {

@@ -916,6 +916,74 @@ public:
         }
     }
 
+    /*
+     * Yield, fail, pass, and recover only manipulate the operand stack and
+     * unwind into an enclosing handler.  They never produce a control value,
+     * so they fit the plain Continue/Abort result.
+     */
+    OpResult run_error_flow_op(Op op, const Instr &ins) {
+        switch (op) {
+            case Op::Yield: {
+                value_t *value = pop_checked();
+                if (!value)
+                    return OpResult::Abort;
+                value_t *result = fiber_yield_value(value);
+                if (context_.control != EVAL_CONTROL_NONE ||
+                    context_.runtime_error_count != errors_before_) {
+                    freeval(result);
+                    return OpResult::Abort;
+                }
+                push(result ? result : newnull());
+                return OpResult::Continue;
+            }
+
+            case Op::Fail: {
+                value_t *value = pop_checked();
+                if (!value)
+                    return OpResult::Abort;
+                if (context_.control != EVAL_CONTROL_NONE) {
+                    freeval(value);
+                    return OpResult::Abort;
+                }
+                raise_fail_value(value, "fail");
+                return OpResult::Abort;
+            }
+
+            case Op::Pass: {
+                value_t *value = pop_checked();
+                if (!value)
+                    return OpResult::Abort;
+                if (handler_body_depth_ <= 0) {
+                    yyerror("pass outside error handler");
+                    freeval(value);
+                    return OpResult::Abort;
+                }
+                if (context_.control != EVAL_CONTROL_NONE) {
+                    freeval(value);
+                    return OpResult::Abort;
+                }
+                raise_fail_value(value, "fail");
+                return OpResult::Abort;
+            }
+
+            case Op::Recover: {
+                value_t *value = pop_checked();
+                if (!value)
+                    return OpResult::Abort;
+                if (!has_handler(UnwindKind::Recover)) {
+                    yyerror("recover outside error handler");
+                    freeval(value);
+                    return OpResult::Abort;
+                }
+                throw_unwind(UnwindKind::Recover, value);
+                return OpResult::Abort;
+            }
+
+            default:
+                return OpResult::Continue;
+        }
+    }
+
     value_t *run() {
         while (true) {
             if (pc_ >= proto().code.size()) {
@@ -2541,60 +2609,14 @@ public:
                     break;
                 }
 
-                case Op::Yield: {
-                    value_t *value = pop_checked();
-                    if (!value)
+                case Op::Yield:
+                case Op::Fail:
+                case Op::Pass:
+                case Op::Recover:
+                    if (run_error_flow_op(static_cast<Op>(ins.op), ins) ==
+                        OpResult::Abort)
                         return abort_error();
-                    value_t *result = fiber_yield_value(value);
-                    if (context_.control != EVAL_CONTROL_NONE ||
-                        context_.runtime_error_count != errors_before_) {
-                        freeval(result);
-                        return abort_error();
-                    }
-                    push(result ? result : newnull());
                     break;
-                }
-
-                case Op::Fail: {
-                    value_t *value = pop_checked();
-                    if (!value)
-                        return abort_error();
-                    if (context_.control != EVAL_CONTROL_NONE) {
-                        freeval(value);
-                        return abort_error();
-                    }
-                    raise_fail_value(value, "fail");
-                    return abort_error();
-                }
-
-                case Op::Pass: {
-                    value_t *value = pop_checked();
-                    if (!value)
-                        return abort_error();
-                    if (handler_body_depth_ <= 0) {
-                        yyerror("pass outside error handler");
-                        freeval(value);
-                        return abort_error();
-                    }
-                    if (context_.control != EVAL_CONTROL_NONE) {
-                        freeval(value);
-                        return abort_error();
-                    }
-                    raise_fail_value(value, "fail");
-                    return abort_error();
-                }
-
-                case Op::Recover: {
-                    value_t *value = pop_checked();
-                    if (!value)
-                        return abort_error();
-                    if (!has_handler(UnwindKind::Recover)) {
-                        yyerror("recover outside error handler");
-                        freeval(value);
-                        return abort_error();
-                    }
-                    throw_unwind(UnwindKind::Recover, value);
-                }
 
                 case Op::PushFailHandler:
                 case Op::PushRecoverHandler:

@@ -1964,6 +1964,114 @@ public:
         }
     }
 
+    OpResult run_upvalue_op(Op op, const Instr &ins,
+                            value_t *&control_out) {
+        switch (op) {
+            case Op::LoadUpvalue: {
+                struct upvalue_cell *cell = upvalue_cell_at(ins.b);
+                if (cell) {
+                    value_t *value = cell_value(cell);
+                    if (!value) {
+                        yyerror("invalid bytecode upvalue");
+                        return OpResult::Abort;
+                    }
+                    push(dupval(value));
+                    return OpResult::Continue;
+                }
+                struct symbol *sym = upvalue_fallback_symbol(ins.b);
+                if (!sym)
+                    return OpResult::Abort;
+                if (sym->is_uninitialized) {
+                    yyerror("parameter %s is used before it is initialized",
+                            sym->name);
+                    return OpResult::Abort;
+                }
+                push(dupval(sym->val));
+                return OpResult::Continue;
+            }
+
+            case Op::StoreUpvalue: {
+                value_t *value = pop_checked();
+                if (!value)
+                    return OpResult::Abort;
+                struct upvalue_cell *cell = upvalue_cell_at(ins.b);
+                value_t *result = NULL;
+                if (cell) {
+                    result = assign_upvalue_cell(cell, value);
+                } else {
+                    struct symbol *sym = upvalue_fallback_symbol(ins.b);
+                    if (!sym) {
+                        freeval(value);
+                        return OpResult::Abort;
+                    }
+                    result = skein_vm_assign_symbol_direct(sym, value);
+                }
+                if (!result)
+                    return OpResult::Abort;
+                if (is_control(result)) {
+                    control_out = abort_control(result);
+                    return OpResult::Control;
+                }
+                push(result);
+                return OpResult::Continue;
+            }
+
+            case Op::CompoundUpvalue: {
+                value_t *value = pop_checked();
+                if (!value)
+                    return OpResult::Abort;
+                struct upvalue_cell *cell = upvalue_cell_at(ins.b);
+                value_t *result = NULL;
+                if (cell) {
+                    result = compound_upvalue_cell(cell, (int)ins.flags,
+                                                   value);
+                } else {
+                    struct symbol *sym = upvalue_fallback_symbol(ins.b);
+                    if (!sym) {
+                        freeval(value);
+                        return OpResult::Abort;
+                    }
+                    result = skein_vm_compound_symbol_direct(
+                        sym, (int)ins.flags, value);
+                }
+                if (!result)
+                    return OpResult::Abort;
+                if (is_control(result)) {
+                    control_out = abort_control(result);
+                    return OpResult::Control;
+                }
+                push(result);
+                return OpResult::Continue;
+            }
+
+            case Op::IncDecUpvalue: {
+                struct upvalue_cell *cell = upvalue_cell_at(ins.b);
+                value_t *result = NULL;
+                if (cell) {
+                    result = incdec_upvalue_cell(cell, ins.a ? 1 : -1,
+                                                 (ins.flags & 1) != 0);
+                } else {
+                    struct symbol *sym = upvalue_fallback_symbol(ins.b);
+                    if (!sym)
+                        return OpResult::Abort;
+                    result = skein_vm_increment_symbol_direct(
+                        sym, ins.a ? 1 : -1, (ins.flags & 1) != 0);
+                }
+                if (!result)
+                    return OpResult::Abort;
+                if (is_control(result)) {
+                    control_out = abort_control(result);
+                    return OpResult::Control;
+                }
+                push(result);
+                return OpResult::Continue;
+            }
+
+            default:
+                return OpResult::Continue;
+        }
+    }
+
     value_t *run() {
         while (true) {
             if (pc_ >= proto().code.size()) {
@@ -2449,98 +2557,17 @@ public:
                     }
                     break;
 
-                case Op::LoadUpvalue: {
-                    struct upvalue_cell *cell = upvalue_cell_at(ins.b);
-                    if (cell) {
-                        value_t *value = cell_value(cell);
-                        if (!value) {
-                            yyerror("invalid bytecode upvalue");
-                            return abort_error();
-                        }
-                        push(dupval(value));
-                        break;
-                    }
-                    struct symbol *sym = upvalue_fallback_symbol(ins.b);
-                    if (!sym)
-                        return abort_error();
-                    if (sym->is_uninitialized) {
-                        yyerror("parameter %s is used before it is initialized",
-                                sym->name);
-                        return abort_error();
-                    }
-                    push(dupval(sym->val));
-                    break;
-                }
-
-                case Op::StoreUpvalue: {
-                    value_t *value = pop_checked();
-                    if (!value)
-                        return abort_error();
-                    struct upvalue_cell *cell = upvalue_cell_at(ins.b);
-                    value_t *result = NULL;
-                    if (cell) {
-                        result = assign_upvalue_cell(cell, value);
-                    } else {
-                        struct symbol *sym = upvalue_fallback_symbol(ins.b);
-                        if (!sym) {
-                            freeval(value);
-                            return abort_error();
-                        }
-                        result = skein_vm_assign_symbol_direct(sym, value);
-                    }
-                    if (!result)
-                        return abort_error();
-                    if (is_control(result))
-                        return abort_control(result);
-                    push(result);
-                    break;
-                }
-
-                case Op::CompoundUpvalue: {
-                    value_t *value = pop_checked();
-                    if (!value)
-                        return abort_error();
-                    struct upvalue_cell *cell = upvalue_cell_at(ins.b);
-                    value_t *result = NULL;
-                    if (cell) {
-                        result = compound_upvalue_cell(
-                            cell, (int)ins.flags, value);
-                    } else {
-                        struct symbol *sym = upvalue_fallback_symbol(ins.b);
-                        if (!sym) {
-                            freeval(value);
-                            return abort_error();
-                        }
-                        result = skein_vm_compound_symbol_direct(
-                            sym, (int)ins.flags, value);
-                    }
-                    if (!result)
-                        return abort_error();
-                    if (is_control(result))
-                        return abort_control(result);
-                    push(result);
-                    break;
-                }
-
+                case Op::LoadUpvalue:
+                case Op::StoreUpvalue:
+                case Op::CompoundUpvalue:
                 case Op::IncDecUpvalue: {
-                    struct upvalue_cell *cell = upvalue_cell_at(ins.b);
-                    value_t *result = NULL;
-                    if (cell) {
-                        result = incdec_upvalue_cell(
-                            cell, ins.a ? 1 : -1,
-                            (ins.flags & 1) != 0);
-                    } else {
-                        struct symbol *sym = upvalue_fallback_symbol(ins.b);
-                        if (!sym)
-                            return abort_error();
-                        result = skein_vm_increment_symbol_direct(
-                            sym, ins.a ? 1 : -1, (ins.flags & 1) != 0);
-                    }
-                    if (!result)
+                    value_t *control_out = NULL;
+                    OpResult result = run_upvalue_op(
+                        static_cast<Op>(ins.op), ins, control_out);
+                    if (result == OpResult::Abort)
                         return abort_error();
-                    if (is_control(result))
-                        return abort_control(result);
-                    push(result);
+                    if (result == OpResult::Control)
+                        return control_out;
                     break;
                 }
 

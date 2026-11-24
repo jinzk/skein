@@ -330,6 +330,140 @@ public:
         context_.handler_depth = saved_handler_depth_;
     }
 
+    enum class HandlerOpResult { Continue, Abort };
+
+    /*
+     * Handler, defer, and result-control opcodes are cold relative to the
+     * arithmetic/name/slot paths.  Keeping them in a separate method makes the
+     * main dispatch loop easier to navigate without changing its hot cases.
+     */
+    HandlerOpResult run_handler_defer_op(Op op, const Instr &ins) {
+        switch (op) {
+            case Op::PushFailHandler:
+            case Op::PushRecoverHandler: {
+                handler_state handler;
+                handler.kind = op == Op::PushFailHandler
+                                   ? UnwindKind::Fail
+                                   : UnwindKind::Recover;
+                handler.target = ins.b;
+                handler.stack_depth = stack_.size();
+                handler.scope_depth =
+                    context_.scopes.restore_stack.size();
+                if (op == Op::PushRecoverHandler &&
+                    (ins.flags & 1) != 0 && handler.scope_depth > 0)
+                    --handler.scope_depth;
+                handler.handler_body_depth = handler_body_depth_;
+                handler.eval_handler_depth = context_.handler_depth;
+                handler.capture = op == Op::PushFailHandler &&
+                                  (ins.flags & 1) != 0;
+                if (handler.capture)
+                    skein_vm_eval_capture_begin(handler.snapshot);
+                handlers_.push_back(handler);
+                if (vm_stats_enabled &&
+                    handlers_.size() > vm_stats.max_handler_depth)
+                    vm_stats.max_handler_depth = handlers_.size();
+                return HandlerOpResult::Continue;
+            }
+
+            case Op::PopHandler: {
+                if (handlers_.empty()) {
+                    yyerror("internal bytecode handler underflow");
+                    return HandlerOpResult::Abort;
+                }
+                value_t *error = end_handler_capture(handlers_.back());
+                freeval(error);
+                handlers_.pop_back();
+                return HandlerOpResult::Continue;
+            }
+
+            case Op::PopHandlers: {
+                if (handlers_.size() < ins.a) {
+                    yyerror("internal bytecode handler underflow");
+                    return HandlerOpResult::Abort;
+                }
+                while (handlers_.size() > ins.a) {
+                    value_t *error =
+                        end_handler_capture(handlers_.back());
+                    freeval(error);
+                    handlers_.pop_back();
+                }
+                handler_body_depth_ = ins.flags;
+                context_.handler_depth = saved_handler_depth_ + ins.flags;
+                return HandlerOpResult::Continue;
+            }
+
+            case Op::CheckResult: {
+                value_t *value = pop_checked();
+                if (!value)
+                    return HandlerOpResult::Abort;
+                if (value->type != T_result) {
+                    push(value);
+                    return HandlerOpResult::Continue;
+                }
+                struct result_value_t *result =
+                    (struct result_value_t *)value;
+                if (result->ok) {
+                    value_t *inner = dupval(result->value);
+                    freeval(value);
+                    push(inner ? inner : newnull());
+                    return HandlerOpResult::Continue;
+                }
+                value_t *error = dupval(result->error);
+                freeval(value);
+                if (!error)
+                    error = newerrorval("fail", "");
+                if (has_handler(UnwindKind::Fail))
+                    throw_unwind(UnwindKind::Fail, error);
+                skein_vm_eval_raise(error);
+                return HandlerOpResult::Abort;
+            }
+
+            case Op::EnterHandlerBody:
+                ++handler_body_depth_;
+                ++context_.handler_depth;
+                return HandlerOpResult::Continue;
+
+            case Op::LeaveHandlerBody:
+                if (handler_body_depth_ > 0)
+                    --handler_body_depth_;
+                if (context_.handler_depth > saved_handler_depth_)
+                    --context_.handler_depth;
+                return HandlerOpResult::Continue;
+
+            case Op::DeferPush: {
+                if (ins.b >= proto().defer_protos.size() ||
+                    defer_scopes_.empty()) {
+                    yyerror("invalid bytecode defer descriptor");
+                    return HandlerOpResult::Abort;
+                }
+                defer_record record;
+                record.proto = proto().defer_protos[ins.b];
+                if (ins.b < proto().defer_captures.size()) {
+                    const std::vector<skein::bc::DeferCapture> &captures =
+                        proto().defer_captures[ins.b];
+                    record.upvalues.reserve(captures.size());
+                    for (const skein::bc::DeferCapture &capture : captures) {
+                        std::shared_ptr<struct upvalue_cell> cell =
+                            capture_defer_cell(capture);
+                        if (!cell)
+                            return HandlerOpResult::Abort;
+                        record.upvalues.push_back(std::move(cell));
+                    }
+                }
+                defer_scopes_.back().push_back(std::move(record));
+                ++context_.vm_defer_count;
+                if (vm_stats_enabled &&
+                    (uint64_t)context_.vm_defer_count >
+                        vm_stats.max_defer_depth)
+                    vm_stats.max_defer_depth = context_.vm_defer_count;
+                return HandlerOpResult::Continue;
+            }
+
+            default:
+                return HandlerOpResult::Continue;
+        }
+    }
+
     value_t *run() {
         while (true) {
             if (pc_ >= proto().code.size()) {
@@ -2283,87 +2417,17 @@ public:
                 }
 
                 case Op::PushFailHandler:
-                case Op::PushRecoverHandler: {
-                    handler_state handler;
-                    handler.kind =
-                        static_cast<Op>(ins.op) == Op::PushFailHandler
-                            ? UnwindKind::Fail
-                            : UnwindKind::Recover;
-                    handler.target = ins.b;
-                    handler.stack_depth = stack_.size();
-                    handler.scope_depth =
-                        context_.scopes.restore_stack.size();
-                    if (static_cast<Op>(ins.op) == Op::PushRecoverHandler &&
-                        (ins.flags & 1) != 0 && handler.scope_depth > 0)
-                        --handler.scope_depth;
-                    handler.handler_body_depth = handler_body_depth_;
-                    handler.eval_handler_depth = context_.handler_depth;
-                    handler.capture =
-                        static_cast<Op>(ins.op) == Op::PushFailHandler &&
-                        (ins.flags & 1) != 0;
-                    if (handler.capture)
-                        skein_vm_eval_capture_begin(handler.snapshot);
-                    handlers_.push_back(handler);
-                    if (vm_stats_enabled &&
-                        handlers_.size() > vm_stats.max_handler_depth)
-                        vm_stats.max_handler_depth = handlers_.size();
-                    break;
-                }
-
-                case Op::PopHandler: {
-                    if (handlers_.empty()) {
-                        yyerror("internal bytecode handler underflow");
+                case Op::PushRecoverHandler:
+                case Op::PopHandler:
+                case Op::PopHandlers:
+                case Op::CheckResult:
+                case Op::EnterHandlerBody:
+                case Op::LeaveHandlerBody:
+                case Op::DeferPush:
+                    if (run_handler_defer_op(static_cast<Op>(ins.op), ins) ==
+                        HandlerOpResult::Abort)
                         return abort_error();
-                    }
-                    value_t *error =
-                        end_handler_capture(handlers_.back());
-                    freeval(error);
-                    handlers_.pop_back();
                     break;
-                }
-
-                case Op::PopHandlers: {
-                    if (handlers_.size() < ins.a) {
-                        yyerror("internal bytecode handler underflow");
-                        return abort_error();
-                    }
-                    while (handlers_.size() > ins.a) {
-                        value_t *error =
-                            end_handler_capture(handlers_.back());
-                        freeval(error);
-                        handlers_.pop_back();
-                    }
-                    handler_body_depth_ = ins.flags;
-                    context_.handler_depth =
-                        saved_handler_depth_ + ins.flags;
-                    break;
-                }
-
-                case Op::CheckResult: {
-                    value_t *value = pop_checked();
-                    if (!value)
-                        return abort_error();
-                    if (value->type != T_result) {
-                        push(value);
-                        break;
-                    }
-                    struct result_value_t *result =
-                        (struct result_value_t *)value;
-                    if (result->ok) {
-                        value_t *inner = dupval(result->value);
-                        freeval(value);
-                        push(inner ? inner : newnull());
-                        break;
-                    }
-                    value_t *error = dupval(result->error);
-                    freeval(value);
-                    if (!error)
-                        error = newerrorval("fail", "");
-                    if (has_handler(UnwindKind::Fail))
-                        throw_unwind(UnwindKind::Fail, error);
-                    skein_vm_eval_raise(error);
-                    return abort_error();
-                }
 
                 case Op::BindName: {
                     value_t *value = pop_checked();
@@ -2387,49 +2451,6 @@ public:
                         ins.a < slot_symbols_.size())
                         slot_symbols_[ins.a] = sym;
                     invalidate_name_cache(name);
-                    break;
-                }
-
-                case Op::EnterHandlerBody:
-                    ++handler_body_depth_;
-                    ++context_.handler_depth;
-                    break;
-
-                case Op::LeaveHandlerBody:
-                    if (handler_body_depth_ > 0)
-                        --handler_body_depth_;
-                    if (context_.handler_depth > saved_handler_depth_)
-                        --context_.handler_depth;
-                    break;
-
-                case Op::DeferPush: {
-                    if (ins.b >= proto().defer_protos.size() ||
-                        defer_scopes_.empty()) {
-                        yyerror("invalid bytecode defer descriptor");
-                        return abort_error();
-                    }
-                    defer_record record;
-                    record.proto = proto().defer_protos[ins.b];
-                    if (ins.b < proto().defer_captures.size()) {
-                        const std::vector<skein::bc::DeferCapture>
-                            &captures = proto().defer_captures[ins.b];
-                        record.upvalues.reserve(captures.size());
-                        for (const skein::bc::DeferCapture &capture :
-                             captures) {
-                            std::shared_ptr<struct upvalue_cell> cell =
-                                capture_defer_cell(capture);
-                            if (!cell)
-                                return abort_error();
-                            record.upvalues.push_back(std::move(cell));
-                        }
-                    }
-                    defer_scopes_.back().push_back(std::move(record));
-                    ++context_.vm_defer_count;
-                    if (vm_stats_enabled &&
-                        (uint64_t)context_.vm_defer_count >
-                            vm_stats.max_defer_depth)
-                        vm_stats.max_defer_depth =
-                            context_.vm_defer_count;
                     break;
                 }
 

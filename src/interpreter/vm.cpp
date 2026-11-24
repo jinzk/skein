@@ -1181,6 +1181,53 @@ public:
         }
     }
 
+    OpResult run_function_op(Op op, const Instr &ins) {
+        switch (op) {
+            case Op::Closure: {
+                const Constant *c = constant_at(proto(), ins.b);
+                if (!c || c->kind != ConstantKind::Function ||
+                    !c->function) {
+                    yyerror("invalid bytecode function");
+                    return OpResult::Abort;
+                }
+                if (!skein_vm_validate_function_params(
+                        c->function->name.c_str(), c->function->sl))
+                    return OpResult::Abort;
+                std::shared_ptr<scope_t> closure = current_scope();
+                if (closure && closure->is_global)
+                    closure.reset();
+                std::vector<std::shared_ptr<struct upvalue_cell>> upvalues;
+                upvalues.reserve(c->function->upvalues.size());
+                for (const std::string &name : c->function->upvalues)
+                    upvalues.push_back(capture_upvalue(name));
+                push(newfuncval(c->function, closure, std::move(upvalues)));
+                return OpResult::Continue;
+            }
+
+            case Op::BindFunc: {
+                value_t *value = pop_checked();
+                if (!value)
+                    return OpResult::Abort;
+                const char *name = name_at(proto(), ins.b);
+                if (isrepeated(name)) {
+                    yyerror("symbol repeated %s", name);
+                    freeval(value);
+                    return OpResult::Abort;
+                }
+                struct symbol *sym = newsym(name);
+                sym->val = value;
+                sym->exported = (ins.flags & 1) != 0;
+                savesym(sym);
+                invalidate_name_cache(name);
+                push(newnull());
+                return OpResult::Continue;
+            }
+
+            default:
+                return OpResult::Continue;
+        }
+    }
+
     value_t *run() {
         while (true) {
             if (pc_ >= proto().code.size()) {
@@ -2633,49 +2680,12 @@ public:
                         return abort_error();
                     break;
 
-                case Op::Closure: {
-                    const Constant *c = constant_at(proto(), ins.b);
-                    if (!c || c->kind != ConstantKind::Function ||
-                        !c->function) {
-                        yyerror("invalid bytecode function");
+                case Op::Closure:
+                case Op::BindFunc:
+                    if (run_function_op(static_cast<Op>(ins.op), ins) ==
+                        OpResult::Abort)
                         return abort_error();
-                    }
-                    if (!skein_vm_validate_function_params(
-                            c->function->name.c_str(),
-                            c->function->sl))
-                        return abort_error();
-                    std::shared_ptr<scope_t> closure = current_scope();
-                    if (closure && closure->is_global)
-                        closure.reset();
-                    std::vector<std::shared_ptr<struct upvalue_cell>> upvalues;
-                    upvalues.reserve(c->function->upvalues.size());
-                    for (const std::string &name :
-                         c->function->upvalues) {
-                        upvalues.push_back(capture_upvalue(name));
-                    }
-                    push(newfuncval(c->function, closure,
-                                    std::move(upvalues)));
                     break;
-                }
-
-                case Op::BindFunc: {
-                    value_t *value = pop_checked();
-                    if (!value)
-                        return abort_error();
-                    const char *name = name_at(proto(), ins.b);
-                    if (isrepeated(name)) {
-                        yyerror("symbol repeated %s", name);
-                        freeval(value);
-                        return abort_error();
-                    }
-                    struct symbol *sym = newsym(name);
-                    sym->val = value;
-                    sym->exported = (ins.flags & 1) != 0;
-                    savesym(sym);
-                    invalidate_name_cache(name);
-                    push(newnull());
-                    break;
-                }
 
                 case Op::DeclareStruct:
                 case Op::DeclareEnum:

@@ -2926,6 +2926,330 @@ public:
         }
     }
 
+    /*
+     * Stack and container construction opcodes only touch the operand stack,
+     * so they never need a control-value channel.
+     */
+    OpResult run_stack_op(Op op, const Instr &ins) {
+        switch (op) {
+            case Op::Nop:
+                return OpResult::Continue;
+
+            case Op::LoadNull:
+                push(newnull());
+                return OpResult::Continue;
+
+            case Op::LoadConst: {
+                const Constant *c = constant_at(proto(), ins.b);
+                if (!c) {
+                    yyerror("invalid bytecode constant");
+                    return OpResult::Abort;
+                }
+                if (c->kind == ConstantKind::Value && c->value)
+                    push(dupval(c->value.get()));
+                else
+                    push(newnull());
+                return OpResult::Continue;
+            }
+
+            case Op::Pop: {
+                value_t *value = pop_checked();
+                if (!value)
+                    return OpResult::Abort;
+                freeval(value);
+                return OpResult::Continue;
+            }
+
+            case Op::Dup: {
+                if (stack_.empty()) {
+                    yyerror("internal bytecode stack underflow");
+                    return OpResult::Abort;
+                }
+                push(dupval(stack_.back()));
+                return OpResult::Continue;
+            }
+
+            case Op::Swap: {
+                if (stack_.size() < 2) {
+                    yyerror("internal bytecode stack underflow");
+                    return OpResult::Abort;
+                }
+                std::swap(stack_[stack_.size() - 1],
+                          stack_[stack_.size() - 2]);
+                return OpResult::Continue;
+            }
+
+            case Op::NewList: {
+                uint32_t count = ins.b;
+                std::vector<value_t *> items(count);
+                for (uint32_t i = count; i > 0; --i) {
+                    value_t *item = pop_checked();
+                    if (!item) {
+                        free_items(items);
+                        return OpResult::Abort;
+                    }
+                    items[i - 1] = item;
+                }
+                struct list_value_t *list =
+                    (ins.flags & 1) ? newtupleval() : newlistval();
+                for (value_t *item : items)
+                    list->payload->items.push_back(item);
+                push((value_t *)list);
+                return OpResult::Continue;
+            }
+
+            case Op::NewDict: {
+                uint32_t count = ins.b;
+                std::vector<value_t *> items((size_t)count * 2);
+                for (uint32_t i = count * 2; i > 0; --i) {
+                    value_t *item = pop_checked();
+                    if (!item) {
+                        free_items(items);
+                        return OpResult::Abort;
+                    }
+                    items[i - 1] = item;
+                }
+                struct dict_value_t *dict = newdictval();
+                for (uint32_t i = 0; i < count; ++i) {
+                    value_t *key = items[(size_t)i * 2];
+                    value_t *value = items[(size_t)i * 2 + 1];
+                    if (!dict_key_allowed(key)) {
+                        yyerror("%s, got %s", dict_key_error(),
+                                typename_of(key));
+                        freeval(key);
+                        freeval(value);
+                        free_items(items, (size_t)i * 2 + 2);
+                        freeval((value_t *)dict);
+                        return OpResult::Abort;
+                    }
+                    int found = dict_find_index(dict, key);
+                    if (found >= 0) {
+                        freeval(dict->payload->items[(size_t)found].second);
+                        dict->payload->items[(size_t)found].second = value;
+                        freeval(key);
+                    } else {
+                        dict_append_item(dict, key, value);
+                    }
+                }
+                push((value_t *)dict);
+                return OpResult::Continue;
+            }
+
+            default:
+                return OpResult::Continue;
+        }
+    }
+
+    OpResult run_declare_op(Op op, const Instr &ins,
+                            value_t *&control_out) {
+        switch (op) {
+            case Op::CheckRedefine: {
+                const char *name = name_at(proto(), ins.b);
+                if (isrepeated(name)) {
+                    yyerror("symbol repeated %s", name ? name : "");
+                    return OpResult::Abort;
+                }
+                return OpResult::Continue;
+            }
+
+            case Op::DefineName: {
+                if (ins.b >= proto().decls.size()) {
+                    yyerror("invalid bytecode declaration");
+                    return OpResult::Abort;
+                }
+                const skein::bc::DeclDesc &def = proto().decls[ins.b];
+                value_t *value = NULL;
+                if (ins.flags & 1) {
+                    value = pop_checked();
+                    if (!value)
+                        return OpResult::Abort;
+                } else {
+                    value = skein_vm_default_value_for_type(&def.type);
+                    if (!value) {
+                        yyerror("variable %s of type %s requires an "
+                                "initializer", def.name.c_str(),
+                                type_constraint_name(&def.type));
+                        return OpResult::Abort;
+                    }
+                }
+
+                if (is_control(value)) {
+                    control_out = abort_control(value);
+                    return OpResult::Control;
+                }
+
+                if (isrepeated(def.name.c_str())) {
+                    yyerror("symbol repeated %s", def.name.c_str());
+                    freeval(value);
+                    return OpResult::Abort;
+                }
+                if (!validate_type_constraint(&def.type)) {
+                    freeval(value);
+                    return OpResult::Abort;
+                }
+                if (!type_constraint_matches(&def.type, value)) {
+                    yyerror("variable %s expects %s, got %s",
+                            def.name.c_str(),
+                            type_constraint_name(&def.type),
+                            typename_of(value));
+                    freeval(value);
+                    return OpResult::Abort;
+                }
+
+                struct symbol *sym = newsym(def.name.c_str());
+                sym->val = value;
+                type_constraint_assign(&sym->type, &def.type);
+                sym->exported = def.exported;
+                sym->is_const = def.is_const;
+                savesym(sym);
+                invalidate_name_cache(def.name.c_str());
+                push(newnull());
+                return OpResult::Continue;
+            }
+
+            case Op::BindName: {
+                value_t *value = pop_checked();
+                if (!value)
+                    return OpResult::Abort;
+                if (direct_slots_ && ins.a != UINT16_MAX &&
+                    ins.a < slot_values_.size()) {
+                    freeval(slot_values_[ins.a]);
+                    slot_values_[ins.a] = value;
+                    if (ins.a < slot_const_.size())
+                        slot_const_[ins.a] = (ins.flags & 1) != 0 ? 1 : 0;
+                    return OpResult::Continue;
+                }
+                const char *name = name_at(proto(), ins.b);
+                struct symbol *sym = newsym(name);
+                sym->val = value;
+                sym->is_const = (ins.flags & 1) != 0;
+                savesym(sym);
+                if (ins.a != UINT16_MAX && ins.a < slot_symbols_.size())
+                    slot_symbols_[ins.a] = sym;
+                invalidate_name_cache(name);
+                return OpResult::Continue;
+            }
+
+            default:
+                return OpResult::Continue;
+        }
+    }
+
+    OpResult run_unary_op(Op op, const Instr &ins) {
+        switch (op) {
+            case Op::Neg: {
+                value_t *value = pop_checked();
+                if (!value)
+                    return OpResult::Abort;
+                value_t *result = NULL;
+                if (value->type == T_int) {
+                    long long n = ((struct int_value_t *)value)->value;
+                    result = new_int_checked(-(__int128)n);
+                } else if (value->type == T_float) {
+                    result = newfloatval(
+                        -((struct float_value_t *)value)->value);
+                } else {
+                    yyerror("cannot negate %s", typename_of(value));
+                }
+                freeval(value);
+                if (!result)
+                    return OpResult::Abort;
+                push(result);
+                return OpResult::Continue;
+            }
+
+            case Op::Not: {
+                value_t *value = pop_checked();
+                if (!value)
+                    return OpResult::Abort;
+                value_t *result = newboolval(!truthy(value));
+                freeval(value);
+                push(result);
+                return OpResult::Continue;
+            }
+
+            case Op::BitNot: {
+                value_t *value = pop_checked();
+                if (!value)
+                    return OpResult::Abort;
+                value_t *result = NULL;
+                if (value->type != T_int) {
+                    yyerror("bitwise not expects an int, got %s",
+                            typename_of(value));
+                } else {
+                    result =
+                        newintval(~((struct int_value_t *)value)->value);
+                }
+                freeval(value);
+                if (!result)
+                    return OpResult::Abort;
+                push(result);
+                return OpResult::Continue;
+            }
+
+            default:
+                return OpResult::Continue;
+        }
+    }
+
+    /*
+     * Jump opcodes mutate pc_ directly, which is fine because they run as
+     * Executor members.
+     */
+    OpResult run_jump_op(Op op, const Instr &ins) {
+        switch (op) {
+            case Op::CmpJump: {
+                value_t *right = pop_checked();
+                value_t *left = pop_checked();
+                if (!left || !right) {
+                    freeval(left);
+                    freeval(right);
+                    return OpResult::Abort;
+                }
+                const int cmp = ins.flags & 0x7f;
+                const bool jump_true = (ins.flags & 0x80) != 0;
+                bool value = false;
+                const bool valid = compare_values(cmp, left, right, value);
+                freeval(left);
+                freeval(right);
+                if (!valid)
+                    return OpResult::Abort;
+                if (jump_true ? value : !value)
+                    pc_ = ins.b;
+                return OpResult::Continue;
+            }
+
+            case Op::Jump:
+                pc_ = ins.b;
+                return OpResult::Continue;
+
+            case Op::JumpIfFalse: {
+                value_t *value = pop_checked();
+                if (!value)
+                    return OpResult::Abort;
+                bool truth = truthy(value);
+                freeval(value);
+                if (!truth)
+                    pc_ = ins.b;
+                return OpResult::Continue;
+            }
+
+            case Op::JumpIfTrue: {
+                value_t *value = pop_checked();
+                if (!value)
+                    return OpResult::Abort;
+                bool truth = truthy(value);
+                freeval(value);
+                if (truth)
+                    pc_ = ins.b;
+                return OpResult::Continue;
+            }
+
+            default:
+                return OpResult::Continue;
+        }
+    }
+
     value_t *run() {
         while (true) {
             if (pc_ >= proto().code.size()) {
@@ -2971,24 +3295,17 @@ public:
 
             switch (static_cast<Op>(ins.op)) {
                 case Op::Nop:
-                    break;
-
                 case Op::LoadNull:
-                    push(newnull());
-                    break;
-
-                case Op::LoadConst: {
-                    const Constant *c = constant_at(proto(), ins.b);
-                    if (!c) {
-                        yyerror("invalid bytecode constant");
+                case Op::LoadConst:
+                case Op::Pop:
+                case Op::Dup:
+                case Op::Swap:
+                case Op::NewList:
+                case Op::NewDict:
+                    if (run_stack_op(static_cast<Op>(ins.op), ins) ==
+                        OpResult::Abort)
                         return abort_error();
-                    }
-                    if (c->kind == ConstantKind::Value && c->value)
-                        push(dupval(c->value.get()));
-                    else
-                        push(newnull());
                     break;
-                }
 
                 case Op::LoadName:
                 case Op::LoadGlobal:
@@ -3054,147 +3371,26 @@ public:
                     break;
                 }
 
-                case Op::CheckRedefine: {
-                    const char *name = name_at(proto(), ins.b);
-                    if (isrepeated(name)) {
-                        yyerror("symbol repeated %s",
-                                name ? name : "");
+                case Op::CheckRedefine:
+                case Op::DefineName:
+                case Op::BindName: {
+                    value_t *control_out = NULL;
+                    OpResult result = run_declare_op(
+                        static_cast<Op>(ins.op), ins, control_out);
+                    if (result == OpResult::Abort)
                         return abort_error();
-                    }
+                    if (result == OpResult::Control)
+                        return control_out;
                     break;
                 }
 
-                case Op::DefineName: {
-                    if (ins.b >= proto().decls.size()) {
-                        yyerror("invalid bytecode declaration");
+                case Op::Neg:
+                case Op::Not:
+                case Op::BitNot:
+                    if (run_unary_op(static_cast<Op>(ins.op), ins) ==
+                        OpResult::Abort)
                         return abort_error();
-                    }
-                    const skein::bc::DeclDesc &def = proto().decls[ins.b];
-                    value_t *value = NULL;
-                    if (ins.flags & 1) {
-                        value = pop_checked();
-                        if (!value)
-                            return abort_error();
-                    } else {
-                        value = skein_vm_default_value_for_type(&def.type);
-                        if (!value) {
-                            yyerror(
-                                "variable %s of type %s requires an "
-                                "initializer",
-                                def.name.c_str(),
-                                type_constraint_name(&def.type));
-                            return abort_error();
-                        }
-                    }
-
-                    if (is_control(value))
-                        return abort_control(value);
-
-                    if (isrepeated(def.name.c_str())) {
-                        yyerror("symbol repeated %s", def.name.c_str());
-                        freeval(value);
-                        return abort_error();
-                    }
-                    if (!validate_type_constraint(&def.type)) {
-                        freeval(value);
-                        return abort_error();
-                    }
-                    if (!type_constraint_matches(&def.type, value)) {
-                        yyerror("variable %s expects %s, got %s",
-                                def.name.c_str(),
-                                type_constraint_name(&def.type),
-                                typename_of(value));
-                        freeval(value);
-                        return abort_error();
-                    }
-
-                    struct symbol *sym = newsym(def.name.c_str());
-                    sym->val = value;
-                    type_constraint_assign(&sym->type, &def.type);
-                    sym->exported = def.exported;
-                    sym->is_const = def.is_const;
-                    savesym(sym);
-                    invalidate_name_cache(def.name.c_str());
-                    push(newnull());
                     break;
-                }
-
-                case Op::Pop: {
-                    value_t *value = pop_checked();
-                    if (!value)
-                        return abort_error();
-                    freeval(value);
-                    break;
-                }
-
-                case Op::Dup: {
-                    if (stack_.empty()) {
-                        yyerror("internal bytecode stack underflow");
-                        return abort_error();
-                    }
-                    push(dupval(stack_.back()));
-                    break;
-                }
-
-                case Op::Swap: {
-                    if (stack_.size() < 2) {
-                        yyerror("internal bytecode stack underflow");
-                        return abort_error();
-                    }
-                    std::swap(stack_[stack_.size() - 1],
-                              stack_[stack_.size() - 2]);
-                    break;
-                }
-
-                case Op::Neg: {
-                    value_t *value = pop_checked();
-                    if (!value)
-                        return abort_error();
-                    value_t *result = NULL;
-                    if (value->type == T_int) {
-                        long long n = ((struct int_value_t *)value)->value;
-                        result = new_int_checked(-(__int128)n);
-                    } else if (value->type == T_float) {
-                        result = newfloatval(
-                            -((struct float_value_t *)value)->value);
-                    } else {
-                        yyerror("cannot negate %s", typename_of(value));
-                    }
-                    freeval(value);
-                    if (!result)
-                        return abort_error();
-                    push(result);
-                    break;
-                }
-
-                case Op::Not: {
-                    value_t *value = pop_checked();
-                    if (!value)
-                        return abort_error();
-                    value_t *result = newboolval(!truthy(value));
-                    freeval(value);
-                    push(result);
-                    break;
-                }
-
-                case Op::BitNot: {
-                    value_t *value = pop_checked();
-                    if (!value)
-                        return abort_error();
-                    value_t *result = NULL;
-                    if (value->type != T_int) {
-                        yyerror("bitwise not expects an int, got %s",
-                                typename_of(value));
-                    } else {
-                        result = newintval(
-                            ~((struct int_value_t *)value)->value);
-                    }
-                    freeval(value);
-                    if (!result)
-                        return abort_error();
-                    push(result);
-                    break;
-                }
 
                 case Op::Add:
                 case Op::Sub:
@@ -3220,27 +3416,14 @@ public:
                         return abort_error();
                     break;
 
-                case Op::CmpJump: {
-                    value_t *right = pop_checked();
-                    value_t *left = pop_checked();
-                    if (!left || !right) {
-                        freeval(left);
-                        freeval(right);
+                case Op::CmpJump:
+                case Op::Jump:
+                case Op::JumpIfFalse:
+                case Op::JumpIfTrue:
+                    if (run_jump_op(static_cast<Op>(ins.op), ins) ==
+                        OpResult::Abort)
                         return abort_error();
-                    }
-                    const int op = ins.flags & 0x7f;
-                    const bool jump_true = (ins.flags & 0x80) != 0;
-                    bool value = false;
-                    const bool valid =
-                        compare_values(op, left, right, value);
-                    freeval(left);
-                    freeval(right);
-                    if (!valid)
-                        return abort_error();
-                    if (jump_true ? value : !value)
-                        pc_ = ins.b;
                     break;
-                }
 
                 case Op::IsType:
                 case Op::SwitchCheck:
@@ -3249,88 +3432,6 @@ public:
                         OpResult::Abort)
                         return abort_error();
                     break;
-
-                case Op::Jump:
-                    pc_ = ins.b;
-                    break;
-
-                case Op::JumpIfFalse: {
-                    value_t *value = pop_checked();
-                    if (!value)
-                        return abort_error();
-                    bool truth = truthy(value);
-                    freeval(value);
-                    if (!truth)
-                        pc_ = ins.b;
-                    break;
-                }
-
-                case Op::JumpIfTrue: {
-                    value_t *value = pop_checked();
-                    if (!value)
-                        return abort_error();
-                    bool truth = truthy(value);
-                    freeval(value);
-                    if (truth)
-                        pc_ = ins.b;
-                    break;
-                }
-
-                case Op::NewList: {
-                    uint32_t count = ins.b;
-                    std::vector<value_t *> items(count);
-                    for (uint32_t i = count; i > 0; --i) {
-                        value_t *item = pop_checked();
-                        if (!item) {
-                            free_items(items);
-                            return abort_error();
-                        }
-                        items[i - 1] = item;
-                    }
-                    struct list_value_t *list =
-                        (ins.flags & 1) ? newtupleval() : newlistval();
-                    for (value_t *item : items)
-                        list->payload->items.push_back(item);
-                    push((value_t *)list);
-                    break;
-                }
-
-                case Op::NewDict: {
-                    uint32_t count = ins.b;
-                    std::vector<value_t *> items((size_t)count * 2);
-                    for (uint32_t i = count * 2; i > 0; --i) {
-                        value_t *item = pop_checked();
-                        if (!item) {
-                            free_items(items);
-                            return abort_error();
-                        }
-                        items[i - 1] = item;
-                    }
-                    struct dict_value_t *dict = newdictval();
-                    for (uint32_t i = 0; i < count; ++i) {
-                        value_t *key = items[(size_t)i * 2];
-                        value_t *value = items[(size_t)i * 2 + 1];
-                        if (!dict_key_allowed(key)) {
-                            yyerror("%s, got %s", dict_key_error(),
-                                    typename_of(key));
-                            freeval(key);
-                            freeval(value);
-                            free_items(items, (size_t)i * 2 + 2);
-                            freeval((value_t *)dict);
-                            return abort_error();
-                        }
-                        int found = dict_find_index(dict, key);
-                        if (found >= 0) {
-                            freeval(dict->payload->items[(size_t)found].second);
-                            dict->payload->items[(size_t)found].second = value;
-                            freeval(key);
-                        } else {
-                            dict_append_item(dict, key, value);
-                        }
-                    }
-                    push((value_t *)dict);
-                    break;
-                }
 
                 case Op::GetIndex:
                 case Op::GetField:
@@ -3411,31 +3512,6 @@ public:
                         OpResult::Abort)
                         return abort_error();
                     break;
-
-                case Op::BindName: {
-                    value_t *value = pop_checked();
-                    if (!value)
-                        return abort_error();
-                    if (direct_slots_ && ins.a != UINT16_MAX &&
-                        ins.a < slot_values_.size()) {
-                        freeval(slot_values_[ins.a]);
-                        slot_values_[ins.a] = value;
-                        if (ins.a < slot_const_.size())
-                            slot_const_[ins.a] =
-                                (ins.flags & 1) != 0 ? 1 : 0;
-                        break;
-                    }
-                    const char *name = name_at(proto(), ins.b);
-                    struct symbol *sym = newsym(name);
-                    sym->val = value;
-                    sym->is_const = (ins.flags & 1) != 0;
-                    savesym(sym);
-                    if (ins.a != UINT16_MAX &&
-                        ins.a < slot_symbols_.size())
-                        slot_symbols_[ins.a] = sym;
-                    invalidate_name_cache(name);
-                    break;
-                }
 
                 case Op::DeclarePackage:
                 case Op::Import:

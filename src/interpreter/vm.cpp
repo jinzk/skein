@@ -1862,6 +1862,108 @@ public:
         }
     }
 
+    OpResult run_symbol_op(Op op, const Instr &ins, value_t *&control_out) {
+        switch (op) {
+            case Op::LoadName:
+            case Op::LoadGlobal: {
+                const char *name = name_at(proto(), ins.b);
+                struct symbol *sym = op == Op::LoadName
+                                         ? cached_symbol(ins.b)
+                                         : global_symbol(ins.a, ins.b);
+                if (!sym) {
+                    yyerror("symbol not found %s", name);
+                    return OpResult::Abort;
+                }
+                if (sym->is_uninitialized) {
+                    yyerror("parameter %s is used before it is initialized",
+                            name);
+                    return OpResult::Abort;
+                }
+                push(dupval(sym->val));
+                return OpResult::Continue;
+            }
+
+            case Op::StoreName:
+            case Op::StoreGlobal: {
+                value_t *value = pop_checked();
+                if (!value)
+                    return OpResult::Abort;
+                struct symbol *sym = op == Op::StoreName
+                                         ? cached_symbol(ins.b)
+                                         : global_symbol(ins.a, ins.b);
+                if (!sym) {
+                    yyerror("symbol not found %s",
+                            name_at(proto(), ins.b));
+                    freeval(value);
+                    return OpResult::Abort;
+                }
+                value_t *result = skein_vm_assign_symbol_direct(sym, value);
+                if (!result)
+                    return OpResult::Abort;
+                if (is_control(result)) {
+                    control_out = abort_control(result);
+                    return OpResult::Control;
+                }
+                push(result);
+                return OpResult::Continue;
+            }
+
+            case Op::CompoundName:
+            case Op::CompoundGlobal: {
+                value_t *value = pop_checked();
+                if (!value)
+                    return OpResult::Abort;
+                struct symbol *sym = op == Op::CompoundName
+                                         ? cached_symbol(ins.b)
+                                         : global_symbol(ins.a, ins.b);
+                if (!sym) {
+                    yyerror("symbol not found %s",
+                            name_at(proto(), ins.b));
+                    freeval(value);
+                    return OpResult::Abort;
+                }
+                value_t *result = skein_vm_compound_symbol_direct(
+                    sym, (int)ins.flags, value);
+                if (!result)
+                    return OpResult::Abort;
+                if (is_control(result)) {
+                    control_out = abort_control(result);
+                    return OpResult::Control;
+                }
+                push(result);
+                return OpResult::Continue;
+            }
+
+            case Op::IncDecName:
+            case Op::IncDecGlobal: {
+                const int direction =
+                    op == Op::IncDecName ? (ins.a ? 1 : -1)
+                                         : ((ins.flags & 2) ? 1 : -1);
+                struct symbol *sym = op == Op::IncDecName
+                                         ? cached_symbol(ins.b)
+                                         : global_symbol(ins.a, ins.b);
+                if (!sym) {
+                    yyerror("symbol not found %s",
+                            name_at(proto(), ins.b));
+                    return OpResult::Abort;
+                }
+                value_t *result = skein_vm_increment_symbol_direct(
+                    sym, direction, (ins.flags & 1) != 0);
+                if (!result)
+                    return OpResult::Abort;
+                if (is_control(result)) {
+                    control_out = abort_control(result);
+                    return OpResult::Control;
+                }
+                push(result);
+                return OpResult::Continue;
+            }
+
+            default:
+                return OpResult::Continue;
+        }
+    }
+
     value_t *run() {
         while (true) {
             if (pc_ >= proto().code.size()) {
@@ -1926,152 +2028,21 @@ public:
                     break;
                 }
 
-                case Op::LoadName: {
-                    const char *name = name_at(proto(), ins.b);
-                    struct symbol *sym = cached_symbol(ins.b);
-                    if (!sym) {
-                        yyerror("symbol not found %s", name);
-                        return abort_error();
-                    }
-                    if (sym->is_uninitialized) {
-                        yyerror("parameter %s is used before it is initialized",
-                                name);
-                        return abort_error();
-                    }
-                    push(dupval(sym->val));
-                    break;
-                }
-
-                case Op::LoadGlobal: {
-                    const char *name = name_at(proto(), ins.b);
-                    struct symbol *sym = global_symbol(ins.a, ins.b);
-                    if (!sym) {
-                        yyerror("symbol not found %s", name);
-                        return abort_error();
-                    }
-                    if (sym->is_uninitialized) {
-                        yyerror("parameter %s is used before it is initialized",
-                                name);
-                        return abort_error();
-                    }
-                    push(dupval(sym->val));
-                    break;
-                }
-
-                case Op::StoreName: {
-                    value_t *value = pop_checked();
-                    if (!value)
-                        return abort_error();
-                    struct symbol *sym = cached_symbol(ins.b);
-                    if (!sym) {
-                        yyerror("symbol not found %s",
-                                name_at(proto(), ins.b));
-                        freeval(value);
-                        return abort_error();
-                    }
-                    value_t *result = skein_vm_assign_symbol_direct(sym, value);
-                    if (!result)
-                        return abort_error();
-                    if (is_control(result))
-                        return abort_control(result);
-                    push(result);
-                    break;
-                }
-
-                case Op::CompoundName: {
-                    value_t *value = pop_checked();
-                    if (!value)
-                        return abort_error();
-                    struct symbol *sym = cached_symbol(ins.b);
-                    if (!sym) {
-                        yyerror("symbol not found %s",
-                                name_at(proto(), ins.b));
-                        freeval(value);
-                        return abort_error();
-                    }
-                    value_t *result = skein_vm_compound_symbol_direct(
-                        sym, (int)ins.flags, value);
-                    if (!result)
-                        return abort_error();
-                    if (is_control(result))
-                        return abort_control(result);
-                    push(result);
-                    break;
-                }
-
-                case Op::IncDecName: {
-                    struct symbol *sym = cached_symbol(ins.b);
-                    if (!sym) {
-                        yyerror("symbol not found %s",
-                                name_at(proto(), ins.b));
-                        return abort_error();
-                    }
-                    value_t *result = skein_vm_increment_symbol_direct(
-                        sym, ins.a ? 1 : -1, (ins.flags & 1) != 0);
-                    if (!result)
-                        return abort_error();
-                    if (is_control(result))
-                        return abort_control(result);
-                    push(result);
-                    break;
-                }
-
-                case Op::StoreGlobal: {
-                    value_t *value = pop_checked();
-                    if (!value)
-                        return abort_error();
-                    struct symbol *sym = global_symbol(ins.a, ins.b);
-                    if (!sym) {
-                        yyerror("symbol not found %s",
-                                name_at(proto(), ins.b));
-                        freeval(value);
-                        return abort_error();
-                    }
-                    value_t *result = skein_vm_assign_symbol_direct(sym, value);
-                    if (!result)
-                        return abort_error();
-                    if (is_control(result))
-                        return abort_control(result);
-                    push(result);
-                    break;
-                }
-
-                case Op::CompoundGlobal: {
-                    value_t *value = pop_checked();
-                    if (!value)
-                        return abort_error();
-                    struct symbol *sym = global_symbol(ins.a, ins.b);
-                    if (!sym) {
-                        yyerror("symbol not found %s",
-                                name_at(proto(), ins.b));
-                        freeval(value);
-                        return abort_error();
-                    }
-                    value_t *result = skein_vm_compound_symbol_direct(
-                        sym, (int)ins.flags, value);
-                    if (!result)
-                        return abort_error();
-                    if (is_control(result))
-                        return abort_control(result);
-                    push(result);
-                    break;
-                }
-
+                case Op::LoadName:
+                case Op::LoadGlobal:
+                case Op::StoreName:
+                case Op::CompoundName:
+                case Op::IncDecName:
+                case Op::StoreGlobal:
+                case Op::CompoundGlobal:
                 case Op::IncDecGlobal: {
-                    struct symbol *sym = global_symbol(ins.a, ins.b);
-                    if (!sym) {
-                        yyerror("symbol not found %s",
-                                name_at(proto(), ins.b));
+                    value_t *control_out = NULL;
+                    OpResult result = run_symbol_op(
+                        static_cast<Op>(ins.op), ins, control_out);
+                    if (result == OpResult::Abort)
                         return abort_error();
-                    }
-                    value_t *result = skein_vm_increment_symbol_direct(
-                        sym, (ins.flags & 2) ? 1 : -1,
-                        (ins.flags & 1) != 0);
-                    if (!result)
-                        return abort_error();
-                    if (is_control(result))
-                        return abort_control(result);
-                    push(result);
+                    if (result == OpResult::Control)
+                        return control_out;
                     break;
                 }
 

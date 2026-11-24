@@ -221,7 +221,7 @@ static struct value_t *invoke_function_body(
     eval_ctx().handler_depth = 0;
     struct value_t *body_ret = NULL;
     if (!skein_vm_try_execute_function_body(def, body_ret)) {
-        if (def->code->semantic_error) {
+        if (skein_vm_function_had_semantic_error(def->code.get())) {
             body_ret = NULL;
         } else {
             struct ast *body_ast = function_body_ast(def->code.get());

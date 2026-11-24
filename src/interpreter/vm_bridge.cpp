@@ -43,6 +43,15 @@ struct default_cache_entry {
     std::vector<skein::bc::ProtoPtr> protos;
 };
 
+/*
+ * Bytecode compilation has two failure modes:
+ *  - Fallback: the compiler declined (unsupported construct or a rejection
+ *    that still needs the AST backend to diagnose), so the caller may run AST.
+ *  - Semantic: the compiler already reported a source error; running AST would
+ *    execute part of an invalid function or duplicate the diagnostic.
+ */
+enum class CompileFailure { None, Fallback, Semantic };
+
 struct function_vm_cache {
     function_code *code = nullptr;
     /*
@@ -71,7 +80,7 @@ struct function_vm_cache {
     /* Whether the compiled entry takes a destructuring parameter frame. */
     bool jit_pattern_frame = false;
 #endif
-    bool compile_failed = false;
+    CompileFailure failure = CompileFailure::None;
 };
 
 thread_local std::unordered_map<function_code *, default_cache_entry> default_cache;
@@ -128,7 +137,7 @@ function_vm_cache *cache_for(function_code *code) {
             entry->proto->index_read_ic.clear();
             entry->proto->call_method_ic.clear();
             entry->param_patterns = source->param_patterns;
-            entry->compile_failed = source->compile_failed;
+            entry->failure = source->failure;
         }
     }
     function_vm_cache *raw = entry.get();
@@ -212,7 +221,7 @@ skein::bc::ProtoPtr prepare_function_body(
         return nullptr;
     function_code *code = def->code.get();
     function_vm_cache &cache = *cache_for(code);
-    if (cache.compile_failed)
+    if (cache.failure != CompileFailure::None)
         return nullptr;
     if (cache.proto)
         return cache.proto;
@@ -226,15 +235,22 @@ skein::bc::ProtoPtr prepare_function_body(
     if (vm_stats_enabled)
         vm_stats.compile_ns += elapsed_ns(compile_start);
     if (!proto) {
-        if (active_eval_context().runtime_error_count != errors_before)
-            code->semantic_error = true;
+        bool semantic =
+            active_eval_context().runtime_error_count != errors_before;
+        cache.failure = semantic ? CompileFailure::Semantic
+                                 : CompileFailure::Fallback;
+        if (semantic) {
+            if (read_bool_env("SKEIN_VM_DEBUG", false) && !error.empty())
+                std::fprintf(stderr, "[vm] compile error function %s: %s\n",
+                             code->name.c_str(), error.c_str());
+            return nullptr;
+        }
         if (vm_stats_enabled)
             ++vm_stats.functions_fallback;
         record_fallback_reason(
             error, "function " + code->name + " @" +
                        std::to_string(code->def_line) + ":" +
                        std::to_string(code->def_column));
-        cache.compile_failed = true;
         if (read_bool_env("SKEIN_VM_DEBUG", false) && !error.empty())
             std::fprintf(stderr, "[vm] fallback function %s: %s\n",
                          code->name.c_str(), error.c_str());
@@ -1439,7 +1455,7 @@ std::shared_ptr<function_code> make_transfer_code(
 
     function_vm_cache &cache = *cache_for(code.get());
     cache.proto = payload.proto;
-    cache.compile_failed = false;
+    cache.failure = CompileFailure::None;
     if (payload.pattern_proto && !payload.pattern_roots.empty()) {
         std::shared_ptr<compiled_pattern_set> compiled =
             std::make_shared<compiled_pattern_set>();
@@ -1926,11 +1942,21 @@ struct value_t *skein_vm_eval_statement(struct ast *statement) {
     skein_vm_ensure_stats_flags();
     const auto compile_start = std::chrono::steady_clock::now();
     std::string error;
+    int errors_before = active_eval_context().runtime_error_count;
     skein::bc::ProtoPtr proto = skein_compile_statement(
         statement, diag_current_package_name(), error);
     if (vm_stats_enabled)
         vm_stats.compile_ns += elapsed_ns(compile_start);
     if (!proto) {
+        if (active_eval_context().runtime_error_count != errors_before) {
+            /* The compiler already reported a source error.  Falling back
+             * would execute part of an invalid statement and can emit a
+             * second, less precise diagnostic. */
+            if (read_bool_env("SKEIN_VM_DEBUG", false) && !error.empty())
+                std::fprintf(stderr, "[vm] compile error statement: %s\n",
+                             error.c_str());
+            return NULL;
+        }
         if (vm_stats_enabled)
             ++vm_stats.statements_fallback;
         record_fallback_reason(
@@ -2157,4 +2183,11 @@ bool skein_vm_try_execute_function_body(
         vm_stats.max_depth = context.vm_call_depth;
     out = skein_vm_execute_proto(*proto, def);
     return true;
+}
+
+bool skein_vm_function_had_semantic_error(const function_code *code) {
+    if (!code)
+        return false;
+    function_vm_cache *cache = cache_for(const_cast<function_code *>(code));
+    return cache && cache->failure == CompileFailure::Semantic;
 }

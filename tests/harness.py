@@ -152,7 +152,8 @@ TEST_SKIP_SOURCE = os.environ.get("SKEIN_TEST_SKIP_SOURCE", "")
 
 
 def check(name, source, *, stdout=None, stdout_all=None, stderr=None,
-          not_stderr=None, code=0, env=None, std_prelude=True):
+          not_stdout=None, not_stderr=None, code=0, env=None,
+          std_prelude=True):
     if name in TEST_SKIP:
         return
     if TEST_SKIP_PREFIXES and name.startswith(TEST_SKIP_PREFIXES):
@@ -185,6 +186,11 @@ def check(name, source, *, stdout=None, stdout_all=None, stderr=None,
     if not_stderr is not None:
         assert not_stderr not in proc.stderr, (
             f"{name}: expected stderr not to contain {not_stderr!r}\n"
+            f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+        )
+    if not_stdout is not None:
+        assert not_stdout not in proc.stdout, (
+            f"{name}: expected stdout not to contain {not_stdout!r}\n"
             f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
         )
 

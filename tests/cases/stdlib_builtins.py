@@ -8,6 +8,7 @@ from harness import *  # noqa: F401,F403
 import os
 
 OFF_ENV = dict(os.environ, SKEIN_TYPECHECK="off")
+VM_ENV = dict(os.environ, SKEIN_VM="1")
 
 
 def run_cases():
@@ -2275,6 +2276,27 @@ def run_cases():
         "}\n"
         "f();\n",
         stderr="break target done is not an enclosing loop or switch",
+    )
+    check(
+        "vm semantic function error skips AST fallback",
+        "func f() {\n"
+        '  println("executed");\n'
+        "  done: break done;\n"
+        "}\n"
+        "f();\n",
+        stderr="break target done is not an enclosing loop or switch",
+        not_stdout="executed",
+        env=VM_ENV,
+    )
+    check(
+        "vm semantic statement error skips AST fallback",
+        "{\n"
+        '  println("executed");\n'
+        "  break missing;\n"
+        "}\n",
+        stderr="break target missing not found",
+        not_stdout="executed",
+        env=VM_ENV,
     )
     check(
         "continue target must be enclosing loop",

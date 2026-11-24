@@ -2570,6 +2570,15 @@ top_statement: top_expression EOL {
                         diag_set_location(g_flow_line, g_flow_column);
                         yyerror("continue outside loop");
                         break;
+                    case T_goto: {
+                        const char *label =
+                            ((struct control_value_t *)rslt)->label;
+                        if ($1)
+                            diag_set_location($1->line, $1->column);
+                        yyerror("goto target %s not found in this block",
+                                label ? label : "");
+                        break;
+                    }
                     default:
                         if (g_interactive) {
                             std::lock_guard<std::mutex> lock(

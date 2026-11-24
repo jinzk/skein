@@ -147,6 +147,13 @@ bool skein_vm_try_execute_function_body(
     const std::shared_ptr<function_def> &def, struct value_t *&out);
 
 /*
+ * True when bytecode compilation rejected the function body with a source
+ * error.  The compiler has already reported it, so callers must not retry the
+ * body through the AST interpreter.
+ */
+bool skein_vm_function_had_semantic_error(const function_code *code);
+
+/*
  * Best-effort compile of methods reachable from a value into shared bytecode
  * caches before the value is handed to an AST-mode worker thread.  Custom key
  * methods are mandatory; other method failures are ignored so unused methods

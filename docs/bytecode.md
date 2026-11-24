@@ -80,22 +80,29 @@ python3 tests/vm_differential.py ./build/skein --fuzz-seconds 60
 
 ## 3. 执行模型
 
-当前实现采用**按需编译 + 局部回退**：
+当前实现采用**按需编译 + 分类回退**：
 
 ```text
 顶层语句
   → 编译为 Proto
-  → 执行
-  → 无法安全编译时，整条语句回退 AST
+  → 成功则执行
+  → 编译失败时区分：
+      semantic：编译器已报告源码错误，不回退 AST
+      fallback：编译器未报告错误（不支持或需要 AST 诊断），整条语句回退 AST
 
 函数定义
   → 仍由现有 AST 路径创建 function_code（保留验证与默认参数语义）
   → 首次调用时把函数体编译为 Proto
   → 后续调用复用缓存的 Proto
-  → 函数体无法安全编译时，整个函数体回退 AST
+  → 函数体编译失败时使用同一分类：
+      semantic：已报告错误，不执行 AST 函数体
+      fallback：整个函数体回退 AST
 ```
 
 这样可以在不破坏现有语义和测试的前提下逐步提高 VM 覆盖率。
+
+需要 AST 给出诊断的编译期拒绝（例如部分字段默认值检查）仍属于
+`fallback`；`tools/check_vm_fallback.py` 会列出这些已知项。
 
 ### 3.1 已原生编译的结构
 

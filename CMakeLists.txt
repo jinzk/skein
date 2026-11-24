@@ -874,6 +874,21 @@ if(BUILD_TESTING)
   add_test(NAME repl_ui_test COMMAND repl_ui_test)
   set_tests_properties(repl_ui_test PROPERTIES LABELS "core")
 
+  add_executable(lexer_test
+    tests/test_lexer.cpp
+  )
+  target_link_libraries(lexer_test PRIVATE skein_interpreter)
+  target_include_directories(lexer_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/interpreter
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/runtime
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/platform
+  )
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(lexer_test PRIVATE -Wall -Wextra)
+  endif()
+  add_test(NAME lexer_test COMMAND lexer_test)
+  set_tests_properties(lexer_test PROPERTIES LABELS "core")
+
   add_executable(bytecode_verifier_test
     tests/test_bytecode_verifier.cpp
   )

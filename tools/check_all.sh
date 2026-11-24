@@ -134,6 +134,13 @@ step "Debug tests (benchmarks are covered by Release)"
 SKEIN_TEST_TIMEOUT=120 test_dir "$DEBUG_DIR" -E \
     'vm_bench_test|container_bench_test'
 
+step "VM fallback regression"
+DEBUG_BIN="$DEBUG_DIR/skein.exe"
+if [[ ! -f "$DEBUG_BIN" ]]; then
+    DEBUG_BIN="$DEBUG_DIR/skein"
+fi
+python3 tools/check_vm_fallback.py --bin "$DEBUG_BIN" --check
+
 step "Toolchain tests (lint / fmt / LSP)"
 SKEIN_TEST_TIMEOUT=120 test_dir "$DEBUG_DIR" -L tools
 

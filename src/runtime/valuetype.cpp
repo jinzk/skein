@@ -483,6 +483,20 @@ void release_deque_chain(std::shared_ptr<deque_node> &head) {
     }
 }
 
+std::shared_ptr<deque_payload> deque_shell_copy(
+    const std::shared_ptr<deque_payload> &source) {
+    std::shared_ptr<deque_payload> out = std::make_shared<deque_payload>();
+    if (!source)
+        return out;
+    out->front = source->front;
+    out->front_tail = source->front_tail;
+    out->back = source->back;
+    out->back_tail = source->back_tail;
+    out->front_size = source->front_size;
+    out->back_size = source->back_size;
+    return out;
+}
+
 } // namespace
 
 deque_payload::~deque_payload() {
@@ -509,6 +523,19 @@ void deque_items_in_order(const struct deque_payload *payload,
         reversed_back.push_back(node->value);
     for (std::size_t i = reversed_back.size(); i > 0; --i)
         out.push_back(reversed_back[i - 1]);
+}
+
+std::shared_ptr<deque_payload> deque_push_back_payload(
+    const std::shared_ptr<deque_payload> &source, struct value_t *value) {
+    std::shared_ptr<deque_payload> out = deque_shell_copy(source);
+    std::shared_ptr<deque_node> entry = std::make_shared<deque_node>();
+    entry->value = dupval(value);
+    entry->next = out->back;
+    out->back = entry;
+    out->back_size += 1;
+    if (out->back_size == 1)
+        out->back_tail = entry;
+    return out;
 }
 
 heap_node::~heap_node() {

@@ -35,19 +35,6 @@ static std::shared_ptr<deque_payload> deque_push_front_payload(
     return out;
 }
 
-std::shared_ptr<deque_payload> deque_push_back_payload(
-    const std::shared_ptr<deque_payload> &source, struct value_t *value) {
-    std::shared_ptr<deque_payload> out = deque_shell_copy(source);
-    std::shared_ptr<deque_node> entry = std::make_shared<deque_node>();
-    entry->value = dupval(value);
-    entry->next = out->back;
-    out->back = entry;
-    out->back_size += 1;
-    if (out->back_size == 1)
-        out->back_tail = entry;
-    return out;
-}
-
 /* Move every back element to the front, reversing the order. */
 static void deque_reverse_back_to_front(deque_payload *payload) {
     std::shared_ptr<deque_node> new_front;

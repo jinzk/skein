@@ -865,6 +865,8 @@ struct Compiler {
             message += " default: ";
             message += error;
             fail(message.c_str());
+            diag_set_location(expr->line, expr->column);
+            yyerror("%s", message.c_str());
             return false;
         }
         return true;

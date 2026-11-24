@@ -91,6 +91,11 @@ if [[ "$DO_BUILD" == "1" ]]; then
     cmake --build "$BUILD_DIR" --parallel "$JOBS"
 fi
 
+SKEIN_BIN="$BUILD_DIR/skein.exe"
+if [[ ! -f "$SKEIN_BIN" ]]; then
+    SKEIN_BIN="$BUILD_DIR/skein"
+fi
+
 start="$(date +%s)"
 case "$MODE" in
     core)
@@ -111,12 +116,12 @@ case "$MODE" in
     coverage)
         printf '==> opcode coverage\n'
         python3 "$ROOT/tools/check_opcode_coverage.py" \
-            --bin "$BUILD_DIR/skein" --check
+            --bin "$SKEIN_BIN" --check
         ;;
     fallback)
         printf '==> VM fallback regression\n'
         python3 "$ROOT/tools/check_vm_fallback.py" \
-            --bin "$BUILD_DIR/skein" --check
+            --bin "$SKEIN_BIN" --check
         ;;
     jit)
         printf '==> JIT smoke + differential + stress\n'

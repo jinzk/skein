@@ -12,12 +12,10 @@ ROOT = Path(__file__).resolve().parent.parent
 
 # Known, intentional fallback paths in the current standard suite.  Each
 # entry is a reason substring plus the reason it is accepted.
-KNOWN_FALLBACKS = [
-    ("default value cannot reference",
-     "compile-time rejection test for field defaults"),
-    ("cannot compile statement",
-     "compile-time rejection test"),
-]
+# The standard suite should compile every statement and function on the VM.
+# Keep this list empty; add an entry only for a known, intentional fallback
+# together with the reason AST execution is required.
+KNOWN_FALLBACKS = []
 
 
 def is_known(reason):

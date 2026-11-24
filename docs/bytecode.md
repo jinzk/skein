@@ -101,10 +101,9 @@ python3 tests/vm_differential.py ./build/skein --fuzz-seconds 60
 
 这样可以在不破坏现有语义和测试的前提下逐步提高 VM 覆盖率。
 
-需要 AST 给出诊断的编译期拒绝（例如部分字段默认值检查）仍属于
-`fallback`；`tools/check_vm_fallback.py` 会列出这些已知项。当前标准测试已无
-operand-stack 相关 fallback：`break` / `continue` 跳出 call 参数时，编译器
-会按活动 call frame 清理尚未消费的 callee / argument 临时值。
+当前标准测试的 VM fallback 为 **0**：字段默认值等编译期拒绝由编译器直接
+报告，`break` / `continue` 跳出 call 参数时也会按活动 call frame 清理临时
+操作数。`tools/check_vm_fallback.py --check` 把任何新 fallback 都视为回归。
 
 ### 3.1 已原生编译的结构
 

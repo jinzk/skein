@@ -2822,12 +2822,15 @@ struct Compiler {
                 default_case = c;
                 continue;
             }
+            SourceLoc case_loc = loc_of((struct ast *)c);
             if (case_values_have_condition(c->values)) {
-                fail("switch case values contain conditions");
+                diag_set_location(case_loc.line, case_loc.column);
+                yyerror("logical or comparison expressions are not allowed "
+                        "in case values");
+                ok = false;
                 return;
             }
 
-            SourceLoc case_loc = loc_of((struct ast *)c);
             compile(c->values);
             if (!ok) return;
             emit(Op::CaseMatch, 0, 0, 0, here);

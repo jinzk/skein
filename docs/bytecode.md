@@ -102,7 +102,9 @@ python3 tests/vm_differential.py ./build/skein --fuzz-seconds 60
 这样可以在不破坏现有语义和测试的前提下逐步提高 VM 覆盖率。
 
 需要 AST 给出诊断的编译期拒绝（例如部分字段默认值检查）仍属于
-`fallback`；`tools/check_vm_fallback.py` 会列出这些已知项。
+`fallback`；`tools/check_vm_fallback.py` 会列出这些已知项。当前剩余的主要
+VM 覆盖缺口是 `break` / `continue` 穿过 call / match 临时值时的 operand
+stack 清理，需要后续引入更完整的表达式栈高度跟踪。
 
 ### 3.1 已原生编译的结构
 

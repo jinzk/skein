@@ -1228,6 +1228,83 @@ public:
         }
     }
 
+    OpResult run_call_spread_op(const Instr &ins,
+                                 value_t *&control_out) {
+        if (ins.b >= proto().call_descs.size()) {
+            yyerror("invalid bytecode call descriptor");
+            return OpResult::Abort;
+        }
+        const skein::bc::CallDesc &desc = proto().call_descs[ins.b];
+        size_t count = desc.spread.size();
+        std::vector<value_t *> raw(count);
+        for (size_t i = count; i > 0; --i) {
+            value_t *arg = pop_checked();
+            if (!arg) {
+                free_args(raw);
+                return OpResult::Abort;
+            }
+            raw[i - 1] = arg;
+        }
+
+        std::vector<value_t *> args;
+        args.reserve(count);
+        bool spread_failed = false;
+        for (size_t i = 0; i < count; ++i) {
+            value_t *value = raw[i];
+            raw[i] = NULL;
+            if (!desc.spread[i]) {
+                args.push_back(value);
+                continue;
+            }
+            if (!value || value->type != T_list) {
+                yyerror("spread expects a list, got %s",
+                        typename_of(value));
+                freeval(value);
+                free_args(args);
+                free_args(raw);
+                spread_failed = true;
+                break;
+            }
+            struct list_value_t *list = (struct list_value_t *)value;
+            for (value_t *item : list->payload->items)
+                args.push_back(dupval(item));
+            freeval(value);
+        }
+        if (spread_failed)
+            return OpResult::Abort;
+
+        value_t *callee = pop_checked();
+        if (!callee) {
+            free_args(args);
+            free_args(raw);
+            return OpResult::Abort;
+        }
+        value_t *result =
+            (ins.flags & 1)
+                ? fiber_launch_host(callee, std::move(args),
+                                    (ins.flags & 2) != 0)
+                : skein_vm_call_value_args(callee, std::move(args));
+        freeval(callee);
+        if (g_interrupted) {
+            freeval(result);
+            return OpResult::Abort;
+        }
+        if (context_.control != EVAL_CONTROL_NONE) {
+            freeval(result);
+            return OpResult::Abort;
+        }
+        if (context_.runtime_error_count != errors_before_) {
+            freeval(result);
+            return OpResult::Abort;
+        }
+        if (result && is_control(result)) {
+            control_out = abort_control(result);
+            return OpResult::Control;
+        }
+        push(result ? result : newnull());
+        return OpResult::Continue;
+    }
+
     value_t *run() {
         while (true) {
             if (pc_ >= proto().code.size()) {
@@ -2766,79 +2843,12 @@ public:
                     break;
 
                 case Op::CallSpread: {
-                    if (ins.b >= proto().call_descs.size()) {
-                        yyerror("invalid bytecode call descriptor");
+                    value_t *control_out = NULL;
+                    OpResult result = run_call_spread_op(ins, control_out);
+                    if (result == OpResult::Abort)
                         return abort_error();
-                    }
-                    const skein::bc::CallDesc &desc =
-                        proto().call_descs[ins.b];
-                    size_t count = desc.spread.size();
-                    std::vector<value_t *> raw(count);
-                    for (size_t i = count; i > 0; --i) {
-                        value_t *arg = pop_checked();
-                        if (!arg) {
-                            free_args(raw);
-                            return abort_error();
-                        }
-                        raw[i - 1] = arg;
-                    }
-
-                    std::vector<value_t *> args;
-                    args.reserve(count);
-                    bool spread_failed = false;
-                    for (size_t i = 0; i < count; ++i) {
-                        value_t *value = raw[i];
-                        raw[i] = NULL;
-                        if (!desc.spread[i]) {
-                            args.push_back(value);
-                            continue;
-                        }
-                        if (!value || value->type != T_list) {
-                            yyerror("spread expects a list, got %s",
-                                    typename_of(value));
-                            freeval(value);
-                            free_args(args);
-                            free_args(raw);
-                            spread_failed = true;
-                            break;
-                        }
-                        struct list_value_t *list =
-                            (struct list_value_t *)value;
-                        for (value_t *item : list->payload->items)
-                            args.push_back(dupval(item));
-                        freeval(value);
-                    }
-                    if (spread_failed)
-                        return abort_error();
-
-                    value_t *callee = pop_checked();
-                    if (!callee) {
-                        free_args(args);
-                        free_args(raw);
-                        return abort_error();
-                    }
-                    value_t *result =
-                        (ins.flags & 1)
-                            ? fiber_launch_host(callee, std::move(args),
-                                                (ins.flags & 2) != 0)
-                            : skein_vm_call_value_args(callee,
-                                                       std::move(args));
-                    freeval(callee);
-                    if (g_interrupted) {
-                        freeval(result);
-                        return abort_error();
-                    }
-                    if (context_.control != EVAL_CONTROL_NONE) {
-                        freeval(result);
-                        return abort_error();
-                    }
-                    if (context_.runtime_error_count != errors_before_) {
-                        freeval(result);
-                        return abort_error();
-                    }
-                    if (result && is_control(result))
-                        return abort_control(result);
-                    push(result ? result : newnull());
+                    if (result == OpResult::Control)
+                        return control_out;
                     break;
                 }
 

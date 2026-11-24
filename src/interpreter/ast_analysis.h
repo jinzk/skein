@@ -1,6 +1,7 @@
 #ifndef SKEIN_AST_ANALYSIS_H
 #define SKEIN_AST_ANALYSIS_H
 
+#include <functional>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -9,6 +10,17 @@ struct ast;
 
 namespace skein {
 namespace ast_analysis {
+
+/* Read-only traversal for analysis passes.  `enter` may skip the current
+ * node's children or stop the walk; `leave` runs after a node's children.
+ * This is intentionally not used by the evaluator or bytecode compiler hot
+ * paths. */
+enum class AstWalkAction { Continue, SkipChildren, Stop };
+using AstWalkEnter = std::function<AstWalkAction(const struct ast *)>;
+using AstWalkLeave = std::function<void(const struct ast *)>;
+
+void walk_ast(const struct ast *node, const AstWalkEnter &enter,
+              const AstWalkLeave &leave = AstWalkLeave());
 
 /* True for top-level statements that primarily declare symbols/types.
  * Analysis-only modes keep evaluating these so imports, type definitions and

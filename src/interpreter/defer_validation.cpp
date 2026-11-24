@@ -2,21 +2,17 @@
 
 #include "ast.h"
 #include "ast_analysis.h"
-#include "diagnostics.h"
 #include "value_runtime.h"
 
 #include <algorithm>
-#include <cstdint>
-#include <cstddef>
 #include <string>
-#include <unordered_map>
 #include <unordered_set>
-#include <utility>
 #include <vector>
 
 namespace {
 
 using skein::bc::SourceLoc;
+using skein::ast_analysis::AstWalkAction;
 
 struct defer_declaration_site {
     std::string name;
@@ -25,64 +21,6 @@ struct defer_declaration_site {
 
 thread_local int defer_error_line = 0;
 thread_local int defer_error_column = 0;
-
-struct label_control_ref {
-    bool is_break = false;
-    std::string name;
-    int line = 0;
-    int column = 0;
-};
-
-struct enclosing_label_target {
-    std::string name;
-    bool breakable = false;
-    bool continuable = false;
-};
-
-struct label_check_state {
-    bool is_generator = false;
-    bool duplicate = false;
-    bool goto_in_generator = false;
-    int error_line = 0;
-    int error_column = 0;
-    std::string error;
-    std::unordered_map<std::string, std::pair<int, int>> labels;
-    std::unordered_map<std::string, std::pair<bool, bool>> target_capabilities;
-    std::vector<enclosing_label_target> enclosing_targets;
-    std::vector<label_control_ref> unresolved_controls;
-    std::unordered_set<std::string> used;
-};
-
-static void label_capabilities(const struct ast *stmt, bool &breakable,
-                               bool &continuable) {
-    breakable = false;
-    continuable = false;
-    while (stmt && stmt->nodetype == 'g')
-        stmt = ((const struct label_node *)stmt)->stmt;
-    if (!stmt)
-        return;
-    switch (stmt->nodetype) {
-        case 'F':
-        case 'P':
-        case 'W':
-        case 'E':
-            breakable = true;
-            continuable = true;
-            break;
-        case 'S':
-            breakable = true;
-            break;
-        default:
-            break;
-    }
-}
-
-/*
- * The defer walker is also reused for the label pass.  A non-null state means
- * the current traversal is collecting labels for one function: labels of
- * nested functions belong to separate namespaces and must not leak outward.
- */
-thread_local label_check_state *active_label_state = nullptr;
 
 static SourceLoc defer_node_loc(const struct ast *node) {
     SourceLoc loc;
@@ -338,325 +276,96 @@ static void validate_defer_members(struct struct_member *member,
     }
 }
 
-static bool validate_defer_walk(
-    const struct ast *node,
-    const std::vector<defer_declaration_site> &sites,
-    std::string &error) {
-    if (!node)
-        return true;
-    switch (node->nodetype) {
-        case 'n': {
-            std::unordered_set<std::string> referenced;
-            skein::ast_analysis::collect_referenced_names(node->l, referenced);
-            std::vector<std::string> later;
-            for (const std::string &name : referenced) {
-                if (name.empty())
-                    continue;
-                for (const defer_declaration_site &site : sites) {
-                    if (site.name != name)
-                        continue;
-                    if (defer_loc_after(site.loc, defer_node_loc(node))) {
-                        later.push_back(name);
-                        break;
-                    }
-                }
-            }
-            if (!later.empty()) {
-                std::sort(later.begin(), later.end());
-                defer_error_line = node->line > 0 ? node->line : 1;
-                defer_error_column =
-                    node->column > 0 ? node->column : 1;
-                error = "defer at ";
-                error += std::to_string(defer_error_line);
-                error += ":";
-                error += std::to_string(defer_error_column);
-                error += " references ";
-                error += later[0];
-                for (size_t i = 1; i < later.size(); ++i) {
-                    error += (i + 1 == later.size()) ? " and " : ", ";
-                    error += later[i];
-                }
-                error += " before its declaration";
-                return false;
-            }
-            return validate_defer_walk(node->l, sites, error);
-        }
-        case 'D':
-            return validate_defer_walk(
-                ((struct symdef *)node)->v, sites, error);
-        case 'Z': {
-            struct funcdef *def = (struct funcdef *)node;
-            if (active_label_state)
-                return true;
-            return validate_defer_body(def->ast, error);
-        }
-        case 'Y': {
-            if (active_label_state)
-                return true;
-            struct struct_node *decl = (struct struct_node *)node;
-            bool ok = true;
-            validate_defer_members(decl->members, error, ok);
-            return ok;
-        }
-        case 'H': {
-            if (active_label_state)
-                return true;
-            struct impl_node *impl = (struct impl_node *)node;
-            bool ok = true;
-            validate_defer_members(impl->methods, error, ok);
-            return ok;
-        }
-        case 'K': {
-            if (active_label_state)
-                return true;
-            struct package_node *package = (struct package_node *)node;
-            return validate_defer_body(package->body, error);
-        }
-        case NODE_DESTRUCTURE:
-            return validate_defer_walk(
-                ((struct destructure_node *)node)->value, sites, error);
-        case 'J':
-        case 't':
-        case '<':
-        case '>':
-            return true;
-        case 'X':
-            return validate_defer_walk(
-                ((struct nscope *)node)->ast, sites, error);
-        case 'L':
-            return validate_defer_walk(node->l, sites, error) &&
-                   validate_defer_walk(node->r, sites, error);
-        case 'I':
-        case 'T': {
-            struct flow *f = (struct flow *)node;
-            return validate_defer_walk(f->cond, sites, error) &&
-                   validate_defer_walk(f->tl, sites, error) &&
-                   validate_defer_walk(f->el, sites, error);
-        }
-        case 'W': {
-            struct flow *f = (struct flow *)node;
-            return validate_defer_walk(f->cond, sites, error) &&
-                   validate_defer_walk(f->tl, sites, error);
-        }
-        case 'E': {
-            struct flow *f = (struct flow *)node;
-            return validate_defer_walk(f->tl, sites, error) &&
-                   validate_defer_walk(f->cond, sites, error);
-        }
-        case 'P': {
-            struct forloop *f = (struct forloop *)node;
-            return validate_defer_walk(f->init, sites, error) &&
-                   validate_defer_walk(f->cond, sites, error) &&
-                   validate_defer_walk(f->step, sites, error) &&
-                   validate_defer_walk(f->body, sites, error);
-        }
-        case 'S': {
-            struct switch_node *s = (struct switch_node *)node;
-            if (!validate_defer_walk(s->expr, sites, error))
-                return false;
-            for (struct case_node *c = (struct case_node *)s->cases; c;
-                 c = (struct case_node *)c->next) {
-                if (!validate_defer_walk(c->values, sites, error) ||
-                    !validate_defer_walk(c->body, sites, error))
-                    return false;
-            }
-            return true;
-        }
-        case 'F': {
-            struct forinloop *loop = (struct forinloop *)node;
-            return validate_defer_walk(loop->iterable, sites, error) &&
-                   validate_defer_walk(loop->body, sites, error);
-        }
-        case 'o': {
-            struct on_error_node *handler =
-                (struct on_error_node *)node;
-            return validate_defer_walk(handler->call, sites, error) &&
-                   validate_defer_walk(handler->body, sites, error);
-        }
-        case '7': {
-            struct match_node *match = (struct match_node *)node;
-            if (!validate_defer_walk(match->expr, sites, error))
-                return false;
-            for (struct match_arm *arm =
-                     (struct match_arm *)match->arms;
-                 arm; arm = (struct match_arm *)arm->next) {
-                if (!validate_defer_walk(arm->guard, sites, error) ||
-                    !validate_defer_walk(arm->body, sites, error))
-                    return false;
-            }
-            return true;
-        }
-        case 'R':
-            return validate_defer_walk(((struct fnret *)node)->v,
-                                       sites, error);
-        case 'C': {
-            struct ufncall *call = (struct ufncall *)node;
-            return validate_defer_walk(call->callee, sites, error) &&
-                   validate_defer_walk(call->args, sites, error);
-        }
-        case '=': {
-            struct symasgn *asgn = (struct symasgn *)node;
-            return validate_defer_walk(asgn->target, sites, error) &&
-                   validate_defer_walk(asgn->v, sites, error);
-        }
-        case 'a': {
-            struct compound_asgn *asgn = (struct compound_asgn *)node;
-            return validate_defer_walk(asgn->target, sites, error) &&
-                   validate_defer_walk(asgn->v, sites, error);
-        }
-        case 'U':
-            return validate_defer_walk(
-                ((struct incdec_node *)node)->target, sites, error);
-        case 'u':
-        case 'v':
-        case 'p':
-            return validate_defer_walk(
-                ((struct control_stmt *)node)->value, sites, error);
-        case 'b':
-        case 'w':
-            return validate_defer_walk(node->l, sites, error);
-        case 'g': {
-            struct label_node *label = (struct label_node *)node;
-            std::string name = label->name ? label->name : "";
-            bool pushed = false;
-            if (active_label_state && !name.empty()) {
-                bool breakable = false;
-                bool continuable = false;
-                label_capabilities(label->stmt, breakable, continuable);
-                active_label_state->target_capabilities[name] =
-                    std::make_pair(breakable, continuable);
-                if (active_label_state->labels.count(name)) {
-                    if (!active_label_state->duplicate) {
-                        active_label_state->duplicate = true;
-                        active_label_state->error = "duplicate label ";
-                        active_label_state->error += name;
-                        active_label_state->error_line =
-                            node->line > 0 ? node->line : 1;
-                        active_label_state->error_column =
-                            node->column > 0 ? node->column : 1;
-                    }
-                } else {
-                    active_label_state->labels[name] =
-                        std::make_pair(node->line, node->column);
-                }
-                active_label_state->enclosing_targets.push_back(
-                    enclosing_label_target{name, breakable, continuable});
-                pushed = true;
-            }
-            bool ok = validate_defer_walk(label->stmt, sites, error);
-            if (pushed)
-                active_label_state->enclosing_targets.pop_back();
-            return ok;
-        }
-        case NODE_FUNCTION_BODY:
-            return validate_defer_walk(node->l, sites, error);
-        case NODE_GOTO: {
-            if (active_label_state) {
-                struct goto_node *jump = (struct goto_node *)node;
-                std::string name = jump->name ? jump->name : "";
-                if (!name.empty())
-                    active_label_state->used.insert(name);
-                if (active_label_state->is_generator &&
-                    !active_label_state->goto_in_generator) {
-                    active_label_state->goto_in_generator = true;
-                    active_label_state->error =
-                        "goto is not allowed in generator functions";
-                    active_label_state->error_line =
-                        node->line > 0 ? node->line : 1;
-                    active_label_state->error_column =
-                        node->column > 0 ? node->column : 1;
-                }
-            }
-            return true;
-        }
-        case 'l':
-        case NODE_TUPLE: {
-            for (struct list_node *item = (struct list_node *)node; item;
-                 item = (struct list_node *)item->next) {
-                if (!validate_defer_walk(item->value, sites, error))
-                    return false;
-            }
-            return true;
-        }
-        case 'd': {
-            for (struct dict_node *entry = (struct dict_node *)node;
-                 entry;
-                 entry = (struct dict_node *)entry->next) {
-                if (!validate_defer_walk(entry->key, sites, error) ||
-                    !validate_defer_walk(entry->value, sites, error))
-                    return false;
-            }
-            return true;
-        }
-        case 'k':
-            return validate_defer_walk(
-                ((struct is_node *)node)->value, sites, error);
-        case 'x':
-            return validate_defer_walk(
-                ((struct spread_node *)node)->value, sites, error);
-        case 'y':
-        case '?': {
-            struct struct_init *init =
-                node->nodetype == 'y'
-                    ? ((struct struct_lit_node *)node)->fields
-                    : ((struct enum_lit_node *)node)->fields;
-            for (; init; init = init->next) {
-                if (!validate_defer_walk(init->value, sites, error))
-                    return false;
-            }
-            return true;
-        }
-        case NODE_CAST:
-            return validate_defer_walk(
-                ((struct cast_node *)node)->value, sites, error);
-        case 'B':
-        case 'O': {
-            if (active_label_state) {
-                bool is_break = node->nodetype == 'B';
-                const char *label =
-                    is_break ? ((struct nbreak *)node)->label
-                             : ((struct ncontinue *)node)->label;
-                if (label && *label) {
-                    active_label_state->used.insert(label);
-                    bool found = false;
-                    for (size_t i =
-                             active_label_state->enclosing_targets.size();
-                         i > 0; --i) {
-                        const enclosing_label_target &target =
-                            active_label_state->enclosing_targets[i - 1];
-                        if (target.name == label &&
-                            (is_break ? target.breakable
-                                      : target.continuable)) {
-                            found = true;
-                            break;
-                        }
-                    }
-                    if (!found) {
-                        active_label_state->unresolved_controls.push_back(
-                            label_control_ref{is_break, label,
-                                              node->line, node->column});
-                    }
-                }
-            }
-            return true;
-        }
-        case 'N':
-        case 'V':
-        case '#':
-            return true;
-        default:
-            return validate_defer_walk(node->l, sites, error) &&
-                   validate_defer_walk(node->r, sites, error);
-    }
-}
-
 static bool validate_defer_body(const struct ast *body,
                                 std::string &error) {
     if (!body)
         return true;
+
     std::vector<defer_declaration_site> sites;
     collect_defer_declaration_sites(body, sites);
-    return validate_defer_walk(body, sites, error);
+
+    bool ok = true;
+    auto enter = [&](const struct ast *node) {
+        if (!ok)
+            return AstWalkAction::Stop;
+        switch (node->nodetype) {
+            case 'n': {
+                std::unordered_set<std::string> referenced;
+                skein::ast_analysis::collect_referenced_names(node->l,
+                                                              referenced);
+                std::vector<std::string> later;
+                for (const std::string &name : referenced) {
+                    if (name.empty())
+                        continue;
+                    for (const defer_declaration_site &site : sites) {
+                        if (site.name != name)
+                            continue;
+                        if (defer_loc_after(site.loc, defer_node_loc(node))) {
+                            later.push_back(name);
+                            break;
+                        }
+                    }
+                }
+                if (!later.empty()) {
+                    std::sort(later.begin(), later.end());
+                    defer_error_line =
+                        node->line > 0 ? node->line : 1;
+                    defer_error_column =
+                        node->column > 0 ? node->column : 1;
+                    error = "defer at ";
+                    error += std::to_string(defer_error_line);
+                    error += ":";
+                    error += std::to_string(defer_error_column);
+                    error += " references ";
+                    error += later[0];
+                    for (size_t i = 1; i < later.size(); ++i) {
+                        error += (i + 1 == later.size()) ? " and " : ", ";
+                        error += later[i];
+                    }
+                    error += " before its declaration";
+                    ok = false;
+                    return AstWalkAction::Stop;
+                }
+                return AstWalkAction::Continue;
+            }
+            case 'Z': {
+                struct funcdef *def = (struct funcdef *)node;
+                if (!validate_defer_body(def->ast, error))
+                    ok = false;
+                return ok ? AstWalkAction::SkipChildren
+                          : AstWalkAction::Stop;
+            }
+            case 'Y': {
+                struct struct_node *decl = (struct struct_node *)node;
+                validate_defer_members(decl->members, error, ok);
+                return ok ? AstWalkAction::SkipChildren
+                          : AstWalkAction::Stop;
+            }
+            case 'H': {
+                struct impl_node *impl = (struct impl_node *)node;
+                validate_defer_members(impl->methods, error, ok);
+                return ok ? AstWalkAction::SkipChildren
+                          : AstWalkAction::Stop;
+            }
+            case 'K': {
+                struct package_node *package = (struct package_node *)node;
+                if (!validate_defer_body(package->body, error))
+                    ok = false;
+                return ok ? AstWalkAction::SkipChildren
+                          : AstWalkAction::Stop;
+            }
+            case 't':
+            case '<':
+            case '>':
+            case 'J':
+                return AstWalkAction::SkipChildren;
+            default:
+                return AstWalkAction::Continue;
+        }
+    };
+
+    skein::ast_analysis::walk_ast(body, enter);
+    return ok;
 }
 
 } // namespace
@@ -709,61 +418,4 @@ bool skein_validate_defer_references(struct ast *statement,
             *error_column = defer_error_column;
     }
     return ok;
-}
-
-void skein_check_function_labels(struct function_code *code, struct ast *body) {
-    if (!code || !body)
-        return;
-
-    label_check_state state;
-    state.is_generator = code->is_generator;
-    std::vector<defer_declaration_site> sites;
-    std::string walk_error;
-
-    label_check_state *saved = active_label_state;
-    active_label_state = &state;
-    validate_defer_walk(body, sites, walk_error);
-    active_label_state = saved;
-
-    if (state.duplicate || state.goto_in_generator) {
-        diag_set_location(state.error_line, state.error_column);
-        yyerror("%s", state.error.c_str());
-        return;
-    }
-
-    if (!state.unresolved_controls.empty()) {
-        const label_control_ref &ref = state.unresolved_controls.front();
-        bool exists = state.target_capabilities.count(ref.name) != 0;
-        std::string message;
-        if (exists) {
-            if (ref.is_break)
-                message = "break target " + ref.name +
-                          " is not an enclosing loop or switch";
-            else
-                message = "continue target " + ref.name +
-                          " is not an enclosing loop";
-        } else if (ref.is_break) {
-            message = "break target " + ref.name +
-                      " not found in this function";
-        } else {
-            message = "continue target " + ref.name +
-                      " not found in this function";
-        }
-        diag_set_location(ref.line, ref.column);
-        yyerror("%s", message.c_str());
-        return;
-    }
-
-    std::vector<std::string> unused;
-    for (const auto &entry : state.labels) {
-        if (state.used.count(entry.first) == 0)
-            unused.push_back(entry.first);
-    }
-    std::sort(unused.begin(), unused.end());
-    for (const std::string &name : unused) {
-        const auto &loc = state.labels[name];
-        std::string message = "label " + name + " is never used";
-        diag_report_warning(loc.first, loc.second, "warning",
-                            message.c_str());
-    }
 }

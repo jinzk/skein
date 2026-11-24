@@ -3,6 +3,7 @@
 #include "ast.h"
 #include "ast_analysis.h"
 #include "diagnostics.h"
+#include "label_analysis.h"
 #include "verifier.h"
 #include "eval_context.h"
 #include "eval_internal.h"
@@ -399,37 +400,6 @@ struct LabelTarget {
     int decl_index = 0;
 };
 
-struct FunctionLabelInfo {
-    int line = 0;
-    int column = 0;
-    bool breakable = false;
-    bool continuable = false;
-};
-
-static void label_capabilities(const struct ast *stmt, bool &breakable,
-                               bool &continuable) {
-    breakable = false;
-    continuable = false;
-    while (stmt && stmt->nodetype == 'g')
-        stmt = ((const struct label_node *)stmt)->stmt;
-    if (!stmt)
-        return;
-    switch (stmt->nodetype) {
-        case 'F': /* for-in */
-        case 'P': /* C-style for */
-        case 'W': /* while */
-        case 'E': /* do-while */
-            breakable = true;
-            continuable = true;
-            break;
-        case 'S': /* switch */
-            breakable = true;
-            break;
-        default:
-            break;
-    }
-}
-
 static bool statement_declares_local(const struct ast *node) {
     if (!node)
         return false;
@@ -453,7 +423,7 @@ struct Compiler {
     std::string error;
     std::vector<LoopContext> loops;
     std::vector<StmtListContext> stmt_lists;
-    std::unordered_map<std::string, FunctionLabelInfo> function_labels;
+    std::unordered_map<std::string, skein::labels::LabelInfo> function_labels;
     std::unordered_set<std::string> used_function_labels;
     std::vector<int> iter_stack;
     struct SlotScope {
@@ -3076,11 +3046,7 @@ struct Compiler {
                 ok = false;
                 return;
             }
-            bool breakable = false;
-            bool continuable = false;
-            label_capabilities(lab->stmt, breakable, continuable);
-            function_labels[name] = FunctionLabelInfo{
-                lab->line, lab->column, breakable, continuable};
+            function_labels[name] = skein::labels::label_info(item);
             LabelTarget target;
             target.scope_depth = ctx.scope_depth;
             target.iter_depth = ctx.iter_depth;
@@ -3812,20 +3778,13 @@ struct Compiler {
         if (!target) {
             if (label && *label) {
                 diag_set_location(loc.line, loc.column);
-                auto it = function_labels.find(label);
-                if (it == function_labels.end()) {
-                    yyerror("%s target %s not found in this function",
-                            is_break ? "break" : "continue", label);
-                } else {
+                bool exists =
+                    function_labels.find(label) != function_labels.end();
+                if (exists)
                     used_function_labels.insert(label);
-                    if (is_break)
-                        yyerror("break target %s is not an enclosing loop or "
-                                "switch",
-                                label);
-                    else
-                        yyerror("continue target %s is not an enclosing loop",
-                                label);
-                }
+                std::string message = skein::labels::target_error(
+                    is_break, label, exists);
+                yyerror("%s", message.c_str());
                 ok = false;
                 return;
             }

@@ -378,6 +378,8 @@ add_library(skein_interpreter STATIC
   src/interpreter/typecheck_builtins.cpp
   src/interpreter/typecheck.cpp
   src/interpreter/defer_validation.cpp
+  src/interpreter/label_analysis.cpp
+  src/interpreter/label_validation.cpp
   src/interpreter/vm_bridge.cpp
   src/interpreter/thread_transfer_serialize.cpp
   src/interpreter/error_report.cpp

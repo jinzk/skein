@@ -286,5 +286,291 @@ void collect_referenced_names(const struct ast *node,
     }
 }
 
+namespace {
+
+bool walk_impl(const struct ast *node, const AstWalkEnter &enter,
+               const AstWalkLeave &leave);
+
+bool walk_members(const struct struct_member *member,
+                  const AstWalkEnter &enter, const AstWalkLeave &leave) {
+    for (; member; member = member->next) {
+        if (member->func && !walk_impl(member->func, enter, leave))
+            return false;
+        if (member->default_value &&
+            !walk_impl(member->default_value, enter, leave))
+            return false;
+        if (member->decorators &&
+            !walk_impl(member->decorators, enter, leave))
+            return false;
+    }
+    return true;
+}
+
+bool walk_trait_methods(const struct trait_method *method,
+                        const AstWalkEnter &enter,
+                        const AstWalkLeave &leave) {
+    for (; method; method = method->next) {
+        if (method->func && !walk_impl(method->func, enter, leave))
+            return false;
+    }
+    return true;
+}
+
+bool walk_enum_variants(const struct enum_variant *variant,
+                        const AstWalkEnter &enter,
+                        const AstWalkLeave &leave) {
+    for (; variant; variant = variant->next) {
+        if (!walk_members(variant->fields, enter, leave))
+            return false;
+    }
+    return true;
+}
+
+bool walk_impl(const struct ast *node, const AstWalkEnter &enter,
+               const AstWalkLeave &leave) {
+    if (!node)
+        return true;
+
+    AstWalkAction action = AstWalkAction::Continue;
+    if (enter)
+        action = enter(node);
+    if (action == AstWalkAction::Stop)
+        return false;
+
+    if (action == AstWalkAction::Continue) {
+        auto visit = [&](const struct ast *child) {
+            return walk_impl(child, enter, leave);
+        };
+        switch (node->nodetype) {
+            case 'n':
+                if (!visit(node->l))
+                    return false;
+                break;
+            case 'D':
+                if (!visit(((struct symdef *)node)->v))
+                    return false;
+                break;
+            case 'Z':
+                if (!visit(((struct funcdef *)node)->ast))
+                    return false;
+                break;
+            case 'Y':
+                if (!walk_members(((struct struct_node *)node)->members,
+                                  enter, leave))
+                    return false;
+                break;
+            case 'H':
+                if (!walk_members(((struct impl_node *)node)->methods, enter,
+                                  leave))
+                    return false;
+                break;
+            case 't':
+                if (!walk_trait_methods(
+                        ((struct trait_node *)node)->methods, enter, leave))
+                    return false;
+                break;
+            case NODE_ENUM_DECL:
+                if (!walk_enum_variants(
+                        ((struct enum_node *)node)->variants, enter, leave))
+                    return false;
+                break;
+            case NODE_ENUM_VARIANT:
+                if (!walk_members(
+                        ((struct enum_variant *)node)->fields, enter, leave))
+                    return false;
+                break;
+            case 'K':
+                if (!visit(((struct package_node *)node)->body))
+                    return false;
+                break;
+            case NODE_DESTRUCTURE:
+                if (!visit(((struct destructure_node *)node)->value))
+                    return false;
+                break;
+            case 'J':
+                break;
+            case 'X':
+                if (!visit(((struct nscope *)node)->ast))
+                    return false;
+                break;
+            case 'L':
+                if (!visit(node->l) || !visit(node->r))
+                    return false;
+                break;
+            case 'I':
+            case 'T': {
+                struct flow *f = (struct flow *)node;
+                if (!visit(f->cond) || !visit(f->tl) || !visit(f->el))
+                    return false;
+                break;
+            }
+            case 'W': {
+                struct flow *f = (struct flow *)node;
+                if (!visit(f->cond) || !visit(f->tl))
+                    return false;
+                break;
+            }
+            case 'E': {
+                struct flow *f = (struct flow *)node;
+                if (!visit(f->tl) || !visit(f->cond))
+                    return false;
+                break;
+            }
+            case 'P': {
+                struct forloop *f = (struct forloop *)node;
+                if (!visit(f->init) || !visit(f->cond) || !visit(f->step) ||
+                    !visit(f->body))
+                    return false;
+                break;
+            }
+            case 'S': {
+                struct switch_node *s = (struct switch_node *)node;
+                if (!visit(s->expr))
+                    return false;
+                for (struct case_node *c = (struct case_node *)s->cases; c;
+                     c = (struct case_node *)c->next) {
+                    if (!visit(c->values) || !visit(c->body))
+                        return false;
+                }
+                break;
+            }
+            case 'F': {
+                struct forinloop *loop = (struct forinloop *)node;
+                if (!visit(loop->iterable) || !visit(loop->body))
+                    return false;
+                break;
+            }
+            case 'o': {
+                struct on_error_node *handler =
+                    (struct on_error_node *)node;
+                if (!visit(handler->call) || !visit(handler->body))
+                    return false;
+                break;
+            }
+            case '7': {
+                struct match_node *match = (struct match_node *)node;
+                if (!visit(match->expr))
+                    return false;
+                for (struct match_arm *arm =
+                         (struct match_arm *)match->arms;
+                     arm; arm = (struct match_arm *)arm->next) {
+                    if (!visit(arm->guard) || !visit(arm->body))
+                        return false;
+                }
+                break;
+            }
+            case 'R':
+                if (!visit(((struct fnret *)node)->v))
+                    return false;
+                break;
+            case 'C': {
+                struct ufncall *call = (struct ufncall *)node;
+                if (!visit(call->callee) || !visit(call->args))
+                    return false;
+                break;
+            }
+            case '=': {
+                struct symasgn *asgn = (struct symasgn *)node;
+                if (!visit(asgn->target) || !visit(asgn->v))
+                    return false;
+                break;
+            }
+            case 'a': {
+                struct compound_asgn *asgn = (struct compound_asgn *)node;
+                if (!visit(asgn->target) || !visit(asgn->v))
+                    return false;
+                break;
+            }
+            case 'U':
+                if (!visit(((struct incdec_node *)node)->target))
+                    return false;
+                break;
+            case 'u':
+            case 'v':
+            case 'p':
+                if (!visit(((struct control_stmt *)node)->value))
+                    return false;
+                break;
+            case 'b':
+            case 'w':
+                if (!visit(node->l))
+                    return false;
+                break;
+            case 'g':
+                if (!visit(((struct label_node *)node)->stmt))
+                    return false;
+                break;
+            case NODE_FUNCTION_BODY:
+                if (!visit(node->l))
+                    return false;
+                break;
+            case NODE_GOTO:
+                break;
+            case 'l':
+            case NODE_TUPLE: {
+                for (struct list_node *item = (struct list_node *)node; item;
+                     item = (struct list_node *)item->next) {
+                    if (!visit(item->value))
+                        return false;
+                }
+                break;
+            }
+            case 'd': {
+                for (struct dict_node *entry = (struct dict_node *)node;
+                     entry; entry = (struct dict_node *)entry->next) {
+                    if (!visit(entry->key) || !visit(entry->value))
+                        return false;
+                }
+                break;
+            }
+            case 'k':
+                if (!visit(((struct is_node *)node)->value))
+                    return false;
+                break;
+            case 'x':
+                if (!visit(((struct spread_node *)node)->value))
+                    return false;
+                break;
+            case 'y':
+            case '?': {
+                struct struct_init *init =
+                    node->nodetype == 'y'
+                        ? ((struct struct_lit_node *)node)->fields
+                        : ((struct enum_lit_node *)node)->fields;
+                for (; init; init = init->next) {
+                    if (!visit(init->value))
+                        return false;
+                }
+                break;
+            }
+            case NODE_CAST:
+                if (!visit(((struct cast_node *)node)->value))
+                    return false;
+                break;
+            case 'B':
+            case 'O':
+            case 'N':
+            case 'V':
+            case '#':
+                break;
+            default:
+                if (!visit(node->l) || !visit(node->r))
+                    return false;
+                break;
+        }
+    }
+
+    if (leave)
+        leave(node);
+    return true;
+}
+
+} // namespace
+
+void walk_ast(const struct ast *node, const AstWalkEnter &enter,
+              const AstWalkLeave &leave) {
+    walk_impl(node, enter, leave);
+}
+
 } // namespace ast_analysis
 } // namespace skein

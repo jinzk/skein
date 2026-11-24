@@ -1478,6 +1478,283 @@ public:
         }
     }
 
+    OpResult run_iter_op(Op op, const Instr &ins) {
+        switch (op) {
+            case Op::IterNew: {
+                uint32_t desc_index = ins.a;
+                if (desc_index >= proto().iters.size()) {
+                    yyerror("invalid bytecode iterator");
+                    return OpResult::Abort;
+                }
+                const skein::bc::IterDesc &desc = proto().iters[desc_index];
+                value_t *iterable = pop_checked();
+                if (!iterable)
+                    return OpResult::Abort;
+
+                if (iterators_.size() <= desc_index)
+                    iterators_.resize(desc_index + 1);
+                iterator_state &state = iterators_[desc_index];
+                if (state.active) {
+                    freeval(state.iterable);
+                    state.iterable = NULL;
+                    state.active = false;
+                }
+                state.key_sym = NULL;
+                state.value_sym = NULL;
+                state.direct = false;
+                state.key_slot = UINT32_MAX;
+                state.value_slot = UINT32_MAX;
+                state.index = 0;
+                state.count = 0;
+                state.generator = false;
+                state.two_vars = desc.two_vars;
+
+                if (fiber_is_generator(iterable)) {
+                    if (desc.two_vars) {
+                        yyerror("two-variable for-in requires dict, "
+                                "got generator");
+                        freeval(iterable);
+                        return OpResult::Abort;
+                    }
+                    state.generator = true;
+                    state.iterable = iterable;
+                } else {
+                    if (iterable->type == T_deque || iterable->type == T_heap ||
+                        iterable->type == T_set) {
+                        struct list_value_t *materialized = newlistval();
+                        std::vector<value_t *> items;
+                        if (iterable->type == T_deque)
+                            deque_items_in_order(
+                                ((struct deque_value_t *)iterable)
+                                    ->payload.get(),
+                                items);
+                        else if (iterable->type == T_heap)
+                            heap_items_level_order(
+                                ((struct heap_value_t *)iterable)
+                                    ->payload.get(),
+                                items);
+                        else
+                            set_values_in_order(
+                                ((struct set_value_t *)iterable)
+                                    ->payload.get(),
+                                items);
+                        materialized->payload->items.reserve(items.size());
+                        for (value_t *item : items)
+                            materialized->payload->items.push_back(
+                                dupval(item));
+                        freeval(iterable);
+                        iterable = (value_t *)materialized;
+                    }
+
+                    if (iterable->type == T_list)
+                        state.count =
+                            ((struct list_value_t *)iterable)
+                                ->payload->items.size();
+                    else if (iterable->type == T_dict)
+                        state.count =
+                            ((struct dict_value_t *)iterable)
+                                ->payload->items.size();
+                    else if (iterable->type == T_string)
+                        state.count = utf8_length(
+                            ((struct string_value_t *)iterable)->value);
+                    else if (iterable->type == T_bytes)
+                        state.count = ((struct bytes_value_t *)iterable)
+                                          ->value.size();
+                    else {
+                        yyerror("cannot iterate %s", typename_of(iterable));
+                        freeval(iterable);
+                        return OpResult::Abort;
+                    }
+
+                    if (desc.two_vars && iterable->type != T_dict) {
+                        yyerror("two-variable for-in requires dict, "
+                                "got %s", typename_of(iterable));
+                        freeval(iterable);
+                        return OpResult::Abort;
+                    }
+                    if (desc.two_vars &&
+                        desc.key_name == desc.value_name) {
+                        yyerror("loop variable repeated: %s",
+                                desc.key_name.c_str());
+                        freeval(iterable);
+                        return OpResult::Abort;
+                    }
+
+                    state.iterable = iterable;
+                }
+
+                state.direct = direct_slots_;
+                if (direct_slots_) {
+                    state.key_slot = desc.key_slot;
+                    state.value_slot = desc.value_slot;
+                    if (state.key_slot < slot_values_.size()) {
+                        freeval(slot_values_[state.key_slot]);
+                        slot_values_[state.key_slot] = NULL;
+                    }
+                    if (desc.two_vars &&
+                        state.value_slot < slot_values_.size()) {
+                        freeval(slot_values_[state.value_slot]);
+                        slot_values_[state.value_slot] = NULL;
+                    }
+                } else {
+                    struct symbol *key_sym = newsym(desc.key_name.c_str());
+                    key_sym->val = NULL;
+                    savesym(key_sym);
+                    state.key_sym = key_sym;
+                    if (desc.key_slot != UINT32_MAX &&
+                        desc.key_slot < slot_symbols_.size())
+                        slot_symbols_[desc.key_slot] = key_sym;
+                    if (desc.two_vars) {
+                        struct symbol *value_sym =
+                            newsym(desc.value_name.c_str());
+                        value_sym->val = NULL;
+                        savesym(value_sym);
+                        state.value_sym = value_sym;
+                        if (desc.value_slot != UINT32_MAX &&
+                            desc.value_slot < slot_symbols_.size())
+                            slot_symbols_[desc.value_slot] = value_sym;
+                    }
+                }
+                state.active = true;
+                if (vm_stats_enabled &&
+                    iterators_.size() > vm_stats.max_iterator_depth)
+                    vm_stats.max_iterator_depth = iterators_.size();
+                invalidate_name_cache(desc.key_name.c_str());
+                if (desc.two_vars)
+                    invalidate_name_cache(desc.value_name.c_str());
+                return OpResult::Continue;
+            }
+
+            case Op::IterNext: {
+                uint32_t desc_index = ins.a;
+                if (desc_index >= iterators_.size()) {
+                    yyerror("invalid bytecode iterator");
+                    return OpResult::Abort;
+                }
+                iterator_state &state = iterators_[desc_index];
+                if (!state.active || (!state.direct && !state.key_sym)) {
+                    pc_ = ins.b;
+                    return OpResult::Continue;
+                }
+
+                if (state.generator) {
+                    generator_ptr generator;
+                    if (!get_generator_value(state.iterable, generator))
+                        return OpResult::Abort;
+                    value_t *item = NULL;
+                    bool done = false;
+                    if (!generator_next_value(generator, NULL, item, done)) {
+                        freeval(item);
+                        return OpResult::Abort;
+                    }
+                    if (done) {
+                        freeval(item);
+                        pc_ = ins.b;
+                        return OpResult::Continue;
+                    }
+                    if (state.direct) {
+                        if (state.key_slot < slot_values_.size()) {
+                            freeval(slot_values_[state.key_slot]);
+                            slot_values_[state.key_slot] = item;
+                        } else {
+                            freeval(item);
+                        }
+                    } else {
+                        freeval(state.key_sym->val);
+                        state.key_sym->val = item;
+                    }
+                    ++state.index;
+                    return OpResult::Continue;
+                }
+
+                if (state.index >= state.count) {
+                    pc_ = ins.b;
+                    return OpResult::Continue;
+                }
+
+                value_t *item = NULL;
+                value_t *second = NULL;
+                size_t index = state.index;
+                if (state.iterable->type == T_list) {
+                    item = dupval(((struct list_value_t *)state.iterable)
+                                      ->payload->items[index]);
+                } else if (state.iterable->type == T_dict) {
+                    struct dict_value_t *dict =
+                        (struct dict_value_t *)state.iterable;
+                    item = dupval(dict->payload->items[index].first);
+                    if (state.two_vars)
+                        second = dupval(dict->payload->items[index].second);
+                } else if (state.iterable->type == T_string) {
+                    std::string ch;
+                    if (!utf8_char_at(
+                            ((struct string_value_t *)state.iterable)->value,
+                            index, ch)) {
+                        yyerror("invalid UTF-8 string iteration");
+                        return OpResult::Abort;
+                    }
+                    size_t consumed = 0;
+                    unsigned int codepoint = 0;
+                    if (!utf8_decode_one(ch.data(), ch.size(), consumed,
+                                         codepoint)) {
+                        yyerror("invalid UTF-8 string iteration");
+                        return OpResult::Abort;
+                    }
+                    item = newcharval(codepoint);
+                } else {
+                    item = newintval(
+                        (unsigned char)((struct bytes_value_t *)state.iterable)
+                            ->value[index]);
+                }
+
+                if (state.direct) {
+                    if (state.key_slot < slot_values_.size()) {
+                        freeval(slot_values_[state.key_slot]);
+                        slot_values_[state.key_slot] = item;
+                    } else {
+                        freeval(item);
+                    }
+                    if (state.two_vars &&
+                        state.value_slot < slot_values_.size()) {
+                        freeval(slot_values_[state.value_slot]);
+                        slot_values_[state.value_slot] = second;
+                    } else {
+                        freeval(second);
+                    }
+                } else {
+                    freeval(state.key_sym->val);
+                    state.key_sym->val = item;
+                    if (state.two_vars && state.value_sym) {
+                        freeval(state.value_sym->val);
+                        state.value_sym->val = second;
+                    } else {
+                        freeval(second);
+                    }
+                }
+                ++state.index;
+                return OpResult::Continue;
+            }
+
+            case Op::IterEnd: {
+                uint32_t desc_index = ins.a;
+                if (desc_index < iterators_.size()) {
+                    iterator_state &state = iterators_[desc_index];
+                    freeval(state.iterable);
+                    state.iterable = NULL;
+                    state.active = false;
+                    state.direct = false;
+                    state.key_slot = UINT32_MAX;
+                    state.value_slot = UINT32_MAX;
+                    state.key_sym = NULL;
+                    state.value_sym = NULL;
+                }
+                return OpResult::Continue;
+            }
+
+            default:
+                return OpResult::Continue;
+        }
+    }
+
     value_t *run() {
         while (true) {
             if (pc_ >= proto().code.size()) {
@@ -2478,287 +2755,13 @@ public:
                         return abort_error();
                     break;
 
-                case Op::IterNew: {
-                    uint32_t desc_index = ins.a;
-                    if (desc_index >= proto().iters.size()) {
-                        yyerror("invalid bytecode iterator");
+                case Op::IterNew:
+                case Op::IterNext:
+                case Op::IterEnd:
+                    if (run_iter_op(static_cast<Op>(ins.op), ins) ==
+                        OpResult::Abort)
                         return abort_error();
-                    }
-                    const skein::bc::IterDesc &desc =
-                        proto().iters[desc_index];
-                    value_t *iterable = pop_checked();
-                    if (!iterable)
-                        return abort_error();
-
-                    if (iterators_.size() <= desc_index)
-                        iterators_.resize(desc_index + 1);
-                    iterator_state &state = iterators_[desc_index];
-                    if (state.active) {
-                        freeval(state.iterable);
-                        state.iterable = NULL;
-                        state.active = false;
-                    }
-                    state.key_sym = NULL;
-                    state.value_sym = NULL;
-                    state.direct = false;
-                    state.key_slot = UINT32_MAX;
-                    state.value_slot = UINT32_MAX;
-                    state.index = 0;
-                    state.count = 0;
-                    state.generator = false;
-                    state.two_vars = desc.two_vars;
-
-                    if (fiber_is_generator(iterable)) {
-                        if (desc.two_vars) {
-                            yyerror("two-variable for-in requires dict, "
-                                    "got generator");
-                            freeval(iterable);
-                            return abort_error();
-                        }
-                        state.generator = true;
-                        state.iterable = iterable;
-                    } else {
-                        if (iterable->type == T_deque ||
-                            iterable->type == T_heap ||
-                            iterable->type == T_set) {
-                            struct list_value_t *materialized =
-                                newlistval();
-                            std::vector<value_t *> items;
-                            if (iterable->type == T_deque)
-                                deque_items_in_order(
-                                    ((struct deque_value_t *)iterable)
-                                        ->payload.get(),
-                                    items);
-                            else if (iterable->type == T_heap)
-                                heap_items_level_order(
-                                    ((struct heap_value_t *)iterable)
-                                        ->payload.get(),
-                                    items);
-                            else
-                                set_values_in_order(
-                                    ((struct set_value_t *)iterable)
-                                        ->payload.get(),
-                                    items);
-                            materialized->payload->items.reserve(
-                                items.size());
-                            for (value_t *item : items)
-                                materialized->payload->items.push_back(
-                                    dupval(item));
-                            freeval(iterable);
-                            iterable = (value_t *)materialized;
-                        }
-
-                        if (iterable->type == T_list)
-                            state.count = ((struct list_value_t *)iterable)
-                                              ->payload->items.size();
-                        else if (iterable->type == T_dict)
-                            state.count = ((struct dict_value_t *)iterable)
-                                              ->payload->items.size();
-                        else if (iterable->type == T_string)
-                            state.count = utf8_length(
-                                ((struct string_value_t *)iterable)->value);
-                        else if (iterable->type == T_bytes)
-                            state.count =
-                                ((struct bytes_value_t *)iterable)
-                                    ->value.size();
-                        else {
-                            yyerror("cannot iterate %s",
-                                    typename_of(iterable));
-                            freeval(iterable);
-                            return abort_error();
-                        }
-
-                        if (desc.two_vars && iterable->type != T_dict) {
-                            yyerror("two-variable for-in requires dict, "
-                                    "got %s", typename_of(iterable));
-                            freeval(iterable);
-                            return abort_error();
-                        }
-                        if (desc.two_vars &&
-                            desc.key_name == desc.value_name) {
-                            yyerror("loop variable repeated: %s",
-                                    desc.key_name.c_str());
-                            freeval(iterable);
-                            return abort_error();
-                        }
-
-                        state.iterable = iterable;
-                    }
-
-                    state.direct = direct_slots_;
-                    if (direct_slots_) {
-                        state.key_slot = desc.key_slot;
-                        state.value_slot = desc.value_slot;
-                        if (state.key_slot < slot_values_.size()) {
-                            freeval(slot_values_[state.key_slot]);
-                            slot_values_[state.key_slot] = NULL;
-                        }
-                        if (desc.two_vars &&
-                            state.value_slot < slot_values_.size()) {
-                            freeval(slot_values_[state.value_slot]);
-                            slot_values_[state.value_slot] = NULL;
-                        }
-                    } else {
-                        struct symbol *key_sym =
-                            newsym(desc.key_name.c_str());
-                        key_sym->val = NULL;
-                        savesym(key_sym);
-                        state.key_sym = key_sym;
-                        if (desc.key_slot != UINT32_MAX &&
-                            desc.key_slot < slot_symbols_.size())
-                            slot_symbols_[desc.key_slot] = key_sym;
-                        if (desc.two_vars) {
-                            struct symbol *value_sym =
-                                newsym(desc.value_name.c_str());
-                            value_sym->val = NULL;
-                            savesym(value_sym);
-                            state.value_sym = value_sym;
-                            if (desc.value_slot != UINT32_MAX &&
-                                desc.value_slot < slot_symbols_.size())
-                                slot_symbols_[desc.value_slot] = value_sym;
-                        }
-                    }
-                    state.active = true;
-                    if (vm_stats_enabled &&
-                        iterators_.size() > vm_stats.max_iterator_depth)
-                        vm_stats.max_iterator_depth = iterators_.size();
-                    invalidate_name_cache(desc.key_name.c_str());
-                    if (desc.two_vars)
-                        invalidate_name_cache(desc.value_name.c_str());
                     break;
-                }
-
-                case Op::IterNext: {
-                    uint32_t desc_index = ins.a;
-                    if (desc_index >= iterators_.size()) {
-                        yyerror("invalid bytecode iterator");
-                        return abort_error();
-                    }
-                    iterator_state &state = iterators_[desc_index];
-                    if (!state.active ||
-                        (!state.direct && !state.key_sym)) {
-                        pc_ = ins.b;
-                        break;
-                    }
-
-                    if (state.generator) {
-                        generator_ptr generator;
-                        if (!get_generator_value(state.iterable, generator)) {
-                            return abort_error();
-                        }
-                        value_t *item = NULL;
-                        bool done = false;
-                        if (!generator_next_value(generator, NULL, item,
-                                                  done)) {
-                            freeval(item);
-                            return abort_error();
-                        }
-                        if (done) {
-                            freeval(item);
-                            pc_ = ins.b;
-                            break;
-                        }
-                        if (state.direct) {
-                            if (state.key_slot < slot_values_.size()) {
-                                freeval(slot_values_[state.key_slot]);
-                                slot_values_[state.key_slot] = item;
-                            } else {
-                                freeval(item);
-                            }
-                        } else {
-                            freeval(state.key_sym->val);
-                            state.key_sym->val = item;
-                        }
-                        ++state.index;
-                        break;
-                    }
-
-                    if (state.index >= state.count) {
-                        pc_ = ins.b;
-                        break;
-                    }
-
-                    value_t *item = NULL;
-                    value_t *second = NULL;
-                    size_t index = state.index;
-                    if (state.iterable->type == T_list) {
-                        item = dupval(
-                            ((struct list_value_t *)state.iterable)
-                                ->payload->items[index]);
-                    } else if (state.iterable->type == T_dict) {
-                        struct dict_value_t *dict =
-                            (struct dict_value_t *)state.iterable;
-                        item = dupval(
-                            dict->payload->items[index].first);
-                        if (state.two_vars)
-                            second = dupval(
-                                dict->payload->items[index].second);
-                    } else if (state.iterable->type == T_string) {
-                        std::string ch;
-                        if (!utf8_char_at(
-                                ((struct string_value_t *)state.iterable)
-                                    ->value,
-                                index, ch)) {
-                            yyerror("invalid UTF-8 string iteration");
-                            return abort_error();
-                        }
-                        size_t consumed = 0;
-                        unsigned int codepoint = 0;
-                        if (!utf8_decode_one(ch.data(), ch.size(),
-                                             consumed, codepoint)) {
-                            yyerror("invalid UTF-8 string iteration");
-                            return abort_error();
-                        }
-                        item = newcharval(codepoint);
-                    } else {
-                        item = newintval((unsigned char)
-                            ((struct bytes_value_t *)state.iterable)
-                                ->value[index]);
-                    }
-
-                    if (state.direct) {
-                        if (state.key_slot < slot_values_.size()) {
-                            freeval(slot_values_[state.key_slot]);
-                            slot_values_[state.key_slot] = item;
-                        } else {
-                            freeval(item);
-                        }
-                        if (state.two_vars &&
-                            state.value_slot < slot_values_.size()) {
-                            freeval(slot_values_[state.value_slot]);
-                            slot_values_[state.value_slot] = second;
-                        } else {
-                            freeval(second);
-                        }
-                    } else {
-                        freeval(state.key_sym->val);
-                        state.key_sym->val = item;
-                        if (state.two_vars && state.value_sym) {
-                            freeval(state.value_sym->val);
-                            state.value_sym->val = second;
-                        } else {
-                            freeval(second);
-                        }
-                    }
-                    ++state.index;
-                    break;
-                }
-
-                case Op::IterEnd: {
-                    uint32_t desc_index = ins.a;
-                    if (desc_index < iterators_.size()) {
-                        iterator_state &state = iterators_[desc_index];
-                        freeval(state.iterable);
-                        state.iterable = NULL;
-                        state.active = false;
-                        state.direct = false;
-                        state.key_slot = UINT32_MAX;
-                        state.value_slot = UINT32_MAX;
-                        state.key_sym = NULL;
-                        state.value_sym = NULL;
-                    }
-                    break;
-                }
 
                 case Op::MatchBegin:
                 case Op::MatchTest:

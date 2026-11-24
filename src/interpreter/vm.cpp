@@ -795,6 +795,127 @@ public:
         }
     }
 
+    OpResult run_pattern_op(Op op, const Instr &ins) {
+        switch (op) {
+            case Op::MatchBegin: {
+                if (stack_.empty()) {
+                    yyerror("internal bytecode stack underflow");
+                    return OpResult::Abort;
+                }
+                if (!match_exhaustive_desc(ins.b, stack_.back()))
+                    return OpResult::Abort;
+                return OpResult::Continue;
+            }
+
+            case Op::MatchTest: {
+                value_t *subject = pop_checked();
+                if (!subject)
+                    return OpResult::Abort;
+                std::vector<pattern_binding> bindings;
+                bool matched =
+                    match_pattern_proto(proto(), ins.b, subject, bindings);
+                freeval(subject);
+                if (context_.runtime_error_count != errors_before_) {
+                    free_pattern_bindings(bindings);
+                    return OpResult::Abort;
+                }
+                if (!matched) {
+                    free_pattern_bindings(bindings);
+                    push(newboolval(false));
+                    return OpResult::Continue;
+                }
+                for (pattern_binding &binding : bindings) {
+                    if (direct_slots_) {
+                        value_t *value = binding.value;
+                        binding.value = NULL;
+                        if (!assign_pattern_slot_direct(
+                                ins.b, binding.name, value, true)) {
+                            freeval(value);
+                            free_pattern_bindings(bindings);
+                            return OpResult::Abort;
+                        }
+                        continue;
+                    }
+                    struct symbol *sym = newsym(binding.name.c_str());
+                    sym->val = binding.value;
+                    binding.value = NULL;
+                    sym->is_const = true;
+                    savesym(sym);
+                    assign_pattern_slot(ins.b, binding.name, sym);
+                }
+                if (!direct_slots_) {
+                    for (const pattern_binding &binding : bindings)
+                        invalidate_name_cache(binding.name.c_str());
+                }
+                bindings.clear();
+                push(newboolval(true));
+                return OpResult::Continue;
+            }
+
+            case Op::MatchBind: {
+                value_t *value = pop_checked();
+                if (!value)
+                    return OpResult::Abort;
+                std::vector<pattern_binding> bindings;
+                bool matched =
+                    match_pattern_proto(proto(), ins.b, value, bindings);
+                if (context_.runtime_error_count != errors_before_) {
+                    free_pattern_bindings(bindings);
+                    freeval(value);
+                    return OpResult::Abort;
+                }
+                if (!matched) {
+                    free_pattern_bindings(bindings);
+                    yyerror("destructuring pattern did not match %s",
+                            typename_of(value));
+                    freeval(value);
+                    return OpResult::Abort;
+                }
+                for (pattern_binding &binding : bindings) {
+                    if (isrepeated(binding.name.c_str())) {
+                        yyerror("symbol repeated %s",
+                                binding.name.c_str());
+                        free_pattern_bindings(bindings);
+                        freeval(value);
+                        return OpResult::Abort;
+                    }
+                }
+                for (pattern_binding &binding : bindings) {
+                    if (direct_slots_) {
+                        value_t *bound = binding.value;
+                        binding.value = NULL;
+                        if (!assign_pattern_slot_direct(
+                                ins.b, binding.name, bound,
+                                (ins.flags & 1) != 0)) {
+                            freeval(bound);
+                            free_pattern_bindings(bindings);
+                            freeval(value);
+                            return OpResult::Abort;
+                        }
+                        continue;
+                    }
+                    struct symbol *sym = newsym(binding.name.c_str());
+                    sym->val = binding.value;
+                    binding.value = NULL;
+                    sym->is_const = (ins.flags & 1) != 0;
+                    savesym(sym);
+                    assign_pattern_slot(ins.b, binding.name, sym);
+                }
+                if (!direct_slots_) {
+                    for (const pattern_binding &binding : bindings)
+                        invalidate_name_cache(binding.name.c_str());
+                }
+                bindings.clear();
+                freeval(value);
+                push(newnull());
+                return OpResult::Continue;
+            }
+
+            default:
+                return OpResult::Continue;
+        }
+    }
+
     value_t *run() {
         while (true) {
             if (pc_ >= proto().code.size()) {
@@ -2302,119 +2423,13 @@ public:
                     break;
                 }
 
-                case Op::MatchBegin: {
-                    if (stack_.empty()) {
-                        yyerror("internal bytecode stack underflow");
-                        return abort_error();
-                    }
-                    if (!match_exhaustive_desc(ins.b, stack_.back()))
+                case Op::MatchBegin:
+                case Op::MatchTest:
+                case Op::MatchBind:
+                    if (run_pattern_op(static_cast<Op>(ins.op), ins) ==
+                        OpResult::Abort)
                         return abort_error();
                     break;
-                }
-
-                case Op::MatchTest: {
-                    value_t *subject = pop_checked();
-                    if (!subject)
-                        return abort_error();
-                    std::vector<pattern_binding> bindings;
-                    bool matched =
-                        match_pattern_proto(proto(), ins.b, subject, bindings);
-                    freeval(subject);
-                    if (context_.runtime_error_count != errors_before_) {
-                        free_pattern_bindings(bindings);
-                        return abort_error();
-                    }
-                    if (!matched) {
-                        free_pattern_bindings(bindings);
-                        push(newboolval(false));
-                        break;
-                    }
-                    for (pattern_binding &binding : bindings) {
-                        if (direct_slots_) {
-                            value_t *value = binding.value;
-                            binding.value = NULL;
-                            if (!assign_pattern_slot_direct(
-                                    ins.b, binding.name, value, true)) {
-                                freeval(value);
-                                free_pattern_bindings(bindings);
-                                return abort_error();
-                            }
-                            continue;
-                        }
-                        struct symbol *sym = newsym(binding.name.c_str());
-                        sym->val = binding.value;
-                        binding.value = NULL;
-                        sym->is_const = true;
-                        savesym(sym);
-                        assign_pattern_slot(ins.b, binding.name, sym);
-                    }
-                    if (!direct_slots_) {
-                        for (const pattern_binding &binding : bindings)
-                            invalidate_name_cache(binding.name.c_str());
-                    }
-                    bindings.clear();
-                    push(newboolval(true));
-                    break;
-                }
-
-                case Op::MatchBind: {
-                    value_t *value = pop_checked();
-                    if (!value)
-                        return abort_error();
-                    std::vector<pattern_binding> bindings;
-                    bool matched =
-                        match_pattern_proto(proto(), ins.b, value, bindings);
-                    if (context_.runtime_error_count != errors_before_) {
-                        free_pattern_bindings(bindings);
-                        freeval(value);
-                        return abort_error();
-                    }
-                    if (!matched) {
-                        free_pattern_bindings(bindings);
-                        yyerror("destructuring pattern did not match %s",
-                                typename_of(value));
-                        freeval(value);
-                        return abort_error();
-                    }
-                    for (pattern_binding &binding : bindings) {
-                        if (isrepeated(binding.name.c_str())) {
-                            yyerror("symbol repeated %s",
-                                    binding.name.c_str());
-                            free_pattern_bindings(bindings);
-                            freeval(value);
-                            return abort_error();
-                        }
-                    }
-                    for (pattern_binding &binding : bindings) {
-                        if (direct_slots_) {
-                            value_t *bound = binding.value;
-                            binding.value = NULL;
-                            if (!assign_pattern_slot_direct(
-                                    ins.b, binding.name, bound,
-                                    (ins.flags & 1) != 0)) {
-                                freeval(bound);
-                                free_pattern_bindings(bindings);
-                                freeval(value);
-                                return abort_error();
-                            }
-                            continue;
-                        }
-                        struct symbol *sym = newsym(binding.name.c_str());
-                        sym->val = binding.value;
-                        binding.value = NULL;
-                        sym->is_const = (ins.flags & 1) != 0;
-                        savesym(sym);
-                        assign_pattern_slot(ins.b, binding.name, sym);
-                    }
-                    if (!direct_slots_) {
-                        for (const pattern_binding &binding : bindings)
-                            invalidate_name_cache(binding.name.c_str());
-                    }
-                    bindings.clear();
-                    freeval(value);
-                    push(newnull());
-                    break;
-                }
 
                 case Op::Closure: {
                     const Constant *c = constant_at(proto(), ins.b);

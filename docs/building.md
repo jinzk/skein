@@ -221,6 +221,10 @@ sanitize 构建会把 Python 套件按模块分成 ASan/UBSan 分片和 LSan 分
 `-j 6`（或接近 CPU 核数）可让 AST/VM/LSan 三组并行，避免整份套件串行跑三遍。
 只需要 leak 检查时可以单独运行 `-R skein_vm_lsan_tests_shard`。
 
+Windows（MSYS2/MinGW）的 GCC 不提供 `libasan`，`SKEIN_SANITIZE` 无法链接；
+`tools/check_all.sh` 会自动探测并跳过 ASan 阶段。Windows 可执行文件预留
+16 MiB 主线程栈，让解释器的递归深度限制先于系统栈溢出触发。
+
 `SKEIN_TEST_TIMEOUT` 只影响测试子进程的超时，默认 5 秒；sanitizer 构建需要放宽。
 task / generator 的 fiber 栈默认 1 MiB，带 guard page，栈按线程复用
 （最多缓存 32 个）；可用 `SKEIN_FIBER_STACK_KB` 调整大小，sanitizer 构建建议

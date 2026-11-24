@@ -517,9 +517,18 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 target_link_libraries(${PROJECT_NAME} PRIVATE skein_builtins)
 if(WIN32 AND MINGW)
   # Windows defaults to a 1 MiB main-thread stack, which is exhausted before
-  # the interpreter's recursion limit.  Match the usual 8 MiB POSIX stack.
+  # the interpreter's recursion limit.  Debug frames are large enough that a
+  # 1000-level recursion chain needs more than 8 MiB, so reserve 16 MiB and
+  # let the interpreter's depth check fire first.
   set_property(TARGET ${PROJECT_NAME} APPEND_STRING PROPERTY
-    LINK_FLAGS " -Wl,--stack,8388608")
+    LINK_FLAGS " -Wl,--stack,16777216")
+  # GCC 16 at -O3 miscompiles the forced unwind used to destroy unstarted or
+  # suspended boost.context fibers: the SEH unwinder crashes in
+  # RtlVirtualUnwind2.  -O2 in this translation unit avoids the bad codegen
+  # while leaving the evaluator and VM hot paths fully optimised.
+  set_source_files_properties(
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/interpreter/fiber.cpp
+    PROPERTIES COMPILE_OPTIONS "$<$<CONFIG:Release>:-O2>")
 endif()
 
 if(SKEIN_COPY_RUNTIME_DLLS)

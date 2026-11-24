@@ -108,6 +108,8 @@ void ast_add_chunk(size_t need) {
     g_ast_pool.limit = g_ast_pool.cursor + capacity;
 }
 
+} // namespace
+
 void *ast_node_alloc(size_t size) {
     if (!ast_arena_enabled())
         return std::malloc(size);
@@ -144,8 +146,6 @@ void *ast_node_alloc(size_t size) {
     header->reserved = 0;
     return header + 1;
 }
-
-} // namespace
 
 void ast_node_free(void *ptr) {
     if (!ptr)

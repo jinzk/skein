@@ -263,7 +263,7 @@ static struct ast *with_decorators(struct ast *method,
 struct val;
 
 static struct ast *ffi_value_node(struct value_t *value) {
-    struct val *a = (struct val *)std::malloc(sizeof(struct val));
+    struct val *a = (struct val *)ast_node_alloc(sizeof(struct val));
     if (!a) {
         yyerror("out of space");
         std::exit(0);

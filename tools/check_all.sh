@@ -121,6 +121,19 @@ test_dir() {
     ctest --test-dir "$dir" --output-on-failure "$@"
 }
 
+asan_available() {
+    local compiler="${CXX:-c++}"
+    command -v "$compiler" >/dev/null 2>&1 || return 1
+    local probe_dir
+    probe_dir="$(mktemp -d)" || return 1
+    printf 'int main(){return 0;}\n' > "$probe_dir/probe.cpp"
+    local rc=0
+    "$compiler" -fsanitize=address "$probe_dir/probe.cpp" \
+        -o "$probe_dir/probe" >/dev/null 2>&1 || rc=1
+    rm -rf "$probe_dir"
+    return "$rc"
+}
+
 step "Debug build"
 DEBUG_DIR="$BUILD_ROOT/debug"
 configure "$DEBUG_DIR" -DCMAKE_BUILD_TYPE=Debug
@@ -132,7 +145,7 @@ build "$DEBUG_DIR" --target runtime_link_test
 
 step "Debug tests (benchmarks are covered by Release)"
 SKEIN_TEST_TIMEOUT=120 test_dir "$DEBUG_DIR" -E \
-    'vm_bench_test|container_bench_test'
+    'vm_bench_test|container_bench_test|thread_bench_test'
 
 step "VM fallback regression"
 DEBUG_BIN="$DEBUG_DIR/skein.exe"
@@ -162,6 +175,13 @@ if [[ "$RUN_RELEASE" == "1" ]]; then
 fi
 
 if [[ "$RUN_ASAN" == "1" ]]; then
+    if ! asan_available; then
+        printf 'ASan is unavailable with the current toolchain; skipping.\n'
+        RUN_ASAN=0
+    fi
+fi
+
+if [[ "$RUN_ASAN" == "1" ]]; then
     step "ASan + UBSan build"
     ASAN_DIR="$BUILD_ROOT/asan"
     configure "$ASAN_DIR" -DCMAKE_BUILD_TYPE=Debug -DSKEIN_SANITIZE=ON
@@ -179,7 +199,7 @@ if [[ "$RUN_VM_ONLY" == "1" ]]; then
 
     step "VM-only tests"
     SKEIN_TEST_TIMEOUT=120 test_dir "$VM_ONLY_DIR" -E \
-        'vm_bench_test|container_bench_test'
+        'vm_bench_test|container_bench_test|thread_bench_test'
 fi
 
 if [[ "$RUN_GLIBCXX_DEBUG" == "1" ]]; then

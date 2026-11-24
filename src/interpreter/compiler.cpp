@@ -383,6 +383,7 @@ struct LoopContext {
     std::vector<size_t> continue_patches;
     int scope_depth = 0;
     int iter_depth = 0;
+    int call_depth = 0;
     int stack_cleanup = 0;
     int handler_body_depth = 0;
     int handler_stack_depth = 0;
@@ -396,6 +397,7 @@ struct LabelTarget {
     int scope_depth = 0;
     int iter_depth = 0;
     int loop_depth = 0;
+    int call_depth = 0;
     int handler_stack_depth = 0;
     int handler_body_depth = 0;
     int decl_index = 0;
@@ -407,6 +409,7 @@ struct StmtListContext {
     int scope_depth = 0;
     int iter_depth = 0;
     int loop_depth = 0;
+    int call_depth = 0;
     int handler_stack_depth = 0;
     int handler_body_depth = 0;
 };
@@ -416,6 +419,7 @@ struct Compiler {
     std::string error;
     std::vector<LoopContext> loops;
     std::vector<StmtListContext> stmt_lists;
+    std::vector<int> call_cleanup;
     std::unordered_map<std::string, skein::labels::LabelInfo> function_labels;
     std::unordered_set<std::string> used_function_labels;
     std::vector<int> iter_stack;
@@ -2455,6 +2459,14 @@ struct Compiler {
             for (int n = 0; n < loops[i - 1].stack_cleanup; ++n)
                 emit(Op::Pop, 0, 0, 0, loc);
         }
+        size_t call_base = static_cast<size_t>(target.call_depth) <
+                                   call_cleanup.size()
+                               ? static_cast<size_t>(target.call_depth)
+                               : call_cleanup.size();
+        for (size_t i = call_base; i < call_cleanup.size(); ++i) {
+            for (int n = 0; n < call_cleanup[i]; ++n)
+                emit(Op::Pop, 0, 0, 0, loc);
+        }
         for (int depth = scope_depth; depth > target.scope_depth; --depth)
             emit(Op::PopScope, 0, 0, 0, loc);
     }
@@ -2471,6 +2483,7 @@ struct Compiler {
         ctx.scope_depth = scope_depth;
         ctx.iter_depth = static_cast<int>(iter_stack.size());
         ctx.loop_depth = static_cast<int>(loops.size());
+        ctx.call_depth = static_cast<int>(call_cleanup.size());
         ctx.handler_stack_depth = handler_stack_depth;
         ctx.handler_body_depth = handler_body_depth;
         std::vector<int> decl_before(items.size() + 1, 0);
@@ -2494,6 +2507,7 @@ struct Compiler {
             target.scope_depth = ctx.scope_depth;
             target.iter_depth = ctx.iter_depth;
             target.loop_depth = ctx.loop_depth;
+            target.call_depth = ctx.call_depth;
             target.handler_stack_depth = ctx.handler_stack_depth;
             target.handler_body_depth = ctx.handler_body_depth;
             target.decl_index = decl_before[i];
@@ -2607,6 +2621,7 @@ struct Compiler {
         ctx.handler_body_depth = handler_body_depth;
         ctx.handler_stack_depth = handler_stack_depth;
         ctx.iter_depth = static_cast<int>(iter_stack.size());
+        ctx.call_depth = static_cast<int>(call_cleanup.size());
         loops.push_back(ctx);
         size_t ctx_index = loops.size() - 1;
 
@@ -2645,6 +2660,7 @@ struct Compiler {
         ctx.handler_body_depth = handler_body_depth;
         ctx.handler_stack_depth = handler_stack_depth;
         ctx.iter_depth = static_cast<int>(iter_stack.size());
+        ctx.call_depth = static_cast<int>(call_cleanup.size());
         loops.push_back(ctx);
         size_t ctx_index = loops.size() - 1;
 
@@ -2693,6 +2709,7 @@ struct Compiler {
         ctx.handler_body_depth = handler_body_depth;
         ctx.handler_stack_depth = handler_stack_depth;
         ctx.iter_depth = static_cast<int>(iter_stack.size());
+        ctx.call_depth = static_cast<int>(call_cleanup.size());
         loops.push_back(ctx);
         size_t ctx_index = loops.size() - 1;
 
@@ -2767,6 +2784,7 @@ struct Compiler {
         ctx.scope_depth = scope_depth;
         ctx.handler_body_depth = handler_body_depth;
         ctx.handler_stack_depth = handler_stack_depth;
+        ctx.call_depth = static_cast<int>(call_cleanup.size());
         loops.push_back(ctx);
         iter_stack.push_back(static_cast<int>(desc));
         loops.back().iter_depth = static_cast<int>(iter_stack.size());
@@ -2810,6 +2828,7 @@ struct Compiler {
         ctx.iter_depth = static_cast<int>(iter_stack.size());
         ctx.stack_cleanup = 1; // the subject stays on the operand stack
         ctx.accepts_continue = false;
+        ctx.call_depth = static_cast<int>(call_cleanup.size());
         loops.push_back(ctx);
         size_t ctx_index = loops.size() - 1;
 
@@ -3044,6 +3063,7 @@ struct Compiler {
         ctx.stack_cleanup = 1; // the subject stays on the operand stack
         ctx.accepts_continue = false;
         ctx.accepts_break = false;
+        ctx.call_depth = static_cast<int>(call_cleanup.size());
         loops.push_back(ctx);
 
         std::vector<size_t> end_jumps;
@@ -3281,6 +3301,15 @@ struct Compiler {
                 emit(Op::Pop, 0, 0, 0, loc);
         }
 
+        size_t call_base = static_cast<size_t>(target->call_depth) <
+                                   call_cleanup.size()
+                               ? static_cast<size_t>(target->call_depth)
+                               : call_cleanup.size();
+        for (size_t i = call_base; i < call_cleanup.size(); ++i) {
+            for (int n = 0; n < call_cleanup[i]; ++n)
+                emit(Op::Pop, 0, 0, 0, loc);
+        }
+
         for (int depth = scope_depth; depth > target->scope_depth; --depth)
             emit(Op::PopScope, 0, 0, 0, loc);
 
@@ -3337,6 +3366,7 @@ struct Compiler {
             tail = false;
         std::vector<ast *> args;
         collect_chain(call->args, args);
+        call_cleanup.push_back(0);
 
         bool has_spread = false;
         for (ast *arg : args) {
@@ -3364,30 +3394,36 @@ struct Compiler {
         if (member_call) {
             compile(call->callee->l);
             if (!ok) return;
+            ++call_cleanup.back();
             for (ast *arg : args) {
                 compile(arg);
                 if (!ok) return;
+                ++call_cleanup.back();
             }
             const uint32_t method_index = add_name(method_name);
             emit(Op::CallMethod, 0,
                  static_cast<uint16_t>(args.size()), method_index,
                  loc_of(node));
+            call_cleanup.pop_back();
             return;
         }
 
         compile(call->callee);
         if (!ok) return;
+        ++call_cleanup.back();
 
         if (!has_spread) {
             for (ast *arg : args) {
                 compile(arg);
                 if (!ok) return;
+                ++call_cleanup.back();
             }
             if (!ok) return;
             emit(tail ? Op::TailCall : Op::Call,
                  (call->launch ? 1 : 0) | (call->awaited ? 2 : 0),
                  static_cast<uint16_t>(args.size()),
                  static_cast<uint32_t>(args.size()), loc_of(node));
+            call_cleanup.pop_back();
             if (!tail && return_value)
                 emit(Op::Return, 0, 0, 0, loc_of(node));
             return;
@@ -3404,11 +3440,13 @@ struct Compiler {
                 spread.push_back(false);
             }
             if (!ok) return;
+            ++call_cleanup.back();
         }
         uint32_t descriptor = add_call_desc(std::move(spread));
         emit(Op::CallSpread,
              (call->launch ? 1 : 0) | (call->awaited ? 2 : 0),
              0, descriptor, loc_of(node));
+        call_cleanup.pop_back();
         if (tail || (!tail && return_value))
             emit(Op::Return, 0, 0, 0, loc_of(node));
     }

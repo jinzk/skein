@@ -13,8 +13,6 @@ ROOT = Path(__file__).resolve().parent.parent
 # Known, intentional fallback paths in the current standard suite.  Each
 # entry is a reason substring plus the reason it is accepted.
 KNOWN_FALLBACKS = [
-    ("bytecode verify: inconsistent stack depth",
-     "break/continue inside call/match temporaries currently falls back"),
     ("default value cannot reference",
      "compile-time rejection test for field defaults"),
     ("cannot compile statement",

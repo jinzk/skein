@@ -293,6 +293,24 @@ def run_cases():
           "  println(i);\n"
           "}\n",
           stdout="1\n3\n")
+    check("break in nested call argument",
+          "func f(a, b) { return b; }\n"
+          "func g(x) { return x; }\n"
+          "for (let i in [1, 2, 3]) {\n"
+          "  f(0, g(match (i) { case 2 => { break; } default => i; }));\n"
+          "  println(i);\n"
+          "}\n",
+          stdout="1\n")
+    check("break through match and call temporaries",
+          "func f(x) { return x; }\n"
+          "for (let i in [1, 2, 3]) {\n"
+          "  let x = match (i) {\n"
+          "    case 2 => f(match (i) { case 2 => { break; } default => i; });\n"
+          "    default => i;\n"
+          "  };\n"
+          "  println(i);\n"
+          "}\n",
+          stdout="1\n")
     check("deep recursive struct print",
           "struct Node { value: int; next: Node?; }\n"
           "let n = null;\n"

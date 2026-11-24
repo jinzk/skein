@@ -1051,6 +1051,60 @@ public:
         }
     }
 
+    OpResult run_index_write_op(Op op, const Instr &ins,
+                                value_t *&control_out) {
+        if (ins.b >= proto().index_ops.size()) {
+            yyerror("invalid bytecode index descriptor");
+            return OpResult::Abort;
+        }
+        const skein::bc::IndexDesc &desc = proto().index_ops[ins.b];
+        size_t count = desc.fields.size();
+        if (count == 0) {
+            yyerror("invalid bytecode index descriptor");
+            return OpResult::Abort;
+        }
+        std::vector<value_t *> indices(count);
+        for (size_t i = count; i > 0; --i) {
+            value_t *index = pop_checked();
+            if (!index) {
+                free_args(indices);
+                return OpResult::Abort;
+            }
+            indices[i - 1] = index;
+        }
+
+        value_t *result = NULL;
+        struct symbol *base = index_base_symbol(desc);
+        if (op == Op::IncDecIndex) {
+            result = skein_vm_increment_index_symbol(
+                base, desc.base_name.c_str(), ins.a ? 1 : -1,
+                (ins.flags & 1) != 0, indices, desc.fields);
+        } else {
+            value_t *value = pop_checked();
+            if (!value) {
+                free_args(indices);
+                return OpResult::Abort;
+            }
+            if (op == Op::AssignIndex) {
+                result = skein_vm_assign_index_symbol(
+                    base, desc.base_name.c_str(), indices, desc.fields,
+                    value);
+            } else {
+                result = skein_vm_compound_index_symbol(
+                    base, desc.base_name.c_str(), (int)ins.flags, indices,
+                    desc.fields, value);
+            }
+        }
+        if (!result)
+            return OpResult::Abort;
+        if (is_control(result)) {
+            control_out = abort_control(result);
+            return OpResult::Control;
+        }
+        push(result);
+        return OpResult::Continue;
+    }
+
     value_t *run() {
         while (true) {
             if (pc_ >= proto().code.size()) {
@@ -2624,55 +2678,13 @@ public:
                 case Op::AssignIndex:
                 case Op::CompoundIndex:
                 case Op::IncDecIndex: {
-                    if (ins.b >= proto().index_ops.size()) {
-                        yyerror("invalid bytecode index descriptor");
+                    value_t *control_out = NULL;
+                    OpResult result = run_index_write_op(
+                        static_cast<Op>(ins.op), ins, control_out);
+                    if (result == OpResult::Abort)
                         return abort_error();
-                    }
-                    const skein::bc::IndexDesc &desc =
-                        proto().index_ops[ins.b];
-                    size_t count = desc.fields.size();
-                    if (count == 0) {
-                        yyerror("invalid bytecode index descriptor");
-                        return abort_error();
-                    }
-                    std::vector<value_t *> indices(count);
-                    for (size_t i = count; i > 0; --i) {
-                        value_t *index = pop_checked();
-                        if (!index) {
-                            free_args(indices);
-                            return abort_error();
-                        }
-                        indices[i - 1] = index;
-                    }
-
-                    value_t *result = NULL;
-                    struct symbol *base = index_base_symbol(desc);
-                    if (static_cast<Op>(ins.op) == Op::IncDecIndex) {
-                        result = skein_vm_increment_index_symbol(
-                            base, desc.base_name.c_str(),
-                            ins.a ? 1 : -1, (ins.flags & 1) != 0,
-                            indices, desc.fields);
-                    } else {
-                        value_t *value = pop_checked();
-                        if (!value) {
-                            free_args(indices);
-                            return abort_error();
-                        }
-                        if (static_cast<Op>(ins.op) == Op::AssignIndex) {
-                            result = skein_vm_assign_index_symbol(
-                                base, desc.base_name.c_str(), indices,
-                                desc.fields, value);
-                        } else {
-                            result = skein_vm_compound_index_symbol(
-                                base, desc.base_name.c_str(),
-                                (int)ins.flags, indices, desc.fields, value);
-                        }
-                    }
-                    if (!result)
-                        return abort_error();
-                    if (is_control(result))
-                        return abort_control(result);
-                    push(result);
+                    if (result == OpResult::Control)
+                        return control_out;
                     break;
                 }
 

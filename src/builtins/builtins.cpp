@@ -668,14 +668,17 @@ struct value_t *call_builtin(int functype,
         } else if (is_print && args.empty()) {
             if (add_newline) {
                 std::lock_guard<std::mutex> lock(stdio_output_mutex());
-                std::printf("\n");
+                std::fputc('\n', stdout);
+                note_stdout_bytes_locked("\n", 1);
             }
             ret = newnull();
         } else if (is_print && args.size() == 1) {
             std::lock_guard<std::mutex> lock(stdio_output_mutex());
             printvalue(args[0]);
-            if (add_newline)
-                std::printf("\n");
+            if (add_newline) {
+                std::fputc('\n', stdout);
+                note_stdout_bytes_locked("\n", 1);
+            }
             ret = newnull();
         } else if (args[0]->type != T_string) {
             yyerror("%s first argument must be a string, got %s", name,
@@ -691,7 +694,11 @@ struct value_t *call_builtin(int functype,
                 ret = newstrval(out.c_str());
             } else {
                 std::lock_guard<std::mutex> lock(stdio_output_mutex());
-                std::printf("%s%s", out.c_str(), add_newline ? "\n" : "");
+                std::string text = out;
+                if (add_newline)
+                    text += '\n';
+                std::fwrite(text.data(), 1, text.size(), stdout);
+                note_stdout_bytes_locked(text.data(), text.size());
                 ret = newnull();
             }
         }

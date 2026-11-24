@@ -5,6 +5,7 @@
 #include "repl_ui.h"
 #include "scopestack.h"
 #include "source_encoding.h"
+#include "stdio_stream.h"
 #include "symbol.h"
 #include "unicode_ident.h"
 #include "valuetype.h"
@@ -165,6 +166,7 @@ bool repl_color_enabled() {
 }
 
 void write_stdout(const std::string &text) {
+    std::lock_guard<std::mutex> lock(stdio_output_mutex());
     std::fflush(stdout);
 #ifdef _WIN32
     if (!text.empty())
@@ -183,6 +185,7 @@ void write_stdout(const std::string &text) {
         remaining -= (size_t)written;
     }
 #endif
+    note_stdout_bytes_locked(text.data(), text.size());
 }
 
 size_t previous_utf8(const std::string &text, size_t pos) {
@@ -951,6 +954,8 @@ repl_line_status repl_read_line(std::string &line, bool continuation) {
         std::string prompt;
         if (g_show_prompt)
             prompt = continuation ? "...> " : "> ";
+        if (g_show_prompt)
+            ensure_stdout_newline();
 
         repl_line_status status;
 #ifdef _WIN32
@@ -961,6 +966,7 @@ repl_line_status repl_read_line(std::string &line, bool continuation) {
             if (g_show_prompt) {
                 std::printf("%s", prompt.c_str());
                 std::fflush(stdout);
+                note_stdout_bytes(prompt.data(), prompt.size());
             }
             status = read_plain_line(line);
         }
@@ -972,6 +978,7 @@ repl_line_status repl_read_line(std::string &line, bool continuation) {
             if (g_show_prompt) {
                 std::printf("%s", prompt.c_str());
                 std::fflush(stdout);
+                note_stdout_bytes(prompt.data(), prompt.size());
             }
             status = read_plain_line(line);
         }

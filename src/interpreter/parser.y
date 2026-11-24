@@ -24,6 +24,7 @@
 #include "modfile.h"
 #include "vm.h"
 #include "static_type.h"
+#include "stdio_stream.h"
 #include "typecheck.h"
 
 extern int yylex();
@@ -2554,10 +2555,14 @@ top_statement: top_expression EOL {
                         break;
                     default:
                         if (g_interactive) {
-                            printf("= ");
+                            std::lock_guard<std::mutex> lock(
+                                stdio_output_mutex());
+                            std::fputs("= ", stdout);
+                            note_stdout_bytes_locked("= ", 2);
                             printvalue(rslt);
-                            printf("\n");
-                            fflush(stdout);
+                            std::fputc('\n', stdout);
+                            note_stdout_bytes_locked("\n", 1);
+                            std::fflush(stdout);
                         }
                         break;
                 }

@@ -10,9 +10,34 @@
 #include <string>
 
 static std::mutex g_stdio_output_mutex;
+static bool g_stdout_line_dirty = false;
 
 std::mutex &stdio_output_mutex() {
     return g_stdio_output_mutex;
+}
+
+static void note_stdout_bytes_unlocked(const char *data, std::size_t size) {
+    if (size == 0)
+        return;
+    g_stdout_line_dirty = data[size - 1] != '\n';
+}
+
+void note_stdout_bytes_locked(const char *data, std::size_t size) {
+    note_stdout_bytes_unlocked(data, size);
+}
+
+void note_stdout_bytes(const char *data, std::size_t size) {
+    std::lock_guard<std::mutex> lock(stdio_output_mutex());
+    note_stdout_bytes_unlocked(data, size);
+}
+
+void ensure_stdout_newline() {
+    std::lock_guard<std::mutex> lock(stdio_output_mutex());
+    if (!g_stdout_line_dirty)
+        return;
+    std::fputc('\n', stdout);
+    std::fflush(stdout);
+    g_stdout_line_dirty = false;
 }
 
 struct stdio_resource {
@@ -78,6 +103,8 @@ static bool stdio_write(void *data, const std::string &bytes,
         error = std::strerror(errno);
         return false;
     }
+    if (resource->file == stdout)
+        note_stdout_bytes_locked(bytes.data(), written);
     resource->eof = false;
     return true;
 }

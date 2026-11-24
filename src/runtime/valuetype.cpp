@@ -1,6 +1,7 @@
 #include "valuetype.h"
 #include "dict.h"
 #include "value_ops.h"
+#include "stdio_stream.h"
 #include "structtype.h"
 #include "unicode.h"
 
@@ -1276,4 +1277,5 @@ std::string value_to_string(const struct value_t *v) {
 void printvalue(struct value_t *v) {
     std::string s = value_to_string(v);
     std::fputs(s.c_str(), stdout);
+    note_stdout_bytes_locked(s.data(), s.size());
 }

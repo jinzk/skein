@@ -104,6 +104,7 @@ print("hello, skein");
 
 - 只有 stdin 是终端时才显示 `> ` / `...> ` 提示符；管道输入不显示提示符；
 - 使用 `skein -i` 可以强制显示提示符；
+- `print` 不会自动补换行；REPL 会在下一轮提示符前按需补换行，避免提示符紧跟在无换行输出后面。脚本模式的输出字节不受影响；
 - POSIX 终端和 Windows 控制台都支持方向键、Home/End、Delete、Ctrl-A/E/K/U/W、Ctrl-L；
 - 支持上下方向键浏览历史；
 - 历史默认保存到 `~/.skein_history`，可用 `SKEIN_HISTORY` 指定路径；

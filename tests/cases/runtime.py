@@ -461,7 +461,7 @@ def run_cases():
     )
     check(
         "unicode identifier NFC label",
-        f"label e\u0301: while (0) {{ break \u00e9; }}\n1\n",
+        f"e\u0301: while (0) {{ break \u00e9; }}\n1\n",
         stdout="= 1",
     )
 

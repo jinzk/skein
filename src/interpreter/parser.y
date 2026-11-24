@@ -1127,7 +1127,8 @@ static struct type_constraint *runtime_type_or_error(
 %token MATCH "match"
 %token RETURN "return" BREAK "break" CONTINUE "continue"
 %token FAIL "fail" ON "on" ERROR "error" RECOVER "recover" PASS "pass"
-%token IS "is" LABEL "label" GOTO "goto"
+%token IS "is" GOTO "goto"
+%token <str> LABEL "label"
 %token COLONCOLON "::"
 %token PLUS_ASSIGN "+=" MINUS_ASSIGN "-=" MUL_ASSIGN "*=" DIV_ASSIGN "/="
 %token MOD_ASSIGN "%=" AND_ASSIGN "&=" OR_ASSIGN "|=" XOR_ASSIGN "^="
@@ -1173,7 +1174,7 @@ static struct type_constraint *runtime_type_or_error(
 %precedence NOELSE
 %precedence ELSE
 
-%type <a> exp value stmt list scope do_block lambda_block explist arg top_expression top_statement line valuelist pairlist
+%type <a> exp value stmt list scope non_empty_scope do_block lambda_block explist arg top_expression top_statement line valuelist pairlist
 %type <a> slice_bound
 %type <str> on_error_name
 %type <a> forinit forcond forend
@@ -1330,8 +1331,7 @@ stmt: IF HEADER_LPAREN exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, 
         $$ = lower_type_with($3, $4, $5,
                              (struct enum_variant *)$7, true, true);
       }
-    | LABEL NAME ':' stmt                { $$ = newlabel($2, $4); }
-    | LABEL NAME ':' line ';'            { $$ = newlabel($2, $4); }
+    | LABEL non_empty_scope            { $$ = newlabel($1, $2); }
     | struct_decl
     | impl_decl
     | trait_decl
@@ -1920,6 +1920,13 @@ gotostart: GOTO {
 scope: stmt                               { $$ = $1; }
      | line ';'                           { $$ = $1; }
      | ';'                                { $$ = newscope(NULL); }
+     | '{' EMPTY_BLOCK_CLOSE              { $$ = newscope(NULL); }
+     | '{' list '}'                       { $$ = newscope($2); }
+     ;
+
+/* A label must decorate a real statement; `name: ;` is rejected. */
+non_empty_scope: stmt                     { $$ = $1; }
+     | line ';'                           { $$ = $1; }
      | '{' EMPTY_BLOCK_CLOSE              { $$ = newscope(NULL); }
      | '{' list '}'                       { $$ = newscope($2); }
      ;

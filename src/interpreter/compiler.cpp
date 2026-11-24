@@ -399,6 +399,37 @@ struct LabelTarget {
     int decl_index = 0;
 };
 
+struct FunctionLabelInfo {
+    int line = 0;
+    int column = 0;
+    bool breakable = false;
+    bool continuable = false;
+};
+
+static void label_capabilities(const struct ast *stmt, bool &breakable,
+                               bool &continuable) {
+    breakable = false;
+    continuable = false;
+    while (stmt && stmt->nodetype == 'g')
+        stmt = ((const struct label_node *)stmt)->stmt;
+    if (!stmt)
+        return;
+    switch (stmt->nodetype) {
+        case 'F': /* for-in */
+        case 'P': /* C-style for */
+        case 'W': /* while */
+        case 'E': /* do-while */
+            breakable = true;
+            continuable = true;
+            break;
+        case 'S': /* switch */
+            breakable = true;
+            break;
+        default:
+            break;
+    }
+}
+
 static bool statement_declares_local(const struct ast *node) {
     if (!node)
         return false;
@@ -422,7 +453,7 @@ struct Compiler {
     std::string error;
     std::vector<LoopContext> loops;
     std::vector<StmtListContext> stmt_lists;
-    std::unordered_map<std::string, std::pair<int, int>> function_labels;
+    std::unordered_map<std::string, FunctionLabelInfo> function_labels;
     std::unordered_set<std::string> used_function_labels;
     std::vector<int> iter_stack;
     struct SlotScope {
@@ -3045,7 +3076,11 @@ struct Compiler {
                 ok = false;
                 return;
             }
-            function_labels[name] = std::make_pair(lab->line, lab->column);
+            bool breakable = false;
+            bool continuable = false;
+            label_capabilities(lab->stmt, breakable, continuable);
+            function_labels[name] = FunctionLabelInfo{
+                lab->line, lab->column, breakable, continuable};
             LabelTarget target;
             target.scope_depth = ctx.scope_depth;
             target.iter_depth = ctx.iter_depth;
@@ -3775,6 +3810,25 @@ struct Compiler {
         }
 
         if (!target) {
+            if (label && *label) {
+                diag_set_location(loc.line, loc.column);
+                auto it = function_labels.find(label);
+                if (it == function_labels.end()) {
+                    yyerror("%s target %s not found in this function",
+                            is_break ? "break" : "continue", label);
+                } else {
+                    used_function_labels.insert(label);
+                    if (is_break)
+                        yyerror("break target %s is not an enclosing loop or "
+                                "switch",
+                                label);
+                    else
+                        yyerror("continue target %s is not an enclosing loop",
+                                label);
+                }
+                ok = false;
+                return;
+            }
             uint32_t index = add_label(label);
             emit(is_break ? Op::ControlBreak : Op::ControlContinue, 0, 0,
                  index, loc);
@@ -4224,7 +4278,7 @@ ProtoPtr compile_function_body_impl(struct function_code *code,
         if (compiler.used_function_labels.count(entry.first) != 0)
             continue;
         std::string message = "label " + entry.first + " is never used";
-        diag_report_warning(entry.second.first, entry.second.second,
+        diag_report_warning(entry.second.line, entry.second.column,
                             "warning", message.c_str());
     }
     if (!finalize_proto(compiler.proto, error))

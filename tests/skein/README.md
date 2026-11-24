@@ -127,7 +127,7 @@ Helpers:
 | `runtime` (loop/control flow) | Skein (partial) | 30 Skein cases in `runtime_control.skein`; loop/range/import diagnostics stay in Python. |
 | `runtime` (const/value semantics) | Skein (partial) | 8 Skein cases in `runtime_misc.skein`; const/package/error cases stay in Python. |
 
-Current coverage: 622 Skein cases across the files above.
+Current coverage: 625 Skein cases across the files above.
 
 `diagnostics`, `typecheck`, `lint`, `fmt`, `lsp`, `build`, `get`, `net`,
 `io_scripts`, `ffi_real`, stress/differential tests, and all host/REPL checks

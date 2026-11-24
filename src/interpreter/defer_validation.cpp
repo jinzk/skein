@@ -26,6 +26,19 @@ struct defer_declaration_site {
 thread_local int defer_error_line = 0;
 thread_local int defer_error_column = 0;
 
+struct label_control_ref {
+    bool is_break = false;
+    std::string name;
+    int line = 0;
+    int column = 0;
+};
+
+struct enclosing_label_target {
+    std::string name;
+    bool breakable = false;
+    bool continuable = false;
+};
+
 struct label_check_state {
     bool is_generator = false;
     bool duplicate = false;
@@ -34,8 +47,35 @@ struct label_check_state {
     int error_column = 0;
     std::string error;
     std::unordered_map<std::string, std::pair<int, int>> labels;
+    std::unordered_map<std::string, std::pair<bool, bool>> target_capabilities;
+    std::vector<enclosing_label_target> enclosing_targets;
+    std::vector<label_control_ref> unresolved_controls;
     std::unordered_set<std::string> used;
 };
+
+static void label_capabilities(const struct ast *stmt, bool &breakable,
+                               bool &continuable) {
+    breakable = false;
+    continuable = false;
+    while (stmt && stmt->nodetype == 'g')
+        stmt = ((const struct label_node *)stmt)->stmt;
+    if (!stmt)
+        return;
+    switch (stmt->nodetype) {
+        case 'F':
+        case 'P':
+        case 'W':
+        case 'E':
+            breakable = true;
+            continuable = true;
+            break;
+        case 'S':
+            breakable = true;
+            break;
+        default:
+            break;
+    }
+}
 
 /*
  * The defer walker is also reused for the label pass.  A non-null state means
@@ -477,26 +517,36 @@ static bool validate_defer_walk(
             return validate_defer_walk(node->l, sites, error);
         case 'g': {
             struct label_node *label = (struct label_node *)node;
-            if (active_label_state) {
-                std::string name = label->name ? label->name : "";
-                if (!name.empty()) {
-                    if (active_label_state->labels.count(name)) {
-                        if (!active_label_state->duplicate) {
-                            active_label_state->duplicate = true;
-                            active_label_state->error = "duplicate label ";
-                            active_label_state->error += name;
-                            active_label_state->error_line =
-                                node->line > 0 ? node->line : 1;
-                            active_label_state->error_column =
-                                node->column > 0 ? node->column : 1;
-                        }
-                    } else {
-                        active_label_state->labels[name] =
-                            std::make_pair(node->line, node->column);
+            std::string name = label->name ? label->name : "";
+            bool pushed = false;
+            if (active_label_state && !name.empty()) {
+                bool breakable = false;
+                bool continuable = false;
+                label_capabilities(label->stmt, breakable, continuable);
+                active_label_state->target_capabilities[name] =
+                    std::make_pair(breakable, continuable);
+                if (active_label_state->labels.count(name)) {
+                    if (!active_label_state->duplicate) {
+                        active_label_state->duplicate = true;
+                        active_label_state->error = "duplicate label ";
+                        active_label_state->error += name;
+                        active_label_state->error_line =
+                            node->line > 0 ? node->line : 1;
+                        active_label_state->error_column =
+                            node->column > 0 ? node->column : 1;
                     }
+                } else {
+                    active_label_state->labels[name] =
+                        std::make_pair(node->line, node->column);
                 }
+                active_label_state->enclosing_targets.push_back(
+                    enclosing_label_target{name, breakable, continuable});
+                pushed = true;
             }
-            return validate_defer_walk(label->stmt, sites, error);
+            bool ok = validate_defer_walk(label->stmt, sites, error);
+            if (pushed)
+                active_label_state->enclosing_targets.pop_back();
+            return ok;
         }
         case NODE_FUNCTION_BODY:
             return validate_defer_walk(node->l, sites, error);
@@ -562,12 +612,31 @@ static bool validate_defer_walk(
         case 'B':
         case 'O': {
             if (active_label_state) {
+                bool is_break = node->nodetype == 'B';
                 const char *label =
-                    node->nodetype == 'B'
-                        ? ((struct nbreak *)node)->label
-                        : ((struct ncontinue *)node)->label;
-                if (label && *label)
+                    is_break ? ((struct nbreak *)node)->label
+                             : ((struct ncontinue *)node)->label;
+                if (label && *label) {
                     active_label_state->used.insert(label);
+                    bool found = false;
+                    for (size_t i =
+                             active_label_state->enclosing_targets.size();
+                         i > 0; --i) {
+                        const enclosing_label_target &target =
+                            active_label_state->enclosing_targets[i - 1];
+                        if (target.name == label &&
+                            (is_break ? target.breakable
+                                      : target.continuable)) {
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        active_label_state->unresolved_controls.push_back(
+                            label_control_ref{is_break, label,
+                                              node->line, node->column});
+                    }
+                }
             }
             return true;
         }
@@ -659,6 +728,29 @@ void skein_check_function_labels(struct function_code *code, struct ast *body) {
     if (state.duplicate || state.goto_in_generator) {
         diag_set_location(state.error_line, state.error_column);
         yyerror("%s", state.error.c_str());
+        return;
+    }
+
+    if (!state.unresolved_controls.empty()) {
+        const label_control_ref &ref = state.unresolved_controls.front();
+        bool exists = state.target_capabilities.count(ref.name) != 0;
+        std::string message;
+        if (exists) {
+            if (ref.is_break)
+                message = "break target " + ref.name +
+                          " is not an enclosing loop or switch";
+            else
+                message = "continue target " + ref.name +
+                          " is not an enclosing loop";
+        } else if (ref.is_break) {
+            message = "break target " + ref.name +
+                      " not found in this function";
+        } else {
+            message = "continue target " + ref.name +
+                      " not found in this function";
+        }
+        diag_set_location(ref.line, ref.column);
+        yyerror("%s", message.c_str());
         return;
     }
 

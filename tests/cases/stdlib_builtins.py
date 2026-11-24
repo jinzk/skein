@@ -2178,7 +2178,7 @@ def run_cases():
     )
     check(
         "labeled break outer loop",
-        "label outer: for (let i in [1, 2, 3]) {\n"
+        "outer: for (let i in [1, 2, 3]) {\n"
         "  for (let j in [1, 2, 3]) {\n"
         "    if (i == 2 && j == 2) { break outer; }\n"
         "    println(str(i) + \",\" + str(j));\n"
@@ -2189,7 +2189,7 @@ def run_cases():
     )
     check(
         "labeled continue outer loop",
-        "label outer: for (let i in [1, 2]) {\n"
+        "outer: for (let i in [1, 2]) {\n"
         "  for (let j in [1, 2]) {\n"
         "    if (j == 1) { continue outer; }\n"
         "    println(\"bad\");\n"
@@ -2200,7 +2200,7 @@ def run_cases():
     )
     check(
         "labeled break switch",
-        "label sw: switch (1) {\n"
+        "sw: switch (1) {\n"
         "  case 1 => { break sw; }\n"
         '  default => println("bad");\n'
         "}\n"
@@ -2209,7 +2209,7 @@ def run_cases():
     )
     check(
         "label on non-loop allowed",
-        "label bad: if (1) { print(1); }\n",
+        "bad: if (1) { print(1); }\n",
         stdout="1",
     )
     check(
@@ -2219,34 +2219,93 @@ def run_cases():
     )
     check(
         "unused label warns",
-        "func f() { let x = 1; label unused: return x; }\n"
+        "func f() {\n"
+        "  let x = 1;\n"
+        "  unused: return x;\n"
+        "}\n"
         "println(f());\n",
         stdout="1",
         stderr="label unused is never used",
     )
     check(
         "goto in generator rejected",
-        "func gen() { yield 1; goto done; label done: return; }\n"
+        "func gen() {\n"
+        "  yield 1;\n"
+        "  goto done;\n"
+        "  done: return;\n"
+        "}\n"
         "let g = gen();\n",
         stderr="goto is not allowed in generator functions",
     )
     check(
         "duplicate label rejected",
-        "func f() { label a: return 1; label a: return 2; }\n"
+        "func f() {\n"
+        "  a: return 1;\n"
+        "  a: return 2;\n"
+        "}\n"
         "f();\n",
         stderr="duplicate label a",
     )
     check(
         "goto cannot cross let forward",
-        "func f() { goto done; let x = 1; label done: return x; }\n"
+        "func f() {\n"
+        "  goto done;\n"
+        "  let x = 1;\n"
+        "  done: return x;\n"
+        "}\n"
         "f();\n",
         stderr="goto cannot cross a let or const declaration",
     )
     check(
         "goto cannot cross let backward",
-        'func f() { label top: println("x"); let x = 1; goto top; }\n'
+        "func f() {\n"
+        '  top: println("x");\n'
+        "  let x = 1;\n"
+        "  goto top;\n"
+        "}\n"
         "f();\n",
         stderr="goto cannot cross a let or const declaration",
+    )
+    check(
+        "break target must be enclosing loop",
+        "func f() {\n"
+        '  done: println("x");\n'
+        "  break done;\n"
+        "  return 1;\n"
+        "}\n"
+        "f();\n",
+        stderr="break target done is not an enclosing loop or switch",
+    )
+    check(
+        "continue target must be enclosing loop",
+        "func f() {\n"
+        "  sw: switch (1) {\n"
+        "    case 1 => { continue sw; }\n"
+        "    default => { }\n"
+        "  }\n"
+        "  return 1;\n"
+        "}\n"
+        "f();\n",
+        stderr="continue target sw is not an enclosing loop",
+    )
+    check(
+        "break target not found",
+        "func f() {\n"
+        "  break missing;\n"
+        "  return 1;\n"
+        "}\n"
+        "f();\n",
+        stderr="break target missing not found in this function",
+    )
+    check(
+        "empty label body rejected",
+        "done: ;\n",
+        stderr="syntax error",
+    )
+    check(
+        "inline label rejected",
+        "func f() { goto done; done: return 1; }\nf();\n",
+        stderr="syntax error",
     )
     check(
         "block scope",

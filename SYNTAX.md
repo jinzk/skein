@@ -32,9 +32,9 @@ let const func yield defer launch wait
 if else while do for
 switch case default
 struct impl trait
-return break continue
+return break continue goto
 fail on error recover pass
-is label
+is
 null true false
 package import export as
 ```
@@ -1554,7 +1554,7 @@ continue outer;
 带标签的控制流：
 
 ```text
-label outer: for (let i in [1, 2, 3]) {
+outer: for (let i in [1, 2, 3]) {
   for (let j in [1, 2, 3]) {
     if (i == 2 && j == 2) {
       break outer;
@@ -1570,21 +1570,23 @@ label outer: for (let i in [1, 2, 3]) {
 func f() {
   goto done;
   print("skipped");
-  label done: return 1;
+  done: return 1;
 }
 ```
 
 规则：
 
-- 标签写法为 `label NAME: statement`；
-- `label` 可以放在任意语句前；`break NAME;` / `continue NAME;` 只对循环或 switch 标签有意义；
+- 标签写成 `NAME: statement`，可以修饰任意语句；
+- `break NAME;` 只能指向当前位置外层的循环或 switch label；`continue NAME;` 只能指向外层循环 label；否则报错；
+- 标签必须是行首（允许缩进）的第一个代码 token；
+- `label` 不再是关键字，可以作为普通标识符使用；
 - label 是函数级命名空间，嵌套函数和 lambda 各自独立；同一函数内重复 label 报错；
 - `goto NAME;` 跳到当前块或外层块的标签；不能跳入内层块或兄弟块；
 - 无标签的 `break` / `continue` 仍然作用于最近的循环或 switch；
 - 含 `yield` 的生成器函数禁止使用 `goto`；
 - 同一块内 `goto` 不能向前或向后跨越 `let` / `const` 声明；
 - 未被任何 `goto` / `break` / `continue` 引用的 label 会产生 warning；
-- 标签找不到时按普通越界 `break` / `continue` 报错；`goto` 找不到当前作用域链内的标签时报 `goto target NAME not found in this block`。
+- 无标签的越界 `break` / `continue` 仍报 `break outside loop` / `continue outside loop`；带标签时找不到目标报 `break target NAME not found in this function` / `continue target NAME not found in this function`，目标存在但不是外层循环或 switch 时报对应错误；`goto` 找不到当前作用域链内的标签时报 `goto target NAME not found in this block`。
 
 ### 5.10 错误处理
 
@@ -4844,7 +4846,7 @@ graph.to_dot(g)                             -> string
 - `add_nodes(g, values)` 返回 `{graph, ids}`；`add_edges(g, edges)` 的每条边是 `[from, to[, tag[, weight]]]`；`from_edges(count, edges)` 创建 1..count 节点；三者都只触发一次 COW；
 - `add_edge` 的两个端点必须已存在，否则 `fail`；
 - `remove_node` 会级联删除所有相关边；
-- 边标签字段叫 `tag`（`label` 是保留字）；
+- 边标签字段叫 `tag`（避免与语句标签混淆）；
 - `topo_sort` 遇到环返回 `{ok: false, error: "cycle"}`；
 - `bfs` / `dfs` 返回访问顺序，不存在的起点返回空列表；
 - `path` 是 BFS 最短路径，不可达返回 `{ok: false, error: "not found"}`；

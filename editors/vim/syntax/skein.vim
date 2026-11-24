@@ -59,8 +59,8 @@ syntax keyword skeinBoolean true false
 syntax keyword skeinNull null
 syntax keyword skeinSelf self
 
-" Labels are defined after keywords so the whole `label name` form wins.
-syntax match skeinLabel '\<label\s\+\h\w*\ze\s*:'
+" Labels are a statement-start `name:` form; this is a line-start heuristic.
+syntax match skeinLabel '^\s*\h\w*\ze\s*:'
 
 " Types ---------------------------------------------------------------------
 syntax keyword skeinType any int float number bool string char byte bytes

@@ -92,7 +92,7 @@ ts_test("for in without let generator", func() {
 
 ts_test("for in without let nested label", func() {
   let out = [];
-  label outer: for i in [1, 2] {
+  outer: for i in [1, 2] {
     for j in [1, 2] {
       if (j == 2) {
         continue outer;

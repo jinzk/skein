@@ -69,7 +69,7 @@ def run_cases():
     )
     check(
         "diagnostic label on non-loop",
-        "label x: if (1) { print(1); }\n",
+        "x: if (1) { print(1); }\n",
         stdout="1",
     )
     check(

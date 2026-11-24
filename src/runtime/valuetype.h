@@ -27,6 +27,9 @@ struct function_code : std::enable_shared_from_this<function_code> {
     bool is_method;
     bool variadic;
     bool is_generator;
+    /* Set when bytecode compilation rejected the body with a hard source
+     * error.  Callers must not fall back to the AST interpreter in that case. */
+    bool semantic_error = false;
     int def_line = 0;
     int def_column = 0;
     /* Package that defined this function, used for lazy compilation. */

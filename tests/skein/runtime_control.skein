@@ -226,7 +226,7 @@ ts_test("goto forward same block", func() {
   let out = [];
   goto done;
   out = std.list.append(out, "skipped");
-  label done: out = std.list.append(out, "done");
+  done: out = std.list.append(out, "done");
   ts_eq(out, ["done"]);
 });
 
@@ -234,7 +234,7 @@ ts_test("goto label on return", func() {
   let f = func() {
     goto done;
     return 1;
-    label done: return 2;
+    done: return 2;
   };
   ts_eq(f(), 2);
 });
@@ -247,7 +247,7 @@ ts_test("goto exits block and runs defer", func() {
       goto done;
     }
     out = std.list.append(out, "skipped");
-    label done: return 8;
+    done: return 8;
   };
   ts_eq(f(), 8);
   ts_eq(out, ["block"]);
@@ -260,7 +260,7 @@ ts_test("goto exits loop and runs defer", func() {
       defer out = std.list.append(out, "loop-" + str(i));
       goto done;
     }
-    label done: return 9;
+    done: return 9;
   };
   ts_eq(f(), 9);
   ts_eq(out, ["loop-1"]);
@@ -271,7 +271,7 @@ ts_test("goto exits handler", func() {
     let x = (1 / 0) on error(e) {
       goto done;
     };
-    label done: return 10;
+    done: return 10;
   };
   ts_eq(f(), 10);
 });
@@ -283,7 +283,7 @@ ts_test("goto exits switch", func() {
       default => { return 2; }
     }
     return 3;
-    label done: return 11;
+    done: return 11;
   };
   ts_eq(f(), 11);
 });
@@ -295,9 +295,31 @@ ts_test("goto exits match", func() {
       default => 20;
     };
     return y;
-    label done: return 12;
+    done: return 12;
   };
   ts_eq(f(), 12);
+});
+
+ts_test("label is an ordinary identifier", func() {
+  let label = 4;
+  let d = {"label": label + 1};
+  ts_eq(d["label"], 5);
+});
+
+ts_test("label may name a label", func() {
+  let f = func() {
+    goto label;
+    label: return 6;
+  };
+  ts_eq(f(), 6);
+});
+
+ts_test("goto in typed function body", func() {
+  let f = func(): int {
+    goto done;
+    done: return 9;
+  };
+  ts_eq(f(), 9);
 });
 
 ts_test("nested handler break exits outer loop", func() {

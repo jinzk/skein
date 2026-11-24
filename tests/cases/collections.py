@@ -545,7 +545,7 @@ def run_cases():
     )
     check(
         "unicode label",
-        "label 开始: while (0) { break 开始; }\n1\n",
+        "开始: while (0) { break 开始; }\n1\n",
         stdout="= 1",
     )
     check("unicode keyword-like identifier", "let if变量 = 7;\nif变量\n",

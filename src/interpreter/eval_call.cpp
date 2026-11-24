@@ -221,12 +221,16 @@ static struct value_t *invoke_function_body(
     eval_ctx().handler_depth = 0;
     struct value_t *body_ret = NULL;
     if (!skein_vm_try_execute_function_body(def, body_ret)) {
-        struct ast *body_ast = function_body_ast(def->code.get());
-        if (!body_ast) {
-            yyerror("function body is unavailable");
+        if (def->code->semantic_error) {
             body_ret = NULL;
         } else {
-            body_ret = eval(body_ast);
+            struct ast *body_ast = function_body_ast(def->code.get());
+            if (!body_ast) {
+                yyerror("function body is unavailable");
+                body_ret = NULL;
+            } else {
+                body_ret = eval(body_ast);
+            }
         }
     }
     eval_ctx().handler_depth = saved_handler_depth;

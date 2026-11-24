@@ -157,11 +157,10 @@
     "labels": {
       "patterns": [
         {
-          "match": "\\b(label)\\s+([\\p{L}_][\\p{L}\\p{N}_]*)\\s*(:)",
+          "match": "^\\s*([\\p{L}_][\\p{L}\\p{N}_]*)\\s*(:)",
           "captures": {
-            "1": { "name": "keyword.other.skein" },
-            "2": { "name": "entity.name.label.skein" },
-            "3": { "name": "punctuation.separator.skein" }
+            "1": { "name": "entity.name.label.skein" },
+            "2": { "name": "punctuation.separator.skein" }
           }
         }
       ]
@@ -182,7 +181,7 @@
         },
         {
           "name": "keyword.other.skein",
-          "match": "\\b(?:let|const|func|struct|impl|trait|enum|extern|package|import|include|export|as|is|in|label)\\b"
+          "match": "\\b(?:let|const|func|struct|impl|trait|enum|extern|package|import|include|export|as|is|in)\\b"
         },
         {
           "name": "variable.language.skein",

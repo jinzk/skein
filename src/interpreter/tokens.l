@@ -1,6 +1,7 @@
 %option noyywrap nodefault yylineno noinput nounput nounistd
 %x STRING
 %x CHARLIT
+%s LABEL_RESCAN
 
 %{
 #ifndef YY_NO_UNISTD_H
@@ -60,6 +61,7 @@ static bool lambda_brace_pending = false;
 struct brace_frame {
     bool is_dict;
     bool empty;
+    bool is_declaration;
 };
 
 /*
@@ -68,6 +70,25 @@ struct brace_frame {
  * normal '{' ... '}' path and let the parser decide from their contents.
  */
 static std::vector<brace_frame> brace_stack;
+
+/*
+ * Set when a bare label token is emitted.  The next `{` belongs to the
+ * labelled statement even though a `{` in that position could otherwise be a
+ * dict literal.
+ */
+static bool label_body_pending = false;
+
+/* True once a non-newline token has been emitted on the current physical line.
+ * Bare labels are only recognized as the first token on a line. */
+static bool line_has_token = false;
+
+/*
+ * Base indentation of each pending `func` signature.  The matching body `{`
+ * sits at the same indentation as the `func` token, while braces inside a
+ * parameter default sit deeper.  A stack is needed for lambdas nested in
+ * parameter lists.
+ */
+static std::vector<int> func_signature_indents;
 
 /*
  * Recognize the unparenthesized `for NAME in exp { ... }` header so the
@@ -239,7 +260,22 @@ static void note_for_name_token() {
         for_header = FOR_HEADER_NONE;
 }
 
-#define YYRET(tok) do { int yyret_tok = (tok); note_for_header_token(yyret_tok); note_header_context_token(yyret_tok); note_token(yyret_tok); if (yyret_tok != SKEIN_TOK_EOL) { prev_token_line = last_token_line; last_token_line = g_token_line; } prev_token = last_token; last_token = yyret_tok; if (yyret_tok == SKEIN_TOK_RARROW) lambda_brace_pending = true; else if (yyret_tok != SKEIN_TOK_EOL && yyret_tok != '{' && yyret_tok != SKEIN_TOK_BODY_LBRACE) lambda_brace_pending = false; return yyret_tok; } while (0)
+static void note_function_signature_token(int tok) {
+    while (!func_signature_indents.empty() &&
+           func_signature_indents.back() > indent_count)
+        func_signature_indents.pop_back();
+    if (func_signature_indents.empty())
+        return;
+    if (tok == SKEIN_TOK_EOL) {
+        func_signature_indents.clear();
+    } else if ((tok == ';' || tok == ',' || tok == '=' ||
+                tok == SKEIN_TOK_RARROW) &&
+               func_signature_indents.back() == indent_count) {
+        func_signature_indents.pop_back();
+    }
+}
+
+#define YYRET(tok) do { int yyret_tok = (tok); note_for_header_token(yyret_tok); note_header_context_token(yyret_tok); note_function_signature_token(yyret_tok); note_token(yyret_tok); if (yyret_tok != SKEIN_TOK_EOL) { prev_token_line = last_token_line; last_token_line = g_token_line; } prev_token = last_token; last_token = yyret_tok; line_has_token = (yyret_tok != SKEIN_TOK_EOL); if (yyret_tok == SKEIN_TOK_RARROW) lambda_brace_pending = true; else if (yyret_tok != SKEIN_TOK_EOL && yyret_tok != '{' && yyret_tok != SKEIN_TOK_BODY_LBRACE) lambda_brace_pending = false; if (yyret_tok == SKEIN_TOK_LABEL) label_body_pending = true; else if (yyret_tok != SKEIN_TOK_EOL) label_body_pending = false; return yyret_tok; } while (0)
 
 
 /* After '.', keywords and builtin names are ordinary member names. */
@@ -660,6 +696,9 @@ static int make_placeholder_token() {
  * choice is irrelevant because the closing brace stays a normal '}'.
  */
 static bool brace_starts_block() {
+    if (!func_signature_indents.empty() &&
+        func_signature_indents.back() == indent_count)
+        return true;
     if (last_token == SKEIN_TOK_NAME && prev_token == SKEIN_TOK_PACKAGE)
         return true;
     if (declaration_header || extern_header)
@@ -667,7 +706,82 @@ static bool brace_starts_block() {
     if (last_token == ')' || last_token == SKEIN_TOK_ELSE || last_token == SKEIN_TOK_DO ||
         last_token == SKEIN_TOK_ARROW)
         return true;
+    switch (last_token) {
+        case 0:
+        case ';':
+        case '}':
+        case SKEIN_TOK_EOL:
+        case SKEIN_TOK_EMPTY_BLOCK_CLOSE:
+        case SKEIN_TOK_EMPTY_DICT_CLOSE:
+            if (brace_stack.empty())
+                return false;
+            return !brace_stack.back().is_dict &&
+                   !brace_stack.back().is_declaration;
+        case '{':
+        case SKEIN_TOK_BODY_LBRACE:
+            if (brace_stack.empty())
+                return false;
+            return !brace_stack.back().is_dict &&
+                   !brace_stack.back().is_declaration;
+        default:
+            break;
+    }
     return false;
+}
+
+static bool reserved_name(const char *text, int len) {
+    static const char *const words[] = {
+        "if",       "else",     "while",    "do",       "for",
+        "struct",   "extern",   "enum",     "impl",     "trait",
+        "switch",   "match",    "case",     "default",  "let",
+        "const",    "func",     "yield",    "launch",   "wait",
+        "defer",    "package",  "import",   "include",  "export",
+        "return",   "break",    "continue", "fail",     "is",
+        "goto",     "on",       "error",    "recover",  "pass",
+        "in",       "as",       "null",     "true",     "false",
+        "len",      "range",    "print",    "println",  "input",
+        "list",     "dict",     "int",      "float",    "bool",
+        "str",      "char",     "byte",     "kind_of",  "type_name",
+        "type_package", "type_module_name", "type_source",
+    };
+    for (const char *word : words) {
+        size_t word_len = std::strlen(word);
+        if (word_len == (size_t)len &&
+            std::memcmp(word, text, word_len) == 0)
+            return true;
+    }
+    return false;
+}
+
+/* True when a NAME that is followed by ':' starts a statement label. */
+static bool label_allowed(const char *text, int len) {
+    if (line_has_token)
+        return false;
+    if (reserved_name(text, len))
+        return false;
+    if (!brace_stack.empty()) {
+        const brace_frame &frame = brace_stack.back();
+        if (frame.is_dict || frame.is_declaration)
+            return false;
+    }
+    switch (last_token) {
+        case 0:
+        case ';':
+        case '{':
+        case '}':
+        case ')':
+        case SKEIN_TOK_BODY_LBRACE:
+        case SKEIN_TOK_EMPTY_BLOCK_CLOSE:
+        case SKEIN_TOK_EMPTY_DICT_CLOSE:
+        case SKEIN_TOK_EOL:
+        case SKEIN_TOK_ELSE:
+        case SKEIN_TOK_DO:
+        case SKEIN_TOK_ARROW:
+        case SKEIN_TOK_LABEL:
+            return true;
+        default:
+            return false;
+    }
 }
 
 /*
@@ -797,12 +911,25 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
     int prev_line = last_token_line;
     if (!brace_stack.empty())
         brace_stack.back().empty = false;
+    bool label_block = label_body_pending;
+    label_body_pending = false;
+    bool declaration_body =
+        declaration_header || extern_header ||
+        (last_token == SKEIN_TOK_NAME && prev_token == SKEIN_TOK_PACKAGE);
+    bool function_body =
+        !func_signature_indents.empty() &&
+        func_signature_indents.back() == indent_count;
+    if (function_body)
+        func_signature_indents.pop_back();
     if (lambda_brace_pending) {
         lambda_brace_pending = false;
+        if (!func_signature_indents.empty() &&
+            func_signature_indents.back() == indent_count)
+            func_signature_indents.pop_back();
         for_header = FOR_HEADER_NONE;
         declaration_header = false;
         extern_header = false;
-        brace_stack.push_back(brace_frame{false, true});
+        brace_stack.push_back(brace_frame{false, true, false});
         indent_count++;
         YYRET(SKEIN_TOK_BODY_LBRACE);
     }
@@ -820,8 +947,14 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
                     for_body_pending && for_operand_started &&
                     indent_count == for_body_indent;
     bool body_token = header_body || c_for_body || for_body;
-    bool body_brace = brace_starts_block() || body_token;
-    if (body_brace && prev_line != 0 && g_token_line != prev_line)
+    bool body_brace =
+        brace_starts_block() || body_token || label_block || function_body;
+    bool header_brace =
+        body_token || declaration_body || function_body ||
+        last_token == ')' ||
+        last_token == SKEIN_TOK_ELSE || last_token == SKEIN_TOK_DO ||
+        last_token == SKEIN_TOK_ARROW;
+    if (header_brace && prev_line != 0 && g_token_line != prev_line)
         report_same_line_error(
             "opening brace must be on the same line as its header");
     for_header = FOR_HEADER_NONE;
@@ -830,13 +963,15 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
     if (body_token) {
         if (for_body)
             for_body_pending = false;
-        brace_stack.push_back(brace_frame{false, true});
+        brace_stack.push_back(brace_frame{false, true, false});
         indent_count++;
         YYRET(SKEIN_TOK_BODY_LBRACE);
     }
     if (for_body_pending && indent_count < for_body_indent)
         for_body_pending = false;
-    brace_stack.push_back(brace_frame{!body_brace, true});
+    brace_stack.push_back(
+        brace_frame{!body_brace, true,
+                    declaration_body && !body_token && !function_body});
     indent_count++;
     YYRET('{');
 }
@@ -993,7 +1128,12 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 "default" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_DEFAULT); }
 "let" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_LET); }
 "const" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_CONST); }
-"func" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_FUNC); }
+"func" { MEMBER_NAME_AFTER_DOT();
+    if (func_signature_indents.empty() ||
+        func_signature_indents.back() < indent_count)
+        func_signature_indents.push_back(indent_count);
+    YYRET(SKEIN_TOK_FUNC);
+}
 "yield" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_YIELD); }
 "launch" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_LAUNCH); }
 "wait" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_WAIT); }
@@ -1008,7 +1148,6 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 "fail" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_FAIL); }
 "is" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_IS); }
 "goto" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_GOTO); }
-"label" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_LABEL); }
 "on" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_ON); }
 "error" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_ERROR); }
 "recover" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_RECOVER); }
@@ -1060,6 +1199,48 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 "type_package" { MEMBER_NAME_AFTER_DOT(); yylval.fn = B_type_package; YYRET(SKEIN_TOK_BUILTIN); }
 "type_module_name" { MEMBER_NAME_AFTER_DOT(); yylval.fn = B_type_module_name; YYRET(SKEIN_TOK_BUILTIN); }
 "type_source" { MEMBER_NAME_AFTER_DOT(); yylval.fn = B_type_source; YYRET(SKEIN_TOK_BUILTIN); }
+
+<INITIAL>{ASCII_NAME}[ \t]*":" {
+    int name_len = yyleng;
+    if (name_len > 0 && yytext[name_len - 1] == ':')
+        --name_len;
+    while (name_len > 0 &&
+           (yytext[name_len - 1] == ' ' || yytext[name_len - 1] == '\t'))
+        --name_len;
+    if (!label_allowed(yytext, name_len)) {
+        yyless(0);
+        BEGIN(LABEL_RESCAN);
+        int tok = yylex();
+        BEGIN(INITIAL);
+        return tok;
+    }
+    int tok = make_name_token(yytext, name_len);
+    if (tok == 0)
+        return 0;
+    label_body_pending = true;
+    YYRET(SKEIN_TOK_LABEL);
+}
+
+<INITIAL>{UNICODE_NAME}[ \t]*":" {
+    int name_len = yyleng;
+    if (name_len > 0 && yytext[name_len - 1] == ':')
+        --name_len;
+    while (name_len > 0 &&
+           (yytext[name_len - 1] == ' ' || yytext[name_len - 1] == '\t'))
+        --name_len;
+    if (!label_allowed(yytext, name_len)) {
+        yyless(0);
+        BEGIN(LABEL_RESCAN);
+        int tok = yylex();
+        BEGIN(INITIAL);
+        return tok;
+    }
+    int tok = make_name_token(yytext, name_len);
+    if (tok == 0)
+        return 0;
+    label_body_pending = true;
+    YYRET(SKEIN_TOK_LABEL);
+}
 
 {ASCII_NAME} {
     int tok = make_name_token(yytext, yyleng);
@@ -1235,6 +1416,7 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 }
 
 \n {
+    line_has_token = false;
     if (indent_count == 0) {
         reset_for_header_state();
         /*
@@ -1280,6 +1462,9 @@ static void reset_scanner_common() {
     prev_token_line = 0;
     declaration_header = false;
     extern_header = false;
+    label_body_pending = false;
+    line_has_token = false;
+    func_signature_indents.clear();
     header_stack.clear();
     pending_header_kind = 0;
     pending_header_indent = 0;
@@ -1343,6 +1528,8 @@ struct scanner_checkpoint {
     int prev_token_line;
     bool declaration_header;
     bool extern_header;
+    bool label_body_pending;
+    bool line_has_token;
     int for_header;
     bool for_body_pending;
     bool for_operand_started;
@@ -1364,6 +1551,7 @@ struct scanner_checkpoint {
     int pending_decl_kind;
     bool pending_decl_skip;
     std::vector<int> do_indents;
+    std::vector<int> func_signature_indents;
     std::vector<brace_frame> braces;
 };
 
@@ -1391,6 +1579,8 @@ scanner_checkpoint *scanner_checkpoint_save() {
     checkpoint->prev_token_line = prev_token_line;
     checkpoint->declaration_header = declaration_header;
     checkpoint->extern_header = extern_header;
+    checkpoint->label_body_pending = label_body_pending;
+    checkpoint->line_has_token = line_has_token;
     checkpoint->for_header = for_header;
     checkpoint->for_body_pending = for_body_pending;
     checkpoint->for_operand_started = for_operand_started;
@@ -1412,6 +1602,7 @@ scanner_checkpoint *scanner_checkpoint_save() {
     checkpoint->pending_decl_kind = pending_decl_kind;
     checkpoint->pending_decl_skip = pending_decl_skip;
     checkpoint->do_indents = do_stack;
+    checkpoint->func_signature_indents = func_signature_indents;
     checkpoint->braces = brace_stack;
     return checkpoint;
 }
@@ -1443,6 +1634,8 @@ void scanner_checkpoint_restore(scanner_checkpoint *checkpoint) {
     prev_token_line = checkpoint->prev_token_line;
     declaration_header = checkpoint->declaration_header;
     extern_header = checkpoint->extern_header;
+    label_body_pending = checkpoint->label_body_pending;
+    line_has_token = checkpoint->line_has_token;
     for_header = (enum for_header_state)checkpoint->for_header;
     for_body_pending = checkpoint->for_body_pending;
     for_operand_started = checkpoint->for_operand_started;
@@ -1464,6 +1657,7 @@ void scanner_checkpoint_restore(scanner_checkpoint *checkpoint) {
     pending_decl_kind = checkpoint->pending_decl_kind;
     pending_decl_skip = checkpoint->pending_decl_skip;
     do_stack = checkpoint->do_indents;
+    func_signature_indents = checkpoint->func_signature_indents;
     brace_stack = checkpoint->braces;
     BEGIN(checkpoint->condition);
     delete checkpoint;

@@ -576,7 +576,7 @@ for key, value in {"a": 1, "b": 2} {
 带标签的 `break` / `continue`：
 
 ```text
-label outer: for (let i in [1, 2, 3]) {
+outer: for (let i in [1, 2, 3]) {
   for (let j in [1, 2, 3]) {
     if (i == 2 && j == 2) { break outer; }
     print(str(i) + "," + str(j));
@@ -584,17 +584,18 @@ label outer: for (let i in [1, 2, 3]) {
 }
 ```
 
-- 标签写成 `label NAME: statement`；
-- `break NAME;` 跳出指定循环或 switch；
-- `continue NAME;` 继续指定循环的下一轮；
-- 标签可以放在任意语句前；`break` / `continue` 只对循环或 switch 标签有意义；
+- 标签写成 `NAME: statement`，可以修饰任意语句；
+- 标签必须是行首（允许缩进）的第一个代码 token；
+- `label` 是普通标识符，不再是关键字；
+- `break NAME;` 跳出指定的外层循环或 switch；
+- `continue NAME;` 继续指定的外层循环的下一轮；
 - `goto NAME;` 跳到当前块或外层块的标签；不能跳入内层块或兄弟块：
 
   ```text
   func f() {
     goto done;
     print("skipped");
-    label done: return 1;
+    done: return 1;
   }
   ```
 

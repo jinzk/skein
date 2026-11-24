@@ -612,22 +612,24 @@ RelWithDebInfo 下空脚本 `main()` 约 0.4 ms，`import std` 约 0.85 ms，
   默认参数值和 `defer` 表达式中的 handler 仍只允许 `recover` / `pass` /
   `fail`，控制流退出会报错。
 - goto / label（2026-11-24）：只支持裸 `NAME:` label，移除 `label`
-  关键字，`label` 恢复为普通标识符；label 后必须跟可执行语句，不能用空
-  语句，跳到函数末尾使用 `return;`。label 是函数级命名空间，嵌套函数 /
+  关键字，`label` 恢复为普通标识符；label 必须是行首（允许缩进）的第一个
+  代码 token，且后必须跟可执行语句，不能用空语句，跳到函数末尾使用
+  `return;`。label 是函数级命名空间，嵌套函数 /
   lambda 独立，同一函数内不允许重名；允许前向引用，未定义或重复 label
-  是错误，未使用 label 报 warning。goto 只能跳到同块或外层块，禁止跳入
+  是错误，未使用 label 报 warning。`break NAME;` / `continue NAME;` 只能
+  解析到当前位置外层且接受该控制流的循环 / switch label，否则报错。goto 只能跳到同块或外层块，禁止跳入
   内层 / 兄弟块、`switch` / `match` arm 和跨函数；跳入 `on error`
   handler 由“不能跳入内层块”统一禁止。同块内前向和后向都不能跨越
   `let` / `const` 声明。跳出块时沿用块级 defer，像 `break` / `continue`
   一样执行被退出块的 defer 和循环 iterator 清理；goto 可以跳出
   `on error` handler，原始错误视为已处理。含 `yield` 的函数禁止 goto；
   含 `wait` / `launch` 的函数允许 goto，普通 `.wait()`、
-  `std.task.wait(...)`、`std.task.scope(...)` 不受限制。实现时在 `stmt`
-  位置识别 `NAME ':' non_empty_stmt`，按函数收集 label 并做两遍解析。当前已
-  实现 `label NAME:` + `goto NAME;`，支持跳到当前或外层块并在退出时执行
+  `std.task.wait(...)`、`std.task.scope(...)` 不受限制。实现时只在行首识别
+  `NAME ':' non_empty_stmt`，按函数收集 label 并做两遍解析。当前已
+  实现裸 `NAME:` + `goto NAME;`，支持跳到当前或外层块并在退出时执行
   defer / iterator / handler 清理（AST/VM）；已实现函数级 label 唯一性、
   重复 label 报错、未使用 label warning、生成器函数禁止 goto，以及同块内
-  跨越 `let` / `const` 的检查。剩余：裸 `NAME:` 迁移。
+  跨越 `let` / `const` 的检查。
 
 ---
 

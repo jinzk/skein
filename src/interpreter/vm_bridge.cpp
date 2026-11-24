@@ -220,11 +220,14 @@ skein::bc::ProtoPtr prepare_function_body(
     skein_vm_ensure_stats_flags();
     const auto compile_start = std::chrono::steady_clock::now();
     std::string error;
+    int errors_before = active_eval_context().runtime_error_count;
     skein::bc::ProtoPtr proto =
         skein_compile_function_body(code, code->package, error);
     if (vm_stats_enabled)
         vm_stats.compile_ns += elapsed_ns(compile_start);
     if (!proto) {
+        if (active_eval_context().runtime_error_count != errors_before)
+            code->semantic_error = true;
         if (vm_stats_enabled)
             ++vm_stats.functions_fallback;
         record_fallback_reason(

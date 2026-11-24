@@ -229,7 +229,7 @@ const char *keyword_detail(const std::string &word) {
         {"on", "exception handler"},  {"error", "exception handling"},
         {"recover", "exception handling"}, {"fail", "failure"},
         {"pass", "no-op"},            {"is", "type test"},
-        {"as", "cast"},               {"label", "label"},
+        {"as", "cast"},
         {"true", "boolean literal"},  {"false", "boolean literal"},
         {"null", "null literal"},
     };

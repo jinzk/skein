@@ -1755,6 +1755,113 @@ public:
         }
     }
 
+    /*
+     * TailCall and Return can either continue the loop (fast frame completed
+     * in place) or hand a finished value back to the caller.  Both the
+     * abort_control path and fast_frame_return's abort value use the Control
+     * result so the caller returns control_out unchanged.
+     */
+    OpResult run_return_op(Op op, const Instr &ins, value_t *&control_out) {
+        switch (op) {
+            case Op::TailCall: {
+                uint32_t argc = ins.b;
+                std::array<value_t *, 8> inline_args;
+                std::vector<value_t *> heap_args;
+                value_t **args = inline_args.data();
+                if (argc > inline_args.size()) {
+                    heap_args.resize(argc);
+                    args = heap_args.data();
+                }
+                for (uint32_t i = argc; i > 0; --i) {
+                    value_t *arg = pop_checked();
+                    if (!arg) {
+                        free_args(args, argc);
+                        return OpResult::Abort;
+                    }
+                    args[i - 1] = arg;
+                }
+                value_t *callee = pop_checked();
+                if (!callee) {
+                    free_args(args, argc);
+                    return OpResult::Abort;
+                }
+                if (try_tail_call(callee, args, argc)) {
+                    if (vm_stats_enabled)
+                        ++vm_stats.tail_calls;
+                    freeval(callee);
+                    return OpResult::Continue;
+                }
+                if (vm_stats_enabled)
+                    ++vm_stats.fallback_calls;
+                std::vector<value_t *> fallback(args, args + argc);
+                value_t *result =
+                    skein_vm_call_value_args(callee, std::move(fallback));
+                freeval(callee);
+                if (g_interrupted) {
+                    freeval(result);
+                    return OpResult::Abort;
+                }
+                if (context_.control != EVAL_CONTROL_NONE) {
+                    freeval(result);
+                    return OpResult::Abort;
+                }
+                if (context_.runtime_error_count != errors_before_) {
+                    freeval(result);
+                    return OpResult::Abort;
+                }
+                if (result && is_control(result)) {
+                    control_out = abort_control(result);
+                    return OpResult::Control;
+                }
+                if (!saved_states_.empty()) {
+                    bool completed = false;
+                    value_t *abort = fast_frame_return(result, completed);
+                    if (!completed) {
+                        control_out = abort;
+                        return OpResult::Control;
+                    }
+                    return OpResult::Continue;
+                }
+                if (!retval(result)) {
+                    yyerror("return outside function");
+                    freeval(result);
+                    return OpResult::Abort;
+                }
+                control_out = abort_control(newreturn());
+                return OpResult::Control;
+            }
+
+            case Op::Return: {
+                value_t *value = pop_checked();
+                if (!value)
+                    return OpResult::Abort;
+                if (!saved_states_.empty()) {
+                    bool completed = false;
+                    value_t *abort = fast_frame_return(value, completed);
+                    if (!completed) {
+                        control_out = abort;
+                        return OpResult::Control;
+                    }
+                    return OpResult::Continue;
+                }
+                if (is_control(value)) {
+                    control_out = abort_control(value);
+                    return OpResult::Control;
+                }
+                if (!retval(value)) {
+                    yyerror("return outside function");
+                    freeval(value);
+                    return OpResult::Abort;
+                }
+                control_out = abort_control(newreturn());
+                return OpResult::Control;
+            }
+
+            default:
+                return OpResult::Continue;
+        }
+    }
+
     value_t *run() {
         while (true) {
             if (pc_ >= proto().code.size()) {
@@ -3245,90 +3352,16 @@ public:
                     break;
                 }
 
-                case Op::TailCall: {
-                    uint32_t argc = ins.b;
-                    std::array<value_t *, 8> inline_args;
-                    std::vector<value_t *> heap_args;
-                    value_t **args = inline_args.data();
-                    if (argc > inline_args.size()) {
-                        heap_args.resize(argc);
-                        args = heap_args.data();
-                    }
-                    for (uint32_t i = argc; i > 0; --i) {
-                        value_t *arg = pop_checked();
-                        if (!arg) {
-                            free_args(args, argc);
-                            return abort_error();
-                        }
-                        args[i - 1] = arg;
-                    }
-                    value_t *callee = pop_checked();
-                    if (!callee) {
-                        free_args(args, argc);
-                        return abort_error();
-                    }
-                    if (try_tail_call(callee, args, argc)) {
-                        if (vm_stats_enabled)
-                            ++vm_stats.tail_calls;
-                        freeval(callee);
-                        break;
-                    }
-                    if (vm_stats_enabled)
-                        ++vm_stats.fallback_calls;
-                    std::vector<value_t *> fallback(args, args + argc);
-                    value_t *result =
-                        skein_vm_call_value_args(callee, std::move(fallback));
-                    freeval(callee);
-                    if (g_interrupted) {
-                        freeval(result);
-                        return abort_error();
-                    }
-                    if (context_.control != EVAL_CONTROL_NONE) {
-                        freeval(result);
-                        return abort_error();
-                    }
-                    if (context_.runtime_error_count != errors_before_) {
-                        freeval(result);
-                        return abort_error();
-                    }
-                    if (result && is_control(result))
-                        return abort_control(result);
-                    if (!saved_states_.empty()) {
-                        bool completed = false;
-                        value_t *abort =
-                            fast_frame_return(result, completed);
-                        if (!completed)
-                            return abort;
-                        break;
-                    }
-                    if (!retval(result)) {
-                        yyerror("return outside function");
-                        freeval(result);
-                        return abort_error();
-                    }
-                    return abort_control(newreturn());
-                }
-
+                case Op::TailCall:
                 case Op::Return: {
-                    value_t *value = pop_checked();
-                    if (!value)
+                    value_t *control_out = NULL;
+                    OpResult result = run_return_op(
+                        static_cast<Op>(ins.op), ins, control_out);
+                    if (result == OpResult::Abort)
                         return abort_error();
-                    if (!saved_states_.empty()) {
-                        bool completed = false;
-                        value_t *abort =
-                            fast_frame_return(value, completed);
-                        if (!completed)
-                            return abort;
-                        break;
-                    }
-                    if (is_control(value))
-                        return abort_control(value);
-                    if (!retval(value)) {
-                        yyerror("return outside function");
-                        freeval(value);
-                        return abort_error();
-                    }
-                    return abort_control(newreturn());
+                    if (result == OpResult::Control)
+                        return control_out;
+                    break;
                 }
 
                 case Op::PushScope:

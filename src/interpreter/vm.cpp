@@ -611,6 +611,190 @@ public:
         }
     }
 
+    OpResult run_type_decl_op(Op op, const Instr &ins) {
+        switch (op) {
+            case Op::DeclareStruct: {
+                if (ins.b >= proto().struct_decls.size()) {
+                    yyerror("invalid bytecode struct declaration");
+                    return OpResult::Abort;
+                }
+                const skein::bc::StructDeclMeta &meta =
+                    proto().struct_decls[ins.b];
+                std::vector<field_meta> fields;
+                fields.reserve(meta.fields.size());
+                for (const auto &field : meta.fields) {
+                    field_meta declared;
+                    declared.name = field.name;
+                    declared.type = field.type;
+                    declared.default_code = field.default_code;
+                    fields.push_back(std::move(declared));
+                }
+                std::shared_ptr<scope_t> closure = current_scope();
+                if (closure && closure->is_global)
+                    closure.reset();
+                std::string error;
+                if (!declare_struct_meta(
+                        meta.source.c_str(),
+                        diag_current_package_name().c_str(),
+                        meta.module.c_str(),
+                        meta.name.c_str(), meta.exported, fields,
+                        closure, error))
+                    return OpResult::Abort;
+                push(newnull());
+                return OpResult::Continue;
+            }
+
+            case Op::DeclareEnum: {
+                if (ins.b >= proto().enum_decls.size()) {
+                    yyerror("invalid bytecode enum declaration");
+                    return OpResult::Abort;
+                }
+                const skein::bc::EnumDeclMeta &meta =
+                    proto().enum_decls[ins.b];
+                std::vector<variant_meta> variants;
+                variants.reserve(meta.variants.size());
+                for (const auto &variant : meta.variants) {
+                    variant_meta declared;
+                    declared.name = variant.name;
+                    declared.fields.reserve(variant.fields.size());
+                    for (const auto &field : variant.fields) {
+                        field_meta field_meta_value;
+                        field_meta_value.name = field.name;
+                        field_meta_value.type = field.type;
+                        field_meta_value.default_code =
+                            field.default_code;
+                        declared.fields.push_back(
+                            std::move(field_meta_value));
+                    }
+                    variants.push_back(std::move(declared));
+                }
+                std::shared_ptr<scope_t> closure = current_scope();
+                if (closure && closure->is_global)
+                    closure.reset();
+                std::string error;
+                if (!declare_enum_meta(
+                        meta.source.c_str(),
+                        diag_current_package_name().c_str(),
+                        meta.module.c_str(),
+                        meta.name.c_str(), meta.exported, variants,
+                        closure, error))
+                    return OpResult::Abort;
+                push(newnull());
+                return OpResult::Continue;
+            }
+
+            case Op::DeclareTrait: {
+                if (ins.b >= proto().trait_decls.size()) {
+                    yyerror("invalid bytecode trait declaration");
+                    return OpResult::Abort;
+                }
+                const skein::bc::TraitDeclMeta &meta =
+                    proto().trait_decls[ins.b];
+                std::vector<trait_method_meta> methods;
+                methods.reserve(meta.methods.size());
+                for (const auto &method : meta.methods) {
+                    trait_method_meta method_meta;
+                    method_meta.name = method.name;
+                    method_meta.code = method.code;
+                    method_meta.params.reserve(method.params.size());
+                    for (const auto &param : method.params) {
+                        trait_param_meta param_meta;
+                        param_meta.name = param.name;
+                        param_meta.type = param.type;
+                        param_meta.variadic = param.variadic;
+                        param_meta.has_default = param.has_default;
+                        method_meta.params.push_back(
+                            std::move(param_meta));
+                    }
+                    methods.push_back(std::move(method_meta));
+                }
+                std::shared_ptr<scope_t> closure = current_scope();
+                if (closure && closure->is_global)
+                    closure.reset();
+                std::string error;
+                if (!declare_trait_meta(
+                        meta.source.c_str(),
+                        diag_current_package_name().c_str(),
+                        meta.module.c_str(),
+                        meta.name.c_str(), meta.exported, methods,
+                        closure, error, [this](const std::string &name) {
+                            return capture_upvalue(name);
+                        }))
+                    return OpResult::Abort;
+                push(newnull());
+                return OpResult::Continue;
+            }
+
+            case Op::DeclareImpl: {
+                if (ins.b >= proto().impl_decls.size()) {
+                    yyerror("invalid bytecode impl declaration");
+                    return OpResult::Abort;
+                }
+                const skein::bc::ImplDeclMeta &meta =
+                    proto().impl_decls[ins.b];
+                std::vector<std::pair<
+                    std::string, std::shared_ptr<function_code>>>
+                    methods;
+                methods.reserve(meta.methods.size());
+                for (const auto &method : meta.methods)
+                    methods.emplace_back(method.name, method.code);
+                std::shared_ptr<scope_t> closure = current_scope();
+                if (closure && closure->is_global)
+                    closure.reset();
+                std::string error;
+                if (!declare_impl_meta(
+                        meta.source.c_str(),
+                        diag_current_package_name().c_str(),
+                        meta.type_name.c_str(), meta.has_trait,
+                        meta.trait_name.c_str(), methods, closure,
+                        error, [this](const std::string &name) {
+                            return capture_upvalue(name);
+                        }))
+                    return OpResult::Abort;
+                push(newnull());
+                return OpResult::Continue;
+            }
+
+            case Op::NewStruct:
+            case Op::NewEnum: {
+                if (ins.b >= proto().constructs.size()) {
+                    yyerror("invalid bytecode constructor");
+                    return OpResult::Abort;
+                }
+                const skein::bc::ConstructDesc &desc =
+                    proto().constructs[ins.b];
+                std::vector<std::pair<std::string, value_t *>>
+                    fields(desc.fields.size());
+                for (size_t i = desc.fields.size(); i > 0; --i) {
+                    value_t *value = pop_checked();
+                    if (!value) {
+                        for (auto &field : fields)
+                            freeval(field.second);
+                        return OpResult::Abort;
+                    }
+                    fields[i - 1] =
+                        std::make_pair(desc.fields[i - 1], value);
+                }
+                value_t *result =
+                    op == Op::NewStruct
+                        ? build_struct_value(desc.source.c_str(),
+                                             desc.name.c_str(),
+                                             fields, desc.spread)
+                        : build_enum_value(desc.source.c_str(),
+                                           desc.name.c_str(),
+                                           desc.variant.c_str(),
+                                           fields, desc.spread);
+                if (!result)
+                    return OpResult::Abort;
+                push(result);
+                return OpResult::Continue;
+            }
+
+            default:
+                return OpResult::Continue;
+        }
+    }
+
     value_t *run() {
         while (true) {
             if (pc_ >= proto().code.size()) {
@@ -2276,182 +2460,16 @@ public:
                     break;
                 }
 
-                case Op::DeclareStruct: {
-                    if (ins.b >= proto().struct_decls.size()) {
-                        yyerror("invalid bytecode struct declaration");
-                        return abort_error();
-                    }
-                    const skein::bc::StructDeclMeta &meta =
-                        proto().struct_decls[ins.b];
-                    std::vector<field_meta> fields;
-                    fields.reserve(meta.fields.size());
-                    for (const auto &field : meta.fields) {
-                        field_meta declared;
-                        declared.name = field.name;
-                        declared.type = field.type;
-                        declared.default_code = field.default_code;
-                        fields.push_back(std::move(declared));
-                    }
-                    std::shared_ptr<scope_t> closure = current_scope();
-                    if (closure && closure->is_global)
-                        closure.reset();
-                    std::string error;
-                    if (!declare_struct_meta(
-                            meta.source.c_str(),
-                            diag_current_package_name().c_str(),
-                            meta.module.c_str(),
-                            meta.name.c_str(), meta.exported, fields,
-                            closure, error))
-                        return abort_error();
-                    push(newnull());
-                    break;
-                }
-
-                case Op::DeclareEnum: {
-                    if (ins.b >= proto().enum_decls.size()) {
-                        yyerror("invalid bytecode enum declaration");
-                        return abort_error();
-                    }
-                    const skein::bc::EnumDeclMeta &meta =
-                        proto().enum_decls[ins.b];
-                    std::vector<variant_meta> variants;
-                    variants.reserve(meta.variants.size());
-                    for (const auto &variant : meta.variants) {
-                        variant_meta declared;
-                        declared.name = variant.name;
-                        declared.fields.reserve(variant.fields.size());
-                        for (const auto &field : variant.fields) {
-                            field_meta field_meta_value;
-                            field_meta_value.name = field.name;
-                            field_meta_value.type = field.type;
-                            field_meta_value.default_code =
-                                field.default_code;
-                            declared.fields.push_back(
-                                std::move(field_meta_value));
-                        }
-                        variants.push_back(std::move(declared));
-                    }
-                    std::shared_ptr<scope_t> closure = current_scope();
-                    if (closure && closure->is_global)
-                        closure.reset();
-                    std::string error;
-                    if (!declare_enum_meta(
-                            meta.source.c_str(),
-                            diag_current_package_name().c_str(),
-                            meta.module.c_str(),
-                            meta.name.c_str(), meta.exported, variants,
-                            closure, error))
-                        return abort_error();
-                    push(newnull());
-                    break;
-                }
-
-                case Op::DeclareTrait: {
-                    if (ins.b >= proto().trait_decls.size()) {
-                        yyerror("invalid bytecode trait declaration");
-                        return abort_error();
-                    }
-                    const skein::bc::TraitDeclMeta &meta =
-                        proto().trait_decls[ins.b];
-                    std::vector<trait_method_meta> methods;
-                    methods.reserve(meta.methods.size());
-                    for (const auto &method : meta.methods) {
-                        trait_method_meta method_meta;
-                        method_meta.name = method.name;
-                        method_meta.code = method.code;
-                        method_meta.params.reserve(method.params.size());
-                        for (const auto &param : method.params) {
-                            trait_param_meta param_meta;
-                            param_meta.name = param.name;
-                            param_meta.type = param.type;
-                            param_meta.variadic = param.variadic;
-                            param_meta.has_default = param.has_default;
-                            method_meta.params.push_back(
-                                std::move(param_meta));
-                        }
-                        methods.push_back(std::move(method_meta));
-                    }
-                    std::shared_ptr<scope_t> closure = current_scope();
-                    if (closure && closure->is_global)
-                        closure.reset();
-                    std::string error;
-                    if (!declare_trait_meta(
-                            meta.source.c_str(),
-                            diag_current_package_name().c_str(),
-                            meta.module.c_str(),
-                            meta.name.c_str(), meta.exported, methods,
-                            closure, error, [this](const std::string &name) {
-                                return capture_upvalue(name);
-                            }))
-                        return abort_error();
-                    push(newnull());
-                    break;
-                }
-
-                case Op::DeclareImpl: {
-                    if (ins.b >= proto().impl_decls.size()) {
-                        yyerror("invalid bytecode impl declaration");
-                        return abort_error();
-                    }
-                    const skein::bc::ImplDeclMeta &meta =
-                        proto().impl_decls[ins.b];
-                    std::vector<std::pair<
-                        std::string, std::shared_ptr<function_code>>>
-                        methods;
-                    methods.reserve(meta.methods.size());
-                    for (const auto &method : meta.methods)
-                        methods.emplace_back(method.name, method.code);
-                    std::shared_ptr<scope_t> closure = current_scope();
-                    if (closure && closure->is_global)
-                        closure.reset();
-                    std::string error;
-                    if (!declare_impl_meta(
-                            meta.source.c_str(),
-                            diag_current_package_name().c_str(),
-                            meta.type_name.c_str(), meta.has_trait,
-                            meta.trait_name.c_str(), methods, closure,
-                            error, [this](const std::string &name) {
-                                return capture_upvalue(name);
-                            }))
-                        return abort_error();
-                    push(newnull());
-                    break;
-                }
-
+                case Op::DeclareStruct:
+                case Op::DeclareEnum:
+                case Op::DeclareTrait:
+                case Op::DeclareImpl:
                 case Op::NewStruct:
-                case Op::NewEnum: {
-                    if (ins.b >= proto().constructs.size()) {
-                        yyerror("invalid bytecode constructor");
+                case Op::NewEnum:
+                    if (run_type_decl_op(static_cast<Op>(ins.op), ins) ==
+                        OpResult::Abort)
                         return abort_error();
-                    }
-                    const skein::bc::ConstructDesc &desc =
-                        proto().constructs[ins.b];
-                    std::vector<std::pair<std::string, value_t *>>
-                        fields(desc.fields.size());
-                    for (size_t i = desc.fields.size(); i > 0; --i) {
-                        value_t *value = pop_checked();
-                        if (!value) {
-                            for (auto &field : fields)
-                                freeval(field.second);
-                            return abort_error();
-                        }
-                        fields[i - 1] =
-                            std::make_pair(desc.fields[i - 1], value);
-                    }
-                    value_t *result =
-                        static_cast<Op>(ins.op) == Op::NewStruct
-                            ? build_struct_value(desc.source.c_str(),
-                                                 desc.name.c_str(),
-                                                 fields, desc.spread)
-                            : build_enum_value(desc.source.c_str(),
-                                               desc.name.c_str(),
-                                               desc.variant.c_str(),
-                                               fields, desc.spread);
-                    if (!result)
-                        return abort_error();
-                    push(result);
                     break;
-                }
 
                 case Op::AssignIndex:
                 case Op::CompoundIndex:

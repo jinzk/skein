@@ -1578,9 +1578,13 @@ func f() {
 
 - 标签写法为 `label NAME: statement`；
 - `label` 可以放在任意语句前；`break NAME;` / `continue NAME;` 只对循环或 switch 标签有意义；
-- `goto NAME;` 跳到当前 statement list 内的标签；跨块跳转暂未支持；
+- label 是函数级命名空间，嵌套函数和 lambda 各自独立；同一函数内重复 label 报错；
+- `goto NAME;` 跳到当前块或外层块的标签；不能跳入内层块或兄弟块；
 - 无标签的 `break` / `continue` 仍然作用于最近的循环或 switch；
-- 标签找不到时按普通越界 `break` / `continue` 报错；`goto` 找不到当前块内的标签时报 `goto target not found in this block`。
+- 含 `yield` 的生成器函数禁止使用 `goto`；
+- 同一块内 `goto` 不能向前或向后跨越 `let` / `const` 声明；
+- 未被任何 `goto` / `break` / `continue` 引用的 label 会产生 warning；
+- 标签找不到时按普通越界 `break` / `continue` 报错；`goto` 找不到当前作用域链内的标签时报 `goto target NAME not found in this block`。
 
 ### 5.10 错误处理
 

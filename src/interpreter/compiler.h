@@ -45,6 +45,15 @@ bool skein_validate_defer_references(struct ast *statement,
                                      int *error_line = nullptr,
                                      int *error_column = nullptr);
 
+/*
+ * Source-level label checks for the AST backend: reject duplicate labels and
+ * goto inside generator functions, and warn about labels no goto/break/
+ * continue references.  The bytecode compiler performs the same checks while
+ * compiling, so callers only run this when the VM is disabled.
+ */
+void skein_check_function_labels(struct function_code *code,
+                                 struct ast *body);
+
 skein::bc::ProtoPtr skein_compile_function_body(struct function_code *code,
                                                  const std::string &module,
                                                  std::string &error);

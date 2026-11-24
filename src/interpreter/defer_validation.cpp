@@ -2,13 +2,16 @@
 
 #include "ast.h"
 #include "ast_analysis.h"
+#include "diagnostics.h"
 #include "value_runtime.h"
 
 #include <algorithm>
 #include <cstdint>
 #include <cstddef>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -22,6 +25,24 @@ struct defer_declaration_site {
 
 thread_local int defer_error_line = 0;
 thread_local int defer_error_column = 0;
+
+struct label_check_state {
+    bool is_generator = false;
+    bool duplicate = false;
+    bool goto_in_generator = false;
+    int error_line = 0;
+    int error_column = 0;
+    std::string error;
+    std::unordered_map<std::string, std::pair<int, int>> labels;
+    std::unordered_set<std::string> used;
+};
+
+/*
+ * The defer walker is also reused for the label pass.  A non-null state means
+ * the current traversal is collecting labels for one function: labels of
+ * nested functions belong to separate namespaces and must not leak outward.
+ */
+thread_local label_check_state *active_label_state = nullptr;
 
 static SourceLoc defer_node_loc(const struct ast *node) {
     SourceLoc loc;
@@ -325,21 +346,29 @@ static bool validate_defer_walk(
                 ((struct symdef *)node)->v, sites, error);
         case 'Z': {
             struct funcdef *def = (struct funcdef *)node;
+            if (active_label_state)
+                return true;
             return validate_defer_body(def->ast, error);
         }
         case 'Y': {
+            if (active_label_state)
+                return true;
             struct struct_node *decl = (struct struct_node *)node;
             bool ok = true;
             validate_defer_members(decl->members, error, ok);
             return ok;
         }
         case 'H': {
+            if (active_label_state)
+                return true;
             struct impl_node *impl = (struct impl_node *)node;
             bool ok = true;
             validate_defer_members(impl->methods, error, ok);
             return ok;
         }
         case 'K': {
+            if (active_label_state)
+                return true;
             struct package_node *package = (struct package_node *)node;
             return validate_defer_body(package->body, error);
         }
@@ -446,13 +475,50 @@ static bool validate_defer_walk(
         case 'b':
         case 'w':
             return validate_defer_walk(node->l, sites, error);
-        case 'g':
-            return validate_defer_walk(
-                ((struct label_node *)node)->stmt, sites, error);
+        case 'g': {
+            struct label_node *label = (struct label_node *)node;
+            if (active_label_state) {
+                std::string name = label->name ? label->name : "";
+                if (!name.empty()) {
+                    if (active_label_state->labels.count(name)) {
+                        if (!active_label_state->duplicate) {
+                            active_label_state->duplicate = true;
+                            active_label_state->error = "duplicate label ";
+                            active_label_state->error += name;
+                            active_label_state->error_line =
+                                node->line > 0 ? node->line : 1;
+                            active_label_state->error_column =
+                                node->column > 0 ? node->column : 1;
+                        }
+                    } else {
+                        active_label_state->labels[name] =
+                            std::make_pair(node->line, node->column);
+                    }
+                }
+            }
+            return validate_defer_walk(label->stmt, sites, error);
+        }
         case NODE_FUNCTION_BODY:
             return validate_defer_walk(node->l, sites, error);
-        case NODE_GOTO:
+        case NODE_GOTO: {
+            if (active_label_state) {
+                struct goto_node *jump = (struct goto_node *)node;
+                std::string name = jump->name ? jump->name : "";
+                if (!name.empty())
+                    active_label_state->used.insert(name);
+                if (active_label_state->is_generator &&
+                    !active_label_state->goto_in_generator) {
+                    active_label_state->goto_in_generator = true;
+                    active_label_state->error =
+                        "goto is not allowed in generator functions";
+                    active_label_state->error_line =
+                        node->line > 0 ? node->line : 1;
+                    active_label_state->error_column =
+                        node->column > 0 ? node->column : 1;
+                }
+            }
             return true;
+        }
         case 'l':
         case NODE_TUPLE: {
             for (struct list_node *item = (struct list_node *)node; item;
@@ -493,10 +559,20 @@ static bool validate_defer_walk(
         case NODE_CAST:
             return validate_defer_walk(
                 ((struct cast_node *)node)->value, sites, error);
+        case 'B':
+        case 'O': {
+            if (active_label_state) {
+                const char *label =
+                    node->nodetype == 'B'
+                        ? ((struct nbreak *)node)->label
+                        : ((struct ncontinue *)node)->label;
+                if (label && *label)
+                    active_label_state->used.insert(label);
+            }
+            return true;
+        }
         case 'N':
         case 'V':
-        case 'B':
-        case 'O':
         case '#':
             return true;
         default:
@@ -564,4 +640,38 @@ bool skein_validate_defer_references(struct ast *statement,
             *error_column = defer_error_column;
     }
     return ok;
+}
+
+void skein_check_function_labels(struct function_code *code, struct ast *body) {
+    if (!code || !body)
+        return;
+
+    label_check_state state;
+    state.is_generator = code->is_generator;
+    std::vector<defer_declaration_site> sites;
+    std::string walk_error;
+
+    label_check_state *saved = active_label_state;
+    active_label_state = &state;
+    validate_defer_walk(body, sites, walk_error);
+    active_label_state = saved;
+
+    if (state.duplicate || state.goto_in_generator) {
+        diag_set_location(state.error_line, state.error_column);
+        yyerror("%s", state.error.c_str());
+        return;
+    }
+
+    std::vector<std::string> unused;
+    for (const auto &entry : state.labels) {
+        if (state.used.count(entry.first) == 0)
+            unused.push_back(entry.first);
+    }
+    std::sort(unused.begin(), unused.end());
+    for (const std::string &name : unused) {
+        const auto &loc = state.labels[name];
+        std::string message = "label " + name + " is never used";
+        diag_report_warning(loc.first, loc.second, "warning",
+                            message.c_str());
+    }
 }

@@ -2,6 +2,7 @@
 
 #include "ast.h"
 #include "ast_analysis.h"
+#include "diagnostics.h"
 #include "verifier.h"
 #include "eval_context.h"
 #include "eval_internal.h"
@@ -387,10 +388,42 @@ struct LoopContext {
     bool accepts_break = true;
 };
 
+struct LabelTarget {
+    size_t pc = static_cast<size_t>(-1);
+    std::vector<size_t> patches;
+    int scope_depth = 0;
+    int iter_depth = 0;
+    int loop_depth = 0;
+    int handler_stack_depth = 0;
+    int handler_body_depth = 0;
+    int decl_index = 0;
+};
+
+static bool statement_declares_local(const struct ast *node) {
+    if (!node)
+        return false;
+    if (node->nodetype == 'g')
+        return statement_declares_local(
+            ((const struct label_node *)node)->stmt);
+    return node->nodetype == 'D' || node->nodetype == NODE_DESTRUCTURE;
+}
+
+struct StmtListContext {
+    std::unordered_map<std::string, LabelTarget> labels;
+    int scope_depth = 0;
+    int iter_depth = 0;
+    int loop_depth = 0;
+    int handler_stack_depth = 0;
+    int handler_body_depth = 0;
+};
+
 struct Compiler {
     Proto proto;
     std::string error;
     std::vector<LoopContext> loops;
+    std::vector<StmtListContext> stmt_lists;
+    std::unordered_map<std::string, std::pair<int, int>> function_labels;
+    std::unordered_set<std::string> used_function_labels;
     std::vector<int> iter_stack;
     struct SlotScope {
         std::unordered_map<std::string, int> names;
@@ -2559,10 +2592,31 @@ struct Compiler {
                 return;
             }
 
-            case NODE_GOTO:
-                compile_runtime_error("goto target not found in this block",
-                                      here);
+            case NODE_GOTO: {
+                struct goto_node *jump = (struct goto_node *)node;
+                std::string name = jump->name ? jump->name : "";
+                LabelTarget *target = find_label(name);
+                if (!target) {
+                    yyerror("goto target %s not found in this block",
+                            name.c_str());
+                    ok = false;
+                } else {
+                    used_function_labels.insert(name);
+                    if (proto.is_generator) {
+                        yyerror("goto is not allowed in generator functions");
+                        ok = false;
+                    }
+                    emit_goto_cleanup(*target, here);
+                    if (!ok) return;
+                    if (target->pc != static_cast<size_t>(-1)) {
+                        emit(Op::Jump, 0, 0,
+                             static_cast<uint32_t>(target->pc), here);
+                    } else {
+                        target->patches.push_back(emit_jump(Op::Jump, here));
+                    }
+                }
                 return;
+            }
 
             case 'l':
                 compile_list(node, false);
@@ -2927,6 +2981,40 @@ struct Compiler {
         patch(jend, proto.code.size());
     }
 
+    LabelTarget *find_label(const std::string &name) {
+        for (size_t depth = stmt_lists.size(); depth > 0; --depth) {
+            auto it = stmt_lists[depth - 1].labels.find(name);
+            if (it != stmt_lists[depth - 1].labels.end())
+                return &it->second;
+        }
+        return NULL;
+    }
+
+    void emit_goto_cleanup(const LabelTarget &target, SourceLoc loc) {
+        if (handler_stack_depth > target.handler_stack_depth) {
+            if (target.handler_body_depth > 255) {
+                yyerror("error handler nesting is too deep");
+                ok = false;
+                return;
+            }
+            emit(Op::PopHandlers,
+                 static_cast<uint8_t>(target.handler_body_depth),
+                 static_cast<uint16_t>(target.handler_stack_depth), 0, loc);
+        }
+        for (size_t i = iter_stack.size();
+             i > static_cast<size_t>(target.iter_depth); --i) {
+            emit(Op::IterEnd, 0, static_cast<uint16_t>(iter_stack[i - 1]), 0,
+                 loc);
+        }
+        for (size_t i = loops.size();
+             i > static_cast<size_t>(target.loop_depth); --i) {
+            for (int n = 0; n < loops[i - 1].stack_cleanup; ++n)
+                emit(Op::Pop, 0, 0, 0, loc);
+        }
+        for (int depth = scope_depth; depth > target.scope_depth; --depth)
+            emit(Op::PopScope, 0, 0, 0, loc);
+    }
+
     void compile_statement_list(ast *node) {
         std::vector<ast *> items;
         collect_chain(node, items);
@@ -2935,69 +3023,123 @@ struct Compiler {
             return;
         }
 
-        std::unordered_map<std::string, size_t> labels;
-        std::unordered_map<std::string, std::vector<size_t>> pending;
-
-        auto compile_label = [&](ast *item) {
+        StmtListContext ctx;
+        ctx.scope_depth = scope_depth;
+        ctx.iter_depth = static_cast<int>(iter_stack.size());
+        ctx.loop_depth = static_cast<int>(loops.size());
+        ctx.handler_stack_depth = handler_stack_depth;
+        ctx.handler_body_depth = handler_body_depth;
+        std::vector<int> decl_before(items.size() + 1, 0);
+        for (size_t i = 0; i < items.size(); ++i) {
+            decl_before[i + 1] =
+                decl_before[i] + (statement_declares_local(items[i]) ? 1 : 0);
+        }
+        for (size_t i = 0; i < items.size(); ++i) {
+            ast *item = items[i];
+            if (item->nodetype != 'g')
+                continue;
             struct label_node *lab = (struct label_node *)item;
             std::string name = lab->name ? lab->name : "";
-            if (labels.count(name)) {
+            if (function_labels.count(name)) {
                 yyerror("duplicate label %s", name.c_str());
                 ok = false;
                 return;
             }
-            labels[name] = proto.code.size();
-            ast *child = lab->stmt;
-            if (child && (child->nodetype == 'W' || child->nodetype == 'E' ||
-                          child->nodetype == 'P' || child->nodetype == 'F' ||
-                          child->nodetype == 'S')) {
-                std::string saved = pending_label;
-                pending_label = name;
-                compile(child);
-                pending_label = saved;
-            } else {
-                compile(child);
-            }
-            auto it = pending.find(name);
-            if (it != pending.end()) {
-                for (size_t at : it->second)
-                    patch(at, labels[name]);
-                pending.erase(it);
-            }
-        };
+            function_labels[name] = std::make_pair(lab->line, lab->column);
+            LabelTarget target;
+            target.scope_depth = ctx.scope_depth;
+            target.iter_depth = ctx.iter_depth;
+            target.loop_depth = ctx.loop_depth;
+            target.handler_stack_depth = ctx.handler_stack_depth;
+            target.handler_body_depth = ctx.handler_body_depth;
+            target.decl_index = decl_before[i];
+            ctx.labels[name] = target;
+        }
+        stmt_lists.push_back(std::move(ctx));
+        const size_t ctx_index = stmt_lists.size() - 1;
 
         for (size_t i = 0; i < items.size(); ++i) {
-            if (!ok)
+            if (!ok) {
+                stmt_lists.pop_back();
                 return;
+            }
             ast *item = items[i];
             if (item->nodetype == 'g') {
-                compile_label(item);
+                struct label_node *lab = (struct label_node *)item;
+                std::string name = lab->name ? lab->name : "";
+                stmt_lists[ctx_index].labels[name].pc = proto.code.size();
+                ast *child = lab->stmt;
+                if (child && (child->nodetype == 'W' ||
+                              child->nodetype == 'E' ||
+                              child->nodetype == 'P' ||
+                              child->nodetype == 'F' ||
+                              child->nodetype == 'S')) {
+                    std::string saved = pending_label;
+                    pending_label = name;
+                    compile(child);
+                    pending_label = saved;
+                } else {
+                    compile(child);
+                }
+                if (!ok) {
+                    stmt_lists.pop_back();
+                    return;
+                }
+                LabelTarget &target = stmt_lists[ctx_index].labels[name];
+                for (size_t at : target.patches)
+                    patch(at, target.pc);
+                target.patches.clear();
             } else if (item->nodetype == NODE_GOTO) {
                 std::string name = ((struct goto_node *)item)->name
                                        ? ((struct goto_node *)item)->name
                                        : "";
-                auto it = labels.find(name);
-                if (it != labels.end()) {
-                    emit(Op::Jump, 0, 0, static_cast<uint32_t>(it->second),
-                         loc_of(item));
-                } else {
-                    pending[name].push_back(emit_jump(Op::Jump, loc_of(item)));
+                LabelTarget *target = find_label(name);
+                if (target) {
+                    std::unordered_map<std::string, LabelTarget>::iterator
+                        local = stmt_lists[ctx_index].labels.find(name);
+                    if (local != stmt_lists[ctx_index].labels.end() &&
+                        local->second.decl_index != decl_before[i]) {
+                        yyerror("goto cannot cross a let or const declaration");
+                        ok = false;
+                    }
+                }
+                if (!target) {
+                    yyerror("goto target %s not found in this block",
+                            name.c_str());
+                    ok = false;
+                } else if (ok) {
+                    used_function_labels.insert(name);
+                    if (proto.is_generator) {
+                        yyerror("goto is not allowed in generator functions");
+                        ok = false;
+                    }
+                    emit_goto_cleanup(*target, loc_of(item));
+                    if (!ok) {
+                        stmt_lists.pop_back();
+                        return;
+                    }
+                    if (target->pc != static_cast<size_t>(-1)) {
+                        emit(Op::Jump, 0, 0,
+                             static_cast<uint32_t>(target->pc),
+                             loc_of(item));
+                    } else {
+                        target->patches.push_back(
+                            emit_jump(Op::Jump, loc_of(item)));
+                    }
                 }
                 continue;
             } else {
                 compile(item);
             }
-            if (!ok)
+            if (!ok) {
+                stmt_lists.pop_back();
                 return;
+            }
             if (i + 1 < items.size())
                 emit(Op::Pop, 0, 0, 0, loc_of(item));
         }
 
-        for (const auto &entry : pending) {
-            yyerror("goto target %s not found in this block",
-                    entry.first.c_str());
-            ok = false;
-        }
+        stmt_lists.pop_back();
     }
 
     static void collect_chain(ast *node, std::vector<ast *> &out) {
@@ -3641,6 +3783,8 @@ struct Compiler {
 
         size_t target_index =
             static_cast<size_t>(target - loops.data());
+        if (label && *label)
+            used_function_labels.insert(label);
 
         if (handler_stack_depth > target->handler_stack_depth) {
             if (target->handler_body_depth > 255) {
@@ -4075,6 +4219,13 @@ ProtoPtr compile_function_body_impl(struct function_code *code,
         error = compiler.error.empty() ? "cannot compile function"
                                        : compiler.error;
         return nullptr;
+    }
+    for (const auto &entry : compiler.function_labels) {
+        if (compiler.used_function_labels.count(entry.first) != 0)
+            continue;
+        std::string message = "label " + entry.first + " is never used";
+        diag_report_warning(entry.second.first, entry.second.second,
+                            "warning", message.c_str());
     }
     if (!finalize_proto(compiler.proto, error))
         return nullptr;

@@ -47,6 +47,14 @@ struct value_release_guard {
 
 } // namespace
 
+static bool item_declares_local(const struct ast *item) {
+    if (!item)
+        return false;
+    if (item->nodetype == 'g')
+        return item_declares_local(((const struct label_node *)item)->stmt);
+    return item->nodetype == 'D' || item->nodetype == NODE_DESTRUCTURE;
+}
+
 static value_t *eval_statement_list(struct ast *body) {
     std::vector<struct ast *> items;
     for (struct ast *item = body; item;) {
@@ -90,16 +98,39 @@ static value_t *eval_statement_list(struct ast *body) {
                 }
             }
             if (target != items.size()) {
+                size_t source = pc - 1;
+                bool crosses = false;
+                if (target > source) {
+                    for (size_t i = source + 1; i < target; ++i) {
+                        if (item_declares_local(items[i])) {
+                            crosses = true;
+                            break;
+                        }
+                    }
+                } else {
+                    for (size_t i = target; i < source; ++i) {
+                        if (item_declares_local(items[i])) {
+                            crosses = true;
+                            break;
+                        }
+                    }
+                }
+                if (crosses) {
+                    diag_set_location(items[source]->line,
+                                      items[source]->column);
+                    yyerror("goto cannot cross a let or const declaration");
+                    freeval(last);
+                    freeval(value);
+                    return NULL;
+                }
                 freeval(last);
                 last = NULL;
                 freeval(value);
                 pc = target;
                 continue;
             }
-            freeval(value);
             freeval(last);
-            yyerror("goto target not found in this block");
-            return NULL;
+            return value;
         }
         if (value && (value->type == T_return || value->type == T_break ||
                       value->type == T_continue ||
@@ -226,7 +257,7 @@ struct value_t *eval(struct ast *a) {
             struct value_t *body_ret = eval(pkg->body);
             if (body_ret &&
                 (body_ret->type == T_return || body_ret->type == T_break ||
-                 body_ret->type == T_continue)) {
+                 body_ret->type == T_continue || body_ret->type == T_goto)) {
                 yyerror("invalid control flow in package %s", pkg->name);
             }
             value_t *ns = NULL;
@@ -315,8 +346,8 @@ struct value_t *eval(struct ast *a) {
                                 name, type_constraint_name(def->type));
                     break;
                 }
-                if (v->type == T_return || v->type == T_break ||
-                    v->type == T_continue) {
+                if (v->type == T_return || v->type == T_goto ||
+                    v->type == T_break || v->type == T_continue) {
                     ret = v;
                     break;
                 }
@@ -395,8 +426,8 @@ struct value_t *eval(struct ast *a) {
             struct value_t *v = eval(value_ast);
             if (value_ast && !v)
                 break;
-            if (v && (v->type == T_return || v->type == T_break ||
-                      v->type == T_continue)) {
+            if (v && (v->type == T_return || v->type == T_goto ||
+                      v->type == T_break || v->type == T_continue)) {
                 ret = v;
                 break;
             }
@@ -935,7 +966,8 @@ struct value_t *eval(struct ast *a) {
                         else
                             ret = body_ret;
                     } else if (body_ret->type == T_continue ||
-                               body_ret->type == T_return) {
+                               body_ret->type == T_return ||
+                               body_ret->type == T_goto) {
                         ret = body_ret;
                     } else {
                         freeval(body_ret);
@@ -1065,7 +1097,7 @@ struct value_t *eval(struct ast *a) {
 
                 bool do_break = false;
                 if (body) {
-                    if (body->type == T_return) {
+                    if (body->type == T_return || body->type == T_goto) {
                         ret = body;
                         break;
                     }
@@ -1134,7 +1166,7 @@ struct value_t *eval(struct ast *a) {
                     ret = NULL;
                     break;
                 }
-                if (ret && ret->type == T_return)
+                if (ret && (ret->type == T_return || ret->type == T_goto))
                     break;
                 if (ret && ret->type == T_break) {
                     if (control_matches_label(ret, loop_label)) {
@@ -1218,7 +1250,7 @@ struct value_t *eval(struct ast *a) {
                         break;
                     }
                     if (body) {
-                        if (body->type == T_return) {
+                        if (body->type == T_return || body->type == T_goto) {
                             ret = body;
                             leave = true;
                             break;
@@ -1368,7 +1400,7 @@ struct value_t *eval(struct ast *a) {
                     break;
                 }
                 if (body) {
-                    if (body->type == T_return) {
+                    if (body->type == T_return || body->type == T_goto) {
                         ret = body;
                         leave = true;
                         break;
@@ -1417,7 +1449,7 @@ struct value_t *eval(struct ast *a) {
                     freeval(v);
                     leave = true;
                 } else if (v) {
-                    if (v->type == T_return) {
+                    if (v->type == T_return || v->type == T_goto) {
                         ret = v;
                         leave = true;
                     } else {
@@ -1463,7 +1495,7 @@ struct value_t *eval(struct ast *a) {
                     break;
                 }
                 if (body) {
-                    if (body->type == T_return) {
+                    if (body->type == T_return || body->type == T_goto) {
                         ret = body;
                         leave = true;
                     } else if (body->type == T_break) {
@@ -1501,7 +1533,7 @@ struct value_t *eval(struct ast *a) {
                         break;
                     }
                     if (step) {
-                        if (step->type == T_return) {
+                        if (step->type == T_return || step->type == T_goto) {
                             ret = step;
                             leave = true;
                         } else {
@@ -1530,7 +1562,7 @@ struct value_t *eval(struct ast *a) {
             }
             if (eval_ctx().control != EVAL_CONTROL_NONE)
                 break;
-            if (ret && (ret->type == T_return ||
+            if (ret && (ret->type == T_return || ret->type == T_goto ||
                         ret->type == T_break ||
                         ret->type == T_continue))
                 break;

@@ -241,7 +241,10 @@ static struct value_t *invoke_function_body(
             diag_set_location(g_flow_line, g_flow_column);
             yyerror("continue outside loop in function");
         } else if (body_ret->type == T_goto) {
-            yyerror("goto target not found in this block");
+            const char *label =
+                ((struct control_value_t *)body_ret)->label;
+            yyerror("goto target %s not found in this block",
+                    label ? label : "");
         }
         freeval(body_ret);
     }

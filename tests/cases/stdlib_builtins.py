@@ -2215,7 +2215,38 @@ def run_cases():
     check(
         "goto target not found in block",
         "func f() { goto missing; }\nf();\n",
-        stderr="goto target not found in this block",
+        stderr="goto target missing not found in this block",
+    )
+    check(
+        "unused label warns",
+        "func f() { let x = 1; label unused: return x; }\n"
+        "println(f());\n",
+        stdout="1",
+        stderr="label unused is never used",
+    )
+    check(
+        "goto in generator rejected",
+        "func gen() { yield 1; goto done; label done: return; }\n"
+        "let g = gen();\n",
+        stderr="goto is not allowed in generator functions",
+    )
+    check(
+        "duplicate label rejected",
+        "func f() { label a: return 1; label a: return 2; }\n"
+        "f();\n",
+        stderr="duplicate label a",
+    )
+    check(
+        "goto cannot cross let forward",
+        "func f() { goto done; let x = 1; label done: return x; }\n"
+        "f();\n",
+        stderr="goto cannot cross a let or const declaration",
+    )
+    check(
+        "goto cannot cross let backward",
+        'func f() { label top: println("x"); let x = 1; goto top; }\n'
+        "f();\n",
+        stderr="goto cannot cross a let or const declaration",
     )
     check(
         "block scope",

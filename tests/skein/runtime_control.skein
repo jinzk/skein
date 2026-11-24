@@ -239,6 +239,67 @@ ts_test("goto label on return", func() {
   ts_eq(f(), 2);
 });
 
+ts_test("goto exits block and runs defer", func() {
+  let out = [];
+  let f = func() {
+    {
+      defer out = std.list.append(out, "block");
+      goto done;
+    }
+    out = std.list.append(out, "skipped");
+    label done: return 8;
+  };
+  ts_eq(f(), 8);
+  ts_eq(out, ["block"]);
+});
+
+ts_test("goto exits loop and runs defer", func() {
+  let out = [];
+  let f = func() {
+    for i in [1, 2] {
+      defer out = std.list.append(out, "loop-" + str(i));
+      goto done;
+    }
+    label done: return 9;
+  };
+  ts_eq(f(), 9);
+  ts_eq(out, ["loop-1"]);
+});
+
+ts_test("goto exits handler", func() {
+  let f = func() {
+    let x = (1 / 0) on error(e) {
+      goto done;
+    };
+    label done: return 10;
+  };
+  ts_eq(f(), 10);
+});
+
+ts_test("goto exits switch", func() {
+  let f = func() {
+    switch (1) {
+      case 1 => { goto done; }
+      default => { return 2; }
+    }
+    return 3;
+    label done: return 11;
+  };
+  ts_eq(f(), 11);
+});
+
+ts_test("goto exits match", func() {
+  let f = func() {
+    let y = match (1) {
+      case 1 => { goto done; }
+      default => 20;
+    };
+    return y;
+    label done: return 12;
+  };
+  ts_eq(f(), 12);
+});
+
 ts_test("nested handler break exits outer loop", func() {
   let boom = func() { fail "handler-test"; };
   let hits = 0;

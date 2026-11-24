@@ -588,7 +588,7 @@ label outer: for (let i in [1, 2, 3]) {
 - `break NAME;` 跳出指定循环或 switch；
 - `continue NAME;` 继续指定循环的下一轮；
 - 标签可以放在任意语句前；`break` / `continue` 只对循环或 switch 标签有意义；
-- `goto NAME;` 跳到当前 statement list 内的标签，跨块跳转暂未支持：
+- `goto NAME;` 跳到当前块或外层块的标签；不能跳入内层块或兄弟块：
 
   ```text
   func f() {

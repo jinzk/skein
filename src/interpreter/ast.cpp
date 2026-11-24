@@ -1,4 +1,5 @@
 #include "ast.h"
+#include "compiler.h"
 #include "diagnostics.h"
 #include "package.h"
 #include "scopestack.h"
@@ -920,7 +921,7 @@ struct ast *newfunc(char *s, struct symlist *sl, struct ast *ast,
     }
     a->name = s;
     a->sl = sl;
-    if (ast && ast->nodetype == 'L') {
+    if (ast && ast->nodetype != 'R') {
         struct ast *body = newast(NODE_FUNCTION_BODY, ast, NULL);
         body->line = ast->line;
         body->column = ast->column;
@@ -1158,6 +1159,8 @@ std::shared_ptr<function_code> get_function_code(struct funcdef *node) {
     if (!body)
         body = newret(newnullast());
     set_function_body_ast(code.get(), body);
+    if (!skein_vm_enabled())
+        skein_check_function_labels(code.get(), body);
     function_codes[node] = code;
     return code;
 }

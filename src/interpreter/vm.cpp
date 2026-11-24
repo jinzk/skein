@@ -2072,6 +2072,168 @@ public:
         }
     }
 
+    OpResult run_param_op(Op op, const Instr &ins,
+                          value_t *&control_out) {
+        switch (op) {
+            case Op::LoadParam: {
+                if (direct_params_) {
+                    if (ins.b >= param_values_.size()) {
+                        yyerror("invalid bytecode parameter slot");
+                        return OpResult::Abort;
+                    }
+                    if (!param_values_[ins.b]) {
+                        yyerror("parameter %s is used before it is "
+                                "initialized", param_name(ins.b));
+                        return OpResult::Abort;
+                    }
+                    push(dupval(param_values_[ins.b]));
+                    return OpResult::Continue;
+                }
+                if (ins.b >= param_symbols_.size()) {
+                    yyerror("invalid bytecode parameter slot");
+                    return OpResult::Abort;
+                }
+                struct symbol *sym = param_symbols_[ins.b];
+                if (!sym) {
+                    yyerror("symbol not found %s",
+                            ins.b < proto().param_names.size()
+                                ? proto().param_names[ins.b].c_str()
+                                : "");
+                    return OpResult::Abort;
+                }
+                if (sym->is_uninitialized) {
+                    yyerror("parameter %s is used before it is "
+                            "initialized", sym->name);
+                    return OpResult::Abort;
+                }
+                push(dupval(sym->val));
+                return OpResult::Continue;
+            }
+
+            case Op::StoreParam: {
+                if (direct_params_) {
+                    value_t *value = pop_checked();
+                    if (!value)
+                        return OpResult::Abort;
+                    if (direct_param_is_const(ins.b)) {
+                        freeval(value);
+                        yyerror("cannot assign to constant self");
+                        return OpResult::Abort;
+                    }
+                    value_t *result = assign_direct_param(ins.b, value);
+                    if (!result)
+                        return OpResult::Abort;
+                    if (is_control(result)) {
+                        control_out = abort_control(result);
+                        return OpResult::Control;
+                    }
+                    push(result);
+                    return OpResult::Continue;
+                }
+                value_t *value = pop_checked();
+                if (!value)
+                    return OpResult::Abort;
+                if (ins.b >= param_symbols_.size() ||
+                    !param_symbols_[ins.b]) {
+                    yyerror("invalid bytecode parameter slot");
+                    freeval(value);
+                    return OpResult::Abort;
+                }
+                value_t *result =
+                    skein_vm_assign_symbol_direct(param_symbols_[ins.b],
+                                                  value);
+                if (!result)
+                    return OpResult::Abort;
+                if (is_control(result)) {
+                    control_out = abort_control(result);
+                    return OpResult::Control;
+                }
+                push(result);
+                return OpResult::Continue;
+            }
+
+            case Op::CompoundParam: {
+                if (direct_params_) {
+                    value_t *value = pop_checked();
+                    if (!value)
+                        return OpResult::Abort;
+                    if (direct_param_is_const(ins.b)) {
+                        freeval(value);
+                        yyerror("cannot assign to constant self");
+                        return OpResult::Abort;
+                    }
+                    value_t *result = compound_direct_param(
+                        ins.b, (int)ins.flags, value);
+                    if (!result)
+                        return OpResult::Abort;
+                    if (is_control(result)) {
+                        control_out = abort_control(result);
+                        return OpResult::Control;
+                    }
+                    push(result);
+                    return OpResult::Continue;
+                }
+                value_t *value = pop_checked();
+                if (!value)
+                    return OpResult::Abort;
+                if (ins.b >= param_symbols_.size() ||
+                    !param_symbols_[ins.b]) {
+                    yyerror("invalid bytecode parameter slot");
+                    freeval(value);
+                    return OpResult::Abort;
+                }
+                value_t *result = skein_vm_compound_symbol_direct(
+                    param_symbols_[ins.b], (int)ins.flags, value);
+                if (!result)
+                    return OpResult::Abort;
+                if (is_control(result)) {
+                    control_out = abort_control(result);
+                    return OpResult::Control;
+                }
+                push(result);
+                return OpResult::Continue;
+            }
+
+            case Op::IncDecParam: {
+                if (direct_params_) {
+                    if (direct_param_is_const(ins.b)) {
+                        yyerror("cannot assign to constant self");
+                        return OpResult::Abort;
+                    }
+                    value_t *result = incdec_direct_param(
+                        ins.b, ins.a ? 1 : -1, (ins.flags & 1) != 0);
+                    if (!result)
+                        return OpResult::Abort;
+                    if (is_control(result)) {
+                        control_out = abort_control(result);
+                        return OpResult::Control;
+                    }
+                    push(result);
+                    return OpResult::Continue;
+                }
+                if (ins.b >= param_symbols_.size() ||
+                    !param_symbols_[ins.b]) {
+                    yyerror("invalid bytecode parameter slot");
+                    return OpResult::Abort;
+                }
+                value_t *result = skein_vm_increment_symbol_direct(
+                    param_symbols_[ins.b], ins.a ? 1 : -1,
+                    (ins.flags & 1) != 0);
+                if (!result)
+                    return OpResult::Abort;
+                if (is_control(result)) {
+                    control_out = abort_control(result);
+                    return OpResult::Control;
+                }
+                push(result);
+                return OpResult::Continue;
+            }
+
+            default:
+                return OpResult::Continue;
+        }
+    }
+
     value_t *run() {
         while (true) {
             if (pc_ >= proto().code.size()) {
@@ -2154,145 +2316,17 @@ public:
                     break;
                 }
 
-                case Op::LoadParam: {
-                    if (direct_params_) {
-                        if (ins.b >= param_values_.size()) {
-                            yyerror("invalid bytecode parameter slot");
-                            return abort_error();
-                        }
-                        if (!param_values_[ins.b]) {
-                            yyerror("parameter %s is used before it is "
-                                    "initialized", param_name(ins.b));
-                            return abort_error();
-                        }
-                        push(dupval(param_values_[ins.b]));
-                        break;
-                    }
-                    if (ins.b >= param_symbols_.size()) {
-                        yyerror("invalid bytecode parameter slot");
-                        return abort_error();
-                    }
-                    struct symbol *sym = param_symbols_[ins.b];
-                    if (!sym) {
-                        yyerror("symbol not found %s",
-                                ins.b < proto().param_names.size()
-                                    ? proto().param_names[ins.b].c_str()
-                                    : "");
-                        return abort_error();
-                    }
-                    if (sym->is_uninitialized) {
-                        yyerror("parameter %s is used before it is "
-                                "initialized", sym->name);
-                        return abort_error();
-                    }
-                    push(dupval(sym->val));
-                    break;
-                }
-
-                case Op::StoreParam: {
-                    if (direct_params_) {
-                        value_t *value = pop_checked();
-                        if (!value)
-                            return abort_error();
-                        if (direct_param_is_const(ins.b)) {
-                            freeval(value);
-                            yyerror("cannot assign to constant self");
-                            return abort_error();
-                        }
-                        value_t *result = assign_direct_param(ins.b, value);
-                        if (!result)
-                            return abort_error();
-                        if (is_control(result))
-                            return abort_control(result);
-                        push(result);
-                        break;
-                    }
-                    value_t *value = pop_checked();
-                    if (!value)
-                        return abort_error();
-                    if (ins.b >= param_symbols_.size() ||
-                        !param_symbols_[ins.b]) {
-                        yyerror("invalid bytecode parameter slot");
-                        freeval(value);
-                        return abort_error();
-                    }
-                    value_t *result =
-                        skein_vm_assign_symbol_direct(param_symbols_[ins.b], value);
-                    if (!result)
-                        return abort_error();
-                    if (is_control(result))
-                        return abort_control(result);
-                    push(result);
-                    break;
-                }
-
-                case Op::CompoundParam: {
-                    if (direct_params_) {
-                        value_t *value = pop_checked();
-                        if (!value)
-                            return abort_error();
-                        if (direct_param_is_const(ins.b)) {
-                            freeval(value);
-                            yyerror("cannot assign to constant self");
-                            return abort_error();
-                        }
-                        value_t *result = compound_direct_param(
-                            ins.b, (int)ins.flags, value);
-                        if (!result)
-                            return abort_error();
-                        if (is_control(result))
-                            return abort_control(result);
-                        push(result);
-                        break;
-                    }
-                    value_t *value = pop_checked();
-                    if (!value)
-                        return abort_error();
-                    if (ins.b >= param_symbols_.size() ||
-                        !param_symbols_[ins.b]) {
-                        yyerror("invalid bytecode parameter slot");
-                        freeval(value);
-                        return abort_error();
-                    }
-                    value_t *result = skein_vm_compound_symbol_direct(
-                        param_symbols_[ins.b], (int)ins.flags, value);
-                    if (!result)
-                        return abort_error();
-                    if (is_control(result))
-                        return abort_control(result);
-                    push(result);
-                    break;
-                }
-
+                case Op::LoadParam:
+                case Op::StoreParam:
+                case Op::CompoundParam:
                 case Op::IncDecParam: {
-                    if (direct_params_) {
-                        if (direct_param_is_const(ins.b)) {
-                            yyerror("cannot assign to constant self");
-                            return abort_error();
-                        }
-                        value_t *result = incdec_direct_param(
-                            ins.b, ins.a ? 1 : -1,
-                            (ins.flags & 1) != 0);
-                        if (!result)
-                            return abort_error();
-                        if (is_control(result))
-                            return abort_control(result);
-                        push(result);
-                        break;
-                    }
-                    if (ins.b >= param_symbols_.size() ||
-                        !param_symbols_[ins.b]) {
-                        yyerror("invalid bytecode parameter slot");
+                    value_t *control_out = NULL;
+                    OpResult result = run_param_op(
+                        static_cast<Op>(ins.op), ins, control_out);
+                    if (result == OpResult::Abort)
                         return abort_error();
-                    }
-                    value_t *result = skein_vm_increment_symbol_direct(
-                        param_symbols_[ins.b], ins.a ? 1 : -1,
-                        (ins.flags & 1) != 0);
-                    if (!result)
-                        return abort_error();
-                    if (is_control(result))
-                        return abort_control(result);
-                    push(result);
+                    if (result == OpResult::Control)
+                        return control_out;
                     break;
                 }
 

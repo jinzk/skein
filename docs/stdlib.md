@@ -1604,6 +1604,8 @@ let n = parse(input) on error(e) {
 - `on error` 不会自动解包嵌套在普通表达式里的 result；
 - 如果只想拿到 result 本身，不要对它使用 `on error`。
 - `on error()` 可以不绑定错误值；
+- handler 可以用 `recover` / `pass` / `fail` 或 `return` / `break` / `continue` / `goto` 退出；控制流退出时原始错误视为已处理；
+- 默认参数值和 `defer` 表达式中的 handler 仍只允许 `recover` / `pass` / `fail`；
 - `wait t on error(e) { ... }`、`wait launch f() on error(e) { ... }` 可直接
   捕获任务内的 `fail`，等价于先写 `(wait t) on error(e) { ... }`；
 - `launch f() on error(...)` 会产生 `launch` warning，因为 handler 不能捕获
@@ -1759,6 +1761,7 @@ func work() {
 - 已有错误正在展开时，原错误优先，defer 错误以 `error in defer: ...` 作为附加诊断报告；
 - 顶层 `defer` 不允许，必须放在函数或代码块中；
 - 生成器正常结束时会执行 defer；
+- `defer` 表达式中的 `on error` handler 只允许 `recover` / `pass` / `fail`，不能用 `return` / `break` / `continue` / `goto` 跳出；
 - 生成器被直接丢弃时不会执行脚本级 defer；如果仍有待执行 defer，析构/GC 时会打印 warning。
 
 FFI：

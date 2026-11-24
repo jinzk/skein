@@ -382,6 +382,7 @@ struct LoopContext {
     int iter_depth = 0;
     int stack_cleanup = 0;
     int handler_body_depth = 0;
+    int handler_stack_depth = 0;
     bool accepts_continue = true;
     bool accepts_break = true;
 };
@@ -405,6 +406,8 @@ struct Compiler {
     int scope_depth = 0;
     bool slot_fast_path = false;
     int handler_body_depth = 0;
+    int handler_stack_depth = 0;
+    bool forbid_control_exit = false;
     bool inside_function = false;
     bool param_fast_path = false;
     bool ok = true;
@@ -964,10 +967,12 @@ struct Compiler {
 
     uint32_t add_expression_proto(
         struct ast *expression, const std::string &suffix,
-        const std::vector<skein::bc::DeferCapture> *captures = nullptr) {
+        const std::vector<skein::bc::DeferCapture> *captures = nullptr,
+        bool forbid_control_exit = false) {
         Compiler child(proto.package);
         child.inside_function = captures ? true : inside_function;
         child.handler_body_depth = handler_body_depth;
+        child.forbid_control_exit = forbid_control_exit;
         child.proto.name =
             (proto.name.empty() ? std::string("<anonymous>") : proto.name) +
             suffix;
@@ -998,7 +1003,7 @@ struct Compiler {
     uint32_t add_defer_proto(struct ast *expression) {
         std::vector<skein::bc::DeferCapture> captures =
             collect_defer_captures(expression);
-        return add_expression_proto(expression, "$defer", &captures);
+        return add_expression_proto(expression, "$defer", &captures, true);
     }
 
     uint32_t add_import(const struct import_node *node) {
@@ -2506,13 +2511,9 @@ struct Compiler {
 
             case 'R': {
                 struct fnret *ret = (struct fnret *)node;
-                if (handler_body_depth > 0) {
-                    const char *text =
-                        inside_function
-                            ? "error handler cannot return, break, or "
-                              "continue; use recover, pass, or fail"
-                            : "return outside function";
-                    uint32_t message = add_name(text);
+                if (forbid_control_exit) {
+                    uint32_t message = add_name(
+                        "defer expression cannot return, break, or continue");
                     emit(Op::RuntimeError, 0, 0, message, here);
                     return;
                 }
@@ -2940,6 +2941,7 @@ struct Compiler {
         ctx.label = take_pending_label();
         ctx.scope_depth = scope_depth;
         ctx.handler_body_depth = handler_body_depth;
+        ctx.handler_stack_depth = handler_stack_depth;
         ctx.iter_depth = static_cast<int>(iter_stack.size());
         loops.push_back(ctx);
         size_t ctx_index = loops.size() - 1;
@@ -2977,6 +2979,7 @@ struct Compiler {
         ctx.label = take_pending_label();
         ctx.scope_depth = scope_depth;
         ctx.handler_body_depth = handler_body_depth;
+        ctx.handler_stack_depth = handler_stack_depth;
         ctx.iter_depth = static_cast<int>(iter_stack.size());
         loops.push_back(ctx);
         size_t ctx_index = loops.size() - 1;
@@ -3024,6 +3027,7 @@ struct Compiler {
         ctx.label = take_pending_label();
         ctx.scope_depth = scope_depth;
         ctx.handler_body_depth = handler_body_depth;
+        ctx.handler_stack_depth = handler_stack_depth;
         ctx.iter_depth = static_cast<int>(iter_stack.size());
         loops.push_back(ctx);
         size_t ctx_index = loops.size() - 1;
@@ -3098,6 +3102,7 @@ struct Compiler {
         ctx.label = take_pending_label();
         ctx.scope_depth = scope_depth;
         ctx.handler_body_depth = handler_body_depth;
+        ctx.handler_stack_depth = handler_stack_depth;
         loops.push_back(ctx);
         iter_stack.push_back(static_cast<int>(desc));
         loops.back().iter_depth = static_cast<int>(iter_stack.size());
@@ -3137,6 +3142,7 @@ struct Compiler {
         ctx.label = take_pending_label();
         ctx.scope_depth = scope_depth;
         ctx.handler_body_depth = handler_body_depth;
+        ctx.handler_stack_depth = handler_stack_depth;
         ctx.iter_depth = static_cast<int>(iter_stack.size());
         ctx.stack_cleanup = 1; // the subject stays on the operand stack
         ctx.accepts_continue = false;
@@ -3366,6 +3372,7 @@ struct Compiler {
         ctx.label = take_pending_label();
         ctx.scope_depth = scope_depth;
         ctx.handler_body_depth = handler_body_depth;
+        ctx.handler_stack_depth = handler_stack_depth;
         ctx.iter_depth = static_cast<int>(iter_stack.size());
         ctx.stack_cleanup = 1; // the subject stays on the operand stack
         ctx.accepts_continue = false;
@@ -3445,11 +3452,13 @@ struct Compiler {
 
         size_t fail_handler =
             emit(Op::PushFailHandler, 1, 0, 0, here); // capture errors
+        ++handler_stack_depth;
 
         compile(handler->call);
         if (!ok) return;
         emit(Op::CheckResult, 0, 0, 0, here);
         emit(Op::PopHandler, 0, 0, 0, here);
+        --handler_stack_depth;
         size_t done_jump = emit_jump(Op::Jump, here);
 
         size_t handler_entry = proto.code.size();
@@ -3478,6 +3487,7 @@ struct Compiler {
          */
         size_t recover_handler =
             emit(Op::PushRecoverHandler, 1, 0, 0, here);
+        ++handler_stack_depth;
         emit(Op::EnterHandlerBody, 0, 0, 0, here);
         ++handler_body_depth;
 
@@ -3487,6 +3497,7 @@ struct Compiler {
         emit(Op::LeaveHandlerBody, 0, 0, 0, here);
         --handler_body_depth;
         emit(Op::PopHandler, 0, 0, 0, here);
+        --handler_stack_depth;
         pop_slot_scope(true, here);
         emit(Op::PopScope, 0, 0, 0, here);
         --scope_depth;
@@ -3536,11 +3547,9 @@ struct Compiler {
             }
         }
 
-        if (handler_body_depth > 0 &&
-            (!target || target->handler_body_depth < handler_body_depth)) {
+        if (forbid_control_exit && !target) {
             uint32_t message = add_name(
-                "error handler cannot return, break, or continue; "
-                "use recover, pass, or fail");
+                "defer expression cannot return, break, or continue");
             emit(Op::RuntimeError, 0, 0, message, loc);
             return;
         }
@@ -3554,6 +3563,17 @@ struct Compiler {
 
         size_t target_index =
             static_cast<size_t>(target - loops.data());
+
+        if (handler_stack_depth > target->handler_stack_depth) {
+            if (target->handler_body_depth > 255) {
+                yyerror("error handler nesting is too deep");
+                return;
+            }
+            emit(Op::PopHandlers,
+                 static_cast<uint8_t>(target->handler_body_depth),
+                 static_cast<uint16_t>(target->handler_stack_depth), 0,
+                 loc);
+        }
 
         /*
          * A break/continue may leave lexical blocks inside the loop body.

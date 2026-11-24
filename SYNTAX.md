@@ -1608,7 +1608,7 @@ let n = parse_positive("0") on error(e) {
 - `e` 是 `error` 值，只在 handler 作用域内有效；
 - `str(e)` 或 `std.error.message(e)` 取得消息；
 - `std.error.kind(e)` 取得错误类别；
-- handler 必须以 `recover`、`pass` 或 `fail` 结束；
+- handler 必须以 `recover`、`pass` 或 `fail` 结束，或通过 `return` / `break` / `continue` / `goto` 退出；
 - `on error()` 可以不绑定错误值；需要检查错误时用 `on error(e)`；
 - `wait t on error(e) { ... }`、`wait launch f() on error(e) { ... }` 的
   handler 覆盖 `wait` 抛出的任务错误，可直接捕获任务内的 `fail`；
@@ -1619,7 +1619,8 @@ let n = parse_positive("0") on error(e) {
 - `recover expr;` 结束 handler，并把 `expr` 作为整个 `on error` 表达式的值；
 - `recover;` 等价于 `recover null;`；
 - `pass e;` 继续向外层传播错误；
-- handler 内不能直接用 `return`、`break` 或 `continue` 结束 handler；
+- handler 可以用 `return`、`break`、`continue` 或 `goto` 退出；控制流退出时原始错误视为已处理；
+- 默认参数值和 `defer` 表达式中的 handler 仍只允许 `recover` / `pass` / `fail`；
 - `recover` / `pass` 只能出现在 handler 内；
 - 未捕获的 `fail` 在脚本顶层报错并停止脚本。
 

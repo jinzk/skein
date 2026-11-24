@@ -2262,11 +2262,61 @@ def run_cases():
           'func f() { fail "x"; }\n'
           "let x = f() on error(e) { print(e); };\n",
           stderr="error handler must end with recover, pass, or fail")
-    check("handler return rejected",
+    check("handler return exits function",
           'func f() { fail "x"; }\n'
           "func g() { let x = f() on error(e) { return 1; }; return 2; }\n"
           "g()\n",
-          stderr="error handler cannot return, break, or continue")
+          stdout="= 1")
+    check("handler break exits loop",
+          'func f() { fail "x"; }\n'
+          "func g() {\n"
+          "  for (let i in [1, 2, 3]) {\n"
+          "    let x = f() on error(e) { break; };\n"
+          "    print(str(i));\n"
+          "  }\n"
+          "  return 9;\n"
+          "}\n"
+          "g()\n",
+          stdout="= 9")
+    check("handler continue keeps loop",
+          'func f() { fail "x"; }\n'
+          "func g() {\n"
+          "  let hits = 0;\n"
+          "  for (let i in [1, 2]) {\n"
+          "    let x = f() on error(e) { continue; };\n"
+          "    hits = hits + 1;\n"
+          "  }\n"
+          "  return hits;\n"
+          "}\n"
+          "g()\n",
+          stdout="= 0")
+    check("handler control runs block defers",
+          'func f() { fail "x"; }\n'
+          "func g() {\n"
+          "  for (let i in [1]) {\n"
+          "    defer print(\"loop\");\n"
+          "    {\n"
+          "      defer print(\"inner\");\n"
+          "      let x = f() on error(e) { break; };\n"
+          "    }\n"
+          "  }\n"
+          "  return 1;\n"
+          "}\n"
+          "g()\n",
+          stdout_all=["innerloop", "= 1"])
+    check("defer handler return rejected",
+          'func f() { fail "x"; }\n'
+          "func g() {\n"
+          "  defer f() on error(e) { return 1; };\n"
+          "  return 2;\n"
+          "}\n"
+          "g()\n",
+          stderr="defer expression cannot return, break, or continue")
+    check("default parameter handler return rejected",
+          'func f() { fail "x"; }\n'
+          "func g(a = f() on error(e) { return 1; }) { return a; }\n"
+          "g()\n",
+          stderr="default value for parameter a cannot return control flow")
     check("method fail caught",
           "struct P {\n"
           "  x: int;\n"

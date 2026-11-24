@@ -95,6 +95,12 @@ static void run_current_defers() {
 
     for (size_t i = defers.size(); i > 0; --i) {
         struct value_t *result = eval(defers[i - 1]);
+        if (result && (result->type == T_return || result->type == T_break ||
+                       result->type == T_continue)) {
+            freeval(result);
+            yyerror("defer expression cannot return, break, or continue");
+            continue;
+        }
         freeval(result);
         if (context.control == EVAL_CONTROL_NONE)
             continue;

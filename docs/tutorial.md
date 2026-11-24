@@ -716,8 +716,9 @@ let v = outer() on error(e) {
 - `std.error.kind(e)` 取得错误类别；
 - `recover expr;` 结束 handler 并返回恢复值；
 - `pass e;` 把错误继续传给外层，保留原始位置和调用栈；
-- handler 必须以 `recover`、`pass` 或 `fail` 结束；
-- handler 内不能直接用 `return` / `break` / `continue` 结束；
+- handler 必须以 `recover`、`pass`、`fail` 或 `return` / `break` / `continue` / `goto` 退出；
+- 控制流退出 handler 时，原始错误视为已处理；
+- 默认参数值和 `defer` 表达式中的 handler 只允许 `recover` / `pass` / `fail`；
 - 未捕获的 `fail` 在抛出点报告，并打印调用栈；
 - 跨 task / thread 传递的 `error` 会保留位置和调用栈。
 

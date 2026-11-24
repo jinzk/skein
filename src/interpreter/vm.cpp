@@ -2322,6 +2322,23 @@ public:
                     break;
                 }
 
+                case Op::PopHandlers: {
+                    if (handlers_.size() < ins.a) {
+                        yyerror("internal bytecode handler underflow");
+                        return abort_error();
+                    }
+                    while (handlers_.size() > ins.a) {
+                        value_t *error =
+                            end_handler_capture(handlers_.back());
+                        freeval(error);
+                        handlers_.pop_back();
+                    }
+                    handler_body_depth_ = ins.flags;
+                    context_.handler_depth =
+                        saved_handler_depth_ + ins.flags;
+                    break;
+                }
+
                 case Op::CheckResult: {
                     value_t *value = pop_checked();
                     if (!value)
@@ -5197,6 +5214,11 @@ private:
 
         for (size_t i = defers.size(); i > 0; --i) {
             value_t *result = run_defer(defers[i - 1]);
+            if (is_control(result)) {
+                freeval(result);
+                yyerror("defer expression cannot return, break, or continue");
+                continue;
+            }
             freeval(result);
             if (context_.control == EVAL_CONTROL_NONE)
                 continue;

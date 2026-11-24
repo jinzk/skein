@@ -129,6 +129,7 @@ enum class Op : uint8_t {
     PushFailHandler,
     PushRecoverHandler,
     PopHandler,
+    PopHandlers,
     CheckResult,
     BindName,
     EnterHandlerBody,

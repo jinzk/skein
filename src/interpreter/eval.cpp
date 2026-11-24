@@ -481,9 +481,7 @@ struct value_t *eval(struct ast *a) {
             }
             if (body && (body->type == T_return || body->type == T_break ||
                          body->type == T_continue)) {
-                freeval(body);
-                yyerror("error handler cannot return, break, or continue; "
-                        "use recover, pass, or fail");
+                ret = body;
                 break;
             }
             if (eval_ctx().runtime_error_count != handler_errors) {

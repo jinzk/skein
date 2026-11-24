@@ -90,6 +90,7 @@ const char *op_name(Op op) {
         case Op::PushFailHandler: return "PUSH_FAIL_HANDLER";
         case Op::PushRecoverHandler: return "PUSH_RECOVER_HANDLER";
         case Op::PopHandler: return "POP_HANDLER";
+        case Op::PopHandlers: return "POP_HANDLERS";
         case Op::CheckResult: return "CHECK_RESULT";
         case Op::BindName: return "BIND_NAME";
         case Op::EnterHandlerBody: return "ENTER_HANDLER_BODY";

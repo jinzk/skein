@@ -490,6 +490,7 @@ bool effect_for(const Proto &proto, const Instr &ins, size_t pc,
                 return false;
             break;
         case Op::PopHandler:
+        case Op::PopHandlers:
         case Op::EnterHandlerBody:
         case Op::LeaveHandlerBody:
             break;

@@ -380,6 +380,7 @@ add_library(skein_interpreter STATIC
   src/interpreter/defer_validation.cpp
   src/interpreter/label_analysis.cpp
   src/interpreter/label_validation.cpp
+  src/interpreter/compiler_analysis.cpp
   src/interpreter/vm_bridge.cpp
   src/interpreter/thread_transfer_serialize.cpp
   src/interpreter/error_report.cpp

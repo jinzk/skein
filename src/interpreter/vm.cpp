@@ -2515,6 +2515,170 @@ public:
         }
     }
 
+    /*
+     * Self-append opcodes mutate a receiver in place when possible and fall
+     * back to the ordinary call/binary paths otherwise.
+     */
+    OpResult run_self_append_op(Op op, const Instr &ins,
+                                value_t *&control_out) {
+        switch (op) {
+            case Op::ListAppendSelf: {
+                if (vm_stats_enabled)
+                    ++vm_stats.calls;
+                const uint32_t argc = ins.a;
+                std::array<value_t *, 8> inline_args;
+                std::vector<value_t *> heap_args;
+                value_t **args = inline_args.data();
+                if (argc > inline_args.size()) {
+                    heap_args.resize(argc);
+                    args = heap_args.data();
+                }
+                for (uint32_t i = argc; i > 0; --i) {
+                    value_t *arg = pop_checked();
+                    if (!arg) {
+                        free_args(args, argc);
+                        return OpResult::Abort;
+                    }
+                    args[i - 1] = arg;
+                }
+                value_t *list = pop_checked();
+                value_t *callee = pop_checked();
+                if (!list || !callee) {
+                    free_args(args, argc);
+                    freeval(list);
+                    freeval(callee);
+                    return OpResult::Abort;
+                }
+                const bool append_builtin =
+                    callee->type == T_builtin &&
+                    ((struct builtin_value_t *)callee)->functype ==
+                        B_list_append;
+                if (append_builtin && list_grow_append(list, args, argc)) {
+                    freeval(callee);
+                    value_t *result = dupval(list);
+                    freeval(list);
+                    push(result);
+                    return OpResult::Continue;
+                }
+                std::vector<value_t *> call_args;
+                call_args.reserve((size_t)argc + 1);
+                call_args.push_back(list);
+                for (uint32_t i = 0; i < argc; ++i)
+                    call_args.push_back(args[i]);
+                FastCallResult fast = try_fast_call(
+                    callee, call_args.data(), (uint32_t)call_args.size());
+                if (fast == FastCallResult::Pushed) {
+                    freeval(callee);
+                    if (g_interrupted)
+                        return OpResult::Abort;
+                    return OpResult::Continue;
+                }
+                if (fast == FastCallResult::JitFailed) {
+                    freeval(callee);
+                    return OpResult::Abort;
+                }
+                if (fast == FastCallResult::Failed) {
+                    free_args(call_args.data(),
+                              (uint32_t)call_args.size());
+                    freeval(callee);
+                    return OpResult::Abort;
+                }
+                value_t *result =
+                    skein_vm_call_value_args(callee, std::move(call_args));
+                freeval(callee);
+                if (g_interrupted) {
+                    freeval(result);
+                    return OpResult::Abort;
+                }
+                if (context_.control != EVAL_CONTROL_NONE) {
+                    freeval(result);
+                    return OpResult::Abort;
+                }
+                if (context_.runtime_error_count != errors_before_) {
+                    freeval(result);
+                    return OpResult::Abort;
+                }
+                if (is_control(result)) {
+                    control_out = abort_control(result);
+                    return OpResult::Control;
+                }
+                push(result ? result : newnull());
+                return OpResult::Continue;
+            }
+
+            case Op::ListConcatSelf: {
+                value_t *right = pop_checked();
+                value_t *left = pop_checked();
+                if (!left || !right) {
+                    freeval(left);
+                    freeval(right);
+                    return OpResult::Abort;
+                }
+                if (list_grow_concat(left, right)) {
+                    freeval(right);
+                    value_t *result = dupval(left);
+                    freeval(left);
+                    push(result);
+                    return OpResult::Continue;
+                }
+                const int errors_before_concat =
+                    context_.runtime_error_count;
+                value_t *result =
+                    skein_vm_apply_binary_value('+', left, right);
+                freeval(left);
+                freeval(right);
+                if (!result)
+                    return OpResult::Abort;
+                if (context_.runtime_error_count != errors_before_concat) {
+                    freeval(result);
+                    return OpResult::Abort;
+                }
+                if (is_control(result)) {
+                    control_out = abort_control(result);
+                    return OpResult::Control;
+                }
+                push(result);
+                return OpResult::Continue;
+            }
+
+            case Op::StringAppendSelf: {
+                value_t *right = pop_checked();
+                value_t *left = pop_checked();
+                if (!left || !right) {
+                    freeval(left);
+                    freeval(right);
+                    return OpResult::Abort;
+                }
+                if (string_append_in_place(left, right, 1)) {
+                    freeval(right);
+                    push(left);
+                    return OpResult::Continue;
+                }
+                const int errors_before_append =
+                    context_.runtime_error_count;
+                value_t *result =
+                    skein_vm_apply_binary_value('+', left, right);
+                freeval(left);
+                freeval(right);
+                if (!result)
+                    return OpResult::Abort;
+                if (context_.runtime_error_count != errors_before_append) {
+                    freeval(result);
+                    return OpResult::Abort;
+                }
+                if (is_control(result)) {
+                    control_out = abort_control(result);
+                    return OpResult::Control;
+                }
+                push(result);
+                return OpResult::Continue;
+            }
+
+            default:
+                return OpResult::Continue;
+        }
+    }
+
     value_t *run() {
         while (true) {
             if (pc_ >= proto().code.size()) {
@@ -3273,152 +3437,16 @@ public:
                     break;
                 }
 
-                case Op::ListAppendSelf: {
-                    if (vm_stats_enabled)
-                        ++vm_stats.calls;
-                    const uint32_t argc = ins.a;
-                    std::array<value_t *, 8> inline_args;
-                    std::vector<value_t *> heap_args;
-                    value_t **args = inline_args.data();
-                    if (argc > inline_args.size()) {
-                        heap_args.resize(argc);
-                        args = heap_args.data();
-                    }
-                    for (uint32_t i = argc; i > 0; --i) {
-                        value_t *arg = pop_checked();
-                        if (!arg) {
-                            free_args(args, argc);
-                            return abort_error();
-                        }
-                        args[i - 1] = arg;
-                    }
-                    value_t *list = pop_checked();
-                    value_t *callee = pop_checked();
-                    if (!list || !callee) {
-                        free_args(args, argc);
-                        freeval(list);
-                        freeval(callee);
-                        return abort_error();
-                    }
-                    const bool append_builtin =
-                        callee->type == T_builtin &&
-                        ((struct builtin_value_t *)callee)->functype ==
-                            B_list_append;
-                    if (append_builtin && list_grow_append(list, args, argc)) {
-                        freeval(callee);
-                        value_t *result = dupval(list);
-                        freeval(list);
-                        push(result);
-                        break;
-                    }
-                    std::vector<value_t *> call_args;
-                    call_args.reserve((size_t)argc + 1);
-                    call_args.push_back(list);
-                    for (uint32_t i = 0; i < argc; ++i)
-                        call_args.push_back(args[i]);
-                    FastCallResult fast = try_fast_call(
-                        callee, call_args.data(),
-                        (uint32_t)call_args.size());
-                    if (fast == FastCallResult::Pushed) {
-                        freeval(callee);
-                        if (g_interrupted)
-                            return abort_error();
-                        break;
-                    }
-                    if (fast == FastCallResult::JitFailed) {
-                        freeval(callee);
-                        return abort_error();
-                    }
-                    if (fast == FastCallResult::Failed) {
-                        free_args(call_args.data(),
-                                  (uint32_t)call_args.size());
-                        freeval(callee);
-                        return abort_error();
-                    }
-                    value_t *result = skein_vm_call_value_args(
-                        callee, std::move(call_args));
-                    freeval(callee);
-                    if (g_interrupted) {
-                        freeval(result);
-                        return abort_error();
-                    }
-                    if (context_.control != EVAL_CONTROL_NONE) {
-                        freeval(result);
-                        return abort_error();
-                    }
-                    if (context_.runtime_error_count != errors_before_) {
-                        freeval(result);
-                        return abort_error();
-                    }
-                    if (is_control(result))
-                        return abort_control(result);
-                    push(result ? result : newnull());
-                    break;
-                }
-
-                case Op::ListConcatSelf: {
-                    value_t *right = pop_checked();
-                    value_t *left = pop_checked();
-                    if (!left || !right) {
-                        freeval(left);
-                        freeval(right);
-                        return abort_error();
-                    }
-                    if (list_grow_concat(left, right)) {
-                        freeval(right);
-                        value_t *result = dupval(left);
-                        freeval(left);
-                        push(result);
-                        break;
-                    }
-                    const int errors_before_concat =
-                        context_.runtime_error_count;
-                    value_t *result =
-                        skein_vm_apply_binary_value('+', left, right);
-                    freeval(left);
-                    freeval(right);
-                    if (!result)
-                        return abort_error();
-                    if (context_.runtime_error_count !=
-                        errors_before_concat) {
-                        freeval(result);
-                        return abort_error();
-                    }
-                    if (is_control(result))
-                        return abort_control(result);
-                    push(result);
-                    break;
-                }
-
+                case Op::ListAppendSelf:
+                case Op::ListConcatSelf:
                 case Op::StringAppendSelf: {
-                    value_t *right = pop_checked();
-                    value_t *left = pop_checked();
-                    if (!left || !right) {
-                        freeval(left);
-                        freeval(right);
+                    value_t *control_out = NULL;
+                    OpResult result = run_self_append_op(
+                        static_cast<Op>(ins.op), ins, control_out);
+                    if (result == OpResult::Abort)
                         return abort_error();
-                    }
-                    if (string_append_in_place(left, right, 1)) {
-                        freeval(right);
-                        push(left);
-                        break;
-                    }
-                    const int errors_before_append =
-                        context_.runtime_error_count;
-                    value_t *result =
-                        skein_vm_apply_binary_value('+', left, right);
-                    freeval(left);
-                    freeval(right);
-                    if (!result)
-                        return abort_error();
-                    if (context_.runtime_error_count !=
-                        errors_before_append) {
-                        freeval(result);
-                        return abort_error();
-                    }
-                    if (is_control(result))
-                        return abort_control(result);
-                    push(result);
+                    if (result == OpResult::Control)
+                        return control_out;
                     break;
                 }
 

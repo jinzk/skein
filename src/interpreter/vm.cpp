@@ -2679,6 +2679,253 @@ public:
         }
     }
 
+    /*
+     * Direct and method calls share argument marshalling, fast call results,
+     * and fallback handling.  Method calls first resolve the receiver method
+     * through the member cache.
+     */
+    OpResult run_call_op(Op op, const Instr &ins, value_t *&control_out) {
+        switch (op) {
+            case Op::Call: {
+                if (vm_stats_enabled)
+                    ++vm_stats.calls;
+                uint32_t argc = ins.b;
+                std::array<value_t *, 8> inline_args;
+                std::vector<value_t *> heap_args;
+                value_t **args = inline_args.data();
+                if (argc > inline_args.size()) {
+                    heap_args.resize(argc);
+                    args = heap_args.data();
+                }
+                for (uint32_t i = argc; i > 0; --i) {
+                    value_t *arg = pop_checked();
+                    if (!arg) {
+                        free_args(args, argc);
+                        return OpResult::Abort;
+                    }
+                    args[i - 1] = arg;
+                }
+                value_t *callee = pop_checked();
+                if (!callee) {
+                    free_args(args, argc);
+                    return OpResult::Abort;
+                }
+                if (ins.flags & 1) {
+                    std::vector<value_t *> owned(args, args + argc);
+                    value_t *result = fiber_launch_host(
+                        callee, std::move(owned), (ins.flags & 2) != 0);
+                    freeval(callee);
+                    if (g_interrupted) {
+                        freeval(result);
+                        return OpResult::Abort;
+                    }
+                    if (context_.control != EVAL_CONTROL_NONE) {
+                        freeval(result);
+                        return OpResult::Abort;
+                    }
+                    if (context_.runtime_error_count != errors_before_) {
+                        freeval(result);
+                        return OpResult::Abort;
+                    }
+                    if (result && is_control(result)) {
+                        control_out = abort_control(result);
+                        return OpResult::Control;
+                    }
+                    push(result ? result : newnull());
+                    return OpResult::Continue;
+                }
+                FastCallResult fast = try_fast_call(callee, args, argc);
+                if (fast == FastCallResult::Pushed) {
+                    if (vm_stats_enabled) {
+                        ++vm_stats.fast_calls;
+                        if ((uint64_t)context_.vm_call_depth >
+                            vm_stats.max_depth)
+                            vm_stats.max_depth = context_.vm_call_depth;
+                    }
+                    freeval(callee);
+                    if (g_interrupted)
+                        return OpResult::Abort;
+                    return OpResult::Continue;
+                }
+                if (fast == FastCallResult::JitFailed) {
+                    /* The JIT consumed the args before reporting. */
+                    freeval(callee);
+                    return OpResult::Abort;
+                }
+                if (fast == FastCallResult::Failed) {
+                    freeval(callee);
+                    free_args(args, argc);
+                    return OpResult::Abort;
+                }
+                if (vm_stats_enabled)
+                    ++vm_stats.fallback_calls;
+                std::vector<value_t *> fallback(args, args + argc);
+                value_t *result =
+                    skein_vm_call_value_args(callee, std::move(fallback));
+                freeval(callee);
+                if (g_interrupted) {
+                    freeval(result);
+                    return OpResult::Abort;
+                }
+                if (context_.control != EVAL_CONTROL_NONE) {
+                    freeval(result);
+                    return OpResult::Abort;
+                }
+                if (context_.runtime_error_count != errors_before_) {
+                    freeval(result);
+                    return OpResult::Abort;
+                }
+                if (result && is_control(result)) {
+                    control_out = abort_control(result);
+                    return OpResult::Control;
+                }
+                push(result ? result : newnull());
+                return OpResult::Continue;
+            }
+
+            case Op::CallMethod: {
+                if (vm_stats_enabled)
+                    ++vm_stats.calls;
+                const uint32_t argc = ins.a;
+                const char *name = name_at(proto(), ins.b);
+                std::array<value_t *, 8> inline_args;
+                std::vector<value_t *> heap_args;
+                value_t **args = inline_args.data();
+                if (argc > inline_args.size()) {
+                    heap_args.resize(argc);
+                    args = heap_args.data();
+                }
+                for (uint32_t i = argc; i > 0; --i) {
+                    value_t *arg = pop_checked();
+                    if (!arg) {
+                        free_args(args, argc);
+                        return OpResult::Abort;
+                    }
+                    args[i - 1] = arg;
+                }
+                value_t *receiver = pop_checked();
+                if (!receiver) {
+                    free_args(args, argc);
+                    return OpResult::Abort;
+                }
+
+                std::shared_ptr<function_def> method = lookup_method_cached(
+                    receiver, name, member_cache(ins.b));
+                if (method) {
+                    std::vector<value_t *> call_args;
+                    call_args.reserve((size_t)argc + 1);
+                    call_args.push_back(receiver);
+                    for (uint32_t i = 0; i < argc; ++i)
+                        call_args.push_back(args[i]);
+                    struct func_value_t function;
+                    function.type = T_func;
+                    function.def = method;
+                    FastCallResult fast = try_fast_call(
+                        (value_t *)&function, call_args.data(),
+                        (uint32_t)call_args.size());
+                    if (fast == FastCallResult::Pushed) {
+                        if (vm_stats_enabled) {
+                            ++vm_stats.fast_calls;
+                            if ((uint64_t)context_.vm_call_depth >
+                                vm_stats.max_depth)
+                                vm_stats.max_depth =
+                                    context_.vm_call_depth;
+                        }
+                        if (g_interrupted)
+                            return OpResult::Abort;
+                        return OpResult::Continue;
+                    }
+                    if (fast == FastCallResult::JitFailed)
+                        return OpResult::Abort;
+                    if (fast == FastCallResult::Failed) {
+                        free_args(call_args.data(),
+                                  (uint32_t)call_args.size());
+                        return OpResult::Abort;
+                    }
+                    if (vm_stats_enabled)
+                        ++vm_stats.fallback_calls;
+                    value_t *result = skein_vm_call_value_args(
+                        (value_t *)&function, std::move(call_args));
+                    if (g_interrupted) {
+                        freeval(result);
+                        return OpResult::Abort;
+                    }
+                    if (context_.control != EVAL_CONTROL_NONE) {
+                        freeval(result);
+                        return OpResult::Abort;
+                    }
+                    if (context_.runtime_error_count != errors_before_) {
+                        freeval(result);
+                        return OpResult::Abort;
+                    }
+                    if (result && is_control(result)) {
+                        control_out = abort_control(result);
+                        return OpResult::Control;
+                    }
+                    push(result ? result : newnull());
+                    return OpResult::Continue;
+                }
+
+                value_t *callee =
+                    read_field_cached(receiver, name, member_cache(ins.b));
+                freeval(receiver);
+                if (!callee) {
+                    free_args(args, argc);
+                    return OpResult::Abort;
+                }
+                FastCallResult fast = try_fast_call(callee, args, argc);
+                if (fast == FastCallResult::Pushed) {
+                    if (vm_stats_enabled) {
+                        ++vm_stats.fast_calls;
+                        if ((uint64_t)context_.vm_call_depth >
+                            vm_stats.max_depth)
+                            vm_stats.max_depth = context_.vm_call_depth;
+                    }
+                    freeval(callee);
+                    if (g_interrupted)
+                        return OpResult::Abort;
+                    return OpResult::Continue;
+                }
+                if (fast == FastCallResult::JitFailed) {
+                    freeval(callee);
+                    return OpResult::Abort;
+                }
+                if (fast == FastCallResult::Failed) {
+                    freeval(callee);
+                    free_args(args, argc);
+                    return OpResult::Abort;
+                }
+                if (vm_stats_enabled)
+                    ++vm_stats.fallback_calls;
+                std::vector<value_t *> fallback(args, args + argc);
+                value_t *result =
+                    skein_vm_call_value_args(callee, std::move(fallback));
+                freeval(callee);
+                if (g_interrupted) {
+                    freeval(result);
+                    return OpResult::Abort;
+                }
+                if (context_.control != EVAL_CONTROL_NONE) {
+                    freeval(result);
+                    return OpResult::Abort;
+                }
+                if (context_.runtime_error_count != errors_before_) {
+                    freeval(result);
+                    return OpResult::Abort;
+                }
+                if (result && is_control(result)) {
+                    control_out = abort_control(result);
+                    return OpResult::Control;
+                }
+                push(result ? result : newnull());
+                return OpResult::Continue;
+            }
+
+            default:
+                return OpResult::Continue;
+        }
+    }
+
     value_t *run() {
         while (true) {
             if (pc_ >= proto().code.size()) {
@@ -3207,233 +3454,15 @@ public:
                     break;
                 }
 
-                case Op::Call: {
-                    if (vm_stats_enabled)
-                        ++vm_stats.calls;
-                    uint32_t argc = ins.b;
-                    std::array<value_t *, 8> inline_args;
-                    std::vector<value_t *> heap_args;
-                    value_t **args = inline_args.data();
-                    if (argc > inline_args.size()) {
-                        heap_args.resize(argc);
-                        args = heap_args.data();
-                    }
-                    for (uint32_t i = argc; i > 0; --i) {
-                        value_t *arg = pop_checked();
-                        if (!arg) {
-                            free_args(args, argc);
-                            return abort_error();
-                        }
-                        args[i - 1] = arg;
-                    }
-                    value_t *callee = pop_checked();
-                    if (!callee) {
-                        free_args(args, argc);
-                        return abort_error();
-                    }
-                    if (ins.flags & 1) {
-                        std::vector<value_t *> owned(args, args + argc);
-                        value_t *result =
-                            fiber_launch_host(callee, std::move(owned),
-                                              (ins.flags & 2) != 0);
-                        freeval(callee);
-                        if (g_interrupted) {
-                            freeval(result);
-                            return abort_error();
-                        }
-                        if (context_.control != EVAL_CONTROL_NONE) {
-                            freeval(result);
-                            return abort_error();
-                        }
-                        if (context_.runtime_error_count != errors_before_) {
-                            freeval(result);
-                            return abort_error();
-                        }
-                        if (result && is_control(result))
-                            return abort_control(result);
-                        push(result ? result : newnull());
-                        break;
-                    }
-                    FastCallResult fast = try_fast_call(callee, args, argc);
-                    if (fast == FastCallResult::Pushed) {
-                        if (vm_stats_enabled) {
-                            ++vm_stats.fast_calls;
-                            if ((uint64_t)context_.vm_call_depth >
-                                vm_stats.max_depth)
-                                vm_stats.max_depth =
-                                    context_.vm_call_depth;
-                        }
-                        freeval(callee);
-                        if (g_interrupted)
-                            return abort_error();
-                        break;
-                    }
-                    if (fast == FastCallResult::JitFailed) {
-                        /* The JIT consumed the args before reporting. */
-                        freeval(callee);
-                        return abort_error();
-                    }
-                    if (fast == FastCallResult::Failed) {
-                        freeval(callee);
-                        free_args(args, argc);
-                        return abort_error();
-                    }
-                    if (vm_stats_enabled)
-                        ++vm_stats.fallback_calls;
-                    std::vector<value_t *> fallback(args, args + argc);
-                    value_t *result =
-                        skein_vm_call_value_args(callee, std::move(fallback));
-                    freeval(callee);
-                    if (g_interrupted) {
-                        freeval(result);
-                        return abort_error();
-                    }
-                    if (context_.control != EVAL_CONTROL_NONE) {
-                        freeval(result);
-                        return abort_error();
-                    }
-                    if (context_.runtime_error_count != errors_before_) {
-                        freeval(result);
-                        return abort_error();
-                    }
-                    if (result && is_control(result))
-                        return abort_control(result);
-                    push(result ? result : newnull());
-                    break;
-                }
-
+                case Op::Call:
                 case Op::CallMethod: {
-                    if (vm_stats_enabled)
-                        ++vm_stats.calls;
-                    const uint32_t argc = ins.a;
-                    const char *name = name_at(proto(), ins.b);
-                    std::array<value_t *, 8> inline_args;
-                    std::vector<value_t *> heap_args;
-                    value_t **args = inline_args.data();
-                    if (argc > inline_args.size()) {
-                        heap_args.resize(argc);
-                        args = heap_args.data();
-                    }
-                    for (uint32_t i = argc; i > 0; --i) {
-                        value_t *arg = pop_checked();
-                        if (!arg) {
-                            free_args(args, argc);
-                            return abort_error();
-                        }
-                        args[i - 1] = arg;
-                    }
-                    value_t *receiver = pop_checked();
-                    if (!receiver) {
-                        free_args(args, argc);
+                    value_t *control_out = NULL;
+                    OpResult result = run_call_op(
+                        static_cast<Op>(ins.op), ins, control_out);
+                    if (result == OpResult::Abort)
                         return abort_error();
-                    }
-
-                    std::shared_ptr<function_def> method =
-                        lookup_method_cached(receiver, name,
-                                             member_cache(ins.b));
-                    if (method) {
-                        std::vector<value_t *> call_args;
-                        call_args.reserve((size_t)argc + 1);
-                        call_args.push_back(receiver);
-                        for (uint32_t i = 0; i < argc; ++i)
-                            call_args.push_back(args[i]);
-                        struct func_value_t function;
-                        function.type = T_func;
-                        function.def = method;
-                        FastCallResult fast = try_fast_call(
-                            (value_t *)&function, call_args.data(),
-                            (uint32_t)call_args.size());
-                        if (fast == FastCallResult::Pushed) {
-                            if (vm_stats_enabled) {
-                                ++vm_stats.fast_calls;
-                                if ((uint64_t)context_.vm_call_depth >
-                                    vm_stats.max_depth)
-                                    vm_stats.max_depth =
-                                        context_.vm_call_depth;
-                            }
-                            if (g_interrupted)
-                                return abort_error();
-                            break;
-                        }
-                        if (fast == FastCallResult::JitFailed)
-                            return abort_error();
-                        if (fast == FastCallResult::Failed) {
-                            free_args(call_args.data(),
-                                      (uint32_t)call_args.size());
-                            return abort_error();
-                        }
-                        if (vm_stats_enabled)
-                            ++vm_stats.fallback_calls;
-                        value_t *result = skein_vm_call_value_args(
-                            (value_t *)&function, std::move(call_args));
-                        if (g_interrupted) {
-                            freeval(result);
-                            return abort_error();
-                        }
-                        if (context_.control != EVAL_CONTROL_NONE) {
-                            freeval(result);
-                            return abort_error();
-                        }
-                        if (context_.runtime_error_count != errors_before_) {
-                            freeval(result);
-                            return abort_error();
-                        }
-                        if (result && is_control(result))
-                            return abort_control(result);
-                        push(result ? result : newnull());
-                        break;
-                    }
-
-                    value_t *callee = read_field_cached(
-                        receiver, name, member_cache(ins.b));
-                    freeval(receiver);
-                    if (!callee) {
-                        free_args(args, argc);
-                        return abort_error();
-                    }
-                    FastCallResult fast = try_fast_call(callee, args, argc);
-                    if (fast == FastCallResult::Pushed) {
-                        if (vm_stats_enabled) {
-                            ++vm_stats.fast_calls;
-                            if ((uint64_t)context_.vm_call_depth >
-                                vm_stats.max_depth)
-                                vm_stats.max_depth = context_.vm_call_depth;
-                        }
-                        freeval(callee);
-                        if (g_interrupted)
-                            return abort_error();
-                        break;
-                    }
-                    if (fast == FastCallResult::JitFailed) {
-                        freeval(callee);
-                        return abort_error();
-                    }
-                    if (fast == FastCallResult::Failed) {
-                        freeval(callee);
-                        free_args(args, argc);
-                        return abort_error();
-                    }
-                    if (vm_stats_enabled)
-                        ++vm_stats.fallback_calls;
-                    std::vector<value_t *> fallback(args, args + argc);
-                    value_t *result =
-                        skein_vm_call_value_args(callee, std::move(fallback));
-                    freeval(callee);
-                    if (g_interrupted) {
-                        freeval(result);
-                        return abort_error();
-                    }
-                    if (context_.control != EVAL_CONTROL_NONE) {
-                        freeval(result);
-                        return abort_error();
-                    }
-                    if (context_.runtime_error_count != errors_before_) {
-                        freeval(result);
-                        return abort_error();
-                    }
-                    if (result && is_control(result))
-                        return abort_control(result);
-                    push(result ? result : newnull());
+                    if (result == OpResult::Control)
+                        return control_out;
                     break;
                 }
 

@@ -1285,15 +1285,23 @@ public:
                                     (ins.flags & 2) != 0)
                 : skein_vm_call_value_args(callee, std::move(args));
         freeval(callee);
-        if (g_interrupted) {
-            freeval(result);
+        return finish_call_result(result, control_out);
+    }
+
+    /*
+     * Shared tails for value-producing opcodes: push a result or report the
+     * abort/control outcome.
+     */
+    OpResult push_result(value_t *result) {
+        if (!result)
             return OpResult::Abort;
-        }
-        if (context_.control != EVAL_CONTROL_NONE) {
-            freeval(result);
-            return OpResult::Abort;
-        }
-        if (context_.runtime_error_count != errors_before_) {
+        push(result);
+        return OpResult::Continue;
+    }
+
+    OpResult finish_call_result(value_t *result, value_t *&control_out) {
+        if (g_interrupted || context_.control != EVAL_CONTROL_NONE ||
+            context_.runtime_error_count != errors_before_) {
             freeval(result);
             return OpResult::Abort;
         }
@@ -1320,10 +1328,7 @@ public:
                     container, index, op == Op::GetField);
                 freeval(container);
                 freeval(index);
-                if (!result)
-                    return OpResult::Abort;
-                push(result);
-                return OpResult::Continue;
+                return push_result(result);
             }
 
             case Op::GetIndexCached: {
@@ -1340,10 +1345,7 @@ public:
                 value_t *result = read_index_cached(container, index, cache);
                 freeval(container);
                 freeval(index);
-                if (!result)
-                    return OpResult::Abort;
-                push(result);
-                return OpResult::Continue;
+                return push_result(result);
             }
 
             case Op::GetIndexBaseCached: {
@@ -1403,10 +1405,7 @@ public:
                 value_t *result = read_index_cached(base->val, key, cache);
                 if (owns_key)
                     freeval(key);
-                if (!result)
-                    return OpResult::Abort;
-                push(result);
-                return OpResult::Continue;
+                return push_result(result);
             }
 
             case Op::GetFieldName: {
@@ -1416,10 +1415,7 @@ public:
                 value_t *result = read_field_cached(
                     container, name_at(proto(), ins.b), member_cache(ins.b));
                 freeval(container);
-                if (!result)
-                    return OpResult::Abort;
-                push(result);
-                return OpResult::Continue;
+                return push_result(result);
             }
 
             case Op::GetFieldOrEnum: {
@@ -1467,10 +1463,7 @@ public:
                                 desc.base.c_str());
                     }
                 }
-                if (!result)
-                    return OpResult::Abort;
-                push(result);
-                return OpResult::Continue;
+                return push_result(result);
             }
 
             default:
@@ -2586,24 +2579,7 @@ public:
                 value_t *result =
                     skein_vm_call_value_args(callee, std::move(call_args));
                 freeval(callee);
-                if (g_interrupted) {
-                    freeval(result);
-                    return OpResult::Abort;
-                }
-                if (context_.control != EVAL_CONTROL_NONE) {
-                    freeval(result);
-                    return OpResult::Abort;
-                }
-                if (context_.runtime_error_count != errors_before_) {
-                    freeval(result);
-                    return OpResult::Abort;
-                }
-                if (is_control(result)) {
-                    control_out = abort_control(result);
-                    return OpResult::Control;
-                }
-                push(result ? result : newnull());
-                return OpResult::Continue;
+                return finish_call_result(result, control_out);
             }
 
             case Op::ListConcatSelf: {
@@ -2715,24 +2691,7 @@ public:
                     value_t *result = fiber_launch_host(
                         callee, std::move(owned), (ins.flags & 2) != 0);
                     freeval(callee);
-                    if (g_interrupted) {
-                        freeval(result);
-                        return OpResult::Abort;
-                    }
-                    if (context_.control != EVAL_CONTROL_NONE) {
-                        freeval(result);
-                        return OpResult::Abort;
-                    }
-                    if (context_.runtime_error_count != errors_before_) {
-                        freeval(result);
-                        return OpResult::Abort;
-                    }
-                    if (result && is_control(result)) {
-                        control_out = abort_control(result);
-                        return OpResult::Control;
-                    }
-                    push(result ? result : newnull());
-                    return OpResult::Continue;
+                    return finish_call_result(result, control_out);
                 }
                 FastCallResult fast = try_fast_call(callee, args, argc);
                 if (fast == FastCallResult::Pushed) {
@@ -2763,24 +2722,7 @@ public:
                 value_t *result =
                     skein_vm_call_value_args(callee, std::move(fallback));
                 freeval(callee);
-                if (g_interrupted) {
-                    freeval(result);
-                    return OpResult::Abort;
-                }
-                if (context_.control != EVAL_CONTROL_NONE) {
-                    freeval(result);
-                    return OpResult::Abort;
-                }
-                if (context_.runtime_error_count != errors_before_) {
-                    freeval(result);
-                    return OpResult::Abort;
-                }
-                if (result && is_control(result)) {
-                    control_out = abort_control(result);
-                    return OpResult::Control;
-                }
-                push(result ? result : newnull());
-                return OpResult::Continue;
+                return finish_call_result(result, control_out);
             }
 
             case Op::CallMethod: {
@@ -2846,24 +2788,7 @@ public:
                         ++vm_stats.fallback_calls;
                     value_t *result = skein_vm_call_value_args(
                         (value_t *)&function, std::move(call_args));
-                    if (g_interrupted) {
-                        freeval(result);
-                        return OpResult::Abort;
-                    }
-                    if (context_.control != EVAL_CONTROL_NONE) {
-                        freeval(result);
-                        return OpResult::Abort;
-                    }
-                    if (context_.runtime_error_count != errors_before_) {
-                        freeval(result);
-                        return OpResult::Abort;
-                    }
-                    if (result && is_control(result)) {
-                        control_out = abort_control(result);
-                        return OpResult::Control;
-                    }
-                    push(result ? result : newnull());
-                    return OpResult::Continue;
+                    return finish_call_result(result, control_out);
                 }
 
                 value_t *callee =
@@ -2901,24 +2826,7 @@ public:
                 value_t *result =
                     skein_vm_call_value_args(callee, std::move(fallback));
                 freeval(callee);
-                if (g_interrupted) {
-                    freeval(result);
-                    return OpResult::Abort;
-                }
-                if (context_.control != EVAL_CONTROL_NONE) {
-                    freeval(result);
-                    return OpResult::Abort;
-                }
-                if (context_.runtime_error_count != errors_before_) {
-                    freeval(result);
-                    return OpResult::Abort;
-                }
-                if (result && is_control(result)) {
-                    control_out = abort_control(result);
-                    return OpResult::Control;
-                }
-                push(result ? result : newnull());
-                return OpResult::Continue;
+                return finish_call_result(result, control_out);
             }
 
             default:

@@ -1277,6 +1277,31 @@ struct generic_constraint *combine_genericconstraint(
     return left;
 }
 
+struct generic_type_arg *newgenerictypearg(
+    struct type_constraint *type) {
+    struct generic_type_arg *arg =
+        (struct generic_type_arg *)ast_node_alloc(
+            sizeof(struct generic_type_arg));
+    if (!arg) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    arg->type = type;
+    arg->next = NULL;
+    return arg;
+}
+
+struct generic_type_arg *append_generictypearg(
+    struct generic_type_arg *head, struct generic_type_arg *arg) {
+    if (!head)
+        return arg;
+    struct generic_type_arg *current = head;
+    while (current->next)
+        current = current->next;
+    current->next = arg;
+    return head;
+}
+
 struct generic_param *newgenericparam(char *name,
                                       struct generic_constraint *constraint) {
     struct generic_param *param =
@@ -1447,6 +1472,7 @@ struct ast *newoptionalchain(struct ast *base, char *name) {
 }
 
 struct ast *newstructlit(char *name, char *source,
+                         struct generic_type_arg *type_args,
                          struct struct_init *fields, bool is_ref) {
     struct struct_lit_node *a =
         (struct struct_lit_node *)
@@ -1459,6 +1485,7 @@ struct ast *newstructlit(char *name, char *source,
     set_loc(a, 0, 0);
     a->name = name;
     a->source = source;
+    a->type_args = type_args;
     a->fields = fields;
     a->is_ref = is_ref;
     return (struct ast *)a;
@@ -1511,6 +1538,7 @@ struct enum_variant *append_enumvariant(struct enum_variant *head,
 }
 
 struct ast *newenumlit(char *name, char *source, char *variant,
+                       struct generic_type_arg *type_args,
                        struct struct_init *fields) {
     struct enum_lit_node *a =
         (struct enum_lit_node *)ast_node_alloc(sizeof(struct enum_lit_node));
@@ -1523,6 +1551,7 @@ struct ast *newenumlit(char *name, char *source, char *variant,
     a->name = name;
     a->source = source;
     a->variant = variant;
+    a->type_args = type_args;
     a->fields = fields;
     return (struct ast *)a;
 }
@@ -1572,6 +1601,15 @@ static void free_generic_constraint(struct generic_constraint *constraint) {
         item = next;
     }
     ast_node_free(constraint);
+}
+
+static void free_generic_type_args(struct generic_type_arg *args) {
+    while (args) {
+        struct generic_type_arg *next = args->next;
+        free_type_constraint(args->type);
+        ast_node_free(args);
+        args = next;
+    }
 }
 
 static void free_generic_params(struct generic_param *params) {
@@ -1860,6 +1898,7 @@ void treefree(struct ast *a) {
         }
         case 'y': {
             struct struct_lit_node *s = (struct struct_lit_node *)a;
+            free_generic_type_args(s->type_args);
             treefree((struct ast *)s->fields);
             std::free(s->name);
             std::free(s->source);
@@ -1970,6 +2009,7 @@ void treefree(struct ast *a) {
             std::free(e->name);
             std::free(e->source);
             std::free(e->variant);
+            free_generic_type_args(e->type_args);
             treefree((struct ast *)e->fields);
             break;
         }

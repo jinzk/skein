@@ -384,6 +384,11 @@ struct generic_param {
     struct generic_param *next;
 };
 
+struct generic_type_arg {
+    struct type_constraint *type;
+    struct generic_type_arg *next;
+};
+
 struct generic_constraint *newgenericconstraint(
     enum generic_constraint_kind kind, struct type_constraint *type);
 struct generic_constraint *combine_genericconstraint(
@@ -391,6 +396,9 @@ struct generic_constraint *combine_genericconstraint(
     struct generic_constraint *right);
 struct generic_param *newgenericparam(char *name,
                                       struct generic_constraint *constraint);
+struct generic_type_arg *newgenerictypearg(struct type_constraint *type);
+struct generic_type_arg *append_generictypearg(
+    struct generic_type_arg *head, struct generic_type_arg *arg);
 struct generic_param *append_genericparam(struct generic_param *head,
                                           struct generic_param *param);
 
@@ -457,6 +465,7 @@ struct struct_lit_node {
     int column;
     char *name;
     char *source;
+    struct generic_type_arg *type_args;
     struct struct_init *fields;
     bool is_ref;
 };
@@ -489,6 +498,7 @@ struct enum_lit_node {
     char *name;
     char *source;
     char *variant;
+    struct generic_type_arg *type_args;
     struct struct_init *fields;
 };
 
@@ -676,6 +686,7 @@ struct ast *newprotocolmethod(char *name, struct symlist *params,
                            bool has_default);
 struct ast *append_protocol_method(struct ast *head, struct ast *method);
 struct ast *newstructlit(char *name, char *source,
+                         struct generic_type_arg *type_args,
                          struct struct_init *fields,
                          bool is_ref = false);
 struct ast *newoptionalchain(struct ast *base, char *name);
@@ -688,6 +699,7 @@ struct ast *newenumvariant(char *name, struct struct_member *fields,
 struct enum_variant *append_enumvariant(struct enum_variant *head,
                                         struct enum_variant *node);
 struct ast *newenumlit(char *name, char *source, char *variant,
+                       struct generic_type_arg *type_args,
                        struct struct_init *fields);
 struct ast *newstructinit(char *name, struct ast *value);
 struct ast *append_struct_init(struct ast *head, struct ast *init);

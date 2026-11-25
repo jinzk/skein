@@ -968,6 +968,7 @@ static void free_type_list(struct parsed_type_list *list) {
     }
 }
 
+
 static struct type_constraint *make_generic_type_list(
     struct type_constraint *base, struct parsed_type_list *list) {
     std::vector<struct type_constraint *> args;
@@ -2145,22 +2146,22 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
     | NAME '{' empty_body                 {
         $$ = newstructlit($1,
                           copy_text(diag_current_source_name().c_str()),
-                          NULL);
+                          NULL, NULL);
       }
     | NAME '{' struct_fields '}'          {
         $$ = newstructlit($1,
                           copy_text(diag_current_source_name().c_str()),
-                          (struct struct_init *)$3);
+                          NULL, (struct struct_init *)$3);
       }
     | REF NAME '{' empty_body             {
         $$ = newstructlit($2,
                           copy_text(diag_current_source_name().c_str()),
-                          NULL, true);
+                          NULL, NULL, true);
       }
     | REF NAME '{' struct_fields '}'      {
         $$ = newstructlit($2,
                           copy_text(diag_current_source_name().c_str()),
-                          (struct struct_init *)$4, true);
+                          NULL, (struct struct_init *)$4, true);
       }
     | NAME '.' fieldname {
         $$ = newast('j', newref($1), newstr($3));
@@ -2172,12 +2173,12 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
     | NAME '.' NAME '{' struct_fields '}' {
         $$ = newenumlit($1,
                         copy_text(diag_current_source_name().c_str()),
-                        $3, (struct struct_init *)$5);
+                        $3, NULL, (struct struct_init *)$5);
       }
     | NAME '.' NAME '{' EMPTY_DICT_CLOSE {
         $$ = newenumlit($1,
                         copy_text(diag_current_source_name().c_str()),
-                        $3, NULL);
+                        $3, NULL, NULL);
       }
     | funcstart '(' symlist ')' func_ret_opt '{' EMPTY_BLOCK_CLOSE
                                            { $$ = newfunc(NULL, $3, NULL, false, finish_function(), $5); }
@@ -2339,7 +2340,7 @@ value_pattern: value                      { $$ = $1; }
     | NAME '.' NAME                       {
         $$ = newenumlit($1,
                         copy_text(diag_current_source_name().c_str()),
-                        $3, NULL);
+                        $3, NULL, NULL);
       }
     ;
 

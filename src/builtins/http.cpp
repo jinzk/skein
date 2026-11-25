@@ -800,11 +800,23 @@ std::string compute_request_id(value_t *header_values) {
 
 std::string random_hex_id(size_t bytes) {
     static const char hex[] = "0123456789abcdef";
-    std::random_device device;
+    /* random_device can open /dev/urandom on every call.  Seed one generator
+     * per worker thread instead so trace propagation stays off the hot path. */
+    static thread_local std::mt19937_64 engine = []() {
+        std::random_device device;
+        const unsigned long long seed =
+            ((unsigned long long)device() << 32) ^
+            (unsigned long long)device();
+        return std::mt19937_64(seed);
+    }();
     std::string result;
     result.reserve(bytes * 2);
+    unsigned long long word = 0;
     for (size_t i = 0; i < bytes; ++i) {
-        unsigned int value = device() & 0xff;
+        if (i % 8 == 0)
+            word = engine();
+        const unsigned char value =
+            (unsigned char)((word >> ((i % 8) * 8)) & 0xff);
         result.push_back(hex[(value >> 4) & 0x0f]);
         result.push_back(hex[value & 0x0f]);
     }

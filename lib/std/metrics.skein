@@ -39,6 +39,30 @@ package metrics {
     return str(float(value));
   }
 
+  // Records are long-lived and updated in place.  Scalar fields on a ref
+  // handle persist; histogram counts are replaced as whole list fields so
+  // renders still produce ordinary values.
+  struct _CounterRec {
+    name: string;
+    labels: dict;
+    value: number;
+  }
+
+  struct _GaugeRec {
+    name: string;
+    labels: dict;
+    value: number;
+  }
+
+  struct _HistRec {
+    name: string;
+    labels: dict;
+    buckets: list;
+    counts: list;
+    sum: number;
+    count: int;
+  }
+
   export struct Registry {
     counter: callable;
     gauge: callable;
@@ -59,11 +83,13 @@ package metrics {
       let key = _key(name, labels);
       let record = std.dict.get(counters, key, null);
       if (record == null) {
-        record = {"name": name, "labels": labels, "value": 0};
+        record = ref _CounterRec {
+          name: name, labels: labels, value: 0
+        };
+        counters[key] = record;
       }
-      record["value"] = record["value"] + delta;
-      counters[key] = record;
-      return record["value"];
+      record.value = record.value + delta;
+      return record.value;
     };
 
     let gauge = func(name, labels, value) {
@@ -71,7 +97,9 @@ package metrics {
         fail("metrics.gauge name must be a non-empty string");
       }
       let key = _key(name, labels);
-      gauges[key] = {"name": name, "labels": labels, "value": value};
+      gauges[key] = ref _GaugeRec {
+        name: name, labels: labels, value: value
+      };
       return value;
     };
 
@@ -91,27 +119,27 @@ package metrics {
         for (let bucket in chosen) {
           counts = std.list.append(counts, 0);
         }
-        record = {
-          "name": name,
-          "labels": labels,
-          "buckets": chosen,
-          "counts": counts,
-          "sum": 0.0,
-          "count": 0
+        record = ref _HistRec {
+          name: name,
+          labels: labels,
+          buckets: chosen,
+          counts: counts,
+          sum: 0.0,
+          count: 0
         };
+        histograms[key] = record;
       }
-      let counts = record["counts"];
+      let counts = record.counts;
       let i = 0;
-      while (i < len(record["buckets"])) {
-        if (float(value) <= float(record["buckets"][i])) {
+      while (i < len(record.buckets)) {
+        if (float(value) <= float(record.buckets[i])) {
           counts[i] = counts[i] + 1;
         }
         i = i + 1;
       }
-      record["counts"] = counts;
-      record["sum"] = record["sum"] + float(value);
-      record["count"] = record["count"] + 1;
-      histograms[key] = record;
+      record.counts = counts;
+      record.sum = record.sum + float(value);
+      record.count = record.count + 1;
       return true;
     };
 
@@ -120,40 +148,39 @@ package metrics {
       for (let key in counters) {
         let record = counters[key];
         lines = std.list.append(
-          lines, record["name"] + _label_text(record["labels"]) + " " +
-                 _number(record["value"]));
+          lines, record.name + _label_text(record.labels) + " " +
+                 _number(record.value));
       }
       for (let key in gauges) {
         let record = gauges[key];
         lines = std.list.append(
-          lines, record["name"] + _label_text(record["labels"]) + " " +
-                 _number(record["value"]));
+          lines, record.name + _label_text(record.labels) + " " +
+                 _number(record.value));
       }
       for (let key in histograms) {
         let record = histograms[key];
         let i = 0;
-        while (i < len(record["buckets"])) {
+        while (i < len(record.buckets)) {
           lines = std.list.append(
             lines,
-            record["name"] + "_bucket" +
-              _label_text(record["labels"], "le",
-                          record["buckets"][i]) +
-              " " + str(record["counts"][i]));
+            record.name + "_bucket" +
+              _label_text(record.labels, "le", record.buckets[i]) +
+              " " + str(record.counts[i]));
           i = i + 1;
         }
         lines = std.list.append(
           lines,
-          record["name"] + "_bucket" +
-            _label_text(record["labels"], "le", "+Inf") + " " +
-            str(record["count"]));
+          record.name + "_bucket" +
+            _label_text(record.labels, "le", "+Inf") + " " +
+            str(record.count));
         lines = std.list.append(
           lines,
-          record["name"] + "_sum" + _label_text(record["labels"]) +
-            " " + _number(record["sum"]));
+          record.name + "_sum" + _label_text(record.labels) +
+            " " + _number(record.sum));
         lines = std.list.append(
           lines,
-          record["name"] + "_count" + _label_text(record["labels"]) +
-            " " + str(record["count"]));
+          record.name + "_count" + _label_text(record.labels) +
+            " " + str(record.count));
       }
       return std.string.join(lines, "\n") + "\n";
     };

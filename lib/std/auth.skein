@@ -47,6 +47,14 @@ package auth {
     return std.bytes.hex(std.random.bytes(32));
   }
 
+  // Avoids the builtin call and default-value duplication of std.dict.get.
+  func _dict_get(table, key) {
+    if (std.dict.has(table, key)) {
+      return table[key];
+    }
+    return null;
+  }
+
   export func constant_time_equal(a, b) {
     if (a == null || b == null || kind_of(a) != kind_of(b) ||
         (kind_of(a) != "string" && kind_of(a) != "bytes") ||
@@ -81,6 +89,13 @@ package auth {
     cleanup: callable;
     cookie_name: string;
     ttl: int;
+  }
+
+  // Local sessions are updated in place; get() still exports the plain value
+  // so callers keep value semantics and never see a ref handle.
+  struct _Session {
+    value: any;
+    expires: number;
   }
 
   func _cache_store(cache_client, prefix, ttl, cookie_name) {
@@ -168,38 +183,38 @@ package auth {
 
     let create = func(value) {
       let id = _session_id();
-      sessions[id] = {
-        "value": value,
-        "expires": std.time.now() + ttl
+      sessions[id] = ref _Session {
+        value: value,
+        expires: std.time.now() + ttl
       };
       return id;
     };
 
     let get = func(id) {
-      if (id == null || kind_of(id) != "string" ||
-          !std.dict.has(sessions, id)) {
+      if (id == null || kind_of(id) != "string") {
         return null;
       }
-      let record = std.dict.get(sessions, id, null);
+      let record = _dict_get(sessions, id);
       if (record == null) {
         return null;
       }
-      if (record["expires"] <= std.time.now()) {
+      if (record.expires <= std.time.now()) {
         sessions = std.dict.delete(sessions, id);
         return null;
       }
-      return record["value"];
+      return record.value;
     };
 
     let set = func(id, value) {
-      if (id == null || kind_of(id) != "string" ||
-          !std.dict.has(sessions, id)) {
+      if (id == null || kind_of(id) != "string") {
         return false;
       }
-      sessions[id] = {
-        "value": value,
-        "expires": std.time.now() + ttl
-      };
+      let record = _dict_get(sessions, id);
+      if (record == null) {
+        return false;
+      }
+      record.value = value;
+      record.expires = std.time.now() + ttl;
       return true;
     };
 
@@ -223,18 +238,16 @@ package auth {
 
     let cleanup = func() {
       let now = std.time.now();
+      let kept = {};
       let removed = 0;
-      let ids = [];
-      for (let id in sessions) {
-        ids = std.list.append(ids, id);
-      }
-      for (let id in ids) {
-        let record = sessions[id];
-        if (record["expires"] <= now) {
-          sessions = std.dict.delete(sessions, id);
+      for (let id, record in sessions) {
+        if (record.expires <= now) {
           removed = removed + 1;
+        } else {
+          kept[id] = record;
         }
       }
+      sessions = kept;
       return removed;
     };
 

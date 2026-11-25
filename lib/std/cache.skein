@@ -4,6 +4,18 @@ package cache {
   let _CRLF = std.bytes.from_string("\r\n");
   let _DEFAULT_PORT = 6379;
 
+  // One ref per open connection.  RESP parsing mutates the receive buffer and
+  // timeout/closed flags directly instead of returning a new state dict from
+  // every helper.  Buffer writes replace the whole field: nested writes
+  // through a ref field would not persist.
+  struct _State {
+    stream: any;
+    buffer: bytes;
+    read_timeout_ms: int;
+    write_timeout_ms: int;
+    closed: bool;
+  }
+
   func _option(options, key, fallback) {
     if (kind_of(options) != "dict") {
       return fallback;
@@ -171,28 +183,25 @@ package cache {
   }
 
   func _ensure(state, count) {
-    while (len(state["buffer"]) < count) {
-      let chunk = std.io.read(state["stream"], 4096,
-                              state["read_timeout_ms"]);
+    while (len(state.buffer) < count) {
+      let chunk = std.io.read(state.stream, 4096, state.read_timeout_ms);
       if (chunk == null || len(chunk) == 0) {
-        state["closed"] = true;
+        state.closed = true;
         fail("std.cache: connection closed");
       }
-      state["buffer"] = std.bytes.concat(state["buffer"], chunk);
+      state.buffer = std.bytes.concat(state.buffer, chunk);
     }
-    return state;
   }
 
   func _consume(state, count) {
-    state["buffer"] = std.bytes.slice(state["buffer"], count);
-    return state;
+    state.buffer = std.bytes.slice(state.buffer, count);
   }
 
   func _read_exact(state, count) {
-    state = _ensure(state, count);
-    let data = std.bytes.slice(state["buffer"], 0, count);
-    state = _consume(state, count);
-    return {"state": state, "value": data};
+    _ensure(state, count);
+    let data = std.bytes.slice(state.buffer, 0, count);
+    _consume(state, count);
+    return data;
   }
 
   func _line_end(data) {
@@ -208,78 +217,65 @@ package cache {
   }
 
   func _read_line(state) {
-    state = _ensure(state, 2);
-    let end = _line_end(state["buffer"]);
+    _ensure(state, 2);
+    let end = _line_end(state.buffer);
     while (end < 0) {
-      let chunk = std.io.read(state["stream"], 4096,
-                              state["read_timeout_ms"]);
+      let chunk = std.io.read(state.stream, 4096, state.read_timeout_ms);
       if (chunk == null || len(chunk) == 0) {
-        state["closed"] = true;
+        state.closed = true;
         fail("std.cache: connection closed");
       }
-      state["buffer"] = std.bytes.concat(state["buffer"], chunk);
-      end = _line_end(state["buffer"]);
+      state.buffer = std.bytes.concat(state.buffer, chunk);
+      end = _line_end(state.buffer);
     }
-    let line = std.bytes.slice(state["buffer"], 0, end);
-    state = _consume(state, end + 2);
-    return {"state": state, "value": line};
+    let line = std.bytes.slice(state.buffer, 0, end);
+    _consume(state, end + 2);
+    return line;
   }
 
   func _expect_crlf(state) {
-    let result = _read_exact(state, 2);
-    if (result["value"] != _CRLF) {
+    if (_read_exact(state, 2) != _CRLF) {
       fail("std.cache: malformed RESP response");
     }
-    return result["state"];
   }
 
   func _parse(state) {
-    state = _ensure(state, 1);
-    let tag = std.bytes.get(state["buffer"], 0);
-    state = _consume(state, 1);
+    _ensure(state, 1);
+    let tag = std.bytes.get(state.buffer, 0);
+    _consume(state, 1);
     if (tag == 43) { // +
-      let result = _read_line(state);
-      return {"state": result["state"],
-              "value": std.bytes.to_string(result["value"])};
+      return std.bytes.to_string(_read_line(state));
     }
     if (tag == 45) { // -
-      let result = _read_line(state);
-      fail("std.cache: " + std.bytes.to_string(result["value"]));
+      fail("std.cache: " + std.bytes.to_string(_read_line(state)));
     }
     if (tag == 58) { // :
-      let result = _read_line(state);
-      return {"state": result["state"],
-              "value": int(std.bytes.to_string(result["value"]))};
+      return int(std.bytes.to_string(_read_line(state)));
     }
     if (tag == 36) { // $
-      let result = _read_line(state);
-      let count = int(std.bytes.to_string(result["value"]));
+      let count = int(std.bytes.to_string(_read_line(state)));
       if (count < 0) {
-        return {"state": result["state"], "value": null};
+        return null;
       }
-      let data = _read_exact(result["state"], count);
-      state = _expect_crlf(data["state"]);
-      return {"state": state, "value": data["value"]};
+      let data = _read_exact(state, count);
+      _expect_crlf(state);
+      return data;
     }
     if (tag == 42) { // *
-      let result = _read_line(state);
-      let count = int(std.bytes.to_string(result["value"]));
+      let count = int(std.bytes.to_string(_read_line(state)));
       if (count < 0) {
-        return {"state": result["state"], "value": null};
+        return null;
       }
       let values = [];
-      state = result["state"];
       let i = 0;
       while (i < count) {
-        let item = _parse(state);
-        state = item["state"];
-        values = std.list.append(values, item["value"]);
+        values = std.list.append(values, _parse(state));
         i = i + 1;
       }
-      return {"state": state, "value": values};
+      return values;
     }
     if (tag == 95) { // _ (RESP3 null)
-      return {"state": state, "value": null};
+      return null;
     }
     fail("std.cache: unsupported RESP response");
   }
@@ -300,7 +296,7 @@ package cache {
   }
 
   func _command(state, args) {
-    if (state["closed"]) {
+    if (state.closed) {
       fail("std.cache: connection is closed");
     }
     let payload = std.bytes.from_string("*" + str(len(args)) + "\r\n");
@@ -311,10 +307,10 @@ package cache {
       payload = std.bytes.concat(payload, data);
       payload = std.bytes.concat(payload, _CRLF);
     }
-    let written = std.io.write_all(state["stream"], payload,
-                                   state["write_timeout_ms"]);
+    let written = std.io.write_all(state.stream, payload,
+                                   state.write_timeout_ms);
     if (written == null || written != len(payload)) {
-      state["closed"] = true;
+      state.closed = true;
       fail("std.cache: failed to write command");
     }
     return _parse(state);
@@ -344,56 +340,39 @@ package cache {
     if (xx) {
       args = std.list.append(args, "XX");
     }
-    let result = _command(state, args);
-    return {"state": result["state"], "value": result["value"] != null};
+    return _command(state, args) != null;
   }
 
   func _make_client(state) {
     let get = func(key) {
-      let result = _command(state, ["GET", key]);
-      state = result["state"];
-      return result["value"];
+      return _command(state, ["GET", key]);
     };
     let set = func(key, value, options = {}) {
-      let result = _set(state, key, value, options);
-      state = result["state"];
-      return result["value"];
+      return _set(state, key, value, options);
     };
     let remove = func(key) {
-      let result = _command(state, ["DEL", key]);
-      state = result["state"];
-      return result["value"];
+      return _command(state, ["DEL", key]);
     };
     let exists = func(key) {
-      let result = _command(state, ["EXISTS", key]);
-      state = result["state"];
-      return result["value"] > 0;
+      return _command(state, ["EXISTS", key]) > 0;
     };
     let incr = func(key, amount = 1) {
       if (kind_of(amount) != "int") {
         fail("std.cache.incr amount must be an integer");
       }
-      let result = _command(state, ["INCRBY", key, amount]);
-      state = result["state"];
-      return result["value"];
+      return _command(state, ["INCRBY", key, amount]);
     };
     let expire = func(key, ttl_ms) {
       if (kind_of(ttl_ms) != "int" || ttl_ms < 0) {
         fail("std.cache.expire ttl_ms must be a non-negative integer");
       }
-      let result = _command(state, ["PEXPIRE", key, ttl_ms]);
-      state = result["state"];
-      return result["value"] == 1;
+      return _command(state, ["PEXPIRE", key, ttl_ms]) == 1;
     };
     let ttl = func(key) {
-      let result = _command(state, ["TTL", key]);
-      state = result["state"];
-      return result["value"];
+      return _command(state, ["TTL", key]);
     };
     let pttl = func(key) {
-      let result = _command(state, ["PTTL", key]);
-      state = result["state"];
-      return result["value"];
+      return _command(state, ["PTTL", key]);
     };
     let incr_window = func(key, window_ms) {
       if (kind_of(window_ms) != "int" || window_ms <= 0) {
@@ -401,23 +380,18 @@ package cache {
       }
       let script = "local n=redis.call('INCR',KEYS[1]); if n==1 then redis.call('PEXPIRE',KEYS[1],ARGV[1]) end; return {n,redis.call('PTTL',KEYS[1])}";
       let result = _command(state, ["EVAL", script, "1", key, window_ms]);
-      state = result["state"];
-      if (kind_of(result["value"]) != "list" ||
-          len(result["value"]) != 2) {
+      if (kind_of(result) != "list" || len(result) != 2) {
         fail("std.cache.incr_window received an invalid response");
       }
-      return {"count": result["value"][0],
-              "ttl_ms": result["value"][1]};
+      return {"count": result[0], "ttl_ms": result[1]};
     };
     let ping = func() {
-      let result = _command(state, ["PING"]);
-      state = result["state"];
-      return result["value"];
+      return _command(state, ["PING"]);
     };
     let close = func() {
-      if (!state["closed"]) {
-        state["closed"] = true;
-        std.io.close(state["stream"]);
+      if (!state.closed) {
+        state.closed = true;
+        std.io.close(state.stream);
       }
       return true;
     };
@@ -469,26 +443,22 @@ package cache {
       }
       stream = std.tls.client(stream, config["server_name"], tls_options);
     }
-    let state = {
-      "stream": stream,
-      "buffer": std.bytes.from_string(""),
-      "read_timeout_ms": config["read_timeout_ms"],
-      "write_timeout_ms": config["write_timeout_ms"],
-      "closed": false
+    let state = ref _State {
+      stream: stream,
+      buffer: std.bytes.from_string(""),
+      read_timeout_ms: config["read_timeout_ms"],
+      write_timeout_ms: config["write_timeout_ms"],
+      closed: false
     };
     if (config["user"] != "" || config["password"] != "") {
-      let auth = null;
       if (config["user"] != "") {
-        auth = _command(state, ["AUTH", config["user"],
-                                config["password"]]);
+        _command(state, ["AUTH", config["user"], config["password"]]);
       } else {
-        auth = _command(state, ["AUTH", config["password"]]);
+        _command(state, ["AUTH", config["password"]]);
       }
-      state = auth["state"];
     }
     if (config["database"] != 0) {
-      let selected = _command(state, ["SELECT", config["database"]]);
-      state = selected["state"];
+      _command(state, ["SELECT", config["database"]]);
     }
     return _make_client(state);
   }

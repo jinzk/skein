@@ -18,53 +18,52 @@ package route {
     inspect: callable;
   }
 
-  // Trie node protocol.  A node is a closure so that registration can mutate
-  // its captured dictionaries in place instead of copying them through value
-  // semantics on every insert.
-  //
-  //   0  get static child
-  //   1  set static child
-  //   2  get param child
-  //   3  set param child          (a = name, b = child)
-  //   4  get param name
-  //   5  get wildcard child
-  //   6  set wildcard child       (a = name, b = child)
-  //   7  get wildcard name
-  //   8  has method (or "*")
-  //   9  get handler (or "*")
-  //  10  set handler              (a = method, b = handler)
-  //  11  has exact method
-  //  12  has any handler
+  // Trie nodes are long-lived mutable state shared by every copy of a Router.
+  // A ref keeps parameter/wildcard traversal and handler selection on direct
+  // field access.  The static-child table has a fast dict snapshot for reads
+  // and a small mutator closure for writes; dropping the snapshot before an
+  // insert avoids COW-copying a table that grows to thousands of entries.
+  struct _Node {
+    kids: any;
+    kids_ops: callable;
+    param: ref _Node? = null;
+    pname: string = "";
+    wild: ref _Node? = null;
+    wname: string = "";
+    handlers: dict;
+  }
+
   func _node_new() {
     let kids = {};
-    let param = null;
-    let pname = "";
-    let wild = null;
-    let wname = "";
-    let handlers = {};
-
-    return func(op, a, b) {
-      if (op == 0) { return std.dict.get(kids, a, null); }
-      if (op == 1) { kids[a] = b; return null; }
-      if (op == 2) { return param; }
-      if (op == 3) { param = b; pname = a; return null; }
-      if (op == 4) { return pname; }
-      if (op == 5) { return wild; }
-      if (op == 6) { wild = b; wname = a; return null; }
-      if (op == 7) { return wname; }
-      if (op == 8) {
-        return std.dict.has(handlers, a) || std.dict.has(handlers, "*");
+    let ops = func(op, key, child = null) {
+      if (op == 0) {
+        kids[key] = child;
+        return null;
       }
-      if (op == 9) {
-        let found = std.dict.get(handlers, a, null);
-        if (found != null) { return found; }
-        return std.dict.get(handlers, "*", null);
-      }
-      if (op == 10) { handlers[a] = b; return null; }
-      if (op == 11) { return std.dict.has(handlers, a); }
-      if (op == 12) { return len(handlers) > 0; }
-      return null;
+      return kids;
     };
+    return ref _Node { kids: {}, kids_ops: ops, handlers: {} };
+  }
+
+  func _node_set_child(node, key, child) {
+    node.kids = null;
+    node.kids_ops(0, key, child);
+    node.kids = node.kids_ops(1, null);
+  }
+
+  // std.dict.get duplicates the default value and goes through a builtin;
+  // this local lookup is measurably cheaper on the dispatch hot path.
+  func _dict_get(table, key) {
+    if (std.dict.has(table, key)) {
+      return table[key];
+    }
+    return null;
+  }
+
+  func _node_set_handler(node, method, handler) {
+    let handlers = node.handlers;
+    handlers[method] = handler;
+    node.handlers = handlers;
   }
 
   func _parse_pattern(pattern) {
@@ -118,7 +117,7 @@ package route {
 
   func _check_route(node, segs, i, method, pattern) {
     if (i >= len(segs)) {
-      if (node(11, method, null)) {
+      if (std.dict.has(node.handlers, method)) {
         fail("duplicate route " + method + " " + pattern);
       }
       return;
@@ -128,11 +127,11 @@ package route {
     let kind = seg[0];
 
     if (kind == _WILD) {
-      let child = node(5, null, null);
+      let child = node.wild;
       if (child == null) {
         return;
       }
-      let existing = node(7, null, null);
+      let existing = node.wname;
       if (existing != seg[1]) {
         fail("conflicting route wildcard name: *" + existing + " vs *" + seg[1]);
       }
@@ -141,11 +140,11 @@ package route {
     }
 
     if (kind == _PARAM) {
-      let child = node(2, null, null);
+      let child = node.param;
       if (child == null) {
         return;
       }
-      let existing = node(4, null, null);
+      let existing = node.pname;
       if (existing != seg[1]) {
         fail("conflicting route parameter name: :" + existing + " vs :" + seg[1]);
       }
@@ -153,7 +152,7 @@ package route {
       return;
     }
 
-    let child = node(0, seg[1], null);
+    let child = _dict_get(node.kids, seg[1]);
     if (child == null) {
       return;
     }
@@ -162,7 +161,7 @@ package route {
 
   func _insert_route(node, segs, i, method, handler) {
     if (i >= len(segs)) {
-      node(10, method, handler);
+      _node_set_handler(node, method, handler);
       return;
     }
 
@@ -170,29 +169,31 @@ package route {
     let kind = seg[0];
 
     if (kind == _WILD) {
-      let child = node(5, null, null);
+      let child = node.wild;
       if (child == null) {
         child = _node_new();
-        node(6, seg[1], child);
+        node.wild = child;
+        node.wname = seg[1];
       }
       _insert_route(child, segs, i + 1, method, handler);
       return;
     }
 
     if (kind == _PARAM) {
-      let child = node(2, null, null);
+      let child = node.param;
       if (child == null) {
         child = _node_new();
-        node(3, seg[1], child);
+        node.param = child;
+        node.pname = seg[1];
       }
       _insert_route(child, segs, i + 1, method, handler);
       return;
     }
 
-    let child = node(0, seg[1], null);
+    let child = _dict_get(node.kids, seg[1]);
     if (child == null) {
       child = _node_new();
-      node(1, seg[1], child);
+      _node_set_child(node, seg[1], child);
     }
     _insert_route(child, segs, i + 1, method, handler);
   }
@@ -209,14 +210,16 @@ package route {
 
   func _walk(node, parts, si, method, params) {
     if (si >= len(parts)) {
-      if (node(8, method, null)) {
+      if (std.dict.has(node.handlers, method) ||
+          std.dict.has(node.handlers, "*")) {
         return {"ok": true, "node": node, "params": params};
       }
 
       // A trailing wildcard also matches zero segments.
-      let wild = node(5, null, null);
-      if (wild != null && wild(8, method, null)) {
-        let name = node(7, null, null);
+      let wild = node.wild;
+      if (wild != null && (std.dict.has(wild.handlers, method) ||
+                           std.dict.has(wild.handlers, "*"))) {
+        let name = node.wname;
         if (name != "") {
           let next = params;
           next[name] = "";
@@ -229,7 +232,7 @@ package route {
 
     let seg = parts[si];
 
-    let child = node(0, seg, null);
+    let child = _dict_get(node.kids, seg);
     if (child != null) {
       let found = _walk(child, parts, si + 1, method, params);
       if (found["ok"]) {
@@ -237,24 +240,25 @@ package route {
       }
     }
 
-    let param = node(2, null, null);
+    let param = node.param;
     if (param != null) {
       let next = params;
-      next[node(4, null, null)] = seg;
+      next[node.pname] = seg;
       let found = _walk(param, parts, si + 1, method, next);
       if (found["ok"]) {
         return found;
       }
     }
 
-    let wild = node(5, null, null);
+    let wild = node.wild;
     if (wild != null) {
-      let name = node(7, null, null);
+      let name = node.wname;
       let next = params;
       if (name != "") {
         next[name] = std.string.join(std.list.slice(parts, si), "/");
       }
-      if (wild(8, method, null)) {
+      if (std.dict.has(wild.handlers, method) ||
+          std.dict.has(wild.handlers, "*")) {
         return {"ok": true, "node": wild, "params": next};
       }
     }
@@ -264,11 +268,11 @@ package route {
 
   func _walk_any(node, parts, si) {
     if (si >= len(parts)) {
-      if (node(12, null, null)) {
+      if (len(node.handlers) > 0) {
         return true;
       }
-      let wild = node(5, null, null);
-      if (wild != null && wild(12, null, null)) {
+      let wild = node.wild;
+      if (wild != null && len(wild.handlers) > 0) {
         return true;
       }
       return false;
@@ -276,18 +280,18 @@ package route {
 
     let seg = parts[si];
 
-    let child = node(0, seg, null);
+    let child = _dict_get(node.kids, seg);
     if (child != null && _walk_any(child, parts, si + 1)) {
       return true;
     }
 
-    let param = node(2, null, null);
+    let param = node.param;
     if (param != null && _walk_any(param, parts, si + 1)) {
       return true;
     }
 
-    let wild = node(5, null, null);
-    if (wild != null && wild(12, null, null)) {
+    let wild = node.wild;
+    if (wild != null && len(wild.handlers) > 0) {
       return true;
     }
 
@@ -335,7 +339,7 @@ package route {
 
       let key = _static_key(pattern, segs);
       if (key != null) {
-        let table = std.dict.get(exact, key, null);
+        let table = _dict_get(exact, key);
         if (table == null) {
           table = {};
         }
@@ -354,11 +358,11 @@ package route {
       let method = req["method"];
       let path = req["path"];
 
-      let table = std.dict.get(exact, path, null);
+      let table = _dict_get(exact, path);
       if (table != null) {
-        let handler = std.dict.get(table, method, null);
+        let handler = _dict_get(table, method);
         if (handler == null) {
-          handler = std.dict.get(table, "*", null);
+          handler = _dict_get(table, "*");
         }
         if (handler != null) {
           req["params"] = {};
@@ -369,7 +373,11 @@ package route {
       let parts = _split_path(path);
       let found = _walk(root, parts, 0, method, {});
       if (found["ok"]) {
-        let handler = found["node"](9, method, null);
+        let handlers = found["node"].handlers;
+        let handler = _dict_get(handlers, method);
+        if (handler == null) {
+          handler = _dict_get(handlers, "*");
+        }
         req["params"] = found["params"];
         return handler(req);
       }

@@ -13,6 +13,14 @@ package web {
     return false;
   }
 
+  // Avoids the builtin call and default-value duplication of std.dict.get.
+  func _dict_get(table, key) {
+    if (std.dict.has(table, key)) {
+      return table[key];
+    }
+    return null;
+  }
+
   func _header(req, name) {
     let headers = req["headers"];
     let value = std.dict.get(headers, name, null);
@@ -324,6 +332,13 @@ package web {
     window_ms: int;
   }
 
+  // Buckets are long-lived per key.  A ref keeps the hot check path on
+  // scalar field updates instead of copying a record dict on every call.
+  struct _Bucket {
+    start: number;
+    count: int;
+  }
+
   export func rate_limit(options = {}) {
     let limit = std.dict.get(options, "limit", 100);
     let window_ms = std.dict.get(options, "window_ms", 60000);
@@ -409,10 +424,9 @@ package web {
         key = "unknown";
       }
       let now = std.time.now_ms();
-      let bucket = std.dict.get(buckets, key, null);
-      if (bucket == null || now - bucket["start"] >= window_ms) {
-        bucket = {"start": now, "count": 1};
-        buckets[key] = bucket;
+      let bucket = _dict_get(buckets, key);
+      if (bucket == null || now - bucket.start >= window_ms) {
+        buckets[key] = ref _Bucket { start: now, count: 1 };
         return {
           "allowed": true,
           "limit": limit,
@@ -421,8 +435,8 @@ package web {
           "reset_ms": now + window_ms
         };
       }
-      if (bucket["count"] >= limit) {
-        let reset = bucket["start"] + window_ms;
+      if (bucket.count >= limit) {
+        let reset = bucket.start + window_ms;
         return {
           "allowed": false,
           "limit": limit,
@@ -431,14 +445,13 @@ package web {
           "reset_ms": reset
         };
       }
-      bucket["count"] = bucket["count"] + 1;
-      buckets[key] = bucket;
+      bucket.count = bucket.count + 1;
       return {
         "allowed": true,
         "limit": limit,
-        "remaining": limit - bucket["count"],
+        "remaining": limit - bucket.count,
         "retry_after_ms": 0,
-        "reset_ms": bucket["start"] + window_ms
+        "reset_ms": bucket.start + window_ms
       };
     };
 
@@ -461,18 +474,16 @@ package web {
 
     let cleanup = func() {
       let now = std.time.now_ms();
+      let kept = {};
       let removed = 0;
-      let keys = [];
-      for (let key in buckets) {
-        keys = std.list.append(keys, key);
-      }
-      for (let key in keys) {
-        let bucket = buckets[key];
-        if (now - bucket["start"] >= window_ms) {
-          buckets = std.dict.delete(buckets, key);
+      for (let key, bucket in buckets) {
+        if (now - bucket.start >= window_ms) {
           removed = removed + 1;
+        } else {
+          kept[key] = bucket;
         }
       }
+      buckets = kept;
       return removed;
     };
 

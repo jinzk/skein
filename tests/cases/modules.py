@@ -110,7 +110,50 @@ def file_module(tmp):
     )
 
 
+def native_extern_policy(tmp):
+    """extern "c" lib inside an imported module must honour the native policy."""
+    if not FFI_SHIM:
+        return
+    shim_path = os.path.abspath(FFI_SHIM)
+    write(
+        tmp,
+        "extlib/module.skein",
+        "module extlib {\n"
+        "  export bind.sum as sum;\n"
+        "}\n",
+    )
+    write(
+        tmp,
+        "extlib/bind.skein",
+        "package bind {\n"
+        '  extern "c" lib sample from ' + skein_string(shim_path) + ' {\n'
+        "    type Point { x: f64; y: f64; }\n"
+        "    func shim_point_sum(p: Point) => f64;\n"
+        "  }\n"
+        "  export func sum() {\n"
+        '    return sample.shim_point_sum({"x": 1.0, "y": 2.0});\n'
+        "  }\n"
+        "}\n",
+    )
+    main = write(tmp, "main.skein",
+                 "import extlib;\nprintln(extlib.sum());\n")
+    denied = subprocess.run([BIN, main], env=os.environ, cwd=tmp,
+                            capture_output=True, text=True, encoding="utf-8",
+                            errors="replace")
+    assert denied.returncode != 0, denied.stdout
+    assert "SKEIN_ALLOW_NATIVE" in denied.stderr, denied.stderr
+    allowed = subprocess.run(
+        [BIN, main], env=dict(os.environ, SKEIN_ALLOW_NATIVE="1"),
+        cwd=tmp, capture_output=True, text=True, encoding="utf-8",
+        errors="replace")
+    assert allowed.returncode == 0, allowed.stderr
+    assert allowed.stdout.strip() == "3.0", allowed.stdout
+
+
 def run_cases():
+    with tempfile.TemporaryDirectory() as tmp:
+        native_extern_policy(tmp)
+
     with tempfile.TemporaryDirectory() as tmp:
         directory_module(tmp)
         run_module(

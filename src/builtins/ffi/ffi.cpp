@@ -2014,6 +2014,8 @@ struct value_t *call_ffi_builtin(
                 return NULL;
             return ffi_open(args);
         case B_ffi_bind:
+            if (!skein_native_load_allowed("extern lib binding"))
+                return NULL;
             return ffi_open(args);
         case B_ffi_close:
             return ffi_close(args);

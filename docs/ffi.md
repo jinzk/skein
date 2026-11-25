@@ -135,8 +135,9 @@ opaque 类型的函数、变量和 struct 会被跳过并记录 warning。它适
 - 支持静态注册、`std.native.load` 动态加载、`std.native.unload` 延迟卸载；
 - 绑定函数和 userdata 持有模块状态，最后一份引用释放时调用 `fini` 并 `dlclose`；
 - 静态模块不可卸载；
-- `std.native.load` / `std.ffi.open` 在 check-only 模式下被禁止；
-- 第三方 module 内的原生加载默认禁止，需 `SKEIN_ALLOW_NATIVE=1` 显式 opt-in；
+- `std.native.load` / `std.ffi.open` / `extern "c" lib` 在 check-only 模式下被禁止；
+- 第三方 module 内的原生加载（含 `extern "c" lib` 绑定）默认禁止，需
+  `SKEIN_ALLOW_NATIVE=1` 显式 opt-in；
   `0` / `false` / `off` / `no` 会全局禁用原生加载。源码形式发布的 module
   用 `skein build` 显式编译，详见 `docs/tutorial.md`；
 - `contrib/mysql` 是用真实 MySQL C client 验证上述 ABI 的可选示例插件，

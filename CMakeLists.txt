@@ -1310,8 +1310,9 @@ if(BUILD_TESTING)
       set_tests_properties(repl_popup_test PROPERTIES
         LABELS "core"
         TIMEOUT 60
-        # The popup needs a POSIX pty; repl_ui_test covers the candidate and
-        # layout logic on every platform.
+        # POSIX drives the REPL through a pty and Windows through ConPTY.
+        # Platforms with neither skip explicitly; repl_ui_test still covers
+        # the popup logic everywhere.
         SKIP_RETURN_CODE 77
       )
       add_test(

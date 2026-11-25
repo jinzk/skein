@@ -174,8 +174,6 @@ static bool evaluate_method(struct struct_member *member, type_def *owner,
         return false;
     }
     out->code->is_method = true;
-    out->code->method_owner_type =
-        owner ? private_owner_key(owner->package, owner->name) : std::string();
     out->code->name = member->name;
     return true;
 }
@@ -570,8 +568,6 @@ bool declare_impl_meta(
             continue;
         }
         method.second->is_method = true;
-        method.second->method_owner_type =
-            private_owner_key(owner->package, owner->name);
         method.second->name = method.first;
         if (!structtype_add_method(owner, method.first, definition,
                                    method_error)) {

@@ -279,8 +279,12 @@ static struct value_t **index_slot_ptr(struct value_t *container,
         if (idx->type != T_string) return NULL;
         struct struct_value_t *sv = (struct struct_value_t *)container;
         if (!sv->def || !sv->payload) return NULL;
-        int field = structtype_field_index(
-            sv->def, ((struct string_value_t *)idx)->value);
+        const char *name = ((struct string_value_t *)idx)->value;
+        if (!private_member_access_allowed(name, sv->def->package.c_str())) {
+            yyerror("private member %s", name);
+            return NULL;
+        }
+        int field = structtype_field_index(sv->def, name);
         if (field < 0 || (size_t)field >= sv->payload->fields.size())
             return NULL;
         return &sv->payload->fields[(size_t)field];
@@ -437,10 +441,8 @@ static struct value_t *write_member_value(struct value_t *container,
         const char *name = idx->type == T_string
                                ? ((struct string_value_t *)idx)->value
                                : nullptr;
-        std::string owner_key =
-            sv->def ? private_owner_key(sv->def->package, sv->def->name)
-                    : std::string();
-        if (!private_member_access_allowed(name, owner_key.c_str())) {
+        const char *private_owner = sv->def ? sv->def->package.c_str() : nullptr;
+        if (!private_member_access_allowed(name, private_owner)) {
             yyerror("private member %s", name ? name : "");
         } else if (idx->type != T_string) {
             yyerror("struct field name must be a string, got %s",
@@ -569,10 +571,8 @@ static struct value_t *increment_member_value(struct value_t *container,
         const char *name = idx->type == T_string
                                ? ((struct string_value_t *)idx)->value
                                : nullptr;
-        std::string owner_key =
-            sv->def ? private_owner_key(sv->def->package, sv->def->name)
-                    : std::string();
-        if (!private_member_access_allowed(name, owner_key.c_str())) {
+        const char *private_owner = sv->def ? sv->def->package.c_str() : nullptr;
+        if (!private_member_access_allowed(name, private_owner)) {
             yyerror("private member %s", name ? name : "");
         } else if (idx->type != T_string) {
             yyerror("struct field name must be a string, got %s",
@@ -1223,9 +1223,8 @@ struct value_t *read_member_value(struct value_t *container,
             return NULL;
         }
         const char *name = ((struct string_value_t *)index)->value;
-        std::string owner_key =
-            private_owner_key(sv->def->package, sv->def->name);
-        if (!private_member_access_allowed(name, owner_key.c_str())) {
+        if (!private_member_access_allowed(name,
+                                           sv->def->package.c_str())) {
             yyerror("private member %s", name);
             return NULL;
         }
@@ -1256,9 +1255,8 @@ struct value_t *read_member_value(struct value_t *container,
         const struct variant_def &variant =
             ev->def->variants[(size_t)ev->variant];
         const char *name = ((struct string_value_t *)index)->value;
-        std::string owner_key =
-            private_owner_key(ev->def->package, ev->def->name);
-        if (!private_member_access_allowed(name, owner_key.c_str())) {
+        if (!private_member_access_allowed(name,
+                                           ev->def->package.c_str())) {
             yyerror("private member %s", name);
             return NULL;
         }

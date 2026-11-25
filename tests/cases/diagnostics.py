@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Diagnostic parity: exact line and column for AST and VM backends."""
 
+import os
+import tempfile
+
 from harness import *  # noqa: F401,F403
 
 
@@ -133,3 +136,71 @@ def run_cases():
         "println(box._secret());\n",
         stderr="runtime error: private member _secret",
     )
+
+    # `_` members are private to their defining package, not to the whole
+    # process: package functions and methods may use them, callers may not.
+    with tempfile.TemporaryDirectory() as tmp:
+        def write(rel, text):
+            path = os.path.join(tmp, rel)
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(text)
+            return path
+
+        write("privpkg.skein",
+              "package privpkg {\n"
+              "  export struct Box {\n"
+              "    _value: int;\n"
+              "    func _secret(self): int { return self._value; }\n"
+              "    func reveal(self): int { return self._secret(); }\n"
+              "  }\n"
+              "  export func make(value: int): Box {\n"
+              "    return Box { _value: value };\n"
+              "  }\n"
+              "  export func hidden_value(box: Box): int {\n"
+              "    return box._value;\n"
+              "  }\n"
+              "  export struct Inner { x: int; }\n"
+              "  export struct Outer { _inner: Inner; }\n"
+              "  export func make_outer(): Outer {\n"
+              "    return Outer { _inner: Inner { x: 1 } };\n"
+              "  }\n"
+              "  export func poke_outer(outer: Outer): Outer {\n"
+              "    outer._inner.x = 9;\n"
+              "    return outer;\n"
+              "  }\n"
+              "  export func describe_outer(outer: Outer): int {\n"
+              "    return match (outer) {\n"
+              "      case Outer { _inner } => _inner.x;\n"
+              "    };\n"
+              "  }\n"
+              "}\n")
+        ok = write("ok.skein",
+                   "import privpkg;\n"
+                   "let box = privpkg.make(3);\n"
+                   "println(privpkg.hidden_value(box));\n"
+                   "println(box.reveal());\n"
+                   "let outer = privpkg.make_outer();\n"
+                   "let poked = privpkg.poke_outer(outer);\n"
+                   "println(privpkg.describe_outer(poked));\n")
+        proc = run_file(ok)
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout.splitlines() == ["3", "3", "9"], proc.stdout
+
+        for member, source in (
+            ("_value", "println(box._value);\n"),
+            ("_secret", "println(box._secret());\n"),
+        ):
+            bad = write("bad_" + member.lstrip("_") + ".skein",
+                        "import privpkg;\n"
+                        "let box = privpkg.make(3);\n" + source)
+            proc = run_file(bad)
+            assert proc.returncode == 1, proc.stdout
+            assert "private member " + member in proc.stderr, proc.stderr
+
+        bad = write("bad_intermediate.skein",
+                    "import privpkg;\n"
+                    "let outer = privpkg.make_outer();\n"
+                    "outer._inner.x = 3;\n")
+        proc = run_file(bad)
+        assert proc.returncode == 1, proc.stdout
+        assert "private member _inner" in proc.stderr, proc.stderr

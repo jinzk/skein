@@ -1008,8 +1008,6 @@ bool structtype_add_protocol_default(protocol_def *protocol, const std::string &
         return false;
     }
     code->code->is_method = true;
-    code->code->method_owner_type =
-        private_owner_key(protocol->package, protocol->name);
     code->code->name = name;
     protocol->defaults.emplace(name, std::move(code));
     return true;

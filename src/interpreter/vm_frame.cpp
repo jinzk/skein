@@ -48,7 +48,7 @@ void save_vm_frame(const VmFrameView &view, bool save_package,
         state.diag_package = diag_current_package_name();
     if (save_source)
         state.diag_source = diag_current_source_name();
-    state.private_owner = current_private_owner;
+    state.private_package = current_private_package;
     state.name_scope_generation = *view.name_scope_generation;
     state.param_pool_safe = *view.param_pool_safe;
     state.slot_pool_safe = *view.slot_pool_safe;
@@ -101,7 +101,7 @@ void restore_vm_frame(const VmFrameView &view, SavedVmState state) {
         diag_set_package_name(state.diag_package);
     if (state.diag_source_saved)
         diag_set_source_name(state.diag_source);
-    current_private_owner = state.private_owner;
+    current_private_package = state.private_package;
     *view.name_scope_generation = state.name_scope_generation;
     *view.param_pool_safe = state.param_pool_safe;
     *view.direct_params = state.direct_params;

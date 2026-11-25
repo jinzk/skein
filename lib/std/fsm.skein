@@ -32,9 +32,9 @@ package fsm {
 
   export struct Context {
     state: any;
-    history_table: any;
-    head_id: int;
-    redo_list: list;
+    _history: any;
+    _head: int;
+    _redo: list;
   }
 
   func _t_new() {
@@ -224,9 +224,9 @@ package fsm {
     let r = _t_add(_t_new(), m.initial, _NIL);
     return Context {
       state: m.initial,
-      history_table: r.table,
-      head_id: r.id,
-      redo_list: []
+      _history: r.table,
+      _head: r.id,
+      _redo: []
     };
   }
 
@@ -246,12 +246,12 @@ package fsm {
       m.on_transition(ctx.state, event, next);
     }
 
-    let r = _t_add(ctx.history_table, next, ctx.head_id);
+    let r = _t_add(ctx._history, next, ctx._head);
     return Context {
       state: next,
-      history_table: r.table,
-      head_id: r.id,
-      redo_list: []
+      _history: r.table,
+      _head: r.id,
+      _redo: []
     };
   }
 
@@ -275,32 +275,32 @@ package fsm {
       // Inline _t_add: after the first COW fork inside this call, the history
       // table is uniquely owned and every following event is O(1).
       let slot = _NIL;
-      if (std.deque.size(ctx.history_table.free) > 0) {
-        let popped = std.deque.pop_back(ctx.history_table.free);
+      if (std.deque.size(ctx._history.free) > 0) {
+        let popped = std.deque.pop_back(ctx._history.free);
         slot = popped["value"];
-        ctx.history_table.free = popped["deque"];
-        ctx.history_table.gens[slot] = ctx.history_table.gens[slot] + 1;
-        ctx.history_table.slots[slot] = _Node { value: next, prev: ctx.head_id };
+        ctx._history.free = popped["deque"];
+        ctx._history.gens[slot] = ctx._history.gens[slot] + 1;
+        ctx._history.slots[slot] = _Node { value: next, prev: ctx._head };
       } else {
-        slot = len(ctx.history_table.slots);
-        ctx.history_table.slots[slot] = _Node { value: next, prev: ctx.head_id };
-        ctx.history_table.gens[slot] = 0;
+        slot = len(ctx._history.slots);
+        ctx._history.slots[slot] = _Node { value: next, prev: ctx._head };
+        ctx._history.gens[slot] = 0;
       }
-      ctx.history_table.alive = ctx.history_table.alive + 1;
+      ctx._history.alive = ctx._history.alive + 1;
 
       ctx.state = next;
-      ctx.head_id = (ctx.history_table.gens[slot] << 32) | slot;
-      ctx.redo_list = [];
+      ctx._head = (ctx._history.gens[slot] << 32) | slot;
+      ctx._redo = [];
     }
     return ctx;
   }
 
   export func history(ctx) {
     let out = std.deque.new();
-    let id = ctx.head_id;
+    let id = ctx._head;
 
     while (id != _NIL) {
-      let node = _t_node(ctx.history_table, id);
+      let node = _t_node(ctx._history, id);
       out = std.deque.push_front(out, node.value);
       id = node.prev;
     }
@@ -309,44 +309,44 @@ package fsm {
   }
 
   export func undo(ctx) {
-    let node = _t_node(ctx.history_table, ctx.head_id);
+    let node = _t_node(ctx._history, ctx._head);
     if (node.prev == _NIL) {
       return ctx;
     }
 
-    let redo = std.list.append(ctx.redo_list, ctx.head_id);
-    let prev = _t_node(ctx.history_table, node.prev);
+    let redo = std.list.append(ctx._redo, ctx._head);
+    let prev = _t_node(ctx._history, node.prev);
     return Context {
       state: prev.value,
-      history_table: ctx.history_table,
-      head_id: node.prev,
-      redo_list: redo
+      _history: ctx._history,
+      _head: node.prev,
+      _redo: redo
     };
   }
 
   export func redo(ctx) {
-    let n = len(ctx.redo_list);
+    let n = len(ctx._redo);
     if (n == 0) {
       return ctx;
     }
 
-    let id = ctx.redo_list[n - 1];
-    let redo = std.list.slice(ctx.redo_list, 0, n - 1);
-    let node = _t_node(ctx.history_table, id);
+    let id = ctx._redo[n - 1];
+    let redo = std.list.slice(ctx._redo, 0, n - 1);
+    let node = _t_node(ctx._history, id);
     return Context {
       state: node.value,
-      history_table: ctx.history_table,
-      head_id: id,
-      redo_list: redo
+      _history: ctx._history,
+      _head: id,
+      _redo: redo
     };
   }
 
   export func snapshot(ctx) {
     return {
       "state": ctx.state,
-      "history": _t_to_value(ctx.history_table),
-      "head": ctx.head_id,
-      "redo": ctx.redo_list
+      "history": _t_to_value(ctx._history),
+      "head": ctx._head,
+      "redo": ctx._redo
     };
   }
 
@@ -357,9 +357,9 @@ package fsm {
     }
     return Context {
       state: _decode_state(snap["state"], decode),
-      history_table: history,
-      head_id: snap["head"],
-      redo_list: snap["redo"]
+      _history: history,
+      _head: snap["head"],
+      _redo: snap["redo"]
     };
   }
 }

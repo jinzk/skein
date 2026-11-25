@@ -251,7 +251,7 @@ def run_cases():
           'let ctx = fsm.run(m, fsm.start(m), [1, 2, 3]);\n'
           'ctx = fsm.undo(ctx);\n'
           'println(ctx.state);\n'
-          'println(ctx._redo);\n'
+          'println(fsm.snapshot(ctx)["redo"]);\n'
           'ctx = fsm.redo(ctx);\n'
           'println(ctx.state);\n',
           stdout_all=["3", "[3]", "6"])
@@ -269,7 +269,7 @@ def run_cases():
           'ctx = fsm.undo(ctx);\n'
           'ctx = fsm.step(m, ctx, 10);\n'
           'println(ctx.state);\n'
-          'println(ctx._redo);\n'
+          'println(fsm.snapshot(ctx)["redo"]);\n'
           'println(fsm.history(ctx));\n',
           stdout_all=["13", "[]", "[0, 1, 3, 13]"])
     check("std.fsm alias import",
@@ -283,6 +283,12 @@ def run_cases():
     check("std.fsm private helper hidden",
           'import std.fsm;\nprintln(fsm._internal());\n',
           stderr="key not found")
+    check("std.fsm package-private field hidden",
+          'import std.fsm;\n'
+          'let m = fsm.define(7, func(ctx, ev) { return ctx; });\n'
+          'let ctx = fsm.start(m);\n'
+          'println(ctx._history);\n',
+          stderr="private member _history")
     check("std.fsm coexists with std",
           'import std;\nimport std.fsm;\n'
           'println(std.regex.match("a+", "a"));\n'

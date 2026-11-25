@@ -529,7 +529,6 @@ struct Proto {
     bool variadic = false;
     bool is_generator = false;
     bool is_method = false;
-    std::string method_owner_type;
 
     uint32_t version = 1;
 };

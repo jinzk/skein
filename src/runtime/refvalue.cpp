@@ -51,9 +51,8 @@ value_t *get_field_from_object(const std::shared_ptr<ref_object> &object,
         return nullptr;
     }
     const char *field_name = name;
-    std::string owner_key =
-        private_owner_key(object->def->package, object->def->name);
-    if (!private_member_access_allowed(field_name, owner_key.c_str())) {
+    if (!private_member_access_allowed(field_name,
+                                       object->def->package.c_str())) {
         yyerror("private member %s", field_name);
         return nullptr;
     }
@@ -84,9 +83,8 @@ bool set_field_on_object(const std::shared_ptr<ref_object> &object,
         freeval(value);
         return false;
     }
-    std::string owner_key =
-        private_owner_key(object->def->package, object->def->name);
-    if (!private_member_access_allowed(name, owner_key.c_str())) {
+    if (!private_member_access_allowed(name,
+                                       object->def->package.c_str())) {
         yyerror("private member %s", name);
         freeval(value);
         return false;

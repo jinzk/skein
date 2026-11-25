@@ -25,8 +25,6 @@ struct function_code : std::enable_shared_from_this<function_code> {
     int required_params;
     std::string name;
     bool is_method;
-    /* Declaring type for a method, or declaring protocol for a default. */
-    std::string method_owner_type;
     bool variadic;
     bool is_generator;
     int def_line = 0;
@@ -49,29 +47,24 @@ struct function_code : std::enable_shared_from_this<function_code> {
     void *vm_cache = nullptr;
 };
 
-/* Type whose method body is currently executing, used by soft-private members. */
-extern thread_local const std::string *current_private_owner;
+/* Package whose code is currently executing, used by `_` package-private members. */
+extern thread_local const std::string *current_private_package;
 
-struct private_owner_guard {
+struct private_package_guard {
     const std::string *previous;
 
-    explicit private_owner_guard(const std::string *owner)
-        : previous(current_private_owner) {
-        current_private_owner = owner;
+    explicit private_package_guard(const std::string *package)
+        : previous(current_private_package) {
+        current_private_package = package;
     }
-    ~private_owner_guard() { current_private_owner = previous; }
-    private_owner_guard(const private_owner_guard &) = delete;
-    private_owner_guard &operator=(const private_owner_guard &) = delete;
+    ~private_package_guard() { current_private_package = previous; }
+    private_package_guard(const private_package_guard &) = delete;
+    private_package_guard &operator=(const private_package_guard &) = delete;
 };
 
-/* True when `name` may be accessed from the current method owner context. */
-bool private_member_access_allowed(const char *name, const char *owner_type);
-
-/* Owner identity stored in method bytecode; package avoids same-name clashes. */
-inline std::string private_owner_key(const std::string &package,
-                                     const std::string &name) {
-    return package.empty() ? name : package + "." + name;
-}
+/* True when `name` may be accessed from the current package context. */
+bool private_member_access_allowed(const char *name,
+                                   const char *owner_package);
 
 /*
  * Explicit upvalue storage.  While a frame is alive the cell is open and

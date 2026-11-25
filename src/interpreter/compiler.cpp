@@ -3733,7 +3733,6 @@ ProtoPtr compile_function_body_impl(struct function_code *code,
     compiler.proto.variadic = code->variadic;
     compiler.proto.is_generator = code->is_generator;
     compiler.proto.is_method = code->is_method;
-    compiler.proto.method_owner_type = code->method_owner_type;
     compiler.proto.def_line = body->line;
     compiler.proto.def_column = body->column;
     compiler.proto.param_names = compiler.param_names;

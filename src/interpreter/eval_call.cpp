@@ -110,22 +110,20 @@ struct call_depth_guard {
 
 namespace {
 
-const std::string *method_owner_from_callee(const struct value_t *callee) {
+const std::string *private_package_from_callee(const struct value_t *callee) {
     if (!callee)
         return nullptr;
     if (callee->type == T_method) {
         const struct method_value_t *method =
             (const struct method_value_t *)callee;
-        if (method->method && method->method->code &&
-            !method->method->code->method_owner_type.empty())
-            return &method->method->code->method_owner_type;
+        if (method->method && method->method->code)
+            return &method->method->code->package;
         return nullptr;
     }
     if (callee->type == T_func) {
         const struct func_value_t *fn = (const struct func_value_t *)callee;
-        if (fn->def && fn->def->code && fn->def->code->is_method &&
-            !fn->def->code->method_owner_type.empty())
-            return &fn->def->code->method_owner_type;
+        if (fn->def && fn->def->code)
+            return &fn->def->code->package;
     }
     return nullptr;
 }
@@ -154,10 +152,7 @@ static struct value_t *invoke_function_body(
     std::vector<struct value_t *> &args) {
     function_package_guard package_guard(def->code->package,
                                        def->code->source);
-    const std::string *method_owner = def->code->method_owner_type.empty()
-                                          ? nullptr
-                                          : &def->code->method_owner_type;
-    private_owner_guard owner_guard(method_owner);
+    private_package_guard private_guard(&def->code->package);
     const std::string *caller_source =
         diag_intern_source(package_guard.previous_source);
     int nparams = def->code->nparams;
@@ -441,7 +436,8 @@ static struct value_t *invoke_value(
      * eligible callbacks do not run interpreted for their whole lifetime.
      */
     if (callee->type == T_func || callee->type == T_method) {
-        private_owner_guard owner_guard(method_owner_from_callee(callee));
+        private_package_guard private_guard(
+            private_package_from_callee(callee));
         value_t *jit_result = nullptr;
         if (skein_vm_try_jit_call_args(callee, args, &jit_result))
             return jit_result;
@@ -449,7 +445,8 @@ static struct value_t *invoke_value(
 #endif
 
     if (callee->type == T_method) {
-        private_owner_guard owner_guard(method_owner_from_callee(callee));
+        private_package_guard private_guard(
+            private_package_from_callee(callee));
         struct method_value_t *method = (struct method_value_t *)callee;
         std::vector<struct value_t *> all_args;
         all_args.reserve(args.size() + 1);
@@ -664,11 +661,8 @@ struct value_t *call_method_value(struct value_t *receiver,
         throw;
     }
 
-    const std::string *method_owner =
-        def->code && !def->code->method_owner_type.empty()
-            ? &def->code->method_owner_type
-            : nullptr;
-    private_owner_guard owner_guard(method_owner);
+    private_package_guard private_guard(
+        def && def->code ? &def->code->package : nullptr);
     struct func_value_t callee;
     callee.type = T_func;
     callee.def = std::move(def);

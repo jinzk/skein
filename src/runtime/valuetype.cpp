@@ -28,14 +28,15 @@ struct free_depth_guard {
 thread_local struct upvalue_cell *gc_cell_head = nullptr;
 } // namespace
 
-thread_local const std::string *current_private_owner = nullptr;
+thread_local const std::string *current_private_package = nullptr;
 
-bool private_member_access_allowed(const char *name, const char *owner_type) {
+bool private_member_access_allowed(const char *name,
+                                   const char *owner_package) {
     if (!name || name[0] != '_')
         return true;
-    if (!current_private_owner || current_private_owner->empty())
+    if (!current_private_package || !owner_package)
         return false;
-    return owner_type && *current_private_owner == owner_type;
+    return *current_private_package == owner_package;
 }
 
 struct upvalue_cell *gc_cell_registry_head() {

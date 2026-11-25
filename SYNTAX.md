@@ -2066,7 +2066,7 @@ let d = Point { ...p, x: 9 };
 - 方法值绑定提取时的结构体快照，之后修改原结构体不会影响它；
 - 方法可以修改 `self` 的字段和下标，修改的是接收者副本，调用方原值不变；需要保留修改时返回新结构体；
 - 结构体使用 copy-on-write 值语义；
-- 字段和方法默认公开；名称以 `_` 开头的成员是“软私有”，只有在该类型的方法体执行期间可直接访问，外部直接访问报 `private member`；`_` 不改变 struct literal、`std.meta`、序列化和 `std.ref.snapshot()` 的行为；
+- 字段和方法默认公开；名称以 `_` 开头的成员是“包私有”，定义所在包内的函数和方法可直接访问，其他包直接访问报 `private member`；`_` 不改变 struct literal、`std.meta`、序列化和 `std.ref.snapshot()` 的行为；
 - 字段类型必须是已声明的类型；支持自引用，例如 `struct Node { value: int; next: Node?; }`；
   两个 `struct` 的普通值互递归字段不支持，需使用 `ref T?` / `weak T?`（见 5.12.3）；
 - 普通值不允许创建环：`a.next = b; b.next = a;` 会报 `recursive value would create a cycle`；共享子结构（DAG）允许；使用 `ref` 字段的强引用环由 GC 回收，见 5.12.3；
@@ -4379,7 +4379,7 @@ fsm.restore(snap, decode = null)    -> Context
 - `snapshot` 返回普通 dict，可 JSON 序列化；`restore` 会重建历史并校验；
 - 枚举状态在 JSON 往返时通过 `std.enum.decode` 自动恢复；
 - struct 状态可传解码回调：`fsm.restore(snap, func(v) { return std.struct.decode(v, "S"); })`；
-- `ctx.history_table` / `ctx.head_id` / `ctx.redo_list` 是内部字段，不要依赖；
+- `ctx._history` / `ctx._head` / `ctx._redo` 是内部字段，不要依赖；
 - 非法 `step` 会 `fail("step must be callable")`，非法回调会 `fail("on_transition must be callable")`。
 
 性能提示：单步 `step` 每次都会为值语义复制历史表，O(history)/次；`run` 在单次调用内复用同一份历史，整体 O(events)，`history` 为 O(n)。线性撤销/重做适合中小规模，超长历史请等待原生 fsm 实现。

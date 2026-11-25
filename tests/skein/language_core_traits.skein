@@ -182,22 +182,22 @@ struct PrivateBox {
   func peer_value(self, other: PrivateBox): int { return other._value; }
 }
 
-ts_test("underscore members are soft private", func() {
+func private_field_helper(box: PrivateBox): int {
+  return box._value;
+}
+
+func private_method_helper(box: PrivateBox): int {
+  return box._secret();
+}
+
+ts_test("underscore members are package private", func() {
   let box = PrivateBox { _value: 7, label: "a" };
   ts_eq(box.reveal(), 7);
   ts_eq(box.peer_value(PrivateBox { _value: 9, label: "b" }), 9);
-  let field_caught = false;
-  let field_result = box._value on error(e) {
-    field_caught = true;
-    recover null;
-  };
-  ts_true(field_caught);
-  let method_caught = false;
-  let method_result = box._secret() on error(e) {
-    method_caught = true;
-    recover null;
-  };
-  ts_true(method_caught);
+  ts_eq(private_field_helper(box), 7);
+  ts_eq(private_method_helper(box), 7);
+  ts_eq(box._value, 7);
+  ts_eq(box._secret(), 7);
 });
 
 ts_finish();

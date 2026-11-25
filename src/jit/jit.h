@@ -67,7 +67,7 @@ struct thread_state {
         bool top_level = false;
         bool package_valid = false;
         bool source_valid = false;
-        const std::string *private_owner = nullptr;
+        const std::string *private_package = nullptr;
     };
     std::vector<call_save> saves;
 

@@ -176,6 +176,11 @@ bool match_pattern(struct ast *pattern_ast, struct value_t *value,
                      field = field->next) {
                     if (!field->key)
                         continue;
+                    if (!private_member_access_allowed(field->key,
+                                                       def->package.c_str())) {
+                        yyerror("private member %s", field->key);
+                        return false;
+                    }
                     int index =
                         structtype_variant_field_index(&variant, field->key);
                     if (index < 0) {
@@ -202,6 +207,14 @@ bool match_pattern(struct ast *pattern_ast, struct value_t *value,
                         for (size_t i = 0; i < variant.fields.size(); ++i) {
                             if (seen[i])
                                 continue;
+                            if (!private_member_access_allowed(
+                                    variant.fields[i].name.c_str(),
+                                    def->package.c_str())) {
+                                freeval((struct value_t *)rest);
+                                yyerror("private member %s",
+                                        variant.fields[i].name.c_str());
+                                return false;
+                            }
                             rest->payload->items.push_back(std::make_pair(
                                 newstrval(variant.fields[i].name.c_str()),
                                 dupval(instance->payload->fields[i])));
@@ -230,6 +243,11 @@ bool match_pattern(struct ast *pattern_ast, struct value_t *value,
                      field = field->next) {
                     if (!field->key)
                         continue;
+                    if (!private_member_access_allowed(field->key,
+                                                       def->package.c_str())) {
+                        yyerror("private member %s", field->key);
+                        return false;
+                    }
                     int index = structtype_field_index(def, field->key);
                     if (index < 0) {
                         yyerror("unknown field %s in %s", field->key,
@@ -255,6 +273,14 @@ bool match_pattern(struct ast *pattern_ast, struct value_t *value,
                         for (size_t i = 0; i < def->fields.size(); ++i) {
                             if (seen[i])
                                 continue;
+                            if (!private_member_access_allowed(
+                                    def->fields[i].name.c_str(),
+                                    def->package.c_str())) {
+                                freeval((struct value_t *)rest);
+                                yyerror("private member %s",
+                                        def->fields[i].name.c_str());
+                                return false;
+                            }
                             rest->payload->items.push_back(std::make_pair(
                                 newstrval(def->fields[i].name.c_str()),
                                 dupval(instance->payload->fields[i])));

@@ -734,6 +734,9 @@ static value_t *build_struct_from_entries(
             continue;
         }
         explicit_seen[(size_t)index] = true;
+        if (entry.value)
+            entry.value = coerce_store_value(
+                &def->fields[(size_t)index].type, NULL, entry.value);
         if (!entry.value ||
             !type_constraint_matches(&def->fields[(size_t)index].type,
                                      entry.value)) {
@@ -772,6 +775,11 @@ static value_t *build_struct_from_entries(
             }
             struct value_t *value = eval_field_default(
                 field, def->name.c_str(), field.name.c_str());
+            if (!value) {
+                ok = false;
+                break;
+            }
+            value = coerce_store_value(&field.type, NULL, value);
             if (!value) {
                 ok = false;
                 break;

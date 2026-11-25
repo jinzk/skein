@@ -6,6 +6,7 @@
 
 #include "ast.h"
 #include "ast_analysis.h"
+#include "builtin_ids.h"
 #include "diagnostics.h"
 #include "scopestack.h"
 #include "static_type.h"
@@ -522,10 +523,48 @@ struct Checker : public BuiltinContext {
         return false;
     }
 
+    /*
+     * Implicit struct-to-ref conversion is limited to fresh values: a struct
+     * literal or a Type.new(...) constructor call.  A variable that already
+     * holds a struct is a value object and must use ref(expr) explicitly.
+     */
+    bool fresh_struct_expr(const struct ast *expr, Env &env) {
+        if (!expr)
+            return false;
+        if (expr->nodetype == 'y')
+            return !((const struct struct_lit_node *)expr)->is_ref;
+        if (expr->nodetype != 'C')
+            return false;
+        const struct ufncall *call = (const struct ufncall *)expr;
+        const struct ast *callee = call->callee;
+        if (!callee || callee->nodetype != 'j')
+            return false;
+        const struct ast *base = callee->l;
+        const struct ast *field = callee->r;
+        if (!base || base->nodetype != 'N' || !field ||
+            field->nodetype != 'V')
+            return false;
+        const struct value_t *name = ((const struct val *)field)->val;
+        if (!name || name->type != T_string ||
+            std::strcmp(((const struct string_value_t *)name)->value,
+                        "new") != 0)
+            return false;
+        const char *base_name = ((const struct symref *)base)->name;
+        return base_name && env.owner_of(base_name) == nullptr;
+    }
+
     bool check_expr(struct ast *expr, const TypeNode *expected, Env &env,
-                    bool explicit_cast = false, bool force_element = false) {
+                    bool explicit_cast = false, bool force_element = false,
+                    bool no_implicit_ref = false) {
         if (!expr)
             return true;
+        if (!no_implicit_ref && expected && expected->kind == TYPE_REF &&
+            !expected->args.empty() && expected->args[0] &&
+            expected->args[0]->kind == TYPE_NAMED &&
+            fresh_struct_expr(expr, env)) {
+            return check_expr(expr, expected->args[0], env, explicit_cast,
+                              true, no_implicit_ref);
+        }
         if (expr->nodetype == 'o')
             warn_launch_on_error(expr);
         if (expr->nodetype == 'w' && expected &&
@@ -549,7 +588,7 @@ struct Checker : public BuiltinContext {
             struct cast_node *cast = (struct cast_node *)expr;
             const TypeNode *target = type_from_constraint(cast->type);
             if (!check_expr(cast->value, target, env, true,
-                            needs_static_check(target)))
+                            needs_static_check(target), no_implicit_ref))
                 return false;
             return warn_or_error(target, expected, expr->line, expr->column,
                                  needs_static_check(target), force_element);
@@ -586,7 +625,7 @@ struct Checker : public BuiltinContext {
                             ? expected->args[index]
                             : type_any();
                     if (!check_expr(item->value, element, env,
-                                    explicit_cast, true))
+                                    explicit_cast, true, true))
                         return false;
                 }
                 if (index != expected->args.size()) {
@@ -610,7 +649,7 @@ struct Checker : public BuiltinContext {
             for (struct list_node *item = (struct list_node *)expr; item;
                  item = (struct list_node *)item->next) {
                 if (!check_expr(item->value, element, env, explicit_cast,
-                                true))
+                                true, true))
                     return false;
             }
             return true;
@@ -625,9 +664,9 @@ struct Checker : public BuiltinContext {
             for (struct dict_node *entry = (struct dict_node *)expr; entry;
                  entry = (struct dict_node *)entry->next) {
                 if (!check_expr(entry->key, key_type, env, explicit_cast,
-                                true) ||
+                                true, true) ||
                     !check_expr(entry->value, value_type, env, explicit_cast,
-                                true))
+                                true, true))
                     return false;
             }
             return true;
@@ -967,7 +1006,12 @@ struct Checker : public BuiltinContext {
         if (!info)
             return NULL;
         auto it = info->methods.find(name ? name : "");
-        return it == info->methods.end() ? NULL : it->second;
+        if (it == info->methods.end())
+            return NULL;
+        struct funcdef *method = it->second;
+        if (method && method->name && std::strcmp(method->name, "new") == 0)
+            return NULL;
+        return method;
     }
 
     const TypeNode *method_value_type(const TypeNode *base_type,
@@ -1215,7 +1259,8 @@ struct Checker : public BuiltinContext {
             if (def) {
                 std::shared_ptr<function_def> method =
                     structtype_method(def, method_name);
-                if (method && method->code) {
+                if (method && method->code &&
+                    !structtype_is_constructor(method.get())) {
                     sig = method_signature_from_code(method->code.get());
                     method_code = method->code.get();
                     found = true;
@@ -1390,13 +1435,22 @@ struct Checker : public BuiltinContext {
         return true;
     }
 
+    bool direct_builtin_functype(const struct ast *callee, int &functype) {
+        if (!callee || callee->nodetype != 'V')
+            return false;
+        const struct value_t *value = ((const struct val *)callee)->val;
+        if (!value || value->type != T_builtin)
+            return false;
+        functype = ((const struct builtin_value_t *)value)->functype;
+        return true;
+    }
+
     bool check_call(struct ast *expr, const TypeNode *expected, Env &env,
                     const TypeNode *&result) {
         struct ufncall *call = (struct ufncall *)expr;
         result = type_any();
         std::vector<struct ast *> args;
         collect_call_args(call->args, args);
-
         std::string path;
         bool has_path = flatten_path(call->callee, path);
         std::string canonical =
@@ -1408,6 +1462,35 @@ struct Checker : public BuiltinContext {
                 spread = true;
                 break;
             }
+        }
+
+        int direct_builtin = -1;
+        if (!has_path &&
+            direct_builtin_functype(call->callee, direct_builtin) &&
+            direct_builtin == B_ref_wrap) {
+            if (args.size() != 1) {
+                char message[128];
+                std::snprintf(message, sizeof(message),
+                              "ref expects 1 argument, got %zu",
+                              args.size());
+                report_error(expr->line, expr->column, message);
+                return false;
+            }
+            const TypeNode *argument = infer(args[0], env);
+            if (argument->kind == TYPE_ANY) {
+                result = type_any();
+                return true;
+            }
+            if (argument->kind == TYPE_NAMED) {
+                result = type_container(TYPE_REF, {argument});
+                return true;
+            }
+            char message[256];
+            std::snprintf(message, sizeof(message),
+                          "ref expects a struct value, got %s",
+                          type_display(argument));
+            report_error(args[0]->line, args[0]->column, message);
+            return false;
         }
 
         if (!spread &&
@@ -3183,9 +3266,34 @@ struct Checker : public BuiltinContext {
                     const struct value_t *value =
                         ((const struct val *)right)->val;
                     if (value && value->type == T_string) {
-                        const TypeNode *method = method_value_type(
-                            base,
-                            ((const struct string_value_t *)value)->value);
+                        const char *field_name =
+                            ((const struct string_value_t *)value)->value;
+                        /*
+                         * `Type.new` is a constructor: the receiver is a type
+                         * name, not a value, so the generic member paths above
+                         * cannot see it.
+                         */
+                        if (base->kind == TYPE_ANY && expr->l &&
+                            expr->l->nodetype == 'N' &&
+                            std::strcmp(field_name, "new") == 0) {
+                            const char *base_name =
+                                ((const struct symref *)expr->l)->name;
+                            const TypeNode *named =
+                                base_name && env.owner_of(base_name) == nullptr
+                                    ? type_named(source.c_str(), base_name)
+                                    : nullptr;
+                            structtype_lookup_result lookup;
+                            if (named && lookup_type_node(named, lookup) &&
+                                lookup.kind == STRUCTTYPE_LOOKUP_STRUCT) {
+                                std::shared_ptr<function_def> constructor =
+                                    structtype_constructor(lookup.structure);
+                                if (constructor && constructor->code)
+                                    return function_type_from_code(
+                                        constructor->code.get());
+                            }
+                        }
+                        const TypeNode *method =
+                            method_value_type(base, field_name);
                         if (method)
                             return method;
                     }

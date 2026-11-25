@@ -9,6 +9,7 @@
 #include "gc_roots.h"
 #include "package.h"
 #include "pattern.h"
+#include "refvalue.h"
 #include "cycle.h"
 #include "platform.h"
 #include "repl.h"
@@ -182,6 +183,12 @@ static struct value_t *invoke_function_body(
     for (struct symlist *sl = def->code->sl; sl && !sl->variadic;
          sl = sl->next, ++i) {
         struct symbol *sym = newsym(sl->sym->name);
+        if (sl->type) {
+            value_t *bound = coerce_store_value(sl->type, NULL, args[i]);
+            args[i] = bound;
+            if (!bound)
+                return NULL;
+        }
         sym->val = args[i];
         if (sl->type)
             type_constraint_assign(&sym->type, sl->type);
@@ -516,6 +523,14 @@ static struct value_t *invoke_value(
             rest = sl;
             break;
         }
+        if (sl->type) {
+            value_t *coerced = coerce_store_value(sl->type, NULL, args[i]);
+            args[i] = coerced;
+            if (!coerced) {
+                free_args(args);
+                return NULL;
+            }
+        }
         if (!type_constraint_matches(sl->type, args[i])) {
             yyerror("function %s argument %d (%s) expects %s, got %s",
                     frame_name.c_str(), i + 1, sl->sym->name,
@@ -526,6 +541,15 @@ static struct value_t *invoke_value(
     }
     if (rest) {
         for (size_t k = (size_t)nparams; k < args.size(); ++k) {
+            if (rest->type) {
+                value_t *coerced =
+                    coerce_store_value(rest->type, NULL, args[k]);
+                args[k] = coerced;
+                if (!coerced) {
+                    free_args(args);
+                    return NULL;
+                }
+            }
             if (!type_constraint_matches(rest->type, args[k])) {
                 yyerror("function %s rest argument %d expects %s, got %s",
                         frame_name.c_str(), (int)(k - (size_t)nparams + 1),

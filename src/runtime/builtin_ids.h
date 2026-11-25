@@ -489,7 +489,8 @@ enum bifs {
     B_dict_index_by,
     B_ref_set,
     B_ref_upgrade,
-    B_ref_snapshot
+    B_ref_snapshot,
+    B_ref_wrap
 };
 
 #endif

@@ -17,6 +17,7 @@
 #include "symbol.h"
 #include "unicode.h"
 #include "value_ops.h"
+#include "refvalue.h"
 #include "value_runtime.h"
 #include "vm_eval.h"
 
@@ -150,6 +151,9 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_define_slot(const skein::bc::SlotDe
         freeval(value);
         return nullptr;
     }
+    value = coerce_store_value(&desc->type, *dest, value);
+    if (!value)
+        return nullptr;
     if (!type_constraint_matches(&desc->type, value)) {
         yyerror("variable %s expects %s, got %s", desc->name.c_str(),
                 type_constraint_name(&desc->type), typename_of(value));
@@ -180,6 +184,9 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_store_slot(const skein::bc::SlotDes
         freeval(value);
         return nullptr;
     }
+    value = coerce_store_value(&desc->type, *dest, value);
+    if (!value)
+        return nullptr;
     if (!type_constraint_matches(&desc->type, value)) {
         yyerror("variable %s expects %s, got %s", desc->name.c_str(),
                 type_constraint_name(&desc->type), typename_of(value));
@@ -992,6 +999,9 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_define_name(
         freeval(value);
         return nullptr;
     }
+    value = coerce_store_value(&decl.type, NULL, value);
+    if (!value)
+        return nullptr;
     if (!type_constraint_matches(&decl.type, value)) {
         yyerror("variable %s expects %s, got %s", decl.name.c_str(),
                 type_constraint_name(&decl.type), typename_of(value));
@@ -1001,6 +1011,8 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_define_name(
     symbol *sym = newsym(decl.name.c_str());
     sym->val = value;
     type_constraint_assign(&sym->type, &decl.type);
+    if (decl.type.kind == TYPE_ANY)
+        type_constraint_set_from_ref(&sym->type, value);
     sym->exported = decl.exported;
     sym->is_const = decl.is_const;
     savesym(sym);

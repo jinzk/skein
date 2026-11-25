@@ -436,6 +436,9 @@ struct value_t *assign_name(struct symref *ref, struct ast *value_ast) {
     if (v->type == T_return || v->type == T_break ||
         v->type == T_continue)
         return v;
+    v = coerce_store_value(&s->type, s->val, v);
+    if (!v)
+        return NULL;
     if (!type_constraint_matches(&s->type, v)) {
         yyerror("variable %s expects %s, got %s", s->name,
                 type_constraint_name(&s->type), typename_of(v));

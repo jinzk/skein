@@ -1,6 +1,7 @@
 #include "dict.h"
 #include "eval_helpers.h"
 #include "cycle.h"
+#include "refvalue.h"
 #include "scopestack.h"
 #include "structtype.h"
 #include "symbol.h"
@@ -453,23 +454,33 @@ static struct value_t *write_member_value(struct value_t *container,
                 (size_t)field >= sv->def->fields.size()) {
                 yyerror("field %s not found in %s", name,
                         sv->def ? sv->def->name.c_str() : "struct");
-            } else if (!type_constraint_matches(
-                           &sv->def->fields[(size_t)field].type, val)) {
-                yyerror("field %s of %s expects %s, got %s", name,
-                        sv->def->name.c_str(),
-                        type_constraint_name(
-                            &sv->def->fields[(size_t)field].type),
-                        typename_of(val));
             } else {
-                ensure_unique_struct(sv);
-                if (!sv->payload ||
-                    (size_t)field >= sv->payload->fields.size()) {
-                    yyerror("invalid struct field assignment");
+                const type_constraint &field_type =
+                    sv->def->fields[(size_t)field].type;
+                value_t *current =
+                    sv->payload &&
+                            (size_t)field < sv->payload->fields.size()
+                        ? sv->payload->fields[(size_t)field]
+                        : NULL;
+                val = coerce_store_value(&field_type, current, val);
+                if (!val)
+                    return NULL;
+                if (!type_constraint_matches(&field_type, val)) {
+                    yyerror("field %s of %s expects %s, got %s", name,
+                            sv->def->name.c_str(),
+                            type_constraint_name(&field_type),
+                            typename_of(val));
                 } else {
-                    freeval(sv->payload->fields[(size_t)field]);
-                    sv->payload->fields[(size_t)field] = val;
-                    val = NULL;
-                    ret = dupval(sv->payload->fields[(size_t)field]);
+                    ensure_unique_struct(sv);
+                    if (!sv->payload ||
+                        (size_t)field >= sv->payload->fields.size()) {
+                        yyerror("invalid struct field assignment");
+                    } else {
+                        freeval(sv->payload->fields[(size_t)field]);
+                        sv->payload->fields[(size_t)field] = val;
+                        val = NULL;
+                        ret = dupval(sv->payload->fields[(size_t)field]);
+                    }
                 }
             }
         }
@@ -1021,6 +1032,9 @@ struct value_t *assign_symbol_direct(struct symbol *s,
     if (value->type == T_return || value->type == T_break ||
         value->type == T_continue)
         return value;
+    value = coerce_store_value(&s->type, s->val, value);
+    if (!value)
+        return NULL;
     if (!type_constraint_matches(&s->type, value)) {
         yyerror("variable %s expects %s, got %s", s->name,
                 type_constraint_name(&s->type), typename_of(value));

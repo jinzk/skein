@@ -19,7 +19,8 @@ struct BuiltinContext {
     virtual const TypeNode *infer(struct ast *expr, Env &env) = 0;
     virtual bool check_expr(struct ast *expr, const TypeNode *expected,
                             Env &env, bool explicit_cast = false,
-                            bool force_element = false) = 0;
+                            bool force_element = false,
+                            bool no_implicit_ref = false) = 0;
     virtual const TypeNode *infer_lambda_result(struct ast *function,
                                                 const TypeNode *element,
                                                 Env &env) = 0;

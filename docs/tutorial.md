@@ -1102,6 +1102,7 @@ p.sum()
 - `struct` 可以直接写方法，也可以只写字段；inline 方法使用与 `impl Type` 方法相同的 `func` 语法；
 - `impl Type` 保留为补充手段，用来给同一类型追加方法；inline 方法与 `impl` 方法共享方法命名空间，同名重复（inline / inline、inline / impl、impl / impl）报 `method repeated <name>`，`impl` 不能覆盖 inline 方法；
 - 方法第一个参数必须是显式 `self`；例外是构造函数 `func new(...)`（无 `self`，只能通过 `Type.new(...)` 调用，返回类型隐式固定为 `Type`，且不能声明返回类型或带装饰器）；
+- 目标类型是 `ref T` 时，构造函数调用和 `T { ... }` 字面量会隐式包装为引用；已经持有 struct 值的变量必须用 `ref(value)` 或 `value as ref T` 显式转换，容器元素同样需要显式 `ref(...)`；
 - 方法参数支持默认值，但 `self` 不能有默认值；默认值可以引用 `self` 和更早的参数；
 - 方法只能通过实例调用：`p.length()`；构造函数是唯一例外，用 `Point.new(...)` 调用；
 - 方法本身可以作为值提取，例如 `let f = p.length; f()`；

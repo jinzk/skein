@@ -535,6 +535,13 @@ struct value_t *call_slice_builtin(
 
 static struct value_t *call_ref_builtin(
     int functype, const std::vector<struct value_t *> &args) {
+    if (functype == B_ref_wrap) {
+        if (args.size() != 1) {
+            yyerror("ref expects 1 argument, got %d", (int)args.size());
+            return NULL;
+        }
+        return wrap_struct_as_ref(args[0]);
+    }
     const char *name = functype == B_ref_set ? "std.ref.set"
                        : functype == B_ref_upgrade ? "std.ref.upgrade"
                                                    : "std.ref.snapshot";
@@ -563,7 +570,7 @@ struct value_t *call_builtin(int functype,
                              const std::vector<struct value_t *> &args) {
     if (functype == B_slice)
         return call_slice_builtin(args);
-    if (functype >= B_ref_set && functype <= B_ref_snapshot)
+    if (functype >= B_ref_set && functype <= B_ref_wrap)
         return call_ref_builtin(functype, args);
     if (functype >= B_meta_type_info && functype <= B_meta_has_type)
         return call_meta_builtin(functype, args);

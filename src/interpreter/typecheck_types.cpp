@@ -638,6 +638,15 @@ MatchResult match_type(const TypeNode *actual, const TypeNode *expected) {
     }
     if (actual->kind == TYPE_REF && expected->kind == TYPE_NAMED)
         return match_type(type_element(actual, 0), expected);
+    if (actual->kind == TYPE_REF && expected->kind == TYPE_WEAK) {
+        /* A weak target may be initialized from a strong ref; runtime
+         * converts the handle while keeping the target type. */
+        const TypeNode *actual_inner = type_element(actual, 0);
+        const TypeNode *expected_inner = type_element(expected, 0);
+        if (actual_inner && expected_inner)
+            return match_type(actual_inner, expected_inner);
+        return MatchResult::Ok;
+    }
     if (actual->kind == TYPE_REF && expected->kind == TYPE_REF &&
         !actual->args.empty() && !expected->args.empty()) {
         const TypeNode *actual_inner = type_element(actual, 0);

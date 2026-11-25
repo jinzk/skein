@@ -1,5 +1,6 @@
 #include "vm_slots.h"
 
+#include "refvalue.h"
 #include "symbol.h"
 #include "string_grow.h"
 #include "value_ops.h"
@@ -29,10 +30,17 @@ const char *param_name(const skein::bc::Proto &proto,
 }
 
 bool check_direct_param(const VmSlotView &view, uint32_t index,
-                        value_t *value) {
+                        value_t *&value) {
     struct symlist *sl = param_meta(view.current_def, index);
     if (!sl || !sl->type)
         return true;
+    value = coerce_store_value(
+        sl->type,
+        index < view.param_values->size() ? (*view.param_values)[index]
+                                          : NULL,
+        value);
+    if (!value)
+        return false;
     if (type_constraint_matches(sl->type, value))
         return true;
     yyerror("variable %s expects %s, got %s",
@@ -42,7 +50,7 @@ bool check_direct_param(const VmSlotView &view, uint32_t index,
 }
 
 bool check_direct_slot(const VmSlotView &view, uint32_t index,
-                       value_t *value, bool check_const) {
+                       value_t *&value, bool check_const) {
     if (index >= view.proto->slots.size())
         return false;
     const skein::bc::SlotDesc &slot = view.proto->slots[index];
@@ -53,6 +61,12 @@ bool check_direct_slot(const VmSlotView &view, uint32_t index,
         return false;
     }
     if (!validate_type_constraint(&slot.type))
+        return false;
+    value = coerce_store_value(
+        &slot.type,
+        index < view.slot_values->size() ? (*view.slot_values)[index] : NULL,
+        value);
+    if (!value)
         return false;
     if (!type_constraint_matches(&slot.type, value)) {
         yyerror("variable %s expects %s, got %s", slot.name.c_str(),

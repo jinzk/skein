@@ -2098,7 +2098,8 @@ let p = Point.new(3.0, 4.0);
 - 返回类型隐式固定为 `Type`，**不能**写返回类型标注（`func new(...): Point` 报 `constructor return type is implicit`）；
 - 只能通过类型名调用：`Point.new(...)`；`p.new(...)` 报方法不存在；
 - 不能用于 `enum`，不能带装饰器；
-- 构造函数返回普通的 struct 值（值语义）；需要 `ref` 时由目标类型或 `ref(...)` 显式转换，见 5.12.3。
+- 构造函数返回普通的 struct 值（值语义）；目标类型是 `ref T` 时，构造函数调用和 `T { ... }`
+  字面量会隐式包装为引用；已经持有 struct 值的变量必须用 `ref(expr)` 显式转换，见 5.12.3。
 
 #### 5.12.1 方法装饰器
 
@@ -2342,12 +2343,18 @@ print(b.prev?.value);       // 1
 
 - `ref T` 是类型化、受 GC 管理的安全句柄；不支持地址运算、手动释放或裸指针；
 - `T { ... }` 仍是普通值；只有 `ref T { ... }` 创建引用对象；
+- 目标类型为 `ref T` 时，**新建**的 `T { ... }` 字面量和 `Type.new(...)` 构造函数调用会
+  隐式包装；已经保存 struct 值的变量不会隐式包装，必须写 `ref(value)`（复制字段内容）
+  或 `value as ref T`；
+- `ref(expr)` 只接受 struct 值；`ref(ref_value)` 和 `ref(null)` 报类型错误；容器元素
+  不做自动包装，`list[ref T]` 的元素需要写成 `ref(T { ... })`；
 - 复制 `ref` 只复制句柄：`let c = a` 与原值指向同一对象；`a = b` 只重新绑定
   `a`；替换整个目标内容用 `a.* = T { ... }` 或 `std.ref.set(a, T { ... })`；
 - 通过 `ref` 调用方法时 `self` 是句柄，方法内修改会持久化；普通值接收者仍是
   副本语义；
 - `weak T` 不保活，保存 `{id, generation}`；目标回收后 generation 失效；
-  `std.ref.upgrade(w)` 得到 `ref T?`；
+  `std.ref.upgrade(w)` 得到 `ref T?`；初始化 `weak T` 或 `weak T?` 时可直接使用
+  `ref T` / `weak T` / `null`，运行时会转成弱引用；裸 struct 值不能赋给 `weak T`；
 - `?.` 是通用可选字段访问：`a?.b` 在 `a` 为 `null`（包括失效弱引用升级失败）时
   返回 `null`，否则读取字段；可继续组合成员访问，例如 `b.prev?.value`；
   目前不支持 `?.()` 或 `?.[index]`；

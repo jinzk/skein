@@ -371,8 +371,7 @@ struct_def *ref_value_def(const struct value_t *value) {
 }
 
 struct value_t *new_ref_value(struct_def *def,
-                              const std::shared_ptr<struct_payload> &payload) {
-    if (!def) {
+                              const std::shared_ptr<struct_payload> &payload) {    if (!def) {
         yyerror("invalid ref type");
         return nullptr;
     }
@@ -397,6 +396,73 @@ struct value_t *new_ref_value(struct_def *def,
     tls_refs.objects.push_back(object);
     gc_note_ref_allocation();
     return ref_value_from_object(object);
+}
+
+struct value_t *wrap_struct_as_ref(struct value_t *value) {
+    if (!value || value->type != T_struct) {
+        yyerror("ref expects a struct value, got %s", typename_of(value));
+        return nullptr;
+    }
+    struct struct_value_t *source = (struct struct_value_t *)value;
+    if (!source->def) {
+        yyerror("invalid struct value");
+        return nullptr;
+    }
+    auto payload = std::make_shared<struct_payload>();
+    if (source->payload) {
+        payload->fields.reserve(source->payload->fields.size());
+        for (value_t *field : source->payload->fields)
+            payload->fields.push_back(dupval(field));
+    }
+    return new_ref_value(source->def, payload);
+}
+
+struct value_t *coerce_store_value(const struct type_constraint *type,
+                                   struct value_t *current,
+                                   struct value_t *value) {
+    if (!value)
+        return nullptr;
+    if (type && type->kind == TYPE_REF) {
+        if (is_ref_value(value))
+            return value;
+        if (value->type == T_struct) {
+            value_t *ref = wrap_struct_as_ref(value);
+            freeval(value);
+            return ref;
+        }
+        return value;
+    }
+    if (type && type->kind == TYPE_WEAK) {
+        if (is_ref_value(value)) {
+            value_t *weak = new_weak_from_ref(value);
+            freeval(value);
+            return weak;
+        }
+        return value;
+    }
+    if (current && is_ref_value(current) && value->type == T_struct) {
+        value_t *ref = wrap_struct_as_ref(value);
+        freeval(value);
+        return ref;
+    }
+    return value;
+}
+
+bool type_constraint_set_from_ref(struct type_constraint *type,
+                                  const struct value_t *value) {
+    if (!type || !value)
+        return false;
+    struct_def *def = ref_value_def(value);
+    if (!def)
+        return false;
+    type->kind = is_ref_value(value) ? TYPE_REF : TYPE_WEAK;
+    type->name = def->name.c_str();
+    type->source = def->source.c_str();
+    type->nullable = false;
+    type->arity = 0;
+    type->display = NULL;
+    type->detail = NULL;
+    return true;
 }
 
 struct value_t *new_weak_from_ref(struct value_t *value) {

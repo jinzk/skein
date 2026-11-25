@@ -1930,6 +1930,10 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
         $$ = make_tuple_lambda($2, $6);
       }
     | '(' exp ')'                         { $$ = $2; }
+    | REF '(' exp ')'                     {
+        struct ast *args = newast('L', $3, NULL);
+        $$ = newcall(newbuiltin(B_ref_wrap), args);
+      }
     | MATCH HEADER_LPAREN exp ')' BODY_LBRACE EMPTY_BLOCK_CLOSE
                                            {
         yyerror("match requires at least one arm");
@@ -2001,7 +2005,19 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
     | exp IS type %prec IS                {
         $$ = newis($1, runtime_type_or_error($3, "'is'"));
       }
-    | exp AS type %prec AS                { $$ = newcast($1, $3); }
+    | exp AS type %prec AS                {
+        /*
+         * `expr as ref T` is the explicit struct-to-ref conversion, like
+         * `ref(expr)`.  Other casts stay static type assertions.
+         */
+        if ($3 && $3->kind == TYPE_REF) {
+            struct ast *args = newast('L', $1, NULL);
+            $$ = newcall(newbuiltin(B_ref_wrap), args);
+            free_type_constraint($3);
+        } else {
+            $$ = newcast($1, $3);
+        }
+      }
     | exp '?' exp ':' exp %prec '?'       { $$ = newflow('T', $1, $3, $5); }
     | exp ON ERROR '(' on_error_name ')' '{' empty_body %prec ON {
         $$ = newonerror($1, $5, NULL);

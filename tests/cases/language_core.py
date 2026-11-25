@@ -562,3 +562,93 @@ def run_cases():
           "struct Point { x: float; }\n"
           "impl Point { @dec func new(x) { return Point { x: x }; } }\n",
           stderr="constructor new cannot have decorators")
+
+    check("constructor implicitly wraps to ref",
+          "struct Point { x: float; }\n"
+          "impl Point { func new(x) { return Point { x: x }; } }\n"
+          "let a: ref Point = Point.new(1.0);\n"
+          "let b = a;\n"
+          "b.x = 9.0;\n"
+          "println(str(a.x));\n",
+          stdout="9.0")
+
+    check("struct literal implicitly wraps to ref",
+          "struct Point { x: float; }\n"
+          "let a: ref Point = Point { x: 1.0 };\n"
+          "let b = a;\n"
+          "b.x = 4.0;\n"
+          "println(str(a.x));\n",
+          stdout="4.0")
+
+    check("struct value requires explicit ref",
+          "struct Point { x: float; }\n"
+          "impl Point { func new(x) { return Point { x: x }; } }\n"
+          "let s = Point.new(1.0);\n"
+          "let a: ref Point = s;\n",
+          stderr="expected ref Point, got Point")
+
+    check("ref reassignment wraps a fresh constructor",
+          "struct Point { x: float; }\n"
+          "impl Point { func new(x) { return Point { x: x }; } }\n"
+          "let a = ref Point { x: 1.0 };\n"
+          "a = Point.new(2.0);\n"
+          "let b = a;\n"
+          "b.x = 9.0;\n"
+          "println(str(a.x));\n",
+          stdout="9.0")
+
+    check("ref field store wraps a fresh constructor",
+          "struct Point { x: float; }\n"
+          "impl Point { func new(x) { return Point { x: x }; } }\n"
+          "struct Holder { p: ref Point; }\n"
+          "let h = Holder { p: Point.new(1.0) };\n"
+          "h.p = Point.new(2.0);\n"
+          "println(str(h.p.x));\n",
+          stdout="2.0")
+
+    check("ref parameter wraps a fresh constructor",
+          "struct Point { x: float; }\n"
+          "impl Point { func new(x) { return Point { x: x }; } }\n"
+          "func bump(p: ref Point) { p.x = 9.0; }\n"
+          "bump(Point.new(1.0));\n"
+          "println(\"ok\");\n",
+          stdout="ok")
+
+    check("explicit ref conversion copies a struct value",
+          "struct Point { x: float; }\n"
+          "let s = Point { x: 4.0 };\n"
+          "let a = ref(s);\n"
+          "a.x = 5.0;\n"
+          "println(str(s.x) + \" \" + str(a.x));\n",
+          stdout="4.0 5.0")
+
+    check("as ref wraps a struct value",
+          "struct Point { x: float; }\n"
+          "let s = Point { x: 1.0 };\n"
+          "let a = s as ref Point;\n"
+          "a.x = 7.0;\n"
+          "println(str(a.x));\n",
+          stdout="7.0")
+
+    check("ref rejects a ref handle",
+          "struct Point { x: float; }\n"
+          "let a = ref Point { x: 1.0 };\n"
+          "let b = ref(a);\n",
+          stderr="ref expects a struct value, got ref Point")
+
+    check("ref rejects null",
+          "let b = ref(null);\n",
+          stderr="ref expects a struct value, got null")
+
+    check("weak accepts a ref handle",
+          "import std;\n"
+          "struct Node { value: int; }\n"
+          "let n = ref Node { value: 1 };\n"
+          "let w: weak Node = n;\n"
+          "println(str(std.ref.upgrade(w) != null));\n",
+          stdout="true")
+
+    check("container elements do not implicitly wrap",
+          "struct Point { x: float; }\n"
+          "let points: list[ref Point] = [Point { x: 1.0 }];\n",
+          stderr="expected ref Point, got Point")

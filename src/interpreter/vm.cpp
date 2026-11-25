@@ -16,6 +16,7 @@
 #include "package.h"
 #include "pattern.h"
 #include "runtime_state.h"
+#include "refvalue.h"
 #include "scopestack.h"
 #include "structeval.h"
 #include "structtype.h"
@@ -2001,6 +2002,9 @@ public:
                 struct upvalue_cell *cell = upvalue_cell_at(ins.b);
                 value_t *result = NULL;
                 if (cell) {
+                    value = coerce_store_value(NULL, cell_value(cell), value);
+                    if (!value)
+                        return OpResult::Abort;
                     result = assign_upvalue_cell(cell, value);
                 } else {
                     struct symbol *sym = upvalue_fallback_symbol(ins.b);
@@ -2124,6 +2128,13 @@ public:
                         yyerror("cannot assign to constant self");
                         return OpResult::Abort;
                     }
+                    value = coerce_store_value(
+                        NULL,
+                        ins.b < param_values_.size() ? param_values_[ins.b]
+                                                     : NULL,
+                        value);
+                    if (!value)
+                        return OpResult::Abort;
                     value_t *result = assign_direct_param(ins.b, value);
                     if (!result)
                         return OpResult::Abort;
@@ -2274,6 +2285,9 @@ public:
                     freeval(value);
                     return OpResult::Abort;
                 }
+                value = coerce_store_value(&slot.type, NULL, value);
+                if (!value)
+                    return OpResult::Abort;
                 if (!type_constraint_matches(&slot.type, value)) {
                     yyerror("variable %s expects %s, got %s",
                             slot.name.c_str(),
@@ -2307,6 +2321,8 @@ public:
                     type_constraint_assign(&sym->type, &slot.type);
                     sym->is_const = slot.is_const;
                 }
+                if (slot.type.kind == TYPE_ANY)
+                    type_constraint_set_from_ref(&sym->type, value);
                 if (!slot_pool_safe_)
                     savesym(sym);
                 slot_symbols_[ins.b] = sym;
@@ -2358,6 +2374,15 @@ public:
                     return OpResult::Abort;
                 }
                 const skein::bc::SlotDesc &slot = proto().slots[ins.b];
+                value_t *current =
+                    direct_slots_
+                        ? (ins.b < slot_values_.size() ? slot_values_[ins.b]
+                                                       : NULL)
+                        : (slot_symbols_[ins.b] ? slot_symbols_[ins.b]->val
+                                                : NULL);
+                value = coerce_store_value(&slot.type, current, value);
+                if (!value)
+                    return OpResult::Abort;
                 if (direct_slots_) {
                     value_t *result = assign_direct_slot(ins.b, value);
                     if (!result)
@@ -3006,6 +3031,9 @@ public:
                     freeval(value);
                     return OpResult::Abort;
                 }
+                value = coerce_store_value(&def.type, NULL, value);
+                if (!value)
+                    return OpResult::Abort;
                 if (!type_constraint_matches(&def.type, value)) {
                     yyerror("variable %s expects %s, got %s",
                             def.name.c_str(),
@@ -3018,6 +3046,8 @@ public:
                 struct symbol *sym = newsym(def.name.c_str());
                 sym->val = value;
                 type_constraint_assign(&sym->type, &def.type);
+                if (def.type.kind == TYPE_ANY)
+                    type_constraint_set_from_ref(&sym->type, value);
                 sym->exported = def.exported;
                 sym->is_const = def.is_const;
                 savesym(sym);
@@ -4044,22 +4074,39 @@ private:
         skipped_scopes_ = 0;
     }
 
-    void bind_fast_arguments(function_code *code,
+    bool bind_fast_arguments(function_code *code,
                              value_t **args, size_t argc) {
         (void)argc;
         if (direct_params_) {
             param_values_.clear();
             param_values_.reserve((size_t)code->nparams);
+            struct symlist *sl = code->sl;
             for (int i = 0; i < code->nparams; ++i) {
-                param_values_.push_back(args[(size_t)i]);
+                value_t *value = args[(size_t)i];
+                if (sl && sl->type) {
+                    value = coerce_store_value(sl->type, NULL, value);
+                    args[(size_t)i] = value;
+                    if (!value)
+                        return false;
+                }
+                param_values_.push_back(value);
                 args[(size_t)i] = NULL;
+                if (sl)
+                    sl = sl->next;
             }
-            return;
+            return true;
         }
         int index = 0;
         for (struct symlist *sl = code->sl; sl; sl = sl->next, ++index) {
             struct symbol *sym =
                 param_pool_safe_ ? take_param_symbol(sl->sym->name) : NULL;
+            if (sl->type) {
+                value_t *value = coerce_store_value(
+                    sl->type, NULL, args[(size_t)index]);
+                args[(size_t)index] = value;
+                if (!value)
+                    return false;
+            }
             if (sym) {
                 reset_param_symbol(sym, sl, args[(size_t)index]);
             } else {
@@ -4075,6 +4122,7 @@ private:
                 sym->is_const = true;
             param_symbols_.push_back(sym);
         }
+        return true;
     }
 
     FastCallResult try_fast_call(value_t *callee,
@@ -4169,7 +4217,8 @@ private:
             defer_scopes_.emplace_back();
 
         setup_frame_scopes();
-        bind_fast_arguments(code, args, argc);
+        if (!bind_fast_arguments(code, args, argc))
+            return FastCallResult::Failed;
         ++context_.vm_call_depth;
         diag_frames_ = 1;
         diag_push_call(name, caller_source, line, column);
@@ -4257,7 +4306,8 @@ private:
             defer_scopes_.emplace_back();
 
         setup_frame_scopes();
-        bind_fast_arguments(code, args, argc);
+        if (!bind_fast_arguments(code, args, argc))
+            return false;
         if (diag_frames_ < 64) {
             diag_push_call(name, caller_source, line, column);
             ++diag_frames_;

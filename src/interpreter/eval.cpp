@@ -380,6 +380,9 @@ struct value_t *eval(struct ast *a) {
                     ret = v;
                     break;
                 }
+                v = coerce_store_value(def->type, NULL, v);
+                if (!v)
+                    break;
                 if (!type_constraint_matches(def->type, v)) {
                     yyerror("variable %s expects %s, got %s", name,
                             type_constraint_name(def->type), typename_of(v));
@@ -390,6 +393,8 @@ struct value_t *eval(struct ast *a) {
                 s->val = v;
                 if (def->type)
                     type_constraint_assign(&s->type, def->type);
+                else
+                    type_constraint_set_from_ref(&s->type, v);
                 s->exported = def->exported;
                 s->is_const = def->is_const;
                 savesym(s);

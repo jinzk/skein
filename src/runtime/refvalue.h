@@ -38,6 +38,24 @@ struct_def *ref_value_def(const struct value_t *value);
 
 struct value_t *new_ref_value(struct_def *def,
                               const std::shared_ptr<struct_payload> &payload);
+/*
+ * Explicit `ref(expr)` conversion.  Accepts a struct value only; strong refs,
+ * weak refs, and null are rejected.  The source value is not consumed and the
+ * new ref gets its own copy of the payload.
+ */
+struct value_t *wrap_struct_as_ref(struct value_t *value);
+/*
+ * Apply target-type coercion before a store: struct -> ref for ref targets,
+ * ref -> weak for weak targets, and struct -> ref when the existing value is
+ * a ref (unannotated inferred ref variables).  Returns a value owned by the
+ * caller; the input is released when a new wrapper is created.
+ */
+struct value_t *coerce_store_value(const struct type_constraint *type,
+                                   struct value_t *current,
+                                   struct value_t *value);
+/* Record the ref/weak target type of an inferred binding at definition. */
+bool type_constraint_set_from_ref(struct type_constraint *type,
+                                  const struct value_t *value);
 struct value_t *new_weak_from_ref(struct value_t *value);
 struct value_t *ref_upgrade(struct value_t *value);
 struct value_t *ref_snapshot(struct value_t *value);

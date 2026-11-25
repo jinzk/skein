@@ -1,19 +1,28 @@
 #!/usr/bin/env python3
 """Interactive completion popup must render and accept a selected candidate."""
-import fcntl
 import os
-import pty
 import select
 import struct
 import subprocess
 import sys
-import termios
 import time
+
+# ctest treats this exit code as "skipped" rather than "passed".  The popup
+# needs a POSIX pty; the underlying candidate/layout logic is covered on every
+# platform by repl_ui_test.
+SKIP_RETURN_CODE = 77
+
+if os.name != "posix":  # pragma: no cover - Windows has no POSIX pty modules
+    sys.exit(SKIP_RETURN_CODE)
+
+import fcntl  # noqa: E402
+import pty  # noqa: E402
+import termios  # noqa: E402
 
 BIN = sys.argv[1]
 
 if not hasattr(termios, "TIOCSWINSZ"):  # pragma: no cover - non-pty platforms
-    sys.exit(0)
+    sys.exit(SKIP_RETURN_CODE)
 
 master, slave = pty.openpty()
 fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))

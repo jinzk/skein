@@ -1310,6 +1310,9 @@ if(BUILD_TESTING)
       set_tests_properties(repl_popup_test PROPERTIES
         LABELS "core"
         TIMEOUT 60
+        # The popup needs a POSIX pty; repl_ui_test covers the candidate and
+        # layout logic on every platform.
+        SKIP_RETURN_CODE 77
       )
       add_test(
         NAME vm_bench_test

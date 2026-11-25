@@ -142,8 +142,13 @@ bool validate_decorated_method(const struct struct_member *member) {
         std::strcmp(func->sl->sym->name, "self") != 0 ||
         func->sl->variadic) {
         set_method_location(member);
-        yyerror("decorated method %s must start with self",
-                member_name(member));
+        if (std::strcmp(member_name(member), "new") == 0) {
+            yyerror("constructor %s cannot have decorators",
+                    member_name(member));
+        } else {
+            yyerror("decorated method %s must start with self",
+                    member_name(member));
+        }
         return false;
     }
     if (func->sl->has_default) {

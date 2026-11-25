@@ -951,6 +951,26 @@ std::shared_ptr<function_def> structtype_method(const type_def *def,
     return method == def->methods.end() ? NULL : method->second;
 }
 
+bool structtype_is_constructor(const function_def *method) {
+    return method && method->code && !method->code->is_method;
+}
+
+std::shared_ptr<function_def> structtype_constructor(const type_def *def) {
+    if (!def || def->kind != TYPE_OWNER_STRUCT)
+        return NULL;
+    std::shared_ptr<function_def> method = structtype_method(def, "new");
+    return structtype_is_constructor(method.get()) ? method : NULL;
+}
+
+struct value_t *structtype_constructor_value(const type_def *def) {
+    std::shared_ptr<function_def> method = structtype_constructor(def);
+    if (!method || !method->code)
+        return NULL;
+    std::vector<std::shared_ptr<struct upvalue_cell>> upvalues =
+        method->upvalues;
+    return newfuncval(method->code, method->closure, std::move(upvalues));
+}
+
 void structtype_set_thread_method(const type_def *def, const std::string &name,
                                   std::shared_ptr<function_def> method) {
     if (!def || !method)

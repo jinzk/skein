@@ -1678,6 +1678,16 @@ struct value_t *eval(struct ast *a) {
                             fields, spread);
                         break;
                     }
+                    if (status == STRUCTTYPE_LOOKUP_FOUND &&
+                        lookup.kind == STRUCTTYPE_LOOKUP_STRUCT &&
+                        std::strcmp(field, "new") == 0) {
+                        ret = structtype_constructor_value(
+                            lookup.structure);
+                        if (!ret) {
+                            yyerror("type %s has no constructor", base);
+                        }
+                        break;
+                    }
                     if (status == STRUCTTYPE_LOOKUP_AMBIGUOUS ||
                         status == STRUCTTYPE_LOOKUP_NOT_VISIBLE ||
                         status == STRUCTTYPE_LOOKUP_ERROR) {
@@ -1711,9 +1721,20 @@ struct value_t *eval(struct ast *a) {
                 }
                 break;
             }
+            bool field_call =
+                call->callee && call->callee->nodetype == 'j';
+            /*
+             * `Type.new(...)` has an unresolved base; send it through the
+             * generic callee path so the type-name lookup can build the
+             * constructor function value.
+             */
+            bool unresolved_field_base =
+                field_call && call->callee->l &&
+                call->callee->l->nodetype == 'N' &&
+                !lookupsym(((struct symref *)call->callee->l)->name);
             if (call->callee && (call->callee->nodetype == 'G' ||
-                                 call->callee->nodetype == 'j')) {
-                bool field_access = call->callee->nodetype == 'j';
+                                 (field_call && !unresolved_field_base))) {
+                bool field_access = field_call;
                 struct value_t *receiver = eval(call->callee->l);
                 if (!receiver)
                     break;
@@ -1759,7 +1780,8 @@ struct value_t *eval(struct ast *a) {
                         if (sv->def) {
                             std::shared_ptr<function_def> method =
                                 structtype_method(sv->def, name);
-                            if (method) {
+                            if (method &&
+                                !structtype_is_constructor(method.get())) {
                                 try {
                                     ret = call_method_value(receiver, method,
                                                             call->args);

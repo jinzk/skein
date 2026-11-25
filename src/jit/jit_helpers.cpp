@@ -635,7 +635,7 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_get_field(value_t *container,
         }
         std::shared_ptr<function_def> method =
             structtype_method(sv->def, name);
-        if (method) {
+        if (method && !structtype_is_constructor(method.get())) {
             value_t *result =
                 newmethodval(dupval(container), method);
             freeval(container);
@@ -671,7 +671,7 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_get_field(value_t *container,
         }
         std::shared_ptr<function_def> method =
             structtype_method(ev->def, name);
-        if (method) {
+        if (method && !structtype_is_constructor(method.get())) {
             value_t *result =
                 newmethodval(dupval(container), method);
             freeval(container);
@@ -832,6 +832,17 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_get_field_or_enum(
         return build(lookup.enumeration->source.c_str(),
                      lookup.enumeration->name.c_str(), desc->field.c_str(),
                      fields, spread);
+    }
+    if (status == STRUCTTYPE_LOOKUP_FOUND &&
+        lookup.kind == STRUCTTYPE_LOOKUP_STRUCT &&
+        desc->field == "new" && lookup.structure) {
+        value_t *constructor =
+            structtype_constructor_value(lookup.structure);
+        if (!constructor) {
+            yyerror("type %s has no constructor", desc->base.c_str());
+            return nullptr;
+        }
+        return constructor;
     }
     if (status == STRUCTTYPE_LOOKUP_AMBIGUOUS ||
         status == STRUCTTYPE_LOOKUP_NOT_VISIBLE ||
@@ -2341,7 +2352,7 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_invoke_method(
             if (sv->def) {
                 std::shared_ptr<function_def> method =
                     structtype_method(sv->def, name);
-                if (method)
+                if (method && !structtype_is_constructor(method.get()))
                     callee = newmethodval(receiver, method);
             }
         } else if (receiver->type == T_enum) {
@@ -2349,7 +2360,7 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_invoke_method(
             if (ev->def) {
                 std::shared_ptr<function_def> method =
                     structtype_method(ev->def, name);
-                if (method)
+                if (method && !structtype_is_constructor(method.get()))
                     callee = newmethodval(receiver, method);
             }
         }

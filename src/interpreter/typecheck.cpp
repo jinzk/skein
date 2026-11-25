@@ -1011,7 +1011,8 @@ struct Checker : public BuiltinContext {
             if (def) {
                 std::shared_ptr<function_def> method =
                     structtype_method(def, name);
-                if (method && method->code) {
+                if (method && method->code &&
+                    !structtype_is_constructor(method.get())) {
                     FunctionSig sig =
                         method_signature_from_code(method->code.get());
                     adjust_generator_result(sig, NULL, method->code.get());

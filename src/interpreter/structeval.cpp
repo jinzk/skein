@@ -124,10 +124,21 @@ static struct value_t *eval_field_default(
     return value;
 }
 
+static bool method_has_self(const struct symlist *sl) {
+    return sl && sl->sym && sl->sym->name &&
+           std::strcmp(sl->sym->name, "self") == 0;
+}
+
 static bool method_self_ok(struct symlist *sl, const char *owner,
-                           std::string &error) {
-    if (!sl || !sl->sym) {
-        error = "method requires self";
+                           const char *method_name, std::string &error) {
+    if (!method_has_self(sl)) {
+        /* `impl Type { func new(...) }` is the type-level constructor. */
+        if (method_name && std::strcmp(method_name, "new") == 0)
+            return true;
+        if (sl && sl->sym)
+            error = "method first parameter must be self";
+        else
+            error = "method requires self";
         return false;
     }
     if (std::strcmp(sl->sym->name, "self") != 0 || sl->variadic) {
@@ -168,12 +179,30 @@ static bool evaluate_method(struct struct_member *member, type_def *owner,
         out.reset();
         return false;
     }
+    const bool is_constructor = !method_has_self(out->code->sl);
     if (!method_self_ok(out->code->sl, owner ? owner->name.c_str() : NULL,
-                        error)) {
+                        member->name, error)) {
         out.reset();
         return false;
     }
-    out->code->is_method = true;
+    if (is_constructor && owner && owner->kind != TYPE_OWNER_STRUCT) {
+        error = "constructor requires a struct type";
+        out.reset();
+        return false;
+    }
+    if (is_constructor && out->code->ret_type) {
+        error = "constructor return type is implicit";
+        out.reset();
+        return false;
+    }
+    if (is_constructor && owner) {
+        auto result = std::make_shared<type_constraint>();
+        result->kind = TYPE_NAMED;
+        result->name = owner->name.c_str();
+        result->source = owner->source.c_str();
+        out->code->ret_type = result;
+    }
+    out->code->is_method = !is_constructor;
     out->code->name = member->name;
     return true;
 }
@@ -560,14 +589,33 @@ bool declare_impl_meta(
                 definition->upvalues.push_back(capture_upvalue(name));
         }
         std::string method_error;
+        const bool is_constructor =
+            !method.second || !method_has_self(method.second->sl);
         if (!method.second ||
             !method_self_ok(method.second->sl, owner->name.c_str(),
-                            method_error)) {
+                            method.first.c_str(), method_error)) {
             yyerror("%s", method_error.c_str());
             ok = false;
             continue;
         }
-        method.second->is_method = true;
+        if (is_constructor && owner->kind != TYPE_OWNER_STRUCT) {
+            yyerror("constructor requires a struct type");
+            ok = false;
+            continue;
+        }
+        if (is_constructor && method.second->ret_type) {
+            yyerror("constructor return type is implicit");
+            ok = false;
+            continue;
+        }
+        if (is_constructor) {
+            auto result = std::make_shared<type_constraint>();
+            result->kind = TYPE_NAMED;
+            result->name = owner->name.c_str();
+            result->source = owner->source.c_str();
+            method.second->ret_type = result;
+        }
+        method.second->is_method = !is_constructor;
         method.second->name = method.first;
         if (!structtype_add_method(owner, method.first, definition,
                                    method_error)) {

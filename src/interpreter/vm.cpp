@@ -1455,6 +1455,16 @@ public:
                             lookup.enumeration->source.c_str(),
                             lookup.enumeration->name.c_str(),
                             desc.field.c_str(), fields, spread);
+                    } else if (status == STRUCTTYPE_LOOKUP_FOUND &&
+                               lookup.kind == STRUCTTYPE_LOOKUP_STRUCT &&
+                               desc.field == "new") {
+                        result = structtype_constructor_value(
+                            lookup.structure);
+                        if (!result) {
+                            yyerror("type %s has no constructor",
+                                    desc.base.c_str());
+                            return OpResult::Abort;
+                        }
                     } else if (status == STRUCTTYPE_LOOKUP_AMBIGUOUS ||
                                status == STRUCTTYPE_LOOKUP_NOT_VISIBLE ||
                                status == STRUCTTYPE_LOOKUP_ERROR) {
@@ -4483,7 +4493,7 @@ private:
             }
             std::shared_ptr<function_def> method =
                 structtype_method(sv->def, name);
-            if (method) {
+            if (method && !structtype_is_constructor(method.get())) {
                 if (cache) {
                     cache->owner = sv->def;
                     cache->variant = -1;
@@ -4534,7 +4544,7 @@ private:
             }
             std::shared_ptr<function_def> method =
                 structtype_method(ev->def, name);
-            if (method) {
+            if (method && !structtype_is_constructor(method.get())) {
                 if (cache) {
                     cache->owner = ev->def;
                     cache->variant = ev->variant;

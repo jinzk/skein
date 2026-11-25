@@ -1234,7 +1234,7 @@ struct value_t *read_member_value(struct value_t *container,
             return dupval(sv->payload->fields[(size_t)field]);
         std::shared_ptr<function_def> method =
             structtype_method(sv->def, name);
-        if (method)
+        if (method && !structtype_is_constructor(method.get()))
             return newmethodval(dupval(container), method);
         yyerror("field %s not found in %s", name, sv->def->name.c_str());
         return NULL;
@@ -1266,7 +1266,7 @@ struct value_t *read_member_value(struct value_t *container,
             return dupval(ev->payload->fields[(size_t)field]);
         std::shared_ptr<function_def> method =
             structtype_method(ev->def, name);
-        if (method)
+        if (method && !structtype_is_constructor(method.get()))
             return newmethodval(dupval(container), method);
         yyerror("field %s not found in %s.%s", name,
                 ev->def->name.c_str(), variant.name.c_str());

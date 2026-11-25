@@ -213,6 +213,11 @@ bool structtype_set_default_method(type_def *def, const std::string &name,
                                    std::string &error);
 std::shared_ptr<function_def> structtype_method(const type_def *def,
                                                 const std::string &name);
+/* A `new` method without a receiver is a type-level constructor. */
+bool structtype_is_constructor(const function_def *method);
+std::shared_ptr<function_def> structtype_constructor(const type_def *def);
+/* Unbound function value for `Type.new`, or null; caller owns the value. */
+struct value_t *structtype_constructor_value(const type_def *def);
 void structtype_set_thread_method(const type_def *def, const std::string &name,
                                   std::shared_ptr<function_def> method);
 uint64_t structtype_method_generation();

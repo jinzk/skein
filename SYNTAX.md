@@ -2071,7 +2071,34 @@ let d = Point { ...p, x: 9 };
   两个 `struct` 的普通值互递归字段不支持，需使用 `ref T?` / `weak T?`（见 5.12.3）；
 - 普通值不允许创建环：`a.next = b; b.next = a;` 会报 `recursive value would create a cycle`；共享子结构（DAG）允许；使用 `ref` 字段的强引用环由 GC 回收，见 5.12.3；
 - 字段可以保存 `callable` / `function` 值，作为普通回调使用，不会自动绑定 `self`；
-- 不支持继承、静态方法、用户自定义泛型、动态添加方法或运算符重载；内建容器的类型参数见变量类型标注章节。
+- 不支持继承、静态方法、用户自定义泛型、动态添加方法或运算符重载；唯一例外是构造函数，见 5.12.4；
+- 内建容器的类型参数见变量类型标注章节。
+
+#### 5.12.4 构造函数
+
+`impl Type` 或 inline 方法中，**没有 `self` 且名为 `new`** 的函数是构造函数：
+
+```text
+struct Point {
+  x: float;
+  y: float;
+
+  func new(x, y) {
+    if (x < 0.0) { fail "x must be >= 0"; }
+    return Point { x: x, y: y };
+  }
+}
+
+let p = Point.new(3.0, 4.0);
+```
+
+规则：
+
+- 只能叫 `new`；其他无 `self` 方法仍报 `method requires self`；
+- 返回类型隐式固定为 `Type`，**不能**写返回类型标注（`func new(...): Point` 报 `constructor return type is implicit`）；
+- 只能通过类型名调用：`Point.new(...)`；`p.new(...)` 报方法不存在；
+- 不能用于 `enum`，不能带装饰器；
+- 构造函数返回普通的 struct 值（值语义）；需要 `ref` 时由目标类型或 `ref(...)` 显式转换，见 5.12.3。
 
 #### 5.12.1 方法装饰器
 
@@ -5281,7 +5308,7 @@ for ... of
 try/catch
 通配导入
 命名参数
-静态方法 / 关联函数
+静态方法 / 关联函数（构造函数 `new` 除外）
 类型声明装饰器
 可变 self
 私有成员

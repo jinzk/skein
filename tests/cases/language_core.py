@@ -511,3 +511,54 @@ def run_cases():
           "let s = \"a\";\n"
           "s = s + 1;\n",
           stderr="cannot add string and int")
+
+    check("struct constructor",
+          "struct Point { x: float; y: float; }\n"
+          "impl Point {\n"
+          "  func new(x, y) { return Point { x: x, y: y }; }\n"
+          "}\n"
+          "let p = Point.new(3.0, 4.0);\n"
+          "println(str(p.x) + \" \" + str(p.y));\n",
+          stdout="3.0 4.0")
+
+    check("inline struct constructor",
+          "struct Point {\n"
+          "  x: float;\n"
+          "  func new(x) { return Point { x: x }; }\n"
+          "}\n"
+          "println(str(Point.new(1.5).x));\n",
+          stdout="1.5")
+
+    check("constructor validation",
+          "struct Point { x: float; }\n"
+          "impl Point {\n"
+          "  func new(x) {\n"
+          "    if (x < 0.0) { fail \"x must be >= 0\"; }\n"
+          "    return Point { x: x };\n"
+          "  }\n"
+          "}\n"
+          "Point.new(-1.0);\n",
+          stderr="x must be >= 0")
+
+    check("constructor is not an instance method",
+          "struct Point { x: float; }\n"
+          "impl Point { func new(x) { return Point { x: x }; } }\n"
+          "let p = Point.new(1.0);\n"
+          "p.new(2.0);\n",
+          stderr="not found in Point")
+
+    check("constructor return type is implicit",
+          "struct Point { x: float; }\n"
+          "impl Point { func new(x): Point { return Point { x: x }; } }\n",
+          stderr="constructor return type is implicit")
+
+    check("constructor requires a struct type",
+          "enum Color { Red; }\n"
+          "impl Color { func new() { return Color.Red; } }\n",
+          stderr="constructor requires a struct type")
+
+    check("constructor cannot have decorators",
+          "func dec(fn) { return fn; }\n"
+          "struct Point { x: float; }\n"
+          "impl Point { @dec func new(x) { return Point { x: x }; } }\n",
+          stderr="constructor new cannot have decorators")

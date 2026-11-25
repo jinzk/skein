@@ -1101,9 +1101,9 @@ p.sum()
 - 所有字段递归可哈希时，结构体可以自动作 `dict` key 或 `set` 元素；也可以实现 `std.dict_key.DictKey` 的 `dict_hash(self) -> int` 跳过字段检查并使用自定义 hash；key 保存插入时的字段快照，之后修改原变量不会改变已插入的 key；
 - `struct` 可以直接写方法，也可以只写字段；inline 方法使用与 `impl Type` 方法相同的 `func` 语法；
 - `impl Type` 保留为补充手段，用来给同一类型追加方法；inline 方法与 `impl` 方法共享方法命名空间，同名重复（inline / inline、inline / impl、impl / impl）报 `method repeated <name>`，`impl` 不能覆盖 inline 方法；
-- 方法第一个参数必须是显式 `self`；
+- 方法第一个参数必须是显式 `self`；例外是构造函数 `func new(...)`（无 `self`，只能通过 `Type.new(...)` 调用，返回类型隐式固定为 `Type`，且不能声明返回类型或带装饰器）；
 - 方法参数支持默认值，但 `self` 不能有默认值；默认值可以引用 `self` 和更早的参数；
-- 方法只能通过实例调用：`p.length()`；
+- 方法只能通过实例调用：`p.length()`；构造函数是唯一例外，用 `Point.new(...)` 调用；
 - 方法本身可以作为值提取，例如 `let f = p.length; f()`；
 - 方法值绑定提取时的结构体快照，之后修改原结构体不会影响已绑定的方法；
 - 方法可以修改 `self` 的字段和下标；结构体是值类型，修改只作用于方法内的接收者副本，调用方原值不变。需要保留修改时返回新结构体，例如 `return self`；

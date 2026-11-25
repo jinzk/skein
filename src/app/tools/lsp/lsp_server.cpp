@@ -316,6 +316,215 @@ std::vector<doc_symbol> scan_document_symbols(const std::string &text) {
     return symbols;
 }
 
+struct doc_type_member {
+    std::string name;
+    bool method = false;
+    bool constructor = false;
+};
+
+std::size_t skip_space(const std::string &text, std::size_t pos) {
+    while (pos < text.size() && std::isspace((unsigned char)text[pos]))
+        ++pos;
+    return pos;
+}
+
+std::size_t skip_line(const std::string &text, std::size_t pos) {
+    while (pos < text.size() && text[pos] != '\r' && text[pos] != '\n')
+        ++pos;
+    return pos;
+}
+
+std::size_t skip_quoted(const std::string &text, std::size_t pos) {
+    const char quote = text[pos++];
+    while (pos < text.size()) {
+        if (text[pos] == '\\' && pos + 1 < text.size()) {
+            pos += 2;
+            continue;
+        }
+        if (text[pos] == quote)
+            return pos + 1;
+        ++pos;
+    }
+    return pos;
+}
+
+std::string read_ident(const std::string &text, std::size_t &pos) {
+    const std::size_t start = pos;
+    while (pos < text.size() && is_ident_byte((unsigned char)text[pos]))
+        ++pos;
+    return text.substr(start, pos - start);
+}
+
+/* Find the '}' matching the '{' at `open`; returns text.size() when
+ * unbalanced.  Comments, strings and chars are skipped. */
+std::size_t matching_brace(const std::string &text, std::size_t open) {
+    int depth = 0;
+    std::size_t pos = open;
+    while (pos < text.size()) {
+        const char c = text[pos];
+        if (c == '/' && pos + 1 < text.size() && text[pos + 1] == '/') {
+            pos = skip_line(text, pos + 2);
+            continue;
+        }
+        if (c == '/' && pos + 1 < text.size() && text[pos + 1] == '*') {
+            const std::size_t end = text.find("*/", pos + 2);
+            pos = end == std::string::npos ? text.size() : end + 2;
+            continue;
+        }
+        if (c == '"' || c == '\'') {
+            pos = skip_quoted(text, pos);
+            continue;
+        }
+        if (c == '{')
+            ++depth;
+        else if (c == '}') {
+            --depth;
+            if (depth == 0)
+                return pos;
+            if (depth < 0)
+                return text.size();
+        }
+        ++pos;
+    }
+    return text.size();
+}
+
+void scan_type_body(const std::string &text, std::size_t begin, std::size_t end,
+                    bool is_impl, std::vector<doc_type_member> &members) {
+    int depth = 0;
+    std::size_t pos = begin;
+    while (pos < end) {
+        const char c = text[pos];
+        if (c == '/' && pos + 1 < end && text[pos + 1] == '/') {
+            pos = skip_line(text, pos + 2);
+            continue;
+        }
+        if (c == '/' && pos + 1 < end && text[pos + 1] == '*') {
+            const std::size_t close = text.find("*/", pos + 2);
+            pos = close == std::string::npos || close >= end ? end : close + 2;
+            continue;
+        }
+        if (c == '"' || c == '\'') {
+            pos = skip_quoted(text, pos);
+            continue;
+        }
+        if (c == '{') {
+            ++depth;
+            ++pos;
+            continue;
+        }
+        if (c == '}') {
+            if (depth > 0)
+                --depth;
+            ++pos;
+            continue;
+        }
+        if (depth != 0 || !is_ident_byte((unsigned char)c)) {
+            ++pos;
+            continue;
+        }
+
+        const std::string word = read_ident(text, pos);
+        if (word == "export" || word == "pub" || word == "static" ||
+            word == "const")
+            continue;
+
+        if (is_impl) {
+            if (word == "func") {
+                std::size_t name_pos = skip_space(text, pos);
+                const std::string name = read_ident(text, name_pos);
+                if (!name.empty()) {
+                    doc_type_member member;
+                    member.name = name;
+                    member.method = true;
+                    member.constructor = name == "new";
+                    members.push_back(std::move(member));
+                }
+            }
+            continue;
+        }
+
+        /* Struct bodies may declare methods inline as well as fields. */
+        if (word == "func") {
+            std::size_t name_pos = skip_space(text, pos);
+            const std::string name = read_ident(text, name_pos);
+            if (!name.empty()) {
+                doc_type_member member;
+                member.name = name;
+                member.method = true;
+                member.constructor = name == "new";
+                members.push_back(std::move(member));
+            }
+            continue;
+        }
+
+        /* Struct body: `name: Type` declares a field. */
+        std::size_t colon = skip_space(text, pos);
+        if (colon < end && text[colon] == ':' &&
+            (colon + 1 >= end || text[colon + 1] != ':')) {
+            doc_type_member member;
+            member.name = word;
+            members.push_back(std::move(member));
+        }
+    }
+}
+
+std::map<std::string, std::vector<doc_type_member>> scan_type_members(
+    const std::string &text) {
+    std::map<std::string, std::vector<doc_type_member>> out;
+    int depth = 0;
+    std::size_t pos = 0;
+    while (pos < text.size()) {
+        const char c = text[pos];
+        if (c == '/' && pos + 1 < text.size() && text[pos + 1] == '/') {
+            pos = skip_line(text, pos + 2);
+            continue;
+        }
+        if (c == '/' && pos + 1 < text.size() && text[pos + 1] == '*') {
+            const std::size_t close = text.find("*/", pos + 2);
+            pos = close == std::string::npos ? text.size() : close + 2;
+            continue;
+        }
+        if (c == '"' || c == '\'') {
+            pos = skip_quoted(text, pos);
+            continue;
+        }
+        if (c == '{') {
+            ++depth;
+            ++pos;
+            continue;
+        }
+        if (c == '}') {
+            if (depth > 0)
+                --depth;
+            ++pos;
+            continue;
+        }
+        if (depth != 0 || !is_ident_byte((unsigned char)c)) {
+            ++pos;
+            continue;
+        }
+
+        const std::string word = read_ident(text, pos);
+        if (word == "export" || word == "pub")
+            continue;
+        if (word != "struct" && word != "impl")
+            continue;
+
+        std::size_t name_pos = skip_space(text, pos);
+        const std::string name = read_ident(text, name_pos);
+        if (name.empty())
+            continue;
+        const std::size_t open = skip_space(text, name_pos);
+        if (open >= text.size() || text[open] != '{')
+            continue;
+        const std::size_t close = matching_brace(text, open);
+        scan_type_body(text, open + 1, close, word == "impl", out[name]);
+        pos = close < text.size() ? close + 1 : text.size();
+    }
+    return out;
+}
+
 value_t *range_value(const lsp_position &start, const lsp_position &end) {
     value_t *range = json::object();
     value_t *start_value = json::object();
@@ -801,6 +1010,24 @@ private:
                          ? (entry.callable ? "function" : "value")
                          : entry.type,
                      false});
+            }
+        }
+
+        /* Fields, methods and the `new` constructor of struct types defined
+         * in this document. */
+        if (!qualifier.empty()) {
+            const auto type_members = scan_type_members(document->text);
+            auto type_it = type_members.find(qualifier);
+            if (type_it != type_members.end()) {
+                for (const doc_type_member &member : type_it->second) {
+                    candidates.add_member(
+                        qualifier,
+                        {member.name, member.method ? 3 : 6,
+                         member.constructor
+                             ? "constructor"
+                             : (member.method ? "method" : "field"),
+                         false});
+                }
             }
         }
 

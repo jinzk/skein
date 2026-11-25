@@ -316,7 +316,32 @@ def run_cases():
             )["items"]
             assert "local" in [item["label"] for item in local_items]
 
-            did_change(session, uri, 3, "import std;\nlet local:int=1;\nstd.io\n")
+            struct_source = (
+                "struct Point {\n"
+                "  x: float;\n"
+                "  func new(x) { return Point { x: x }; }\n"
+                "  func norm(self): float { return self.x; }\n"
+                "}\n"
+                "Point.\n"
+            )
+            did_change(session, uri, 4, struct_source)
+            session.wait_for_diagnostics(uri)
+            member_items = session.request(
+                "textDocument/completion",
+                {
+                    "textDocument": {"uri": uri},
+                    "position": {"line": 5, "character": 6},
+                },
+            )["items"]
+            member_labels = [item["label"] for item in member_items]
+            assert "new" in member_labels, member_labels
+            assert "norm" in member_labels, member_labels
+            assert "x" in member_labels, member_labels
+            constructor = next(
+                item for item in member_items if item["label"] == "new")
+            assert constructor["detail"] == "constructor", constructor
+
+            did_change(session, uri, 5, "import std;\nlet local:int=1;\nstd.io\n")
             session.wait_for_diagnostics(uri)
             hover = session.request(
                 "textDocument/hover",
@@ -327,7 +352,7 @@ def run_cases():
             )
             assert "std.io" in hover["contents"]["value"], hover
 
-            did_change(session, uri, 4, "let x:int=1;\nprint(x);\n")
+            did_change(session, uri, 6, "let x:int=1;\nprint(x);\n")
             session.wait_for_diagnostics(uri)
             symbols = session.request(
                 "textDocument/documentSymbol", {"textDocument": {"uri": uri}}
@@ -352,7 +377,7 @@ def run_cases():
             assert "let x: int" in local_hover["contents"]["value"], local_hover
 
             # Incremental edits replace UTF-16 ranges and are debounced.
-            did_change(session, uri, 5, "let x:int=1;\nprint(x);\n")
+            did_change(session, uri, 7, "let x:int=1;\nprint(x);\n")
             session.wait_for_diagnostics(uri)
             did_change_edits(
                 session,

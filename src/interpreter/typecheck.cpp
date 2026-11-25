@@ -2568,10 +2568,22 @@ struct Checker : public BuiltinContext {
         return ok;
     }
 
+    bool reject_generic_params(struct generic_param *params, int line,
+                               int column) {
+        if (!params)
+            return true;
+        report_error(line, column,
+                     "user-defined generics are not implemented yet");
+        return false;
+    }
+
     bool check_funcdef(struct funcdef *def, Env &env,
                        const TypeNode *self_type = nullptr) {
         if (!def)
             return true;
+        if (!reject_generic_params(def->generic_params, def->line,
+                                   def->column))
+            return false;
         annotate_decorated_generator(def);
         FunctionSig sig;
         if (def->sl)
@@ -2720,6 +2732,9 @@ struct Checker : public BuiltinContext {
     }
 
     bool check_struct_decl(struct struct_node *decl, Env &env) {
+        if (!reject_generic_params(decl->generic_params, decl->line,
+                                   decl->column))
+            return false;
         const TypeNode *self_type =
             type_named(decl->source, decl->name);
         StaticTypeInfo &info = static_types[
@@ -2760,6 +2775,9 @@ struct Checker : public BuiltinContext {
     }
 
     bool check_enum_decl(struct enum_node *decl, Env &env) {
+        if (!reject_generic_params(decl->generic_params, decl->line,
+                                   decl->column))
+            return false;
         StaticTypeInfo &info = static_types[
             static_type_key(decl->source, decl->name)];
         info.is_enum = true;
@@ -3089,6 +3107,13 @@ struct Checker : public BuiltinContext {
                 return check_enum_decl((struct enum_node *)stmt, env);
             case 'H':
                 return check_impl_decl((struct impl_node *)stmt, env);
+            case 't': {
+                struct protocol_node *protocol =
+                    (struct protocol_node *)stmt;
+                return reject_generic_params(protocol->generic_params,
+                                             protocol->line,
+                                             protocol->column);
+            }
             case 'J': {
                 struct import_node *imp = (struct import_node *)stmt;
                 std::string path = imp->path ? imp->path : "";

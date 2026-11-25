@@ -920,6 +920,7 @@ struct ast *newfunc(char *s, struct symlist *sl, struct ast *ast,
         func_locations.pop_back();
     }
     a->name = s;
+    a->generic_params = NULL;
     a->sl = sl;
     if (ast && ast->nodetype != 'R') {
         struct ast *body = newast(NODE_FUNCTION_BODY, ast, NULL);
@@ -1217,7 +1218,34 @@ struct ast *newdict(struct ast *k, struct ast *v, struct ast *l) {
     return (struct ast *)p;
 }
 
+struct generic_param *newgenericparam(char *name,
+                                      struct type_constraint *constraint) {
+    struct generic_param *param =
+        (struct generic_param *)ast_node_alloc(sizeof(struct generic_param));
+    if (!param) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    param->name = name;
+    param->constraint = constraint;
+    param->default_type = NULL;
+    param->next = NULL;
+    return param;
+}
+
+struct generic_param *append_genericparam(struct generic_param *head,
+                                          struct generic_param *param) {
+    if (!head)
+        return param;
+    struct generic_param *current = head;
+    while (current->next)
+        current = current->next;
+    current->next = param;
+    return head;
+}
+
 struct ast *newstructdecl(char *name, char *source,
+                          struct generic_param *generic_params,
                           struct struct_member *members, bool exported) {
     struct struct_node *a =
         (struct struct_node *)ast_node_alloc(sizeof(struct struct_node));
@@ -1230,6 +1258,7 @@ struct ast *newstructdecl(char *name, char *source,
     a->name = name;
     a->source = source;
     a->module = copy_string(diag_current_module_name().c_str());
+    a->generic_params = generic_params;
     a->members = members;
     a->exported = exported;
     return (struct ast *)a;
@@ -1296,6 +1325,7 @@ struct ast *newimpl(char *type_name, char *source,
 }
 
 struct ast *newprotocoldecl(char *name, char *source,
+                         struct generic_param *generic_params,
                          struct protocol_method *methods, bool exported) {
     struct protocol_node *a =
         (struct protocol_node *)ast_node_alloc(sizeof(struct protocol_node));
@@ -1308,6 +1338,7 @@ struct ast *newprotocoldecl(char *name, char *source,
     a->name = name;
     a->source = source;
     a->module = copy_string(diag_current_module_name().c_str());
+    a->generic_params = generic_params;
     a->methods = methods;
     a->exported = exported;
     return (struct ast *)a;
@@ -1375,6 +1406,7 @@ struct ast *newstructlit(char *name, char *source,
 }
 
 struct ast *newenumdecl(char *name, char *source,
+                        struct generic_param *generic_params,
                         struct enum_variant *variants, bool exported) {
     struct enum_node *a =
         (struct enum_node *)ast_node_alloc(sizeof(struct enum_node));
@@ -1387,6 +1419,7 @@ struct ast *newenumdecl(char *name, char *source,
     a->name = name;
     a->source = source;
     a->module = copy_string(diag_current_module_name().c_str());
+    a->generic_params = generic_params;
     a->variants = variants;
     a->exported = exported ? 1 : 0;
     return (struct ast *)a;
@@ -1466,6 +1499,17 @@ static void freepatternfields(struct pattern_field *field) {
         treefree(field->pattern);
         ast_node_free(field);
         field = next;
+    }
+}
+
+static void free_generic_params(struct generic_param *params) {
+    while (params) {
+        struct generic_param *next = params->next;
+        free_type_constraint(params->constraint);
+        free_type_constraint(params->default_type);
+        std::free(params->name);
+        ast_node_free(params);
+        params = next;
     }
 }
 
@@ -1610,6 +1654,7 @@ void treefree(struct ast *a) {
             }
             free_type_constraint(f->ret_type);
             free_type_constraint(f->method_self_type);
+            free_generic_params(f->generic_params);
             std::free(f->name);
             break;
         }
@@ -1693,6 +1738,7 @@ void treefree(struct ast *a) {
         }
         case 'Y': {
             struct struct_node *s = (struct struct_node *)a;
+            free_generic_params(s->generic_params);
             treefree((struct ast *)s->members);
             std::free(s->name);
             std::free(s->source);
@@ -1708,6 +1754,7 @@ void treefree(struct ast *a) {
         }
         case 't': {
             struct protocol_node *t = (struct protocol_node *)a;
+            free_generic_params(t->generic_params);
             treefree((struct ast *)t->methods);
             std::free(t->name);
             std::free(t->source);
@@ -1832,6 +1879,7 @@ void treefree(struct ast *a) {
         }
         case NODE_ENUM_DECL: {
             struct enum_node *e = (struct enum_node *)a;
+            free_generic_params(e->generic_params);
             std::free(e->name);
             std::free(e->source);
             std::free(e->module);

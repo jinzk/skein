@@ -1175,6 +1175,7 @@ static struct type_constraint *runtime_type_or_error(
 %type <a> let_pattern
 %type <a> struct_decl impl_decl protocol_decl struct_members struct_member
 %type <a> enum_decl enum_variants enum_variant variant_fields variant_field
+%type <a> generic_params generic_param_list generic_param
 %type <a> func_decl
 %type <a> impl_methods protocol_methods protocol_method method_decl method_member
 %type <a> decorators decorator decorator_expr
@@ -1202,18 +1203,42 @@ static struct type_constraint *runtime_type_or_error(
 %start program
 %%
 
-func_decl: funcstart NAME '(' symlist ')' func_ret_opt '{' EMPTY_BLOCK_CLOSE
-                                           { $$ = newfunc($2, $4, NULL, false, finish_function(), $6); }
-    | funcstart NAME '(' symlist ')' func_ret_opt '{' list '}'
-                                           { $$ = newfunc($2, $4, $8, false, finish_function(), $6); }
-    | funcstart NAME '(' symlist ')' func_ret_opt RARROW exp ';'
-                                           { $$ = newfunc($2, $4, newret($8), false, finish_function(), $6); }
-    | EXPORT funcstart NAME '(' symlist ')' func_ret_opt '{' EMPTY_BLOCK_CLOSE
-                                           { $$ = newfunc($3, $5, NULL, true, finish_function(), $7); }
-    | EXPORT funcstart NAME '(' symlist ')' func_ret_opt '{' list '}'
-                                           { $$ = newfunc($3, $5, $9, true, finish_function(), $7); }
-    | EXPORT funcstart NAME '(' symlist ')' func_ret_opt RARROW exp ';'
-                                           { $$ = newfunc($3, $5, newret($9), true, finish_function(), $7); }
+func_decl: funcstart NAME generic_params '(' symlist ')' func_ret_opt '{' EMPTY_BLOCK_CLOSE
+                                           {
+        $$ = newfunc($2, $5, NULL, false, finish_function(), $7);
+        ((struct funcdef *)$$)->generic_params =
+            (struct generic_param *)$3;
+      }
+    | funcstart NAME generic_params '(' symlist ')' func_ret_opt '{' list '}'
+                                           {
+        $$ = newfunc($2, $5, $9, false, finish_function(), $7);
+        ((struct funcdef *)$$)->generic_params =
+            (struct generic_param *)$3;
+      }
+    | funcstart NAME generic_params '(' symlist ')' func_ret_opt RARROW exp ';'
+                                           {
+        $$ = newfunc($2, $5, newret($9), false, finish_function(), $7);
+        ((struct funcdef *)$$)->generic_params =
+            (struct generic_param *)$3;
+      }
+    | EXPORT funcstart NAME generic_params '(' symlist ')' func_ret_opt '{' EMPTY_BLOCK_CLOSE
+                                           {
+        $$ = newfunc($3, $6, NULL, true, finish_function(), $8);
+        ((struct funcdef *)$$)->generic_params =
+            (struct generic_param *)$4;
+      }
+    | EXPORT funcstart NAME generic_params '(' symlist ')' func_ret_opt '{' list '}'
+                                           {
+        $$ = newfunc($3, $6, $10, true, finish_function(), $8);
+        ((struct funcdef *)$$)->generic_params =
+            (struct generic_param *)$4;
+      }
+    | EXPORT funcstart NAME generic_params '(' symlist ')' func_ret_opt RARROW exp ';'
+                                           {
+        $$ = newfunc($3, $6, newret($10), true, finish_function(), $8);
+        ((struct funcdef *)$$)->generic_params =
+            (struct generic_param *)$4;
+      }
     ;
 
 stmt: IF HEADER_LPAREN exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, NULL); }
@@ -1277,24 +1302,27 @@ stmt: IF HEADER_LPAREN exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, 
         $$ = newvar($3, $7, true, true, $5);
       }
     | EXPORT NAME '=' exp ';'             { $$ = newvar($2, $4, true); }
-    | EXPORT STRUCT NAME '{' empty_body  {
-        $$ = lower_struct_inline_methods(newstructdecl(
-            $3, copy_text(diag_current_source_name().c_str()), NULL, true));
-      }
-    | EXPORT STRUCT NAME '{' struct_members '}' {
+    | EXPORT STRUCT NAME generic_params '{' empty_body  {
         $$ = lower_struct_inline_methods(newstructdecl(
             $3, copy_text(diag_current_source_name().c_str()),
-            (struct struct_member *)$5, true));
+            (struct generic_param *)$4, NULL, true));
       }
-    | EXPORT ENUM NAME '{' empty_body    {
+    | EXPORT STRUCT NAME generic_params '{' struct_members '}' {
+        $$ = lower_struct_inline_methods(newstructdecl(
+            $3, copy_text(diag_current_source_name().c_str()),
+            (struct generic_param *)$4,
+            (struct struct_member *)$6, true));
+      }
+    | EXPORT ENUM NAME generic_params '{' empty_body    {
         $$ = newenumdecl($3,
                          copy_text(diag_current_source_name().c_str()),
-                         NULL, true);
+                         (struct generic_param *)$4, NULL, true);
       }
-    | EXPORT ENUM NAME '{' enum_variants '}' {
+    | EXPORT ENUM NAME generic_params '{' enum_variants '}' {
         $$ = newenumdecl($3,
                          copy_text(diag_current_source_name().c_str()),
-                         (struct enum_variant *)$5, true);
+                         (struct generic_param *)$4,
+                         (struct enum_variant *)$6, true);
       }
     | LABEL non_empty_scope            { $$ = newlabel($1, $2); }
     | struct_decl
@@ -1568,26 +1596,53 @@ let_pattern: NAME '{' pattern_fields '}'  {
     | '(' tuple_pattern_items ')'          { $$ = $2; }
     ;
 
-struct_decl: STRUCT NAME '{' empty_body  {
-        $$ = lower_struct_inline_methods(newstructdecl(
-            $2, copy_text(diag_current_source_name().c_str()), NULL));
-      }
-    | STRUCT NAME '{' struct_members '}' {
-        $$ = lower_struct_inline_methods(newstructdecl(
-            $2, copy_text(diag_current_source_name().c_str()),
-            (struct struct_member *)$4));
+generic_params: %empty                   { $$ = NULL; }
+    | '[' generic_param_list ']'         { $$ = $2; }
+    ;
+
+generic_param_list: generic_param        { $$ = $1; }
+    | generic_param_list ',' generic_param {
+        $$ = (struct ast *)append_genericparam(
+            (struct generic_param *)$1, (struct generic_param *)$3);
       }
     ;
 
-enum_decl: ENUM NAME '{' empty_body      {
-        $$ = newenumdecl($2,
-                         copy_text(diag_current_source_name().c_str()),
-                         NULL);
+generic_param: NAME type                 {
+        $$ = (struct ast *)newgenericparam($1, $2);
       }
-    | ENUM NAME '{' enum_variants '}'    {
+    | NAME '=' type                      {
+        $$ = (struct ast *)newgenericparam($1, NULL);
+        ((struct generic_param *)$$)->default_type = $3;
+      }
+    | NAME type '=' type                 {
+        $$ = (struct ast *)newgenericparam($1, $2);
+        ((struct generic_param *)$$)->default_type = $4;
+      }
+    ;
+
+struct_decl: STRUCT NAME generic_params '{' empty_body  {
+        $$ = lower_struct_inline_methods(newstructdecl(
+            $2, copy_text(diag_current_source_name().c_str()),
+            (struct generic_param *)$3, NULL));
+      }
+    | STRUCT NAME generic_params '{' struct_members '}' {
+        $$ = lower_struct_inline_methods(newstructdecl(
+            $2, copy_text(diag_current_source_name().c_str()),
+            (struct generic_param *)$3,
+            (struct struct_member *)$5));
+      }
+    ;
+
+enum_decl: ENUM NAME generic_params '{' empty_body      {
         $$ = newenumdecl($2,
                          copy_text(diag_current_source_name().c_str()),
-                         (struct enum_variant *)$4);
+                         (struct generic_param *)$3, NULL);
+      }
+    | ENUM NAME generic_params '{' enum_variants '}'    {
+        $$ = newenumdecl($2,
+                         copy_text(diag_current_source_name().c_str()),
+                         (struct generic_param *)$3,
+                         (struct enum_variant *)$5);
       }
     ;
 
@@ -1690,15 +1745,16 @@ impl_methods: method_member              { $$ = $1; }
     | impl_methods method_member         { $$ = append_struct_member($1, $2); }
     ;
 
-protocol_decl: PROTOCOL NAME '{' empty_body    {
+protocol_decl: PROTOCOL NAME generic_params '{' empty_body    {
         $$ = newprotocoldecl($2,
                           copy_text(diag_current_source_name().c_str()),
-                          NULL);
+                          (struct generic_param *)$3, NULL);
       }
-    | PROTOCOL NAME '{' protocol_methods '}'   {
+    | PROTOCOL NAME generic_params '{' protocol_methods '}'   {
         $$ = newprotocoldecl($2,
                           copy_text(diag_current_source_name().c_str()),
-                          (struct protocol_method *)$4);
+                          (struct generic_param *)$3,
+                          (struct protocol_method *)$5);
       }
     ;
 

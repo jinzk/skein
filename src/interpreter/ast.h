@@ -167,6 +167,7 @@ struct funcdef {
     int line;
     int column;
     char *name;
+    struct generic_param *generic_params;
     struct symlist *sl;
     struct ast *ast;
     /* Optional `: type` return annotation, owned by the AST node. */
@@ -360,6 +361,18 @@ struct struct_member {
     struct struct_member *next;
 };
 
+struct generic_param {
+    struct type_constraint *constraint;
+    struct type_constraint *default_type;
+    char *name;
+    struct generic_param *next;
+};
+
+struct generic_param *newgenericparam(char *name,
+                                      struct type_constraint *constraint);
+struct generic_param *append_genericparam(struct generic_param *head,
+                                          struct generic_param *param);
+
 struct struct_node {
     int nodetype;
     int line;
@@ -367,6 +380,7 @@ struct struct_node {
     char *name;
     char *source;
     char *module;
+    struct generic_param *generic_params;
     struct struct_member *members;
     int exported;
 };
@@ -402,6 +416,7 @@ struct protocol_node {
     char *name;
     char *source;
     char *module;
+    struct generic_param *generic_params;
     struct protocol_method *methods;
     int exported;
 };
@@ -441,6 +456,7 @@ struct enum_node {
     char *name;
     char *source;
     char *module;
+    struct generic_param *generic_params;
     struct enum_variant *variants;
     int exported;
 };
@@ -622,6 +638,7 @@ struct ast *newtuple(struct ast *v, struct ast *l);
 struct ast *newdict(struct ast *k, struct ast *v, struct ast *l);
 
 struct ast *newstructdecl(char *name, char *source,
+                          struct generic_param *generic_params,
                           struct struct_member *members,
                           bool exported = false);
 struct ast *newstructfield(char *name, struct type_constraint *type);
@@ -630,6 +647,7 @@ struct ast *append_struct_member(struct ast *head, struct ast *member);
 struct ast *newimpl(char *type_name, char *source,
                     struct struct_member *methods);
 struct ast *newprotocoldecl(char *name, char *source,
+                         struct generic_param *generic_params,
                          struct protocol_method *methods,
                          bool exported = false);
 struct ast *newprotocolmethod(char *name, struct symlist *params,
@@ -641,6 +659,7 @@ struct ast *newstructlit(char *name, char *source,
                          bool is_ref = false);
 struct ast *newoptionalchain(struct ast *base, char *name);
 struct ast *newenumdecl(char *name, char *source,
+                        struct generic_param *generic_params,
                         struct enum_variant *variants,
                         bool exported = false);
 struct ast *newenumvariant(char *name, struct struct_member *fields,

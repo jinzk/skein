@@ -173,4 +173,31 @@ ts_test("with remains an identifier", func() {
   ts_eq(s.doubled(), 18);
 });
 
+struct PrivateBox {
+  _value: int;
+  label: string;
+
+  func _secret(self): int { return self._value; }
+  func reveal(self): int { return self._secret(); }
+  func peer_value(self, other: PrivateBox): int { return other._value; }
+}
+
+ts_test("underscore members are soft private", func() {
+  let box = PrivateBox { _value: 7, label: "a" };
+  ts_eq(box.reveal(), 7);
+  ts_eq(box.peer_value(PrivateBox { _value: 9, label: "b" }), 9);
+  let field_caught = false;
+  let field_result = box._value on error(e) {
+    field_caught = true;
+    recover null;
+  };
+  ts_true(field_caught);
+  let method_caught = false;
+  let method_result = box._secret() on error(e) {
+    method_caught = true;
+    recover null;
+  };
+  ts_true(method_caught);
+});
+
 ts_finish();

@@ -1111,7 +1111,7 @@ p.sum()
 - 字段类型必须是已声明的类型；支持自引用，例如 `struct Node { value: int; next: Node?; }`；
   两个 `struct` 互引用需使用 `ref T?` / `weak T?`；
 - 不允许创建环：`a.next = b; b.next = a;` 会报 `recursive value would create a cycle`；共享子结构（DAG）允许；
-- 所有字段和方法都是公开的；暂不实现 `_` 私有语法；
+- 字段和方法默认公开；`_` 前缀成员是软私有：只有该类型的方法体内可直接访问，外部直接访问报 `private member`；构造、反射、序列化和 snapshot 仍包含这些成员；
 - 字段可以保存函数值，作为普通回调使用，不会自动绑定 `self`：
 
 ```text

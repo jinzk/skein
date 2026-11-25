@@ -433,12 +433,19 @@ static struct value_t *write_member_value(struct value_t *container,
             }
         }
     } else if (container->type == T_struct) {
-        if (idx->type != T_string) {
+        struct struct_value_t *sv = (struct struct_value_t *)container;
+        const char *name = idx->type == T_string
+                               ? ((struct string_value_t *)idx)->value
+                               : nullptr;
+        std::string owner_key =
+            sv->def ? private_owner_key(sv->def->package, sv->def->name)
+                    : std::string();
+        if (!private_member_access_allowed(name, owner_key.c_str())) {
+            yyerror("private member %s", name ? name : "");
+        } else if (idx->type != T_string) {
             yyerror("struct field name must be a string, got %s",
                     typename_of(idx));
         } else {
-            struct struct_value_t *sv = (struct struct_value_t *)container;
-            const char *name = ((struct string_value_t *)idx)->value;
             int field = sv->def ? structtype_field_index(sv->def, name) : -1;
             if (field < 0 || !sv->def ||
                 (size_t)field >= sv->def->fields.size()) {
@@ -558,12 +565,19 @@ static struct value_t *increment_member_value(struct value_t *container,
             }
         }
     } else if (container->type == T_struct) {
-        if (idx->type != T_string) {
+        struct struct_value_t *sv = (struct struct_value_t *)container;
+        const char *name = idx->type == T_string
+                               ? ((struct string_value_t *)idx)->value
+                               : nullptr;
+        std::string owner_key =
+            sv->def ? private_owner_key(sv->def->package, sv->def->name)
+                    : std::string();
+        if (!private_member_access_allowed(name, owner_key.c_str())) {
+            yyerror("private member %s", name ? name : "");
+        } else if (idx->type != T_string) {
             yyerror("struct field name must be a string, got %s",
                     typename_of(idx));
         } else {
-            struct struct_value_t *sv = (struct struct_value_t *)container;
-            const char *name = ((struct string_value_t *)idx)->value;
             int field = sv->def ? structtype_field_index(sv->def, name) : -1;
             if (field < 0 || !sv->def ||
                 (size_t)field >= sv->def->fields.size()) {
@@ -1209,6 +1223,12 @@ struct value_t *read_member_value(struct value_t *container,
             return NULL;
         }
         const char *name = ((struct string_value_t *)index)->value;
+        std::string owner_key =
+            private_owner_key(sv->def->package, sv->def->name);
+        if (!private_member_access_allowed(name, owner_key.c_str())) {
+            yyerror("private member %s", name);
+            return NULL;
+        }
         int field = structtype_field_index(sv->def, name);
         if (field >= 0 && sv->payload &&
             (size_t)field < sv->payload->fields.size())
@@ -1236,6 +1256,12 @@ struct value_t *read_member_value(struct value_t *container,
         const struct variant_def &variant =
             ev->def->variants[(size_t)ev->variant];
         const char *name = ((struct string_value_t *)index)->value;
+        std::string owner_key =
+            private_owner_key(ev->def->package, ev->def->name);
+        if (!private_member_access_allowed(name, owner_key.c_str())) {
+            yyerror("private member %s", name);
+            return NULL;
+        }
         int field = structtype_variant_field_index(&variant, name);
         if (field >= 0 && ev->payload &&
             (size_t)field < ev->payload->fields.size())

@@ -34,7 +34,7 @@
 | 包生态与信任（M3） | 按需 | 公共生态暂缓，先支持私有/本地生态；SumDB / proxy / 私有认证按私有需求推进 |
 | JIT / VM 与 GC（M4） | 优化冻结 | moving GC 与 AOT / 字节码缓存均已确认不做；已完成记录见第 3 节 |
 | 长尾能力与体验（M5） | 按需 | 旧编码、HTTP/2 CONNECT、REPL / LSP 体验、LevelDB / RocksDB |
-| 对象抽象 / `protocol` / `ref` / Channel 模型（M8） | 阶段 1–3 与 inline 方法已完成 | Channel 端点对、结构化 `protocol`、struct 内联方法，以及 `ref` / `weak` / GC / channel payload 拒绝已落地；下一步完成文档与 CI 收尾 |
+| 对象抽象 / `protocol` / `ref` / Channel 模型（M8） | 功能已完成 | Channel 端点对、结构化 `protocol`、struct 内联方法、`_` 软私有成员，以及 `ref` / `weak` / GC / channel payload 拒绝已落地；文档同步完成，仅剩 Windows x64 MinGW/MSVC CI 发布门槛 |
 | `std.cache`（M7）/ `std.kv` | 已完成 | 维护；Valkey 独立 CI 服务可按需补 |
 | FFI 平台 CI / fuzz | 按需 | Windows x64（MinGW/MSVC）进入正式发布；32 位 / ARM 与 fuzz 按需，见 `architecture.md` |
 
@@ -55,8 +55,9 @@
    按私有需求推进。
 4. M8 已确认只保留 `protocol` 并直接删除 `trait`，且以 duplex 端点对作为
    唯一 Channel 模型并删除旧共享队列；阶段 1（端点对）、阶段 2（结构化
-   protocol）与阶段 3（`ref` / `weak` / GC / channel payload 拒绝）已完成；
-   下一步只做文档与 CI 收尾。
+   protocol）、阶段 3（`ref` / `weak` / GC / channel payload 拒绝）、struct
+   内联方法与 `_` 软私有成员均已完成；文档同步完成，仅剩 Windows x64
+   MinGW/MSVC CI 发布门槛。
 5. M4 的 GC root 审计、热点 opcode / frame 分配、字符串拼接、
    启动解析优化和 JIT 默认启用已完成；moving GC 与 AOT / 字节码缓存均已
    确认不做；per-pc liveness / OSR / deopt 保持不做。
@@ -286,9 +287,10 @@ REPL / 工具链体验：
 
 ### 2.6 对象抽象、`protocol` 与引用模型（M8；阶段 3 已完成）
 
-状态：结构化 `protocol`、直接删除 `trait`、struct 内联 `func` 方法，以及
-`ref` / `weak` / GC 接入与 channel payload 拒绝均已实现；顶层 `impl Type`
-保留为补充方法容器。剩余工作仅为文档同步和全量 CI 收尾。
+状态：结构化 `protocol`、直接删除 `trait`、struct 内联 `func` 方法、`_`
+前缀软私有成员，以及 `ref` / `weak` / GC 接入与 channel payload 拒绝均已
+实现；顶层 `impl Type` 保留为补充方法容器。文档同步已完成，剩余工作仅为
+Windows x64 MinGW/MSVC CI 发布门槛。
 
 背景与问题：
 
@@ -376,7 +378,8 @@ print(a.next.value);  // 9，引用不是值快照
 - 弱引用保存 `{id, generation}`，目标释放后 generation 失效，不会误指向
   新对象；
 - 跨线程或序列化边界使用 `std.ref.snapshot(r)` 显式得到普通值快照；
-- 两个不同类型互引用时用 `ref T?` / `weak T?`，普通值字段必须是已声明类型。
+- 两个不同类型互引用时用 `ref T?` / `weak T?`，普通值字段必须是已声明类型；
+- `_` 前缀字段/方法是软私有成员，仅在该类型的方法体执行期间可直接访问。
 
 GC 接入（已实现）：
 
@@ -858,6 +861,9 @@ RelWithDebInfo 下空脚本 `main()` 约 0.4 ms，`import std` 约 0.85 ms，
 - `ref` / `weak` 语义（2026-11-25）：`ref T` 是类型化、受 GC 管理的指针/
   句柄，进入 GC 图；`weak T` 不保活并通过 generation 失效；普通值继续
   引用计数，`T { ... }` 不会隐式变成引用对象。
+- struct 软私有成员（2026-11-25，已决定）：`_` 前缀字段/方法仅在该 struct
+  的方法体执行期间可直接访问；struct literal、`std.meta`、序列化和
+  `std.ref.snapshot()` 不变；不做名称改写、package 级硬隔离或反射隐藏。
 - GC 接入（2026-11-25）：复用现有 `collect_cycles()` / `gc_roots` / epoch
   sweep，强 `ref` 参与 mark，`weak` 不参与；值环检查在 `ref` 边界停止，
   不把整个值系统改成 tracing GC。
@@ -880,6 +886,7 @@ RelWithDebInfo 下空脚本 `main()` 约 0.4 ms，`import std` 约 0.85 ms，
   Channel 统一为端点对，不做 `Queue` 兼容层；
 - 不做“多消费者共享一个 Channel”语义；一对多由用户建立多条端点链路；
 - 不自动把回边降级为 `weak`；回边是否保活由字段类型显式表达；
+- `_` 前缀成员只做软私有访问控制，不做名称改写、package 级硬隔离或反射隐藏；
 - 暂不实现 `trait` 继承、关联类型、泛型 trait、运算符重载和动态添加方法。
 
 包管理与生态：

@@ -4117,6 +4117,9 @@ private:
             diag_set_package_name(code->package);
         if (change_source)
             diag_set_source_name(code->source);
+        current_private_owner = code->method_owner_type.empty()
+                                    ? nullptr
+                                    : &code->method_owner_type;
         current_def_ = std::move(def);
         proto_ptr_ = proto.get();
         param_pool_safe_ = proto->params_direct &&
@@ -4203,6 +4206,9 @@ private:
         recycle_slots();
         pop_scopes_to(scope_mark_);
 
+        current_private_owner = code->method_owner_type.empty()
+                                    ? nullptr
+                                    : &code->method_owner_type;
         current_def_ = std::move(def);
         proto_ptr_ = proto.get();
         if (!code->package.empty())
@@ -4365,6 +4371,30 @@ private:
         skein::bc::MemberCacheEntry *cache) {
         if (!receiver || !name)
             return nullptr;
+        std::string owner_key;
+        const char *private_owner = nullptr;
+        if (receiver->type == T_struct) {
+            const struct struct_value_t *sv =
+                (const struct struct_value_t *)receiver;
+            if (sv->def) {
+                owner_key =
+                    private_owner_key(sv->def->package, sv->def->name);
+                private_owner = owner_key.c_str();
+            }
+        } else if (receiver->type == T_enum) {
+            const struct enum_value_t *ev =
+                (const struct enum_value_t *)receiver;
+            if (ev->def) {
+                owner_key =
+                    private_owner_key(ev->def->package, ev->def->name);
+                private_owner = owner_key.c_str();
+            }
+        }
+        if (private_owner &&
+            !private_member_access_allowed(name, private_owner)) {
+            yyerror("private member %s", name);
+            return nullptr;
+        }
         if (receiver->type == T_struct) {
             struct struct_value_t *sv = (struct struct_value_t *)receiver;
             if (!sv->def)
@@ -4412,6 +4442,30 @@ private:
                                skein::bc::MemberCacheEntry *cache) {
         if (!container || !name)
             return NULL;
+        std::string owner_key;
+        const char *private_owner = nullptr;
+        if (container->type == T_struct) {
+            const struct struct_value_t *sv =
+                (const struct struct_value_t *)container;
+            if (sv->def) {
+                owner_key =
+                    private_owner_key(sv->def->package, sv->def->name);
+                private_owner = owner_key.c_str();
+            }
+        } else if (container->type == T_enum) {
+            const struct enum_value_t *ev =
+                (const struct enum_value_t *)container;
+            if (ev->def) {
+                owner_key =
+                    private_owner_key(ev->def->package, ev->def->name);
+                private_owner = owner_key.c_str();
+            }
+        }
+        if (private_owner &&
+            !private_member_access_allowed(name, private_owner)) {
+            yyerror("private member %s", name);
+            return NULL;
+        }
 
         if (container->type == T_struct) {
             struct struct_value_t *sv = (struct struct_value_t *)container;

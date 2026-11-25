@@ -1731,6 +1731,17 @@ struct value_t *eval(struct ast *a) {
                             (struct struct_value_t *)receiver;
                         const char *name =
                             ((struct string_value_t *)key)->value;
+                        std::string owner_key =
+                            sv->def ? private_owner_key(sv->def->package,
+                                                        sv->def->name)
+                                    : std::string();
+                        if (!private_member_access_allowed(name,
+                                                           owner_key.c_str())) {
+                            yyerror("private member %s", name);
+                            freeval(receiver);
+                            freeval(key);
+                            break;
+                        }
                         int field =
                             sv->def ? structtype_field_index(sv->def, name)
                                     : -1;

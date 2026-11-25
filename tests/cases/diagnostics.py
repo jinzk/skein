@@ -119,3 +119,17 @@ def run_cases():
         "println(std.error.format_trace(e));\n",
         stdout_all=["null", "0", "custom: boom"],
     )
+    check(
+        "diagnostic private field",
+        "struct Box { _value: int; }\n"
+        "let box = Box { _value: 1 };\n"
+        "println(box._value);\n",
+        stderr="runtime error: private member _value",
+    )
+    check(
+        "diagnostic private method",
+        "struct Box { func _secret(self) { return 1; } }\n"
+        "let box = Box {};\n"
+        "println(box._secret());\n",
+        stderr="runtime error: private member _secret",
+    )

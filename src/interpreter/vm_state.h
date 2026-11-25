@@ -71,6 +71,8 @@ struct SavedVmState {
     std::string diag_source;
     bool diag_package_saved = false;
     bool diag_source_saved = false;
+    /* Method owner visible to the caller while this frame is active. */
+    const std::string *private_owner = nullptr;
     uint64_t name_scope_generation = 0;
     bool param_pool_safe = false;
     bool slot_pool_safe = false;

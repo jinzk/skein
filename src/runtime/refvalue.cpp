@@ -51,6 +51,12 @@ value_t *get_field_from_object(const std::shared_ptr<ref_object> &object,
         return nullptr;
     }
     const char *field_name = name;
+    std::string owner_key =
+        private_owner_key(object->def->package, object->def->name);
+    if (!private_member_access_allowed(field_name, owner_key.c_str())) {
+        yyerror("private member %s", field_name);
+        return nullptr;
+    }
     int field = structtype_field_index(object->def, field_name);
     if (field >= 0 && (size_t)field < object->payload->fields.size()) {
         value_t *value = object->payload->fields[(size_t)field];
@@ -75,6 +81,13 @@ bool set_field_on_object(const std::shared_ptr<ref_object> &object,
                          const char *name, value_t *value) {
     if (!object || !object->def || !object->payload || !name || !value) {
         yyerror("invalid ref value");
+        freeval(value);
+        return false;
+    }
+    std::string owner_key =
+        private_owner_key(object->def->package, object->def->name);
+    if (!private_member_access_allowed(name, owner_key.c_str())) {
+        yyerror("private member %s", name);
         freeval(value);
         return false;
     }

@@ -26,7 +26,7 @@
 namespace {
 
 constexpr uint32_t kPayloadMagic = 0x48545453u; /* "STTH" */
-constexpr uint32_t kPayloadVersion = 13u;
+constexpr uint32_t kPayloadVersion = 14u;
 constexpr uint32_t kEndianMarker = 0x01020304u;
 constexpr uint32_t kMaxCount = 1000000u;
 constexpr uint32_t kMaxString = 64u * 1024u * 1024u;
@@ -2391,6 +2391,7 @@ bool write_proto(writer &out, const skein::bc::Proto &proto,
     out.u8(proto.is_generator ? 1 : 0);
     out.u8(proto.is_method ? 1 : 0);
     out.u8(proto.fast_frame_blocked ? 1 : 0);
+    out.str(proto.method_owner_type);
     out.u32(proto.nparams);
     out.u32(proto.required_params);
     out.u32(proto.nlocals);
@@ -2915,6 +2916,10 @@ bool read_proto(reader &in, std::shared_ptr<skein::bc::Proto> &proto,
     proto->is_generator = flags[9] != 0;
     proto->is_method = flags[10] != 0;
     proto->fast_frame_blocked = flags[11] != 0;
+    if (!in.str(proto->method_owner_type)) {
+        error = in.error;
+        return false;
+    }
 
     if (!in.u32(proto->nparams) || !in.u32(proto->required_params) ||
         !in.u32(proto->nlocals) || !in.u32(proto->max_stack)) {

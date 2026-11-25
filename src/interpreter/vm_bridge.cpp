@@ -573,6 +573,11 @@ bool jit_resolve_and_enter(value_t *callee, value_t **args,
 
     if (method)
         method->receiver = nullptr;
+    const std::string *method_owner =
+        def && def->code && !def->code->method_owner_type.empty()
+            ? &def->code->method_owner_type
+            : nullptr;
+    private_owner_guard owner_guard(method_owner);
     /*
      * Root the callee and arguments only now: this is the first point where
      * the JIT will run user code and a collection could happen.  Doing it
@@ -1056,6 +1061,11 @@ value_t *skein_vm_jit_invoke_method_cached(
     }
     if (!owner)
         return fallback();
+    const struct type_def *owner_def = (const struct type_def *)owner;
+    std::string owner_key =
+        private_owner_key(owner_def->package, owner_def->name);
+    if (!private_member_access_allowed(name, owner_key.c_str()))
+        return fallback();
 
     const uint64_t generation = structtype_method_generation();
     std::shared_ptr<function_def> method;
@@ -1430,6 +1440,7 @@ std::shared_ptr<function_code> make_transfer_code(
     code->package = proto.package;
     code->is_generator = proto.is_generator;
     code->is_method = proto.is_method;
+    code->method_owner_type = proto.method_owner_type;
     code->variadic = proto.variadic;
     code->def_line = proto.def_line;
     code->def_column = proto.def_column;

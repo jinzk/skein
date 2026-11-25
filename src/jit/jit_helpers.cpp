@@ -620,6 +620,13 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_get_field(value_t *container,
             freeval(container);
             return nullptr;
         }
+        std::string owner_key =
+            private_owner_key(sv->def->package, sv->def->name);
+        if (!private_member_access_allowed(name, owner_key.c_str())) {
+            yyerror("private member %s", name);
+            freeval(container);
+            return nullptr;
+        }
         const int field = structtype_field_index(sv->def, name);
         if (field >= 0 && sv->payload &&
             (size_t)field < sv->payload->fields.size()) {
@@ -650,6 +657,13 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_get_field(value_t *container,
         }
         const struct variant_def &variant =
             ev->def->variants[(size_t)ev->variant];
+        std::string owner_key =
+            private_owner_key(ev->def->package, ev->def->name);
+        if (!private_member_access_allowed(name, owner_key.c_str())) {
+            yyerror("private member %s", name);
+            freeval(container);
+            return nullptr;
+        }
         const int field = structtype_variant_field_index(&variant, name);
         if (field >= 0 && ev->payload &&
             (size_t)field < ev->payload->fields.size()) {
@@ -2304,6 +2318,33 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_invoke_method(
     diag_set_location(line, column);
     value_t *callee = nullptr;
     if (receiver && name) {
+        std::string owner_key;
+        const char *private_owner = nullptr;
+        if (receiver->type == T_struct) {
+            const struct struct_value_t *sv =
+                (const struct struct_value_t *)receiver;
+            if (sv->def) {
+                owner_key =
+                    private_owner_key(sv->def->package, sv->def->name);
+                private_owner = owner_key.c_str();
+            }
+        } else if (receiver->type == T_enum) {
+            const struct enum_value_t *ev =
+                (const struct enum_value_t *)receiver;
+            if (ev->def) {
+                owner_key =
+                    private_owner_key(ev->def->package, ev->def->name);
+                private_owner = owner_key.c_str();
+            }
+        }
+        if (private_owner &&
+            !private_member_access_allowed(name, private_owner)) {
+            yyerror("private member %s", name);
+            freeval(receiver);
+            for (uint32_t i = 0; i < argc; ++i)
+                freeval(args[i]);
+            return nullptr;
+        }
         if (receiver->type == T_struct) {
             struct struct_value_t *sv = (struct struct_value_t *)receiver;
             if (sv->def) {
@@ -2473,8 +2514,13 @@ extern "C" SKEIN_JIT_SYSV int skein_jit_enter(skein::jit::thread_state *ts,
     saved.top_level = ts->top_level;
     saved.package_valid = ts->saved_package_valid;
     saved.source_valid = ts->saved_source_valid;
+    saved.private_owner = current_private_owner;
     ts->saves.push_back(std::move(saved));
 
+    current_private_owner =
+        def && def->code && !def->code->method_owner_type.empty()
+            ? &def->code->method_owner_type
+            : nullptr;
     if (def)
         ts->top_level = false;
 
@@ -2582,6 +2628,7 @@ extern "C" SKEIN_JIT_SYSV void skein_jit_leave(skein::jit::thread_state *ts) {
         ts->top_level = saved.top_level;
         ts->saved_package_valid = saved.package_valid;
         ts->saved_source_valid = saved.source_valid;
+        current_private_owner = saved.private_owner;
     } else {
         ts->diag_pushed = false;
         ts->entered = false;

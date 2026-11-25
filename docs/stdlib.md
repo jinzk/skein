@@ -2469,6 +2469,8 @@ app.dispatch({"method": "GET", "path": "/users/42"});
 
 `app.use_after(func(req, res) { ... })` 在路由或前置 middleware 产生响应后执行，适合统一补充 CORS、安全头、request id 和响应日志。返回 `null` 表示保留当前响应，返回 dict 表示替换响应；返回 task 会被等待。
 
+`Router` 的操作是满足 `route.RouterApi` 的方法：`add` / `get` / `post` / `put` / `delete` / `use` / `use_after` / `dispatch` / `inspect`。函数参数可标注 `app: route.RouterApi` 获得结构式类型检查；handler / middleware 是否 callable 仍由运行时校验并给出原来的错误信息。原来的 callable 字段已改为方法；调用写法 `app.get(...)` 不变，仍可写 `let d = app.dispatch;` 取出方法值。
+
 `std.password` 提供 Argon2id 密码哈希：
 
 ```skein
@@ -2651,6 +2653,8 @@ client.close() -> bool
 - 当前不做 Cluster / Sentinel、pub/sub、Streams、任意命令透传或 Lua；
 - Session / 限流共享 store adapter 后续接入。
 
+`Client` 的操作是满足 `cache.ClientApi` 的方法：`get` / `set` / `delete` / `exists` / `incr` / `expire` / `ttl` / `pttl` / `incr_window` / `ping` / `close`。函数参数可标注 `c: cache.ClientApi` 做类型检查。原来的 callable 字段已改为方法，`set` / `incr` 仍支持默认参数；调用写法 `c.get(key)` 不变。
+
 `std.kv` 是嵌入式持久化 KV，当前默认后端为 SQLite 单文件：
 
 ```skein
@@ -2746,6 +2750,8 @@ let denied = auth.unauthorized_response("login required");
 - `auth.has_role(identity, role)` / `auth.has_permission(identity, permission)`
   可用于 handler 内部判断。
 
+`SessionStore` 的操作是满足 `auth.SessionStoreApi` 的方法：`create` / `get` / `set` / `delete` / `rotate` / `cleanup`。函数参数可标注 `store: auth.SessionStoreApi` 做类型检查；原来的 callable 字段已改为方法，`cookie_name` 和 `ttl` 仍是公开数据字段，调用写法 `store.get(sid)` 不变。
+
 `std.web` 提供 CORS、安全响应头、可信代理客户端 IP 和限流：
 
 ```skein
@@ -2802,6 +2808,8 @@ let ip = web.client_ip(req, {
 - `web.health_routes(app, {"ready": func() { ... }})` 注册 `/healthz` 和
   `/readyz`；`ready` 返回 false 时 `/readyz` 返回 503。
 
+`Limiter` 的操作是满足 `web.LimiterApi` 的方法：`check` / `middleware` / `reset` / `cleanup`，其中 `check` 和 `middleware` 接受请求 dict。函数参数可标注 `limiter: web.LimiterApi` 做类型检查；原来的 callable 字段已改为方法，`limit` 和 `window_ms` 仍是公开数据字段。仍可写 `app.use(limiter.middleware)` 取出方法值。
+
 `std.metrics` 提供进程内 Prometheus 指标：
 
 ```skein
@@ -2830,6 +2838,8 @@ registry.reset()
 - histogram 自动输出 `_bucket` / `_sum` / `_count`；
 - 当前是进程内、非跨 worker 共享；多 worker 需要聚合或共享存储；
 - `std.metrics` 与 `std.web.metrics_middleware` 配合使用。
+
+`Registry` 的操作是满足 `metrics.RegistryApi` 的方法：`counter` / `gauge` / `observe` / `render` / `reset`。函数参数可标注 `registry: metrics.RegistryApi` 做类型检查；原来的 callable 字段已改为方法，`counter` / `observe` 仍支持默认参数，调用写法 `registry.counter(name)` 不变。
 
 `std.graph` 提供有向图和常用算法：
 

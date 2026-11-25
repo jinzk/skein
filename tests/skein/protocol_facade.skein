@@ -1,0 +1,95 @@
+import std;
+import std.route;
+import std.cache;
+import std.metrics;
+import std.auth;
+import std.web;
+include "_support.skein";
+
+struct FacadeCacheStub {
+  func get(self, key: string) { return "value"; }
+  func set(self, key: string, value: any, options: dict) { return true; }
+  func delete(self, key: string) { return 0; }
+  func exists(self, key: string) { return true; }
+  func incr(self, key: string, amount: int) { return 1; }
+  func expire(self, key: string, ttl_ms: int) { return true; }
+  func ttl(self, key: string) { return 1; }
+  func pttl(self, key: string) { return 1; }
+  func incr_window(self, key: string, window_ms: int) { return {}; }
+  func ping(self) { return "PONG"; }
+  func close(self) { return true; }
+}
+
+func facade_route(r: route.RouterApi) {
+  r.get("/users/:id", func(req) {
+    return {"status": 200, "body": req["params"]["id"]};
+  });
+  return r.dispatch({"method": "GET", "path": "/users/7"})["body"];
+}
+
+func facade_cache(c: cache.ClientApi) {
+  return c.get("key");
+}
+
+func facade_metrics(r: metrics.RegistryApi) {
+  r.counter("hits", {}, 2);
+  r.gauge("temp", {}, 3);
+  r.observe("latency", {}, 4, null);
+  return r.render();
+}
+
+func facade_auth(s: auth.SessionStoreApi) {
+  let sid = s.create({"user_id": 1}) as string;
+  s.set(sid, {"user_id": 2});
+  return s.get(sid);
+}
+
+func facade_web(l: web.LimiterApi) {
+  let req = {"remote_addr": "127.0.0.1"};
+  l.check(req);
+  l.middleware(req);
+  l.reset();
+  l.cleanup();
+}
+
+ts_test("protocol facade implements", func() {
+  ts_true(std.meta.implements("route.Router", "route.RouterApi"));
+  ts_true(std.meta.implements("cache.Client", "cache.ClientApi"));
+  ts_true(std.meta.implements("metrics.Registry", "metrics.RegistryApi"));
+  ts_true(std.meta.implements("auth.SessionStore", "auth.SessionStoreApi"));
+  ts_true(std.meta.implements("web.Limiter", "web.LimiterApi"));
+  ts_true(FacadeCacheStub {} is cache.ClientApi);
+});
+
+ts_test("protocol facade route", func() {
+  ts_eq(facade_route(route.new()), "7");
+});
+
+ts_test("protocol facade cache", func() {
+  ts_eq(facade_cache(FacadeCacheStub {}), "value");
+});
+
+ts_test("protocol facade metrics", func() {
+  ts_true(len(facade_metrics(metrics.new())) > 0);
+});
+
+ts_test("protocol facade auth", func() {
+  ts_eq(facade_auth(auth.new_store())["user_id"], 2);
+});
+
+ts_test("protocol facade web", func() {
+  facade_web(web.rate_limit({"limit": 1}));
+});
+
+ts_test("protocol method values", func() {
+  let app = route.new();
+  app.get("/x", func(req) { return {"status": 200, "body": "ok"}; });
+  let dispatch = app.dispatch;
+  ts_eq(dispatch({"method": "GET", "path": "/x"})["body"], "ok");
+
+  let limiter = web.rate_limit({"limit": 1});
+  let middleware = limiter.middleware;
+  ts_eq(middleware({"remote_addr": "127.0.0.1"}), null);
+});
+
+ts_finish();

@@ -4790,7 +4790,8 @@ app.dispatch(request)               -> response | task
 app.inspect()                       -> [{method, pattern, handler}, ...]
 ```
 
-`Router` 是可变引用句柄：`let b = a;` 之后 `b` 和 `a` 共享同一个路由表；注册方法原地更新，不返回新 Router。
+`Router` 是可变引用句柄：`let b = a;` 之后 `b` 和 `a` 共享同一个路由表；注册方法原地更新，不返回新 Router。`Router` 的公开操作是满足 `route.RouterApi` 的方法，可用 `app: route.RouterApi` 做结构式类型检查；`let d = app.dispatch;` 仍可取出方法值。
+
 
 规则：
 

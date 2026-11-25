@@ -6,16 +6,60 @@ package route {
   const _WILD = 2;
   const _MAX_SEGMENTS = 32;
 
+  // The operations live in private callable fields; the public interface is
+  // the protocol below.  Copies of a Router still share the same state.
   export struct Router {
-    add: callable;
-    get: callable;
-    post: callable;
-    put: callable;
-    delete: callable;
-    use: callable;
-    use_after: callable;
-    dispatch: callable;
-    inspect: callable;
+    _add: callable;
+    _get: callable;
+    _post: callable;
+    _put: callable;
+    _delete: callable;
+    _use: callable;
+    _use_after: callable;
+    _dispatch: callable;
+    _inspect: callable;
+  }
+
+  protocol RouterApi {
+    func add(self, method: string, pattern: string, handler: any);
+    func get(self, pattern: string, handler: any);
+    func post(self, pattern: string, handler: any);
+    func put(self, pattern: string, handler: any);
+    func delete(self, pattern: string, handler: any);
+    func use(self, middleware: any);
+    func use_after(self, middleware: any);
+    func dispatch(self, req: dict);
+    func inspect(self);
+  }
+
+  impl Router {
+    func add(self, method: string, pattern: string, handler: any) {
+      self._add(method, pattern, handler);
+    }
+    func get(self, pattern: string, handler: any) {
+      self._get(pattern, handler);
+    }
+    func post(self, pattern: string, handler: any) {
+      self._post(pattern, handler);
+    }
+    func put(self, pattern: string, handler: any) {
+      self._put(pattern, handler);
+    }
+    func delete(self, pattern: string, handler: any) {
+      self._delete(pattern, handler);
+    }
+    func use(self, middleware: any) {
+      self._use(middleware);
+    }
+    func use_after(self, middleware: any) {
+      self._use_after(middleware);
+    }
+    func dispatch(self, req: dict) {
+      return self._dispatch(req);
+    }
+    func inspect(self) {
+      return self._inspect();
+    }
   }
 
   // Trie nodes are long-lived mutable state shared by every copy of a Router.
@@ -475,15 +519,15 @@ package route {
     };
 
     return Router {
-      add: add,
-      get: func(pattern, handler) { add("GET", pattern, handler); },
-      post: func(pattern, handler) { add("POST", pattern, handler); },
-      put: func(pattern, handler) { add("PUT", pattern, handler); },
-      delete: func(pattern, handler) { add("DELETE", pattern, handler); },
-      use: use,
-      use_after: use_after,
-      dispatch: dispatch,
-      inspect: inspect
+      _add: add,
+      _get: func(pattern, handler) { add("GET", pattern, handler); },
+      _post: func(pattern, handler) { add("POST", pattern, handler); },
+      _put: func(pattern, handler) { add("PUT", pattern, handler); },
+      _delete: func(pattern, handler) { add("DELETE", pattern, handler); },
+      _use: use,
+      _use_after: use_after,
+      _dispatch: dispatch,
+      _inspect: inspect
     };
   }
 }

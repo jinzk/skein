@@ -80,15 +80,47 @@ package auth {
     return constant_time_equal(token, expected);
   }
 
+  // Operations live in private callable fields; SessionStoreApi is the
+  // public structural contract.  cookie_name and ttl remain public data.
   export struct SessionStore {
-    create: callable;
-    get: callable;
-    set: callable;
-    delete: callable;
-    rotate: callable;
-    cleanup: callable;
+    _create: callable;
+    _get: callable;
+    _set: callable;
+    _delete: callable;
+    _rotate: callable;
+    _cleanup: callable;
     cookie_name: string;
     ttl: int;
+  }
+
+  protocol SessionStoreApi {
+    func create(self, value: any);
+    func get(self, sid: string?);
+    func set(self, sid: string?, value: any);
+    func delete(self, sid: string?);
+    func rotate(self, sid: string?);
+    func cleanup(self);
+  }
+
+  impl SessionStore {
+    func create(self, value: any) {
+      return self._create(value);
+    }
+    func get(self, sid: string?) {
+      return self._get(sid);
+    }
+    func set(self, sid: string?, value: any) {
+      return self._set(sid, value);
+    }
+    func delete(self, sid: string?) {
+      return self._delete(sid);
+    }
+    func rotate(self, sid: string?) {
+      return self._rotate(sid);
+    }
+    func cleanup(self) {
+      return self._cleanup();
+    }
   }
 
   // Local sessions are updated in place; get() still exports the plain value
@@ -147,12 +179,12 @@ package auth {
       return 0;
     };
     return SessionStore {
-      create: create,
-      get: get,
-      set: set,
-      delete: remove,
-      rotate: rotate,
-      cleanup: cleanup,
+      _create: create,
+      _get: get,
+      _set: set,
+      _delete: remove,
+      _rotate: rotate,
+      _cleanup: cleanup,
       cookie_name: cookie_name,
       ttl: ttl
     };
@@ -252,12 +284,12 @@ package auth {
     };
 
     return SessionStore {
-      create: create,
-      get: get,
-      set: set,
-      delete: remove,
-      rotate: rotate,
-      cleanup: cleanup,
+      _create: create,
+      _get: get,
+      _set: set,
+      _delete: remove,
+      _rotate: rotate,
+      _cleanup: cleanup,
       cookie_name: cookie_name,
       ttl: ttl
     };

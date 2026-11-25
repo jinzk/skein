@@ -323,13 +323,37 @@ package web {
     });
   }
 
+  // Operations live in private callable fields; LimiterApi is the public
+  // structural contract.  limit and window_ms remain public data.
   export struct Limiter {
-    check: callable;
-    middleware: callable;
-    reset: callable;
-    cleanup: callable;
+    _check: callable;
+    _middleware: callable;
+    _reset: callable;
+    _cleanup: callable;
     limit: int;
     window_ms: int;
+  }
+
+  protocol LimiterApi {
+    func check(self, req: dict);
+    func middleware(self, req: dict);
+    func reset(self);
+    func cleanup(self);
+  }
+
+  impl Limiter {
+    func check(self, req: dict) {
+      return self._check(req);
+    }
+    func middleware(self, req: dict) {
+      return self._middleware(req);
+    }
+    func reset(self) {
+      self._reset();
+    }
+    func cleanup(self) {
+      return self._cleanup();
+    }
   }
 
   // Buckets are long-lived per key.  A ref keeps the hot check path on
@@ -407,10 +431,10 @@ package web {
         return 0;
       };
       return Limiter {
-        check: shared_check,
-        middleware: shared_middleware,
-        reset: shared_reset,
-        cleanup: shared_cleanup,
+        _check: shared_check,
+        _middleware: shared_middleware,
+        _reset: shared_reset,
+        _cleanup: shared_cleanup,
         limit: limit,
         window_ms: window_ms
       };
@@ -488,10 +512,10 @@ package web {
     };
 
     return Limiter {
-      check: check,
-      middleware: middleware,
-      reset: reset,
-      cleanup: cleanup,
+      _check: check,
+      _middleware: middleware,
+      _reset: reset,
+      _cleanup: cleanup,
       limit: limit,
       window_ms: window_ms
     };

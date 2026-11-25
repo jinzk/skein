@@ -63,12 +63,41 @@ package metrics {
     count: int;
   }
 
+  // Operations live in private callable fields; RegistryApi is the public
+  // structural contract.  Copies of a Registry share the same metric tables.
   export struct Registry {
-    counter: callable;
-    gauge: callable;
-    observe: callable;
-    render: callable;
-    reset: callable;
+    _counter: callable;
+    _gauge: callable;
+    _observe: callable;
+    _render: callable;
+    _reset: callable;
+  }
+
+  protocol RegistryApi {
+    func counter(self, name: string, labels: dict, delta: number);
+    func gauge(self, name: string, labels: dict, value: number);
+    func observe(self, name: string, labels: dict, value: number, buckets: any);
+    func render(self);
+    func reset(self);
+  }
+
+  impl Registry {
+    func counter(self, name: string, labels: dict = {}, delta: number = 1) {
+      return self._counter(name, labels, delta);
+    }
+    func gauge(self, name: string, labels: dict, value: number) {
+      return self._gauge(name, labels, value);
+    }
+    func observe(self, name: string, labels: dict, value: number,
+                 buckets: any = null) {
+      return self._observe(name, labels, value, buckets);
+    }
+    func render(self) {
+      return self._render();
+    }
+    func reset(self) {
+      self._reset();
+    }
   }
 
   export func new() {
@@ -193,11 +222,11 @@ package metrics {
     };
 
     return Registry {
-      counter: counter,
-      gauge: gauge,
-      observe: observe,
-      render: render,
-      reset: reset
+      _counter: counter,
+      _gauge: gauge,
+      _observe: observe,
+      _render: render,
+      _reset: reset
     };
   }
 }

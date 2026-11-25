@@ -396,32 +396,84 @@ package cache {
       return true;
     };
     return Client {
-      get: get,
-      set: set,
-      delete: remove,
-      exists: exists,
-      incr: incr,
-      expire: expire,
-      ttl: ttl,
-      pttl: pttl,
-      incr_window: incr_window,
-      ping: ping,
-      close: close
+      _get: get,
+      _set: set,
+      _delete: remove,
+      _exists: exists,
+      _incr: incr,
+      _expire: expire,
+      _ttl: ttl,
+      _pttl: pttl,
+      _incr_window: incr_window,
+      _ping: ping,
+      _close: close
     };
   }
 
+  // Operations live in private callable fields; ClientApi is the public
+  // structural contract.  Copies of a Client share the same connection state.
   export struct Client {
-    get: callable;
-    set: callable;
-    delete: callable;
-    exists: callable;
-    incr: callable;
-    expire: callable;
-    ttl: callable;
-    pttl: callable;
-    incr_window: callable;
-    ping: callable;
-    close: callable;
+    _get: callable;
+    _set: callable;
+    _delete: callable;
+    _exists: callable;
+    _incr: callable;
+    _expire: callable;
+    _ttl: callable;
+    _pttl: callable;
+    _incr_window: callable;
+    _ping: callable;
+    _close: callable;
+  }
+
+  protocol ClientApi {
+    func get(self, key: string);
+    func set(self, key: string, value: any, options: dict);
+    func delete(self, key: string);
+    func exists(self, key: string);
+    func incr(self, key: string, amount: int);
+    func expire(self, key: string, ttl_ms: int);
+    func ttl(self, key: string);
+    func pttl(self, key: string);
+    func incr_window(self, key: string, window_ms: int);
+    func ping(self);
+    func close(self);
+  }
+
+  impl Client {
+    func get(self, key: string) {
+      return self._get(key);
+    }
+    func set(self, key: string, value: any, options: dict = {}) {
+      return self._set(key, value, options);
+    }
+    func delete(self, key: string) {
+      return self._delete(key);
+    }
+    func exists(self, key: string) {
+      return self._exists(key);
+    }
+    func incr(self, key: string, amount: int = 1) {
+      return self._incr(key, amount);
+    }
+    func expire(self, key: string, ttl_ms: int) {
+      return self._expire(key, ttl_ms);
+    }
+    func ttl(self, key: string) {
+      return self._ttl(key);
+    }
+    func pttl(self, key: string) {
+      return self._pttl(key);
+    }
+    func incr_window(self, key: string, window_ms: int) {
+      return self._incr_window(key, window_ms);
+    }
+    func ping(self) {
+      return self._ping();
+    }
+    func close(self) {
+      return self._close();
+    }
   }
 
   export func drivers() {

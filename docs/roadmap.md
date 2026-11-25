@@ -34,7 +34,7 @@
 | 包生态与信任（M3） | 按需 | 公共生态暂缓，先支持私有/本地生态；SumDB / proxy / 私有认证按私有需求推进 |
 | JIT / VM 与 GC（M4） | 优化冻结 | moving GC 与 AOT / 字节码缓存均已确认不做；已完成记录见第 3 节 |
 | 长尾能力与体验（M5） | 按需 | 旧编码、HTTP/2 CONNECT、REPL / LSP 体验、LevelDB / RocksDB |
-| 对象抽象 / `protocol` / `ref` / Channel 模型（M8） | 阶段 1/2 已完成 | Channel 端点对与结构化 `protocol` 已落地；下一步实现 `ref` / `weak`、GC 接入与 channel payload 拒绝 |
+| 对象抽象 / `protocol` / `ref` / Channel 模型（M8） | 阶段 1/2 与 inline 方法已完成 | Channel 端点对、结构化 `protocol` 与 struct 内联方法已落地；下一步实现 `ref` / `weak`、GC 接入与 channel payload 拒绝 |
 | `std.cache`（M7）/ `std.kv` | 已完成 | 维护；Valkey 独立 CI 服务可按需补 |
 | FFI 平台 CI / fuzz | 按需 | Windows x64（MinGW/MSVC）进入正式发布；32 位 / ARM 与 fuzz 按需，见 `architecture.md` |
 
@@ -285,9 +285,9 @@ REPL / 工具链体验：
 - 补全候选弹窗 / 分栏
 - 多行历史条目
 
-### 2.6 对象抽象、`protocol` 与引用模型（M8；阶段 2 已完成）
+### 2.6 对象抽象、`protocol` 与引用模型（M8；阶段 2 与 inline 方法已完成）
 
-状态：结构化 `protocol` 与直接删除 `trait` 已实现；`ref` / `weak` 设计已明确，待实现。
+状态：结构化 `protocol`、直接删除 `trait`，以及 struct 内联 `func` 方法已实现；顶层 `impl Type` 保留为补充方法容器。`ref` / `weak` 设计已明确，待实现。
 
 背景与问题：
 
@@ -306,7 +306,10 @@ REPL / 工具链体验：
 - 已确认只保留结构化 `protocol`，移除用户层 `trait` / `impl Trait for
   Type`；`impl Type` 保留为具体类型写方法的机制；
 - 不把现有 `trait` 直接改成结构化语义，否则会破坏显式契约和已有诊断；
-- 不提供 deprecated alias；`trait` 与 `impl Trait for Type` 直接删除，一次性迁移。
+- 不提供 deprecated alias；`trait` 与 `impl Trait for Type` 直接删除，一次性迁移；
+- `struct` 体内可直接写 `func` 方法，语法与 `impl Type` 内的方法一致；解析后
+  等价于紧随 struct 的隐式 `impl Type`，因此后续顶层 `impl Type` 可以添加
+  方法但不能覆盖同名方法，重名仍报 `method repeated <name>`。
 
 `protocol` 语义（已实现）：
 
@@ -401,9 +404,11 @@ GC 接入（待实现）：
    “动态调用看运行时能力，接口看显式/结构化契约”的说明~~（已完成）；
 2. ~~新增 `protocol`，一次性迁移测试、stdlib、LSP 和文档，并删除 `trait` /
    `impl Trait for Type`~~（已完成）；
-3. 实现 `ref` / `weak` 内部值、`std.ref` API、通用 `?.` 可选链、GC sweep
+3. ~~允许 `struct` 体内直接定义 `func` 方法；顶层 `impl Type` 仍可继续添加
+   方法，二者共用方法命名空间且重名报错~~（已完成）；
+4. 实现 `ref` / `weak` 内部值、`std.ref` API、通用 `?.` 可选链、GC sweep
    与 channel payload 拒绝；
-4. 验收：强引用环可被回收，weak 在目标释放后升级为 `null`，普通值环仍
+5. 验收：强引用环可被回收，weak 在目标释放后升级为 `null`，普通值环仍
    被拒绝，channel 发送 `ref` / weak（含嵌套）报错且 snapshot 可发送，
    `SKEIN_GC_STRESS` 无漏根，JIT/VM 差分与语言核心测试稳定。
 

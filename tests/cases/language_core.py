@@ -396,6 +396,12 @@ def run_cases():
           'protocol B { func m(self) { return 2; } }\n'
           'println(S {}.m());\n',
           stdout="3")
+    check("protocol default conflict resolved by inline method",
+          'struct S { func m(self) { return 3; } }\n'
+          'protocol A { func m(self) { return 1; } }\n'
+          'protocol B { func m(self) { return 2; } }\n'
+          'println(S {}.m());\n',
+          stdout="3")
     check("protocol missing method still rejected",
           'protocol T { func m(self); }\n'
           'struct S { }\n'

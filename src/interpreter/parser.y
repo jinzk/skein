@@ -255,6 +255,38 @@ static struct ast *with_decorators(struct ast *method,
     return method;
 }
 
+/* Inline struct methods are lowered to an immediately following implicit
+ * `impl Type`.  This keeps struct metadata, bytecode serialization, and the
+ * method runtime unchanged while letting fields and methods share one source
+ * body.  A later explicit `impl Type` simply adds to the same method table. */
+static struct ast *lower_struct_inline_methods(struct ast *decl) {
+    struct struct_node *s = (struct struct_node *)decl;
+    if (!s)
+        return decl;
+
+    struct struct_member *fields = NULL;
+    struct struct_member *methods = NULL;
+    for (struct struct_member *member = s->members; member;) {
+        struct struct_member *next = member->next;
+        member->next = NULL;
+        if (member->nodetype == 'm')
+            methods = (struct struct_member *)append_struct_member(
+                (struct ast *)methods, (struct ast *)member);
+        else
+            fields = (struct struct_member *)append_struct_member(
+                (struct ast *)fields, (struct ast *)member);
+        member = next;
+    }
+    s->members = fields;
+    if (!methods)
+        return decl;
+
+    struct ast *lowered = lower_impl_decorators(
+        (struct impl_node *)newimpl(copy_text(s->name),
+                                    copy_text(s->source), methods));
+    return newast('L', decl, lowered);
+}
+
 /* -------------------------------------------------------------------------
  * extern lib bindings: build a manifest dict at parse time, then hand it to
  * the FFI builtin as a normal call expression.
@@ -1237,14 +1269,13 @@ stmt: IF HEADER_LPAREN exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, 
       }
     | EXPORT NAME '=' exp ';'             { $$ = newvar($2, $4, true); }
     | EXPORT STRUCT NAME '{' empty_body  {
-        $$ = newstructdecl($3,
-                           copy_text(diag_current_source_name().c_str()),
-                           NULL, true);
+        $$ = lower_struct_inline_methods(newstructdecl(
+            $3, copy_text(diag_current_source_name().c_str()), NULL, true));
       }
     | EXPORT STRUCT NAME '{' struct_members '}' {
-        $$ = newstructdecl($3,
-                           copy_text(diag_current_source_name().c_str()),
-                           (struct struct_member *)$5, true);
+        $$ = lower_struct_inline_methods(newstructdecl(
+            $3, copy_text(diag_current_source_name().c_str()),
+            (struct struct_member *)$5, true));
       }
     | EXPORT ENUM NAME '{' empty_body    {
         $$ = newenumdecl($3,
@@ -1529,14 +1560,13 @@ let_pattern: NAME '{' pattern_fields '}'  {
     ;
 
 struct_decl: STRUCT NAME '{' empty_body  {
-        $$ = newstructdecl($2,
-                           copy_text(diag_current_source_name().c_str()),
-                           NULL);
+        $$ = lower_struct_inline_methods(newstructdecl(
+            $2, copy_text(diag_current_source_name().c_str()), NULL));
       }
     | STRUCT NAME '{' struct_members '}' {
-        $$ = newstructdecl($2,
-                           copy_text(diag_current_source_name().c_str()),
-                           (struct struct_member *)$4);
+        $$ = lower_struct_inline_methods(newstructdecl(
+            $2, copy_text(diag_current_source_name().c_str()),
+            (struct struct_member *)$4));
       }
     ;
 

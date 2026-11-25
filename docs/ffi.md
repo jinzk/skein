@@ -209,7 +209,8 @@ task 完成队列被 drain，因此 worker "先投递再返回" 能保证回调�
   `next()` / `close()`；优先用现有 userdata + wrapper 实现，不改 ABI；
 - **P3：C++ 实现 Skein protocol（暂不计划）**：需要 vtable 双向绑定和
   跨语言类型检查，复杂度高、收益场景少。继续推荐 wrapper 模式：Skein struct
-  定义接口，方法体调用 native 函数。
+  定义接口，方法体调用 native 函数；方法可以直接写在 struct 内，也可以随后用
+  `impl Type` 追加，两种写法对 FFI 调用点没有区别。
 
 ### 8.6 兼容性与发布约束
 

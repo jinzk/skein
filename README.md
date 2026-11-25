@@ -184,7 +184,7 @@ let desc = match (event) {
 
 ### 组织代码：struct、protocol 与枚举
 
-`struct` 声明数据，`impl` 声明方法，`protocol` 声明结构式接口；枚举支持带载荷变体和穷尽匹配：
+`struct` 声明数据和方法，`impl` 可追加方法，`protocol` 声明结构式接口；枚举支持带载荷变体和穷尽匹配：
 
 ```skein
 protocol Drawable {
@@ -194,9 +194,7 @@ protocol Drawable {
 struct Point {
   x: int;
   y: int;
-}
 
-impl Point {
   func area(self) {
     return self.x * self.y;
   }
@@ -205,11 +203,16 @@ impl Point {
     print("point " + str(self.area()));
   }
 }
+
+impl Point {
+  func scaled(self, k: int) -> self.area() * k;
+}
 ```
 
-- struct 支持字段默认值和 copy-with：`Point { ...p, x: 9 }`；
+- struct 支持字段默认值、内联方法和 copy-with：`Point { ...p, x: 9 }`；
+- `impl Type` 给已有类型追加方法，与内联方法共享方法命名空间；同名重复会报错；
 - 方法支持默认参数、可变参数、装饰器和 generator；
-- enum 支持带字段变体、`impl`、protocol 和 `match` 穷尽性检查；
+- enum 支持带字段变体、`impl`、protocol 和 `match` 穷尽性检查；enum 方法仍写在 `impl` 中；
 - list / dict / struct 是值语义，内部使用写时复制。
 
 ### 并发：task 与 launch

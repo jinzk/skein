@@ -172,10 +172,12 @@ println(describe(2));
 struct Point {
   x: int;
   y: int;
+
+  func length_sq(self) -> self.x * self.x + self.y * self.y;
 }
 
 impl Point {
-  func length_sq(self) -> self.x * self.x + self.y * self.y;
+  func sum(self) -> self.x + self.y;
 }
 
 let p = Point { x: 3, y: 4 };
@@ -183,9 +185,12 @@ println(str(p.length_sq()));
 ```
 
 - 构造用 `Point { x: 1, y: 2 }`；字段有默认值时可写 `Config {}`；
-- 方法写在 `impl Type` 中，第一个参数必须是显式 `self`，调用时写 `p.method()`；
-- `struct` 只声明字段，方法不能直接写在 `struct` 里；
-- enum 变体也是结构体风格：`Event.Msg { text: "hi" }`、`Event.Timeout`；
+- 方法可以直接写在 `struct` 中，也可以用 `impl Type` 追加；两者共享方法表，
+  同名重复报 `method repeated <name>`；
+- 方法第一个参数必须是显式 `self`，调用时写 `p.method()`；
+- enum 变体也是结构体风格：`Event.Msg { text: "hi" }`、`Event.Timeout`；enum
+  方法仍只写在 `impl Event` 中；
+- `with` 是普通标识符，可作变量名或字段名；`struct Name with Protocol` 简写不存在；
 - struct 是 copy-on-write 值语义，方法内改 `self` 不会改调用方原值。
 
 ### 8. 字符串没有插值

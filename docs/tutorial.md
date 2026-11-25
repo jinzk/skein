@@ -1068,9 +1068,7 @@ import std;
 struct Point {
   x: int;
   y: int;
-}
 
-impl Point {
   func length(self) {
     return std.math.sqrt(self.x * self.x + self.y * self.y);
   }
@@ -1080,10 +1078,16 @@ impl Point {
   }
 }
 
+// impl 是补充：继续给 Point 追加方法
+impl Point {
+  func sum(self) { return self.x + self.y; }
+}
+
 let p = Point { x: 3, y: 4 };
 p.x
 p.length()
 let q = p.moved(1, 2);
+p.sum()
 ```
 
 - `struct` 声明字段；没有默认值的字段都必须初始化，未知字段或重复字段会报错；
@@ -1094,9 +1098,10 @@ let q = p.moved(1, 2);
 - `std.struct.decode` 不自动填充默认值，缺失字段仍然报错；
 - 字段可以读写：`p.x`、`p.x = 5`；
 - 所有字段递归可哈希时，结构体可以自动作 `dict` key 或 `set` 元素；也可以实现 `std.dict_key.DictKey` 的 `dict_hash(self) -> int` 跳过字段检查并使用自定义 hash；key 保存插入时的字段快照，之后修改原变量不会改变已插入的 key；
+- `struct` 可以直接写方法，也可以只写字段；inline 方法使用与 `impl Type` 方法相同的 `func` 语法；
+- `impl Type` 保留为补充手段，用来给同一类型追加方法；inline 方法与 `impl` 方法共享方法命名空间，同名重复（inline / inline、inline / impl、impl / impl）报 `method repeated <name>`，`impl` 不能覆盖 inline 方法；
 - 方法第一个参数必须是显式 `self`；
 - 方法参数支持默认值，但 `self` 不能有默认值；默认值可以引用 `self` 和更早的参数；
-- `struct` 只声明字段；所有方法必须写在 `impl Type` 中；
 - 方法只能通过实例调用：`p.length()`；
 - 方法本身可以作为值提取，例如 `let f = p.length; f()`；
 - 方法值绑定提取时的结构体快照，之后修改原结构体不会影响已绑定的方法；
@@ -1140,7 +1145,8 @@ protocol Drawable {
   func draw(self);
 }
 
-impl Point {
+struct DrawPoint {
+  x: int;
   func draw(self) {
     print("point");
   }
@@ -1150,14 +1156,16 @@ func render(x: Drawable) {
   x.draw();
 }
 
-render(p)
+render(DrawPoint { x: 1 })
 ```
 
 - `protocol` 可以包含方法签名和默认方法体，不包含字段或 protocol 继承；
 - 一致性是结构式的：方法名、参数个数、参数类型、`self` 接收者和返回类型都要匹配，不需要声明实现关系；
-- 没有默认体的 protocol 方法必须由 `impl Type` 的方法匹配，否则不满足 protocol；
-- `impl Type` 的同名方法覆盖 protocol 默认方法；多个 protocol 提供同名默认方法而类型没有自己的实现时报冲突，需要在 `impl Type` 中显式实现；
-- protocol 方法声明不能有默认值；`impl` 方法可以额外提供默认值；
+- 没有默认体的 protocol 方法必须由 inline 方法或 `impl Type` 方法匹配，否则不满足 protocol；
+- inline 方法和 `impl Type` 的同名方法都覆盖 protocol 默认方法；多个 protocol
+  提供同名默认方法而类型没有自己的实现时报冲突，需要在 `struct` 中直接实现，
+  或在 `impl Type` 中显式实现；
+- protocol 方法声明不能有默认值；inline 方法和 `impl` 方法可以额外提供默认值；
 - 未标注类型的方法调用按值的运行时能力查找；protocol 标注和 `is Protocol` 是结构式契约；
 - enum 上的方法名不能与任意变体字段重名；
 - struct、enum 和 protocol 名称共享类型命名空间，不能在同一个包中重名；
@@ -1175,9 +1183,8 @@ protocol Drawable {
   func area(self);
 }
 
-struct Point { x: int; }
-
-impl Point {
+struct Point {
+  x: int;
   func area(self) { return self.x; }
   // draw 使用 protocol 默认实现
 }
@@ -1251,9 +1258,10 @@ func trace(fn) {
   };
 }
 
-struct Point { x: int; y: int; }
+struct Point {
+  x: int;
+  y: int;
 
-impl Point {
   @trace
   func area(self, scale: int = 1) {
     return self.x * self.y * scale;
@@ -1263,11 +1271,12 @@ impl Point {
 Point { x: 3, y: 4 }.area()      // enter / exit / 12
 ```
 
-- `@expr` 写在 `impl` 方法前，可以连续写多个；多个装饰器从下往上应用；
-- 装饰器在 `impl` 声明执行时应用一次，不随方法调用重复执行；
+- `@expr` 写在 `struct` 内的方法或 `impl` 方法前，可以连续写多个；多个装饰器从下往上应用；
+- 装饰器在 `struct` / `impl` 声明执行时应用一次，不随方法调用重复执行；
 - 装饰器是普通高阶函数，不需要专门的定义语法；
 - 装饰器收到 unbound function，`self` 是第一个参数；推荐用 `...args` 转发；
-- 支持 `impl Type` 方法；调用点、方法值提取和 protocol 默认方法查找不变；
+- 支持 inline 结构体方法和 `impl Type` 方法；调用点、方法值提取和 protocol
+  默认方法查找不变；
 - 默认值由生成的 wrapper 解析，装饰器看到的是补全后的参数；
 - 装饰器必须返回 callable；不支持类型声明装饰器和解构参数方法；
 - generator 方法也支持装饰器；生成的 wrapper 是普通函数，直接返回装饰器链产生的
@@ -2466,7 +2475,7 @@ let t = std.thread.spawn_function(worker, std.thread.Message.from({"n": 4}));
   # 另一个进程：
   let t = std.thread.spawn_entry(std.fs.read_bytes("entry.bin"), msg);
   ```
-  当前可序列化的 Proto 支持入口内的局部 `struct` / `enum` / `protocol` / `impl` 声明、嵌套函数和 `defer`；结构/枚举字段默认值和 impl 方法会随声明元数据传递，局部方法参数默认值当前仍受限。data 值支持 null/bool/int/float/char/byte/string/bytes/error/result/list/dict/set/deque、struct/enum（字段/variant 元数据随 payload 注册；字段默认值，以及带默认/模式/可变参数、数据捕获和全局数据依赖的方法也会传输；方法若捕获函数/heap/命名空间，当前会给出明确诊断并拒绝）以及 builtin 函数常量。`list` / `dict` / `set` / `deque` 现在会递归携带嵌套值，因此可以跨线程/进程传递函数表、heap 容器和多层混合容器；LRU 是普通 struct，遵循 struct 的传输规则，不能嵌套函数 / heap 等特殊值。
+  当前可序列化的 Proto 支持入口内的局部 `struct` / `enum` / `protocol` / `impl` 声明、嵌套函数和 `defer`；结构/枚举字段默认值、struct inline 方法和 impl 方法会随声明元数据传递，局部方法参数默认值当前仍受限。data 值支持 null/bool/int/float/char/byte/string/bytes/error/result/list/dict/set/deque、struct/enum（字段/variant 元数据随 payload 注册；字段默认值，以及带默认/模式/可变参数、数据捕获和全局数据依赖的方法也会传输；方法若捕获函数/heap/命名空间，当前会给出明确诊断并拒绝）以及 builtin 函数常量。`list` / `dict` / `set` / `deque` 现在会递归携带嵌套值，因此可以跨线程/进程传递函数表、heap 容器和多层混合容器；LRU 是普通 struct，遵循 struct 的传输规则，不能嵌套函数 / heap 等特殊值。
 
 线程入口接收一个 Message：
 

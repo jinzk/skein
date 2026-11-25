@@ -700,7 +700,8 @@ protocol Drawable {
   func draw(self);
 }
 
-impl Point {
+struct Point {
+  x: int;
   func draw(self) {
     print("point");
   }
@@ -717,15 +718,19 @@ protocol Drawable {
   func area(self);
 }
 
-impl Point {
+struct Point {
+  x: int;
   func area(self) { return 1; }
   // draw 使用 protocol 默认实现
 }
 ```
 
-- protocol 方法可以写签名或默认方法体；`impl Type` 的同名方法覆盖默认实现；
-- 没有默认体的纯签名方法必须由类型方法匹配，否则不满足 protocol；
-- 多个 protocol 提供同名默认方法而类型没有自己的实现时报冲突，需要在 `impl Type` 中显式实现。
+- protocol 方法可以写签名或默认方法体；类型自带的同名 inline 方法或 `impl Type`
+  追加的同名方法覆盖默认实现；
+- 没有默认体的纯签名方法必须由 inline 方法或 `impl Type` 方法匹配，否则不满足
+  protocol；
+- 多个 protocol 提供同名默认方法而类型没有自己的实现时报冲突，需要在 `struct`
+  中直接实现，或在 `impl Type` 中显式实现。
 
 protocol 是结构式契约：方法名、参数个数、参数类型、`self` 接收者和返回类型都匹配即满足，不需要 `impl Protocol for Type` 声明。`trait`、`impl Protocol for Type`、`export protocol`、`struct Name with Protocol` / `enum Name with Protocol` 简写均已移除，没有兼容别名；`with` 仍是普通标识符。
 
@@ -1861,11 +1866,14 @@ func bad(): int {
 }
 ```
 
-结构体 / impl 方法也支持表达式体：
+inline 结构体方法 / impl 方法也支持表达式体：
 
 ```text
-struct Box { v: int; }
-impl Box { func twice(self) -> self.v * 2; }
+struct Box {
+  v: int;
+  func twice(self) -> self.v * 2;
+}
+impl Box { func half(self) -> self.v / 2; }
 ```
 
 类型不匹配会报告运行时错误，例如：
@@ -1992,9 +2000,7 @@ func fetch(x) { return x; }
 struct Point {
   x: int;
   y: int;
-}
 
-impl Point {
   func length(self) {
     return std.math.sqrt(self.x * self.x + self.y * self.y);
   }
@@ -2002,6 +2008,11 @@ impl Point {
   func moved(self, dx: int, dy: int) {
     return Point { x: self.x + dx, y: self.y + dy };
   }
+}
+
+// impl 是补充：给同一类型追加更多方法
+impl Point {
+  func sum(self) { return self.x + self.y; }
 }
 ```
 
@@ -2013,6 +2024,7 @@ let p = Point { x: 3, y: 4 };
 p.x
 p.x = 5;
 p.length()
+p.sum()
 ```
 
 copy-with 与字段默认值：
@@ -2038,8 +2050,12 @@ let d = Point { ...p, x: 9 };
 - 字段可以声明默认值：`struct Config { host: string = "localhost"; port: int = 80; }`；
 - 默认值在定义包作用域中求值，每次构造重新求值；不能引用 `self` 或其他字段；
 - `std.struct.decode` 不自动填充默认值，缺失字段仍然报错；
-- `struct` 只声明字段；所有方法必须写在 `impl Type` 中；
-- `impl Type` 用于声明该类型的固有方法；
+- `struct` 可直接声明方法，也可以只声明字段；inline 方法使用与 `impl Type`
+  方法相同的 `func` 语法；
+- `impl Type` 保留为补充手段，用于给同一类型追加更多方法；
+- inline 方法与 `impl Type` 方法共享同一个方法命名空间；同一名字不能定义两次
+  （inline / inline、inline / impl、impl / impl 都一样），重复时报
+  `method repeated <name>`；`impl Type` 不能覆盖已有的 inline 方法；
 - 方法第一个参数必须是显式 `self`；
 - `self` 的类型隐式为当前结构体；
 - 方法参数支持默认值，但 `self` 不能有默认值；默认值可以引用 `self` 和更早的参数；
@@ -2056,7 +2072,7 @@ let d = Point { ...p, x: 9 };
 
 #### 5.12.1 方法装饰器
 
-`impl` 方法支持 `@expr` 装饰器：
+inline 结构体方法和 `impl` 方法都支持 `@expr` 装饰器：
 
 ```text
 func trace(fn) {
@@ -2068,9 +2084,10 @@ func trace(fn) {
   };
 }
 
-struct Point { x: int; y: int; }
+struct Point {
+  x: int;
+  y: int;
 
-impl Point {
   @trace
   func area(self, scale: int = 1) {
     return self.x * self.y * scale;
@@ -2083,13 +2100,14 @@ p.area()      // enter / exit / 12
 
 规则：
 
-- `@expr` 放在 `impl` 方法声明前，可以连续写多个；
-- 支持 `impl Type` 中的方法；protocol 默认方法也走同一套方法签名检查；
+- `@expr` 放在 `struct` 内的方法或 `impl` 方法声明前，可以连续写多个；
+- 支持 inline 结构体方法和 `impl Type` 中的方法；protocol 默认方法也走同一套
+  方法签名检查；
 - 多个装饰器从下往上应用，`@a @b func m` 等价于 `a(b(m))`；
-- 装饰器在 `impl` 声明执行时应用一次，不随方法调用重复执行；
+- 装饰器在 `struct` / `impl` 声明执行时应用一次，不随方法调用重复执行；
 - 装饰器就是普通高阶函数，不新增 `decorator` 关键字；
 - 装饰器表达式支持名称、成员访问、调用和下标；任意表达式请加括号，例如 `@(make_decorator(x))`；
-- 装饰器必须返回 callable，否则在 `impl` 安装时报告 `expects callable`；
+- 装饰器必须返回 callable，否则在方法安装时报告 `expects callable`；
 - 方法装饰器收到的是 unbound function，`self` 是第一个参数；推荐用 `...args` 转发；
 - 装饰器可以修改参数，包括 `args[0]`（`self`），再调用原方法；
 - 调用点不变：`p.area()`、`let f = p.area; f()`，protocol 默认方法也走同一套方法查找；
@@ -2228,13 +2246,19 @@ protocol Drawable {
 }
 ```
 
-类型在 `impl Type` 中提供匹配方法即满足接口：
+类型可以直接在 `struct` 内提供匹配方法，`impl Type` 也可以追加匹配方法：
 
 ```text
-impl Point {
+struct Point {
+  x: int;
+  y: int;
   func draw(self) {
     print("point");
   }
+}
+
+impl Point {
+  func area(self) { return self.x * self.y; }
 }
 ```
 
@@ -2252,9 +2276,13 @@ render(Point { x: 1, y: 2 });
 
 - protocol 可以包含方法签名和默认方法体，不包含字段或 protocol 继承；
 - 一致性是结构式的：方法名、参数个数、参数类型、`self` 接收者和返回类型都要匹配，不需要 `impl Protocol for Type`；
-- 没有默认体的签名必须由 `impl Type` 中的方法匹配，否则不满足 protocol；
-- `impl Type` 的同名方法覆盖 protocol 默认方法；多个 protocol 提供同名默认方法而类型没有自己的实现时报冲突，需要在 `impl Type` 中显式实现；
-- protocol 方法声明不支持默认值和可变参数；`impl Type` 中的方法可以额外提供默认值；
+- 没有默认体的签名必须由 inline 方法或 `impl Type` 方法匹配，否则不满足
+  protocol；
+- inline 方法和 `impl Type` 的同名方法都覆盖 protocol 默认方法；多个 protocol
+  提供同名默认方法而类型没有自己的实现时报冲突，需要在 `struct` 中直接实现，
+  或在 `impl Type` 中显式实现；
+- protocol 方法声明不支持默认值和可变参数；inline 方法和 `impl Type` 方法可以
+  额外提供默认值；
 - enum 上的方法名不能与任意变体字段重名；
 - 不支持 protocol 继承、泛型和静态方法；`trait`、`impl Protocol for Type`、`export protocol` 和 `with` 协议简写均已移除；
 - struct、enum 和 protocol 名称共享类型命名空间，不能在同一个包中重名；
@@ -2288,7 +2316,7 @@ let b = Event.Timeout;
 - copy-with 目前只支持 struct，不支持 enum；
 - 载荷字段只读：`a.text` 可读，`a.text = ...` 会报错；
 - 字段访问按当前变体校验：`Event.Timeout.text` 报错；
-- 方法只能写在 `impl Event` 中；方法内 `self` 只读，修改状态时返回新 enum；
+- enum 体不声明方法；方法只能写在 `impl Event` 中；方法内 `self` 只读，修改状态时返回新 enum；
 - enum 方法同样按结构式规则满足 protocol：只要 `impl Event` 的方法签名匹配即可；`Event` 也能用于 `is` 和类型标注；
 - 方法名不能与任意变体的字段重名；
 - `kind_of(e)` → `"enum"`，`type_name(e)` → `"Event"`，`type_package(e)` → 包名；

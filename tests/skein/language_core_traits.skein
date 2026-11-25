@@ -53,6 +53,29 @@ impl ProtoRequiredC {
   }
 }
 
+protocol ProtoInlineRequired {
+  func base(self) -> int;
+
+  func doubled(self) {
+    return self.base() * 2;
+  }
+}
+
+struct ProtoInlineC {
+  seed: int;
+  func base(self): int { return self.seed; }
+  func twice(self) -> self.base() * 2;
+  func doubled(self) -> self.base() * 2;
+}
+
+impl ProtoInlineC {
+  func triple(self) -> self.base() * 3;
+}
+
+func proto_inline_doubled(value: ProtoInlineRequired) {
+  return value.doubled();
+}
+
 protocol ProtoStructDefault {
   func struct_default(self) {
     return "struct";
@@ -93,6 +116,7 @@ protocol ProtoEnumDefault {
 
 struct ProtoWithS {
   with: int;
+  func doubled(self) -> self.with * 2;
 }
 
 ts_test("protocol default method", func() {
@@ -107,6 +131,22 @@ ts_test("protocol default method override", func() {
 
 ts_test("protocol default calls required method", func() {
   ts_eq(ProtoRequiredC {}.doubled(), 8);
+});
+
+ts_test("inline struct method", func() {
+  let c = ProtoInlineC { seed: 5 };
+  ts_eq(c.base(), 5);
+  ts_eq(c.twice(), 10);
+});
+
+ts_test("inline method and impl method coexist", func() {
+  ts_eq(ProtoInlineC { seed: 5 }.triple(), 15);
+});
+
+ts_test("inline method satisfies protocol default", func() {
+  let c = ProtoInlineC { seed: 4 };
+  ts_eq(proto_inline_doubled(c), 8);
+  ts_true(c is ProtoInlineRequired);
 });
 
 ts_test("structural struct protocol match", func() {
@@ -130,6 +170,7 @@ ts_test("with remains an identifier", func() {
   let with = 7;
   let s = ProtoWithS { with: 9 };
   ts_eq(with + s.with, 16);
+  ts_eq(s.doubled(), 18);
 });
 
 ts_finish();

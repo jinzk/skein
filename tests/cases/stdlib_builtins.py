@@ -2951,25 +2951,53 @@ def run_cases():
           "println(render(Point { x: 1 }));\n"
           "println(Point { x: 1 }.other());\n",
           stdout_all=["1", "2"])
+    check("inline method satisfies protocol default",
+          "protocol Doubler {\n"
+          "  func value(self) -> int;\n"
+          "  func double(self) { return self.value() * 2; }\n"
+          "}\n"
+          "struct Num { n: int; func value(self): int { return self.n; } }\n"
+          "func render(x: Doubler) { return x.double(); }\n"
+          "println(render(Num { n: 5 }));\n"
+          "println(Num { n: 5 } is Doubler);\n",
+          stdout_all=["10", "true"])
     check("protocol method repeated",
           "protocol Drawable { func draw(self); func draw(self); }\n",
           stderr="protocol method repeated draw")
-    check("duplicate method",
+    check("duplicate impl method",
           "struct Point { x: int; }\n"
           "impl Point { func get(self) { return 1; } }\n"
+          "impl Point { func get(self) { return 2; } }\n",
+          stderr="method repeated get")
+    check("inline struct method",
+          "struct Point { x: int; func get(self): int { return self.x; } }\n"
+          "println(Point { x: 3 }.get());\n",
+          stdout="3")
+    check("inline and impl methods share namespace",
+          "struct Point { x: int; func twice(self) -> self.x * 2; }\n"
+          "impl Point { func plus(self, y) -> self.x + y; }\n"
+          "let p = Point { x: 4 };\n"
+          "println(p.twice());\n"
+          "println(p.plus(3));\n",
+          stdout_all=["8", "7"])
+    check("duplicate inline method",
+          "struct Point { func get(self) { return 1; } func get(self) { return 2; } }\n",
+          stderr="method repeated get")
+    check("impl cannot override inline method",
+          "struct Point { func get(self) { return 1; } }\n"
           "impl Point { func get(self) { return 2; } }\n",
           stderr="method repeated get")
     check("field and method name conflict",
           "struct Point { x: int; }\n"
           "impl Point { func x(self) { return 1; } }\n",
           stderr="field and method have the same name x")
+    check("field and inline method name conflict",
+          "struct Point { x: int; func x(self) { return 1; } }\n",
+          stderr="field and method have the same name x")
     check("method first parameter self",
           "struct Point { x: int; }\n"
           "impl Point { func get(this) { return 1; } }\n",
           stderr="method first parameter must be self")
-    check("struct methods must be in impl",
-          "struct Point { x: int; func get(self) { return self.x; } }\n",
-          stderr="methods must be declared in impl")
 
     check("enum method in impl",
           "enum Shape { Circle { r: int; }; Rect { w: int; h: int; }; }\n"

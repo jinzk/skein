@@ -61,6 +61,8 @@ std::shared_mutex type_method_mutex
 - `structtype_method()`、`structtype_method_names()`、
   `structtype_protocol_default()` 使用共享锁。
 - `structtype_add_method()`、`structtype_add_protocol_default()` 使用独占锁。
+- struct inline 方法与 `impl Type` 追加的方法写入同一 `type_def::methods`；
+  重复名检查和 protocol 默认方法冲突解析也走这张表。
 - `structtype_visit_functions()` 先在锁内收集 `shared_ptr`，释放锁后再回调，
   避免 GC 回调期间持锁。
 

@@ -148,7 +148,7 @@ python3 tests/vm_differential.py ./build/skein --fuzz-seconds 60
 - 索引/字段赋值、复合赋值、自增自减（含 COW 与循环引用检查）
 - `is` 类型检查
 - struct / enum 字面量构造
-- struct / enum / protocol / impl 声明
+- struct（含 inline 方法）/ enum / protocol / impl 声明
 - package 声明
 - `fail`
 - `on error` / `recover` / `pass`（handler 栈 + 局部 unwind）
@@ -274,8 +274,9 @@ struct Instr {
 源码行列，用于保持现有诊断输出。
 
 `CALL_METHOD` 用于 `obj.method(args)`：栈上是 receiver 和实参，`a` 保存参数
-个数，`b` 保存方法名常量索引。VM 直接按 receiver 类型查找方法，并把 receiver
-作为第 0 个参数调用，不创建 bound method 值；非 struct/enum 的成员调用
+个数，`b` 保存方法名常量索引。VM 直接按 receiver 类型的同一方法表查找方法
+（包含 struct inline 方法和 `impl Type` 追加的方法），并把 receiver 作为第 0 个
+参数调用，不创建 bound method 值；非 struct/enum 的成员调用
 （dict、module、builtin）回退到普通成员读取 + `CALL`。
 
 `LIST_APPEND_SELF` 用于 `xs = std.list.append(xs, expr)`：栈上是 callee、

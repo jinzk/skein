@@ -2352,6 +2352,7 @@ print(std.meta.has_type("int"));      // true
 `std.meta` 只查询已加载且可见的类型：当前包/当前源文件的类型可见，其他包
 的类型必须 `export`；不可见类型报错，`has_type` 返回 `false`。
 `fields` / `variants` / `methods` / `protocols` 对不适用的类型返回空列表。
+`methods` 同时包含 struct 内联方法和 `impl Type` 追加的方法，二者共享方法表；
 `protocols` / `implements` 按结构式方法签名匹配检查 protocol。
 返回字典同时包含 `package`、`module`、`source`：
 `package` 是完整包身份，`module` 是 Module 容器名（普通包和入口为空字符串），
@@ -2387,9 +2388,7 @@ import std.dict_key;
 struct User {
   id: int;
   cache: list[int];
-}
 
-impl User {
   func dict_hash(self) {
     return self.id;
   }
@@ -2399,6 +2398,8 @@ impl User {
   }
 }
 ```
+
+也可以用 `impl User` 追加这些方法；inline 方法和 `impl` 方法共享方法命名空间。
 
 `dict_hash` 必须是纯函数、确定性、无副作用，并且与 key 相等语义一致：相等的值必须返回相同的 hash。实现后该 struct/enum 可以跳过字段递归可哈希检查，直接作为 `dict` key 或 `set` 元素；hash 相同但 key 不相等的值只会在同一个桶里冲突。hash 期间禁止重入 dict/set key hash。
 

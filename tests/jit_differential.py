@@ -196,6 +196,18 @@ CASES = [
         "while (i < 20) { println(str(roundtrip(Num { n: i }))); i = i + 1; }\n",
     ),
     case(
+        "inline-struct-method-dispatch",
+        "struct Counter { n: int; func bump(self): int { return self.n + 1; } }\n"
+        "impl Counter { func twice_bumped(self) -> self.bump() * 2; }\n"
+        "func roundtrip(i) {\n"
+        "  let c = Counter { n: i };\n"
+        "  return c.bump() + c.twice_bumped();\n"
+        "}\n"
+        "let i = 0;\n"
+        "while (i < 20) { println(str(roundtrip(i))); i = i + 1; }\n",
+        expect_debug="[jit] enter roundtrip",
+    ),
+    case(
         "structural-protocol-thread-transfer",
         "import std;\n"
         "protocol Doubler {\n"

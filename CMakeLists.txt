@@ -1302,6 +1302,16 @@ if(BUILD_TESTING)
         TIMEOUT 60
       )
       add_test(
+        NAME repl_popup_test
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/repl_popup_test.py
+                $<TARGET_FILE:${PROJECT_NAME}>
+      )
+      set_tests_properties(repl_popup_test PROPERTIES
+        LABELS "core"
+        TIMEOUT 60
+      )
+      add_test(
         NAME vm_bench_test
         COMMAND $<TARGET_FILE:${PROJECT_NAME}>
                 ${CMAKE_CURRENT_SOURCE_DIR}/tools/bench_vm.skein

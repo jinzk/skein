@@ -282,7 +282,6 @@ REPL / 工具链体验：
 - 签名提示 / hover
 - Ctrl-R 历史搜索
 - 模糊补全排序
-- 补全候选弹窗 / 分栏
 - 多行历史条目
 
 ### 2.6 对象抽象、`protocol` 与引用模型（M8；阶段 3 已完成）
@@ -533,6 +532,7 @@ REPL / LSP 体验统一（M2，已完成）：
 - 共享 `completion_index`
 - REPL struct 字段补全
 - REPL `:load` 路径补全
+- 补全候选弹窗 / 分栏（方向键或 Ctrl-P/N 选择，Tab 接受，Esc/Ctrl-G 关闭）
 - 长行水平滚动
 - 运算符/逗号 continuation 缩进
 - LSP incremental sync / debounce

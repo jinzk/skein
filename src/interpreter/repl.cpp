@@ -35,6 +35,7 @@ extern int indent_count;
 #endif
 #else
 #include <cerrno>
+#include <poll.h>
 #include <termios.h>
 #include <unistd.h>
 #endif
@@ -209,8 +210,8 @@ size_t line_width(const std::string &text) {
     return unicode_ident::display_width(text.data(), text.size());
 }
 
-void redraw(const std::string &prompt, const std::string &line,
-            size_t cursor) {
+std::string line_sequence(const std::string &prompt, const std::string &line,
+                          size_t cursor) {
     const size_t terminal = (size_t)platform_terminal_width();
     const size_t prompt_width = line_width(prompt);
     const size_t available =
@@ -251,7 +252,97 @@ void redraw(const std::string &prompt, const std::string &line,
         if (tail > 0)
             out += "\x1b[" + std::to_string(tail) + "D";
     }
-    write_stdout(out);
+    return out;
+}
+
+struct completion_popup_state {
+    std::vector<std::string> candidates;
+    size_t selected = 0;
+    size_t visible_count = 0;
+    size_t start = 0;
+    size_t rows = 0;
+    bool active = false;
+
+    std::string clear() {
+        if (!active || rows == 0)
+            return std::string();
+        std::string out;
+        for (size_t i = 0; i < rows; ++i)
+            out += "\x1b[B\x1b[2K";
+        out += "\x1b[" + std::to_string(rows) + "A";
+        active = false;
+        rows = 0;
+        return out;
+    }
+
+    std::string draw_rows(const std::string &prompt, const std::string &line,
+                          size_t cursor) {
+        if (candidates.size() < 2)
+            return std::string();
+        const repl_ui::completion_popup_view view =
+            repl_ui::format_completion_popup(
+                candidates, (size_t)platform_terminal_width(), 6, selected);
+        if (view.rows.empty())
+            return std::string();
+        visible_count = view.visible_count;
+        if (selected >= visible_count)
+            selected = visible_count - 1;
+        rows = view.rows.size();
+        active = true;
+
+        std::string out = "\x1b[B\r";
+        for (size_t i = 0; i < view.rows.size(); ++i) {
+            if (i > 0)
+                out += "\r\n";
+            out += "\x1b[2K" + view.rows[i];
+        }
+        out += "\x1b[" + std::to_string(rows) + "A";
+        out += line_sequence(prompt, line, cursor);
+        return out;
+    }
+
+    void show(const std::vector<std::string> &values, size_t word_start,
+              const std::string &prompt, const std::string &line,
+              size_t cursor) {
+        candidates = values;
+        selected = 0;
+        start = word_start;
+        std::string out = clear();
+        out += line_sequence(prompt, line, cursor);
+        out += draw_rows(prompt, line, cursor);
+        write_stdout(out);
+    }
+
+    void dismiss(const std::string &prompt, const std::string &line,
+                 size_t cursor) {
+        if (!active)
+            return;
+        write_stdout(clear() + line_sequence(prompt, line, cursor));
+    }
+
+    void forget() {
+        active = false;
+        rows = 0;
+    }
+
+    void move(int delta, const std::string &prompt, const std::string &line,
+              size_t cursor) {
+        if (!active || visible_count == 0)
+            return;
+        selected = (selected + (size_t)(delta > 0 ? 1 : visible_count - 1)) %
+                   visible_count;
+        std::string out = clear();
+        out += line_sequence(prompt, line, cursor);
+        out += draw_rows(prompt, line, cursor);
+        write_stdout(out);
+    }
+};
+
+completion_popup_state g_popup;
+
+void redraw(const std::string &prompt, const std::string &line,
+            size_t cursor) {
+    write_stdout(g_popup.clear() + line_sequence(prompt, line, cursor));
 }
 
 const std::vector<std::string> &repl_commands() {
@@ -337,12 +428,25 @@ void complete_line(std::string &line, size_t &cursor,
         line.replace(context.start, cursor - context.start, prefix);
         cursor = context.start + prefix.size();
         redraw(prompt, line, cursor);
+        g_popup.show(candidates, context.start, prompt, line, cursor);
         return;
     }
-    write_stdout("\r\n");
-    for (const std::string &candidate : candidates)
-        write_stdout("  " + candidate + "\n");
-    redraw(prompt, line, cursor);
+    g_popup.show(candidates, context.start, prompt, line, cursor);
+}
+
+bool accept_popup(std::string &line, size_t &cursor,
+                  const std::string &prompt) {
+    if (!g_popup.active || g_popup.selected >= g_popup.candidates.size())
+        return false;
+    if (g_popup.start > cursor || cursor > line.size()) {
+        g_popup.dismiss(prompt, line, cursor);
+        return false;
+    }
+    const std::string choice = g_popup.candidates[g_popup.selected];
+    line.replace(g_popup.start, cursor - g_popup.start, choice);
+    cursor = g_popup.start + choice.size();
+    g_popup.dismiss(prompt, line, cursor);
+    return true;
 }
 
 #ifndef _WIN32
@@ -357,6 +461,22 @@ int read_byte() {
         }
         return -1;
     }
+}
+
+int read_byte_timed() {
+    struct pollfd descriptor;
+    descriptor.fd = STDIN_FILENO;
+    descriptor.events = POLLIN;
+    descriptor.revents = 0;
+    const int ready = ::poll(&descriptor, 1, 50);
+    if (ready == 0)
+        return -3;
+    if (ready < 0) {
+        if (errno == EINTR && g_interrupted)
+            return -2;
+        return -1;
+    }
+    return read_byte();
 }
 
 struct raw_terminal {
@@ -410,16 +530,23 @@ repl_line_status read_edited_line(const std::string &prompt,
 
     for (;;) {
         int c = read_byte();
+        if (g_popup.active && (c == 14 || c == 16)) { /* Ctrl-N / Ctrl-P */
+            g_popup.move(c == 14 ? 1 : -1, prompt, current, cursor);
+            continue;
+        }
         if (c == -2 || g_interrupted) {
             g_interrupted = 1;
+            g_popup.dismiss(prompt, current, cursor);
             write_stdout("^C\r\n");
             return REPL_INTERRUPTED;
         }
         if (c < 0) {
+            g_popup.dismiss(prompt, current, cursor);
             write_stdout("\r\n");
             return current.empty() ? REPL_EOF : REPL_LINE;
         }
         if (c == '\r' || c == '\n') {
+            g_popup.dismiss(prompt, current, cursor);
             write_stdout("\r\n");
             line = current;
             history_add(line);
@@ -427,6 +554,7 @@ repl_line_status read_edited_line(const std::string &prompt,
         }
         if (c == 3) {
             g_interrupted = 1;
+            g_popup.dismiss(prompt, current, cursor);
             write_stdout("^C\r\n");
             return REPL_INTERRUPTED;
         }
@@ -442,7 +570,11 @@ repl_line_status read_edited_line(const std::string &prompt,
             }
             continue;
         }
-        if (c == 7) { /* Ctrl-G: cancel current line */
+        if (c == 7) { /* Ctrl-G: dismiss popup, then cancel current line */
+            if (g_popup.active) {
+                g_popup.dismiss(prompt, current, cursor);
+                continue;
+            }
             current.clear();
             cursor = 0;
             redraw(prompt, current, cursor);
@@ -484,6 +616,7 @@ repl_line_status read_edited_line(const std::string &prompt,
             continue;
         }
         if (c == 12) { /* Ctrl-L */
+            g_popup.forget();
             write_stdout("\x1b[2J\x1b[H");
             redraw(prompt, current, cursor);
             continue;
@@ -498,10 +631,18 @@ repl_line_status read_edited_line(const std::string &prompt,
             continue;
         }
         if (c == 27) {
-            int a = read_byte();
-            if (a != '[' && a != 'O')
+            int a = read_byte_timed();
+            if (a == -3 || (a != '[' && a != 'O')) {
+                g_popup.dismiss(prompt, current, cursor);
                 continue;
+            }
             int b = read_byte();
+            if (g_popup.active && (b == 'A' || b == 'B')) {
+                g_popup.move(b == 'A' ? -1 : 1, prompt, current, cursor);
+                continue;
+            }
+            if (g_popup.active)
+                g_popup.dismiss(prompt, current, cursor);
             if (b == 'A') { /* up */
                 if (history.empty()) continue;
                 if (history_pos == history.size()) draft = current;
@@ -554,7 +695,8 @@ repl_line_status read_edited_line(const std::string &prompt,
             continue;
         }
         if (c == '\t') {
-            complete_line(current, cursor, prompt);
+            if (!accept_popup(current, cursor, prompt))
+                complete_line(current, cursor, prompt);
             continue;
         }
         if (c >= 32) {
@@ -676,6 +818,7 @@ repl_line_status read_edited_line(const std::string &prompt,
     for (;;) {
         if (g_interrupted) {
             g_interrupted = 1;
+            g_popup.dismiss(prompt, current, cursor);
             write_stdout("^C\r\n");
             return REPL_INTERRUPTED;
         }
@@ -685,9 +828,11 @@ repl_line_status read_edited_line(const std::string &prompt,
             count == 0) {
             if (g_interrupted) {
                 g_interrupted = 1;
+                g_popup.dismiss(prompt, current, cursor);
                 write_stdout("^C\r\n");
                 return REPL_INTERRUPTED;
             }
+            g_popup.dismiss(prompt, current, cursor);
             write_stdout("\r\n");
             return current.empty() ? REPL_EOF : REPL_LINE;
         }
@@ -698,10 +843,20 @@ repl_line_status read_edited_line(const std::string &prompt,
             (key.dwControlKeyState & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED)) !=
             0;
 
+        if (ctrl && (key.wVirtualKeyCode == 'N' || key.wVirtualKeyCode == 'P')) {
+            g_popup.move(key.wVirtualKeyCode == 'N' ? 1 : -1, prompt, current,
+                         cursor);
+            continue;
+        }
         if (ctrl && key.wVirtualKeyCode == 'C') {
             g_interrupted = 1;
+            g_popup.dismiss(prompt, current, cursor);
             write_stdout("^C\r\n");
             return REPL_INTERRUPTED;
+        }
+        if (key.wVirtualKeyCode == VK_ESCAPE) {
+            g_popup.dismiss(prompt, current, cursor);
+            continue;
         }
         if (key.wVirtualKeyCode == VK_LEFT) {
             cursor = previous_utf8(current, cursor);
@@ -724,6 +879,10 @@ repl_line_status read_edited_line(const std::string &prompt,
             continue;
         }
         if (key.wVirtualKeyCode == VK_UP) {
+            if (g_popup.active) {
+                g_popup.move(-1, prompt, current, cursor);
+                continue;
+            }
             if (!history.empty()) {
                 if (history_pos == history.size())
                     draft = current;
@@ -736,6 +895,10 @@ repl_line_status read_edited_line(const std::string &prompt,
             continue;
         }
         if (key.wVirtualKeyCode == VK_DOWN) {
+            if (g_popup.active) {
+                g_popup.move(1, prompt, current, cursor);
+                continue;
+            }
             if (history_pos < history.size()) {
                 ++history_pos;
                 current = history_pos == history.size() ? draft
@@ -753,13 +916,15 @@ repl_line_status read_edited_line(const std::string &prompt,
             continue;
         }
         if (key.wVirtualKeyCode == VK_RETURN) {
+            g_popup.dismiss(prompt, current, cursor);
             write_stdout("\r\n");
             line = current;
             history_add(line);
             return REPL_LINE;
         }
         if (key.wVirtualKeyCode == VK_TAB) {
-            complete_line(current, cursor, prompt);
+            if (!accept_popup(current, cursor, prompt))
+                complete_line(current, cursor, prompt);
             continue;
         }
         if (key.wVirtualKeyCode == VK_BACK) {
@@ -777,11 +942,13 @@ repl_line_status read_edited_line(const std::string &prompt,
             continue;
         if (ch == 3) {
             g_interrupted = 1;
+            g_popup.dismiss(prompt, current, cursor);
             write_stdout("^C\r\n");
             return REPL_INTERRUPTED;
         }
         if (ch == 4) {
             if (current.empty()) {
+                g_popup.dismiss(prompt, current, cursor);
                 write_stdout("\r\n");
                 return REPL_EOF;
             }
@@ -792,6 +959,10 @@ repl_line_status read_edited_line(const std::string &prompt,
             continue;
         }
         if (ch == 7) {
+            if (g_popup.active) {
+                g_popup.dismiss(prompt, current, cursor);
+                continue;
+            }
             current.clear();
             cursor = 0;
             redraw(prompt, current, cursor);
@@ -833,6 +1004,7 @@ repl_line_status read_edited_line(const std::string &prompt,
             continue;
         }
         if (ch == 12) {
+            g_popup.forget();
             write_stdout("\x1b[2J\x1b[H");
             redraw(prompt, current, cursor);
             continue;
@@ -847,13 +1019,15 @@ repl_line_status read_edited_line(const std::string &prompt,
             continue;
         }
         if (ch == '\r' || ch == '\n') {
+            g_popup.dismiss(prompt, current, cursor);
             write_stdout("\r\n");
             line = current;
             history_add(line);
             return REPL_LINE;
         }
         if (ch == '\t') {
-            complete_line(current, cursor, prompt);
+            if (!accept_popup(current, cursor, prompt))
+                complete_line(current, cursor, prompt);
             continue;
         }
         if (ch >= 32) {

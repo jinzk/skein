@@ -39,6 +39,15 @@ const std::unordered_set<std::string> &keyword_set() {
     return words;
 }
 
+std::size_t display_width(const std::string &text) {
+    std::size_t width = 0;
+    for (unsigned char c : text) {
+        if ((c & 0xC0) != 0x80)
+            ++width;
+    }
+    return width;
+}
+
 const char *color_for(token_kind kind) {
     switch (kind) {
         case token_kind::keyword:
@@ -258,6 +267,98 @@ std::string common_prefix(const std::vector<std::string> &candidates) {
         }
     }
     return prefix;
+}
+
+completion_popup_view format_completion_popup(
+    const std::vector<std::string> &candidates, std::size_t width,
+    std::size_t max_rows, std::size_t selected) {
+    completion_popup_view view;
+    if (candidates.empty() || max_rows == 0)
+        return view;
+
+    std::size_t content_width = width >= 8 ? width - 4 : 24;
+    if (content_width < 12)
+        content_width = 12;
+
+    std::size_t cell_width = 0;
+    for (const std::string &candidate : candidates)
+        cell_width = std::max(cell_width, display_width(candidate) + 2);
+
+    auto choose_columns = [&](std::size_t label_width) {
+        const std::size_t per_cell = label_width + 2;
+        return std::max<std::size_t>(1, content_width / per_cell);
+    };
+
+    std::size_t columns = choose_columns(cell_width);
+    std::size_t capacity = columns * max_rows;
+    std::size_t visible = std::min(candidates.size(), capacity);
+    bool truncated = visible < candidates.size();
+    if (truncated) {
+        const std::string more =
+            "... +" + std::to_string(candidates.size() - visible + 1) + " more";
+        cell_width = std::max(cell_width, display_width(more) + 2);
+        columns = choose_columns(cell_width);
+        capacity = columns * max_rows;
+        visible = std::min(candidates.size(), capacity > 1 ? capacity - 1 : 1);
+        truncated = visible < candidates.size();
+    }
+    if (visible == 0)
+        return view;
+
+    view.visible_count = visible;
+    if (selected >= visible)
+        selected = visible - 1;
+
+    const std::string border =
+        "+" + std::string(content_width + 2, '-') + "+";
+    std::string heading =
+        "candidates (" + std::to_string(candidates.size()) + ")";
+    if (display_width(heading) > content_width)
+        heading = "candidates";
+    std::string header = heading;
+    if (display_width(header) < content_width)
+        header += std::string(content_width - display_width(header), ' ');
+
+    view.rows.push_back(border);
+    view.rows.push_back("| " + header + " |");
+    view.rows.push_back(border);
+
+    auto append_cell = [&](std::string &line, const std::string &text,
+                           bool last) {
+        line += text;
+        const std::size_t used = display_width(text);
+        if (!last && used < cell_width)
+            line += std::string(cell_width - used, ' ');
+        if (!last)
+            line += "  ";
+    };
+
+    for (std::size_t row = 0; row * columns < visible; ++row) {
+        std::string line;
+        for (std::size_t column = 0; column < columns; ++column) {
+            const std::size_t index = row * columns + column;
+            if (index >= visible)
+                break;
+            append_cell(line,
+                        std::string(index == selected ? "> " : "  ") +
+                            candidates[index],
+                        column + 1 == columns || index + 1 == visible);
+        }
+        if (truncated && (visible % columns == 0
+                              ? row + 1 == visible / columns
+                              : row == visible / columns)) {
+            const std::string more =
+                "... +" + std::to_string(candidates.size() - visible) +
+                " more";
+            append_cell(line, more, true);
+        }
+        const std::size_t used = display_width(line);
+        if (used < content_width)
+            line += std::string(content_width - used, ' ');
+        view.rows.push_back("| " + line + " |");
+    }
+    view.rows.push_back(border);
+    return view;
 }
 
 std::string indentation(int level, int width) {

@@ -54,6 +54,17 @@ std::vector<std::string> filter_and_sort(
 /* Longest common prefix of all candidates. */
 std::string common_prefix(const std::vector<std::string> &candidates);
 
+struct completion_popup_view {
+    std::vector<std::string> rows;
+    std::size_t visible_count = 0;
+};
+
+/* Lay completion candidates out in a bordered, possibly multi-column popup.
+ * `selected` is clamped to the number of candidates actually shown. */
+completion_popup_view format_completion_popup(
+    const std::vector<std::string> &candidates, std::size_t width,
+    std::size_t max_rows, std::size_t selected);
+
 /* Spaces for one or more indentation levels. */
 std::string indentation(int level, int width = 2);
 

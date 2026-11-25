@@ -171,6 +171,31 @@ void test_completion_index() {
             "empty completion index result");
 }
 
+void test_completion_popup() {
+    const auto view = skein::repl_ui::format_completion_popup(
+        {"alpha", "alpine", "beta"}, 40, 6, 1);
+    require(view.visible_count == 3, "popup should show all candidates");
+    require(view.rows.size() >= 5, "popup should have borders and rows");
+    require(view.rows.front() == view.rows.back(),
+            "popup top and bottom borders should match");
+    bool selected = false;
+    for (const std::string &row : view.rows)
+        selected = selected || row.find("> alpine") != std::string::npos;
+    require(selected, "popup should mark the selected candidate");
+
+    std::vector<std::string> many;
+    for (int i = 0; i < 24; ++i)
+        many.push_back("name" + std::to_string(i));
+    const auto clipped =
+        skein::repl_ui::format_completion_popup(many, 36, 3, 0);
+    require(clipped.visible_count < many.size(),
+            "popup should clip long candidate lists");
+    bool more = false;
+    for (const std::string &row : clipped.rows)
+        more = more || row.find("more") != std::string::npos;
+    require(more, "clipped popup should report hidden candidates");
+}
+
 void test_candidates() {
     std::vector<std::string> candidates = {"std.", "string", "std", "string"};
     candidates = skein::repl_ui::filter_and_sort(candidates, "st");
@@ -201,6 +226,7 @@ int main() {
     test_continuation_lines();
     test_path_completions();
     test_completion_index();
+    test_completion_popup();
     test_candidates();
     return 0;
 }

@@ -12,7 +12,7 @@ package mysql {
   if (plugin_path == "") {
     plugin_path = std.module.native("skein.contrib/mysql");
   }
-  std.plugin.load(plugin_path);
+  std.native.load(plugin_path);
   import skein.mysql as native;
 
   export let VERSION = native.VERSION;

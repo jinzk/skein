@@ -1165,7 +1165,7 @@ def run_cases():
         check(
             "native module dynamic load",
             "import std;\n"
-            f"let name = std.plugin.load({native_module});\n"
+            f"let name = std.native.load({native_module});\n"
             "name\n"
             "import test.dynamic;\n"
             "dynamic.twice(21)\n",
@@ -1173,13 +1173,13 @@ def run_cases():
         )
         check(
             "native module dynamic load error",
-            'import std;\nstd.plugin.load("/definitely/not/a/module.so")\n',
-            stderr="std.plugin.load",
+            'import std;\nstd.native.load("/definitely/not/a/module.so")\n',
+            stderr="std.native.load",
         )
         check(
             "native module v1 additions",
             "import std;\n"
-            f"std.plugin.load({native_module});\n"
+            f"std.native.load({native_module});\n"
             "import test.dynamic;\n"
             "let c = dynamic.counter_new(7);\n"
             "dynamic.counter_value(c)\n"
@@ -1190,7 +1190,7 @@ def run_cases():
         check(
             "native module new_string_len",
             "import std;\n"
-            f"std.plugin.load({native_module});\n"
+            f"std.native.load({native_module});\n"
             "import test.dynamic;\n"
             "let s = dynamic.string_len();\n"
             "s\n"
@@ -1200,7 +1200,7 @@ def run_cases():
         check(
             "native module async export",
             "import std;\n"
-            f"std.plugin.load({native_module});\n"
+            f"std.native.load({native_module});\n"
             "import test.dynamic;\n"
             "let t = dynamic.twice_async(21);\n"
             "type_name(t)\n"
@@ -1213,7 +1213,7 @@ def run_cases():
         check(
             "native module async cancellation",
             "import std;\n"
-            f"std.plugin.load({native_module});\n"
+            f"std.native.load({native_module});\n"
             "import test.dynamic;\n"
             "let t = dynamic.cancellable();\n"
             "std.task.cancel(t);\n"
@@ -1223,7 +1223,7 @@ def run_cases():
         check(
             "native module posted callback from worker",
             "import std;\n"
-            f"std.plugin.load({native_module});\n"
+            f"std.native.load({native_module});\n"
             "import test.dynamic;\n"
             "let seen = 0;\n"
             "func record(v) { seen = seen + v; }\n"
@@ -1235,7 +1235,7 @@ def run_cases():
         check(
             "native module posted callback cancellation",
             "import std;\n"
-            f"std.plugin.load({native_module});\n"
+            f"std.native.load({native_module});\n"
             "import test.dynamic;\n"
             "let seen = 0;\n"
             "func record(v) { seen = seen + v; }\n"
@@ -1248,25 +1248,25 @@ def run_cases():
         check(
             "native module unload keeps live bindings",
             "import std;\n"
-            f"std.plugin.load({native_module});\n"
+            f"std.native.load({native_module});\n"
             "import test.dynamic;\n"
             "dynamic.twice(21)\n"
-            'std.plugin.unload("test.dynamic");\n'
+            'std.native.unload("test.dynamic");\n'
             "dynamic.twice(21)\n",
             stdout_all=["= 42", "= 42"],
         )
         check(
             "native module unload removes import",
             "import std;\n"
-            f"std.plugin.load({native_module});\n"
-            'std.plugin.unload("test.dynamic");\n'
+            f"std.native.load({native_module});\n"
+            'std.native.unload("test.dynamic");\n'
             "import test.dynamic;\n",
             stderr="package not found",
         )
         check(
             "native module cannot unload static",
             "import std;\n"
-            'std.plugin.unload("example.math")\n',
+            'std.native.unload("example.math")\n',
             stderr="cannot unload a static native module",
         )
         with tempfile.TemporaryDirectory() as fini_dir:
@@ -1276,13 +1276,13 @@ def run_cases():
             check(
                 "native module fini",
                 "import std;\n"
-                f"std.plugin.load({native_module});\n"
+                f"std.native.load({native_module});\n"
                 "func use() {\n"
                 "  import test.dynamic;\n"
                 "  return dynamic.twice(1);\n"
                 "}\n"
                 "use();\n"
-                'std.plugin.unload("test.dynamic");\n',
+                'std.native.unload("test.dynamic");\n',
                 stdout="= 2",
                 env=fini_env,
             )
@@ -1293,7 +1293,7 @@ def run_cases():
             check(
                 "native module missing descriptor",
                 "import std;\n"
-                f"std.plugin.load({skein_string(FFI_SHIM)})\n",
+                f"std.native.load({skein_string(FFI_SHIM)})\n",
                 stderr="missing skein_module_descriptor",
             )
     import json as _json

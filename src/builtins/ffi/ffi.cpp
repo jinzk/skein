@@ -2010,14 +2010,8 @@ struct value_t *call_ffi_builtin(
     int functype, const std::vector<struct value_t *> &args) {
     switch (functype) {
         case B_ffi_open:
-            if (g_check_only) {
-                yyerror("std.ffi.open is disabled in check-only mode");
+            if (!skein_native_load_allowed("std.ffi.open"))
                 return NULL;
-            }
-            if (!skein_native_code_allowed()) {
-                yyerror("%s", skein_native_policy_error());
-                return NULL;
-            }
             return ffi_open(args);
         case B_ffi_bind:
             return ffi_open(args);

@@ -35,7 +35,7 @@ println(mysql.VERSION);
 println(mysql.library_version());
 ```
 
-第三方 module 内的 `std.plugin.load` 默认禁止，因此运行脚本时必须设置
+第三方 module 内的 `std.native.load` 默认禁止，因此运行脚本时必须设置
 `SKEIN_ALLOW_NATIVE=1`。`skein build` 会在缓存目录旁生成动态库，封装包通过
 `std.module.native("skein.contrib/mysql")` 取得路径，不绑定固定 `.so` 位置。
 
@@ -156,7 +156,7 @@ result.close();
 - SQL 失败让 task 失败（`native task failed`），具体信息保留在
   `conn.last_error()`；
 - `finish` / `destroy` 在 owner 线程运行，异步任务持有连接 userdata 和模块
-  引用，`std.plugin.unload` 后仍可安全完成。
+  引用，`std.native.unload` 后仍可安全完成。
 
 ## 测试
 
@@ -165,7 +165,7 @@ ctest --test-dir build -R mysql_plugin_test --output-on-failure
 ```
 
 未配置数据库时测试 ABI、源码 native module 打包路径、`new_string_len`、类型
-转换 helper、异步导出存在性、错误传播、参数校验、`std.plugin.unload` 后已有
+转换 helper、异步导出存在性、错误传播、参数校验、`std.native.unload` 后已有
 绑定继续可用。设置 `SKEIN_TEST_MYSQL_HOST/USER/PASSWORD/DATABASE` 和可选的
 `SKEIN_TEST_MYSQL_PORT` 后，还会跑建表、插入、同步查询、NULL/BLOB、类型
 转换、异步查询、task 失败与取消、错误恢复、unload 后继续使用 userdata、

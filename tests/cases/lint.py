@@ -137,7 +137,7 @@ def run_cases():
         plugin_load = run_lint(
             "package p {\n"
             "  import std;\n"
-            "  std.plugin.load(" + skein_string(harness.NATIVE_MODULE) +
+            "  std.native.load(" + skein_string(harness.NATIVE_MODULE) +
             ");\n"
             "}\n"
         )

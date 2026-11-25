@@ -113,7 +113,7 @@ def test_abi():
     check(
         "mysql plugin argument error",
         "import std;\n"
-        f"std.plugin.load({skein_string(os.path.abspath(PLUGIN))});\n"
+        f"std.native.load({skein_string(os.path.abspath(PLUGIN))});\n"
         "import skein.mysql as native;\n"
         "native.connect(1, 2, 3, 4) on error(e) {\n"
         "  println(std.error.kind(e));\n"
@@ -124,7 +124,7 @@ def test_abi():
     check(
         "mysql plugin async export",
         "import std;\n"
-        f"std.plugin.load({skein_string(os.path.abspath(PLUGIN))});\n"
+        f"std.native.load({skein_string(os.path.abspath(PLUGIN))});\n"
         "import skein.mysql as native;\n"
         "native.query_task(1) on error(e) {\n"
         "  println(std.error.kind(e));\n"
@@ -137,7 +137,7 @@ def test_abi():
         "import std;\n"
         "import mysql;\n"
         "println(mysql.VERSION);\n"
-        'std.plugin.unload("skein.mysql");\n'
+        'std.native.unload("skein.mysql");\n'
         "println(mysql.library_version());\n",
         stdout="0.1.0",
     )
@@ -192,7 +192,7 @@ def test_integration(config):
         "println(c.insert_id());\n"
         "let r = c.query(\"SELECT id, name, note, payload "
         "FROM skein_plugin_test\");\n"
-        "std.plugin.unload(\"skein.mysql\");\n"
+        "std.native.unload(\"skein.mysql\");\n"
         "println(r.fields());\n"
         "println(r.count());\n"
         "let rows = r.rows();\n"

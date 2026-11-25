@@ -96,7 +96,7 @@ def run_cases():
         write(repo, "api.skein",
               "package api {\n"
               "  import std;\n"
-              '  std.plugin.load(std.module.native("' + MODULE + '"));\n'
+              '  std.native.load(std.module.native("' + MODULE + '"));\n'
               "  export func marker() { return 1; }\n"
               "}\n")
         write(repo, "native/add.cpp", SOURCE)

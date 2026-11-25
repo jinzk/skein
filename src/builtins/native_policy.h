@@ -3,6 +3,8 @@
 
 #include "diagnostics.h"
 #include "runtime_state.h"
+#include "analysis_mode.h"
+#include "symbol.h"
 
 #include <algorithm>
 #include <cctype>
@@ -26,6 +28,23 @@ inline bool skein_native_code_allowed() {
 inline const char *skein_native_policy_error() {
     return "native code loading is disabled; set SKEIN_ALLOW_NATIVE=1 to "
            "allow it";
+}
+
+/*
+ * Shared gate for APIs that load native code at runtime (`std.native.load`,
+ * `std.ffi.open`).  Keeps the check-only and policy diagnostics in one place.
+ * `api` names the public entry point for the message.
+ */
+inline bool skein_native_load_allowed(const char *api) {
+    if (g_check_only) {
+        yyerror("%s is disabled in check-only mode", api);
+        return false;
+    }
+    if (!skein_native_code_allowed()) {
+        yyerror("%s", skein_native_policy_error());
+        return false;
+    }
+    return true;
 }
 
 #endif

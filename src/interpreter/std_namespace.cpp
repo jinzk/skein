@@ -574,7 +574,7 @@ value_t *build_namespace_impl() {
         })));
 #endif
     root->payload->items.push_back(std::make_pair(
-        newstrval("plugin"),
+        newstrval("native"),
         builtin_module({
             {"load", B_module_load},
             {"unload", B_module_unload},

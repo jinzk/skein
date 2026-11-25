@@ -3282,9 +3282,9 @@ module myutil {
   `--no-insert-timestamp`，MSVC 使用 `/Brepro`，并设置 `SOURCE_DATE_EPOCH=0`；
   相同输入连续构建应产生相同产物字节；
 - Skein 封装包通过 `std.module.dir(path)` / `std.module.native(path)` 取得源码
-  目录和构建产物路径，再用 `std.plugin.load(...)` 加载；`std.ffi.open(...)`
+  目录和构建产物路径，再用 `std.native.load(...)` 加载；`std.ffi.open(...)`
   同理；
-- 主脚本里的原生调用保持原行为；**第三方 module 内**的 `std.plugin.load` /
+- 主脚本里的原生调用保持原行为；**第三方 module 内**的 `std.native.load` /
   `std.ffi.open` 默认禁止，必须显式设置 `SKEIN_ALLOW_NATIVE=1`
   （设为 `0` / `false` / `off` / `no` 则全局禁止）；
 - `skein_module.h` 是纯 C ABI 头，module 应自带一份，不需要链接 Skein 符号；

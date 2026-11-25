@@ -2640,7 +2640,7 @@ std.thread
 std.type
 std.ref
 std.meta
-std.plugin
+std.native
 std.module
 std.entry
 std.net

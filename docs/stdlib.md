@@ -2093,7 +2093,7 @@ func point_sort(base: *Point, n: usize, cmp: Compare) retains cmp;
 
 import std;
 
-let name = std.plugin.load("./libexample.so");
+let name = std.native.load("./libexample.so");
 print(name);              // example.math
 
 import example.math;
@@ -2113,13 +2113,13 @@ example.math.ANSWER;
   ABI v4 追加了 `post_callback` / `cancel_post_callback`：worker 线程可把 Skein
   函数投递到 owner 线程执行，参数被复制，投递可用 id 撤销；检查
   `api->size >= offsetof(skein_api, cancel_post_callback) + sizeof(api->cancel_post_callback)`；
-- 静态绑定在启动时注册，动态插件通过 `std.plugin.load` 加载；
-- `std.plugin.unload(name)` 只移除注册表；已存在的绑定函数/userdata 会继续持有
+- 静态绑定在启动时注册，动态插件通过 `std.native.load` 加载；
+- `std.native.unload(name)` 只移除注册表；已存在的绑定函数/userdata 会继续持有
   模块引用，最后一份引用释放时才调用 `fini` 并 `dlclose`；静态模块不能卸载；
 - 模块名是建议 import path，内部 key 由 loader 生成；
 - 源码形式发布的 module 由 `skein build` 显式编译；封装包可用
   `std.module.dir(path)` 取得缓存源码目录、`std.module.native(path)` 取得
-  动态库路径，再交给 `std.plugin.load` / `std.ffi.open`；
+  动态库路径，再交给 `std.native.load` / `std.ffi.open`；
 - 主脚本允许加载原生库；第三方 module 内默认禁止，需显式
   `SKEIN_ALLOW_NATIVE=1`（`0` / `false` / `off` / `no` 全局禁止）；
 - 重复 import path、模块与包同名、ABI 版本不匹配都会报错；
@@ -2164,7 +2164,7 @@ static skein_status twice_async(skein_context *ctx,
 `contrib/mysql` 的 `Connection.query_task()` 是连接真实 C 客户端的完整示例，
 包括取消检查、连接 userdata 保活和 SQL 结果转换。
 
-`std.plugin.load` 和 `std.ffi.open` 在 `lint` / `fmt` / `lsp` 的 check-only
+`std.native.load` 和 `std.ffi.open` 在 `lint` / `fmt` / `lsp` 的 check-only
 模式下被禁止，避免静态检查加载并执行原生库；`extern "c" lib` 的 ABI 校验
 不受影响。
 
@@ -2252,7 +2252,7 @@ std.thread
 std.type
 std.ref
 std.meta
-std.plugin
+std.native
 std.module
 std.entry
 std.net
@@ -3242,9 +3242,9 @@ std.meta.protocols
 std.meta.implements
 std.meta.has_type
 
-std.plugin
-std.plugin.load
-std.plugin.unload
+std.native
+std.native.load
+std.native.unload
 std.module.dir
 std.module.native
 

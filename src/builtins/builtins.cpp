@@ -75,40 +75,34 @@
 
 #include "iter.h"
 
-static struct value_t *module_load_builtin(
+static struct value_t *native_load_builtin(
     const std::vector<struct value_t *> &args) {
-    if (g_check_only) {
-        yyerror("std.plugin.load is disabled in check-only mode");
+    if (!skein_native_load_allowed("std.native.load"))
         return NULL;
-    }
-    if (!skein_native_code_allowed()) {
-        yyerror("%s", skein_native_policy_error());
-        return NULL;
-    }
     if (args.size() != 1 || args[0]->type != T_string) {
-        yyerror("std.plugin.load expects a string path");
+        yyerror("std.native.load expects a string path");
         return NULL;
     }
     std::string import_path;
     std::string error;
     if (!skein::load_dynamic_module(
             ((struct string_value_t *)args[0])->value, import_path, error)) {
-        yyerror("std.plugin.load: %s", error.c_str());
+        yyerror("std.native.load: %s", error.c_str());
         return NULL;
     }
     return newstrval(import_path.c_str());
 }
 
-static struct value_t *module_unload_builtin(
+static struct value_t *native_unload_builtin(
     const std::vector<struct value_t *> &args) {
     if (args.size() != 1 || args[0]->type != T_string) {
-        yyerror("std.plugin.unload expects a string name");
+        yyerror("std.native.unload expects a string name");
         return NULL;
     }
     std::string error;
     if (!skein::unload_module(((struct string_value_t *)args[0])->value,
                               error)) {
-        yyerror("std.plugin.unload: %s", error.c_str());
+        yyerror("std.native.unload: %s", error.c_str());
         return NULL;
     }
     return newnull();
@@ -586,9 +580,9 @@ struct value_t *call_builtin(int functype,
 #endif
     }
     if (functype == B_module_load)
-        return module_load_builtin(args);
+        return native_load_builtin(args);
     if (functype == B_module_unload)
-        return module_unload_builtin(args);
+        return native_unload_builtin(args);
     if (functype == B_module_dir)
         return module_dir_builtin(args);
     if (functype == B_module_native)

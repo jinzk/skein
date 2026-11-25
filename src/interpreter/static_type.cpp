@@ -38,6 +38,8 @@ const char *builtin_kind_name(enum type_constraint_kind kind) {
         case TYPE_RESULT: return "result";
         case TYPE_ERROR: return "error";
         case TYPE_NAMED: return "invalid";
+        case TYPE_REF: return "ref";
+        case TYPE_WEAK: return "weak";
         case TYPE_VAR: return "T";
         case TYPE_TASK: return "task";
         case TYPE_GENERATOR: return "generator";
@@ -142,6 +144,13 @@ std::string node_display(enum type_constraint_kind kind,
             args[0]->kind == TYPE_NULL ? args[1] : args[0];
         text = function_arg_display(inner);
         text += '?';
+        return text;
+    } else if ((kind == TYPE_REF || kind == TYPE_WEAK) && !args.empty()) {
+        text = builtin_kind_name(kind);
+        text += ' ';
+        text += function_arg_display(args[0]);
+        if (nullable)
+            text += '?';
         return text;
     } else if (type_container_arity(kind) > 0 && !args.empty()) {
         text = builtin_kind_name(kind);
@@ -387,6 +396,8 @@ int type_container_arity(enum type_constraint_kind kind) {
         case TYPE_DEQUE:
         case TYPE_HEAP:
         case TYPE_TASK:
+        case TYPE_REF:
+        case TYPE_WEAK:
             return 1;
         case TYPE_DICT:
         case TYPE_RESULT:
@@ -671,6 +682,22 @@ struct type_constraint *type_apply_function(
     for (struct type_constraint *param : params)
         free_type_constraint(param);
     free_type_constraint(result);
+    return type;
+}
+
+struct type_constraint *type_apply_prefix(enum type_constraint_kind kind,
+                                          struct type_constraint *inner) {
+    if (!inner)
+        return NULL;
+    const TypeNode *inner_node = type_from_constraint(inner);
+    const TypeNode *node =
+        type_container(kind, std::vector<const TypeNode *>{inner_node});
+    struct type_constraint *type = new_type_constraint(kind);
+    type->name = inner->name;
+    type->source = inner->source;
+    type->display = node->display.c_str();
+    attach_type_detail(type, node);
+    free_type_constraint(inner);
     return type;
 }
 

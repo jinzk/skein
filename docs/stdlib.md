@@ -2250,6 +2250,7 @@ std.process
 std.worker
 std.thread
 std.type
+std.ref
 std.meta
 std.plugin
 std.module
@@ -2333,6 +2334,19 @@ std.enum.tag(E.A { n: 2 })   // "main.E.A"
 ```
 
 无实例时可用 `std.enum.tag("E", "A")`。
+
+`std.ref` 提供 `ref T` / `weak T` 句柄的配套操作：
+
+```text
+std.ref.set(target, value)   // 替换整个目标内容；target.* = value 的等价形式
+std.ref.upgrade(weak)        // weak T? -> ref T?，目标已回收时返回 null
+std.ref.snapshot(value)      // 递归得到普通值快照，可跨线程发送
+```
+
+`std.ref.snapshot` 会把 `ref` / `weak` 及其容器、struct、enum 字段转换为没有
+句柄的普通值；强引用环不能快照。`ref` 对象由 GC 在 safepoint 回收，弱引用在
+目标回收后失效。ref heap 严格线程本地，`ref` / `weak` 不能作为 channel payload
+（包括嵌套在容器或字段中），发送前须显式快照，或改传 `std.arena` id。
 
 `std.meta` 提供只读类型描述，内建类型和用户定义类型使用同一种形状：
 
@@ -3216,6 +3230,10 @@ std.type.package_name
 std.type.module_name
 std.type.source
 
+std.ref.set
+std.ref.upgrade
+std.ref.snapshot
+
 std.meta.type_info
 std.meta.fields
 std.meta.variants
@@ -3580,6 +3598,7 @@ std.thread.capabilities
 - `std.fs` 提供文件读写和文件句柄操作；
 - `std.process` 提供命令执行和状态查询；
 - `std.type` 提供 `kind_of`、`type_name`、`type_package`、`type_module_name`、`type_source`；
+- `std.ref` 提供 `ref` / `weak` 句柄的替换、升级和值快照；
 - `std.meta` 提供只读类型反射，查询字段、变体、方法和 protocol；
 - `std.net` 提供同步和 task 形式异步的 TCP/DNS，数据使用 `bytes`，底层由 libuv 驱动；
 - `std.net` 的阻塞操作支持可选 `timeout_ms`，超时是运行时错误；

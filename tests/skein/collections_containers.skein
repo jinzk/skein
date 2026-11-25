@@ -54,7 +54,7 @@ ts_test("set len json iterate type", func() {
 
 ts_test("set differential", func() {
   let s = set.new();
-  let ref = {};
+  let reference = {};
   let i = 0;
   let seed = 12345;
   while (i < 2000) {
@@ -63,20 +63,20 @@ ts_test("set differential", func() {
     seed = (seed * 1103515245 + 12345) % 2147483648;
     if (seed % 3 == 0) {
       s = set.remove(s, v);
-      ref = std.dict.delete(ref, v);
+      reference = std.dict.delete(reference, v);
     } else {
       s = set.add(s, v);
-      ref[v] = true;
+      reference[v] = true;
     }
-    if (set.size(s) != len(ref)) {
+    if (set.size(s) != len(reference)) {
       fail("size mismatch");
     }
-    if (set.has(s, v) != (std.dict.has(ref, v) != 0)) {
+    if (set.has(s, v) != (std.dict.has(reference, v) != 0)) {
       fail("has mismatch");
     }
     i = i + 1;
   }
-  ts_true(std.list.sort(set.values(s)) == std.list.sort(std.dict.keys(ref)));
+  ts_true(std.list.sort(set.values(s)) == std.list.sort(std.dict.keys(reference)));
 });
 
 ts_test("set large add", func() {

@@ -2,6 +2,7 @@
 
 #include "ast.h"
 #include "diagnostics.h"
+#include "refvalue.h"
 #include "structtype.h"
 #include "typecheck_state.h"
 #include "valuetype.h"
@@ -62,6 +63,14 @@ const TypeNode *value_static_type(const struct value_t *value) {
         case T_method:
         case T_native: return type_builtin(TYPE_CALLABLE);
         case T_userdata: {
+            if (is_ref_value(value) || is_weak_value(value)) {
+                struct_def *def = ref_value_def(value);
+                const TypeNode *inner =
+                    def ? type_named(def->source.c_str(), def->name.c_str())
+                        : type_any();
+                return type_container(
+                    is_ref_value(value) ? TYPE_REF : TYPE_WEAK, {inner});
+            }
             const struct userdata_value_t *userdata =
                 (const struct userdata_value_t *)value;
             const char *name =
@@ -626,6 +635,34 @@ MatchResult match_type(const TypeNode *actual, const TypeNode *expected) {
                 return result;
         }
         return result;
+    }
+    if (actual->kind == TYPE_REF && expected->kind == TYPE_NAMED)
+        return match_type(type_element(actual, 0), expected);
+    if (actual->kind == TYPE_REF && expected->kind == TYPE_REF &&
+        !actual->args.empty() && !expected->args.empty()) {
+        const TypeNode *actual_inner = type_element(actual, 0);
+        const TypeNode *expected_inner = type_element(expected, 0);
+        if (expected_inner && expected_inner->kind == TYPE_NAMED &&
+            actual_inner && actual_inner->kind == TYPE_NAMED) {
+            structtype_lookup_result expected_lookup;
+            if (lookup_named_type(expected_inner, expected_lookup) &&
+                expected_lookup.protocol) {
+                structtype_lookup_result actual_lookup;
+                if (!lookup_named_type(actual_inner, actual_lookup))
+                    return MatchResult::Unknown;
+                const type_def *actual_type =
+                    actual_lookup.structure
+                        ? static_cast<const type_def *>(actual_lookup.structure)
+                        : static_cast<const type_def *>(
+                              actual_lookup.enumeration);
+                if (!actual_type)
+                    return MatchResult::Unknown;
+                return structtype_satisfies_protocol(actual_type,
+                                                     expected_lookup.protocol)
+                           ? MatchResult::Ok
+                           : MatchResult::Mismatch;
+            }
+        }
     }
     if (actual->kind != expected->kind)
         return MatchResult::Mismatch;

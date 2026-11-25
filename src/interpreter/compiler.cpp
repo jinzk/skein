@@ -573,6 +573,13 @@ struct Compiler {
         return static_cast<uint32_t>(proto.consts.size() - 1);
     }
 
+    uint32_t add_builtin_value(int functype) {
+        struct value_t *value = newbuiltinval(functype);
+        uint32_t index = add_value(value);
+        freeval(value);
+        return index;
+    }
+
     uint32_t add_name(const std::string &name) {
         Constant c;
         c.kind = ConstantKind::Name;
@@ -945,11 +952,13 @@ struct Compiler {
     uint32_t add_construct(const char *source, const char *name,
                            const char *variant,
                            std::vector<std::string> fields,
-                           std::vector<bool> spread) {
+                           std::vector<bool> spread,
+                           bool is_ref = false) {
         skein::bc::ConstructDesc desc;
         desc.source = source ? source : "";
         desc.name = name ? name : "";
         desc.variant = variant ? variant : "";
+        desc.is_ref = is_ref;
         desc.fields = std::move(fields);
         desc.spread = std::move(spread);
         proto.constructs.push_back(std::move(desc));
@@ -1705,6 +1714,18 @@ struct Compiler {
                     return;
                 }
                 if (asgn->target &&
+                    asgn->target->nodetype == NODE_REF_TARGET) {
+                    compile(asgn->target->l);
+                    if (!ok) return;
+                    emit(Op::LoadConst, 0, 0,
+                         add_builtin_value(B_ref_set), here);
+                    emit(Op::Swap, 0, 0, 0, here);
+                    compile(asgn->v);
+                    if (!ok) return;
+                    emit(Op::Call, 0, 2, 2, here);
+                    return;
+                }
+                if (asgn->target &&
                     (asgn->target->nodetype == 'G' ||
                      asgn->target->nodetype == 'j')) {
                     std::vector<ast *> indices;
@@ -2131,6 +2152,44 @@ struct Compiler {
                 return;
             }
 
+            case NODE_REF_TARGET: {
+                compile(node->l);
+                if (!ok) return;
+                emit(Op::LoadConst, 0, 0,
+                     add_builtin_value(B_ref_snapshot), here);
+                emit(Op::Swap, 0, 0, 0, here);
+                emit(Op::Call, 0, 1, 1, here);
+                return;
+            }
+
+            case NODE_OPTIONAL_CHAIN: {
+                struct optional_chain_node *chain =
+                    (struct optional_chain_node *)node;
+                compile(chain->l);
+                if (!ok) return;
+                /* A weak base must be upgraded first.  Keeping this in the
+                 * bytecode path makes AST/VM/JIT agree on stale weak handles. */
+                emit(Op::LoadConst, 0, 0,
+                     add_builtin_value(B_ref_upgrade), here);
+                emit(Op::Swap, 0, 0, 0, here);
+                emit(Op::Call, 0, 1, 1, here);
+                struct type_constraint null_type = any_type_constraint();
+                null_type.kind = TYPE_NULL;
+                uint32_t null_constant = add_type(&null_type);
+                emit(Op::Dup, 0, 0, 0, here);
+                emit(Op::IsType, 0, 0, null_constant, here);
+                size_t jump_null = emit_jump(Op::JumpIfTrue, here);
+                const char *field = literal_string(chain->r);
+                uint32_t name = add_name(field ? field : "");
+                emit(Op::GetFieldName, 0, 0, name, here);
+                size_t jump_end = emit_jump(Op::Jump, here);
+                patch(jump_null, proto.code.size());
+                emit(Op::Pop, 0, 0, 0, here);
+                emit_null(here);
+                patch(jump_end, proto.code.size());
+                return;
+            }
+
             case 'j': {
                 const char *field = literal_string(node->r);
                 if (field && node->l && node->l->nodetype == 'N') {
@@ -2294,7 +2353,7 @@ struct Compiler {
                 }
                 uint32_t descriptor = add_construct(
                     lit->source, lit->name, "", std::move(fields),
-                    std::move(spread));
+                    std::move(spread), lit->is_ref);
                 emit(Op::NewStruct, 0, 0, descriptor, here);
                 return;
             }

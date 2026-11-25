@@ -9,6 +9,7 @@
 #include "pattern.h"
 #include "cycle.h"
 #include "platform.h"
+#include "refvalue.h"
 #include "repl.h"
 #include "string_grow.h"
 #include "value_ops.h"
@@ -93,6 +94,30 @@ struct value_t *assign_index(struct ast *target, struct ast *value_ast) {
     }
     return assign_index_symbol(s, ((struct symref *)base)->name, indices,
                                fields, val);
+}
+
+struct value_t *assign_ref_target(struct ast *target,
+                                  struct ast *value_ast) {
+    if (!target || target->nodetype != NODE_REF_TARGET) {
+        yyerror("cannot assign to this expression");
+        return NULL;
+    }
+    struct value_t *base = eval(target->l);
+    struct value_t *value = value_ast ? eval(value_ast) : NULL;
+    if (!base || !value) {
+        freeval(base);
+        freeval(value);
+        return NULL;
+    }
+    if (!ref_replace_target(base, value)) {
+        freeval(base);
+        freeval(value);
+        return NULL;
+    }
+    struct value_t *result = dupval(value);
+    freeval(base);
+    freeval(value);
+    return result;
 }
 
 struct value_t *increment_index(struct ast *target, int delta,

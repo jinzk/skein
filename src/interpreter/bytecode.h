@@ -217,6 +217,7 @@ struct ConstructDesc {
     std::string source;
     std::string name;
     std::string variant;
+    bool is_ref = false;
     std::vector<std::string> fields;
     std::vector<bool> spread;
 };

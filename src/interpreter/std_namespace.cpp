@@ -438,6 +438,13 @@ value_t *build_namespace_impl() {
             {"source", B_type_source},
         })));
     root->payload->items.push_back(std::make_pair(
+        newstrval("ref"),
+        builtin_module({
+            {"set", B_ref_set},
+            {"upgrade", B_ref_upgrade},
+            {"snapshot", B_ref_snapshot},
+        })));
+    root->payload->items.push_back(std::make_pair(
         newstrval("meta"),
         builtin_module({
             {"type_info", B_meta_type_info},

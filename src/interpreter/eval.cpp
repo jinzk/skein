@@ -8,6 +8,7 @@
 #include "format.h"
 #include "package.h"
 #include "pattern.h"
+#include "refvalue.h"
 #include "cycle.h"
 #include "platform.h"
 #include "repl.h"
@@ -31,6 +32,34 @@ static const char *literal_field_name(const struct ast *node) {
     if (!value->val || value->val->type != T_string)
         return NULL;
     return ((const struct string_value_t *)value->val)->value;
+}
+
+static struct value_t *eval_optional_chain(struct optional_chain_node *chain) {
+    if (!chain)
+        return NULL;
+    struct value_t *base = eval(chain->l);
+    if (!base)
+        return NULL;
+    if (is_weak_value(base)) {
+        struct value_t *strong = ref_upgrade(base);
+        freeval(base);
+        base = strong;
+        if (!base)
+            return NULL;
+        if (base->type == T_null)
+            return base;
+    } else if (base->type == T_null) {
+        return base;
+    }
+    const char *name = literal_field_name(chain->r);
+    if (!name)
+        return NULL;
+    struct string_value_t key;
+    key.type = T_string;
+    key.value = const_cast<char *>(name);
+    struct value_t *result = read_member_value(base, (struct value_t *)&key, true);
+    freeval(base);
+    return result;
 }
 
 namespace {
@@ -388,6 +417,19 @@ struct value_t *eval(struct ast *a) {
             ret = eval_struct_lit((struct struct_lit_node *)a);
             break;
 
+        case NODE_OPTIONAL_CHAIN:
+            ret = eval_optional_chain((struct optional_chain_node *)a);
+            break;
+
+        case NODE_REF_TARGET: {
+            struct value_t *base = eval(a->l);
+            if (!base)
+                break;
+            ret = ref_snapshot(base);
+            freeval(base);
+            break;
+        }
+
         case NODE_ENUM_LITERAL:
             ret = eval_enum_lit((struct enum_lit_node *)a);
             break;
@@ -641,6 +683,8 @@ struct value_t *eval(struct ast *a) {
             else if (asgn->target->nodetype == 'G' ||
                      asgn->target->nodetype == 'j')
                 ret = assign_index(asgn->target, asgn->v);
+            else if (asgn->target->nodetype == NODE_REF_TARGET)
+                ret = assign_ref_target(asgn->target, asgn->v);
             else
                 yyerror("cannot assign to this expression");
             break;

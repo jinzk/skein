@@ -867,6 +867,13 @@ struct Checker : public BuiltinContext {
             out_type = type_any();
             return false;
         }
+        if (node->nodetype == NODE_REF_TARGET) {
+            const TypeNode *base = infer(node->l, env);
+            out_type = base && base->kind == TYPE_REF && !base->args.empty()
+                           ? base->args[0]
+                           : type_any();
+            return true;
+        }
         if (node->nodetype == 'j') {
             const TypeNode *base_type = type_any();
             if (!resolve_lvalue(node->l, env, base_type))
@@ -921,7 +928,24 @@ struct Checker : public BuiltinContext {
         return key;
     }
 
+    const TypeNode *unwrap_ref_type(const TypeNode *type) {
+        if (!type)
+            return type;
+        if (type->kind == TYPE_REF || type->kind == TYPE_WEAK) {
+            const TypeNode *inner = type_element(type, 0);
+            return inner ? unwrap_ref_type(inner) : type;
+        }
+        if (type->nullable) {
+            const TypeNode *inner =
+                type_container(type->kind, type->args, false);
+            if (inner && inner != type)
+                return unwrap_ref_type(inner);
+        }
+        return type;
+    }
+
     StaticTypeInfo *find_static_info(const TypeNode *type) {
+        type = unwrap_ref_type(type);
         if (!type || type->kind != TYPE_NAMED)
             return NULL;
         auto it = static_types.find(
@@ -974,6 +998,7 @@ struct Checker : public BuiltinContext {
                     {type_container(TYPE_TASK, {result_type})});
             return NULL;
         }
+        base_type = unwrap_ref_type(base_type);
         if (!base_type || base_type->kind != TYPE_NAMED)
             return NULL;
 
@@ -1022,6 +1047,7 @@ struct Checker : public BuiltinContext {
     const TypeNode *field_type(const TypeNode *base_type,
                                const struct ast *field_node, Env &env) {
         (void)env;
+        base_type = unwrap_ref_type(base_type);
         if (!base_type || base_type->kind != TYPE_NAMED)
             return type_any();
         const struct ast *right = field_node->r;
@@ -1741,6 +1767,10 @@ struct Checker : public BuiltinContext {
         if (it == owner->vars.end() || it->second.fixed)
             return;
         const TypeNode *type = it->second.type;
+        /* The inner type of a ref/weak handle is needed to resolve fields
+         * after an assignment; degrading it to `any` loses that knowledge. */
+        if (type && (type->kind == TYPE_REF || type->kind == TYPE_WEAK))
+            return;
         int arity = type ? type_container_arity(type->kind) : -1;
         if (arity > 0) {
             std::vector<const TypeNode *> args((size_t)arity, type_any());
@@ -3075,6 +3105,34 @@ struct Checker : public BuiltinContext {
                     return type_builtin(TYPE_BYTE);
                 return type_any();
             }
+            case NODE_REF_TARGET: {
+                const TypeNode *base = infer(expr->l, env);
+                if (base && base->kind == TYPE_REF && !base->args.empty())
+                    return base->args[0];
+                return type_any();
+            }
+            case NODE_OPTIONAL_CHAIN: {
+                struct optional_chain_node *chain =
+                    (struct optional_chain_node *)expr;
+                const TypeNode *base =
+                    unwrap_ref_type(infer(chain->l, env));
+                const TypeNode *field =
+                    field_type(base, (const struct ast *)expr, env);
+                const struct ast *right = chain->r;
+                if (field->kind == TYPE_ANY && right &&
+                    right->nodetype == 'V') {
+                    const struct value_t *value =
+                        ((const struct val *)right)->val;
+                    if (value && value->type == T_string) {
+                        const TypeNode *method = method_value_type(
+                            base,
+                            ((const struct string_value_t *)value)->value);
+                        if (method)
+                            field = method;
+                    }
+                }
+                return type_nullable(field);
+            }
             case 'j': {
                 const TypeNode *base = infer(expr->l, env);
                 std::string path;
@@ -3174,7 +3232,10 @@ struct Checker : public BuiltinContext {
                 struct struct_lit_node *lit =
                     (struct struct_lit_node *)expr;
                 check_struct_literal(expr, env);
-                return type_named(lit->source, lit->name);
+                const TypeNode *named = type_named(lit->source, lit->name);
+                if (lit->is_ref)
+                    return type_container(TYPE_REF, {named});
+                return named;
             }
             case '?': {
                 struct enum_lit_node *lit =

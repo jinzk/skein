@@ -1,5 +1,6 @@
 #include "symbol.h"
 
+#include "refvalue.h"
 #include "structtype.h"
 
 #include <cstddef>
@@ -263,6 +264,28 @@ bool type_constraint_matches(const struct type_constraint *type,
             return value->type == T_error;
         case TYPE_NAMED:
             return named_type_matches(type->source, type->name, value);
+        case TYPE_REF: {
+            if (!is_ref_value(value))
+                return false;
+            struct_def *def = ref_value_def(value);
+            if (!type->name || !def)
+                return true;
+            struct value_t *plain = newstructval(def, nullptr);
+            bool matched = named_type_matches(type->source, type->name, plain);
+            freeval(plain);
+            return matched;
+        }
+        case TYPE_WEAK: {
+            struct_def *def = ref_value_def(value);
+            if (!is_weak_value(value) && !is_ref_value(value))
+                return false;
+            if (!type->name || !def)
+                return true;
+            struct value_t *plain = newstructval(def, nullptr);
+            bool matched = named_type_matches(type->source, type->name, plain);
+            freeval(plain);
+            return matched;
+        }
         case TYPE_TASK:
             return userdata_name && std::strcmp(userdata_name, "task") == 0;
         case TYPE_GENERATOR:
@@ -316,7 +339,8 @@ bool type_constraint_equal(const struct type_constraint *a,
     if ((a->kind == TYPE_PAIR || a->kind == TYPE_TUPLE) &&
         a->arity != b->arity)
         return false;
-    if (a->kind == TYPE_NAMED) {
+    if (a->kind == TYPE_NAMED || a->kind == TYPE_REF ||
+        a->kind == TYPE_WEAK) {
         if (!a->name || !b->name)
             return a->name == b->name;
         return structtype_named_types_equal(a->source, a->name, b->source,
@@ -368,6 +392,18 @@ const char *type_constraint_name(const struct type_constraint *type) {
         case TYPE_NAMED:
             base = type->name ? type->name : "invalid";
             break;
+        case TYPE_REF: {
+            static thread_local std::string ref_name;
+            ref_name = type->name ? std::string("ref ") + type->name : "ref";
+            base = ref_name.c_str();
+            break;
+        }
+        case TYPE_WEAK: {
+            static thread_local std::string weak_name;
+            weak_name = type->name ? std::string("weak ") + type->name : "weak";
+            base = weak_name.c_str();
+            break;
+        }
         case TYPE_VAR:
             base = type->name ? type->name : "T";
             break;

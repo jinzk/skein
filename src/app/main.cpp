@@ -26,6 +26,7 @@
 #include "package.h"
 #include "platform.h"
 #include "process_spawn.h"
+#include "refvalue.h"
 #include "repl.h"
 #include "runtime_context.h"
 #include "runtime_state.h"
@@ -489,6 +490,7 @@ int main(int argc, char **argv) {
 #endif
     net_shutdown();
     donescope();
+    ref_shutdown();
     ast_thread_shutdown();
     process_spawn_shutdown();
     skein_vm_shutdown();

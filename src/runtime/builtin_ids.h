@@ -486,7 +486,10 @@ enum bifs {
     B_sys_is_main,
     B_type_package,
     B_type_module_name,
-    B_dict_index_by
+    B_dict_index_by,
+    B_ref_set,
+    B_ref_upgrade,
+    B_ref_snapshot
 };
 
 #endif

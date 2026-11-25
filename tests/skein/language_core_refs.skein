@@ -1,0 +1,175 @@
+import std;
+include "_support.skein";
+
+protocol RefDrawable {
+  func draw(self) -> int;
+}
+
+struct RefNode {
+  value: int;
+  next: ref RefNode? = null;
+  prev: weak RefNode? = null;
+
+  func get(self): int { return self.value; }
+  func bump(self) { self.value = self.value + 1; }
+  func draw(self): int { return self.value; }
+}
+
+func ref_render(item: RefDrawable): int {
+  return item.draw();
+}
+
+struct RefCycleHandle {
+  root: ref RefNode? = null;
+  watch: weak RefNode? = null;
+}
+
+func ref_make_cycle(): RefCycleHandle {
+  let a = ref RefNode { value: 1 };
+  let b = ref RefNode { value: 2 };
+  a.next = b;
+  b.next = a;
+  a.prev = b;
+  return RefCycleHandle { root: a, watch: a.prev };
+}
+
+ts_test("ref copies alias the same object", func() {
+  let a = ref RefNode { value: 1 };
+  let b = a;
+  b.value = 9;
+  ts_eq(a.value, 9);
+  ts_eq(b.value, 9);
+});
+
+ts_test("ref target replacement updates aliases", func() {
+  let a = ref RefNode { value: 1 };
+  let b = a;
+  let replaced = (a.* = RefNode { value: 42 });
+  ts_eq(replaced.value, 42);
+  ts_eq(a.value, 42);
+  ts_eq(b.value, 42);
+  let set_result = std.ref.set(a, RefNode { value: 7 });
+  ts_eq(set_result.value, 7);
+  ts_eq(b.value, 7);
+});
+
+ts_test("ref methods mutate the receiver", func() {
+  let a = ref RefNode { value: 1 };
+  ts_eq(a.get(), 1);
+  a.bump();
+  ts_eq(a.get(), 2);
+  ts_eq(ref_render(a), 2);
+});
+
+ts_test("weak upgrade and optional chaining", func() {
+  let a = ref RefNode { value: 5 };
+  let b = ref RefNode { value: 6 };
+  b.prev = a;
+  ts_eq(str(b.prev), "weak RefNode");
+  ts_eq(b.prev?.value, 5);
+  ts_eq(std.ref.upgrade(b.prev).value, 5);
+  ts_eq(std.ref.snapshot(b.prev).value, 5);
+  let empty: RefNode? = null;
+  ts_eq(empty?.value, null);
+});
+
+// GC runs at statement boundaries; hold a strong root until the live check,
+// then drop it so the sweep is observable even with SKEIN_GC_STRESS=1.
+let ref_cycle = ref_make_cycle();
+let ref_cycle_weak = ref_cycle.watch;
+let ref_cycle_alive = std.ref.upgrade(ref_cycle_weak) != null;
+ref_cycle.root = null;
+let ref_cycle_i = 0;
+while (ref_cycle_i < 400) {
+  let tmp = ref RefNode { value: ref_cycle_i };
+  ref_cycle_i = ref_cycle_i + 1;
+}
+
+ts_test("strong ref cycles are collected", func() {
+  ts_true(ref_cycle_alive);
+  ts_eq(std.ref.upgrade(ref_cycle_weak), null);
+  ts_eq(ref_cycle_weak?.value, null);
+});
+
+ts_test("ordinary value cycles are still rejected", func() {
+  struct Plain { value: int; next: Plain? = null; }
+  let a = Plain { value: 1 };
+  let b = Plain { value: 2 };
+  a.next = b;
+  let caught = false;
+  let x = (b.next = a) on error(e) {
+    caught = true;
+    recover null;
+  };
+  ts_true(caught);
+});
+
+ts_test("snapshot is sendable but a ref is not", func() {
+  let ends = std.thread.Channel(4);
+  let parent = ends[0];
+  let r = ref RefNode { value: 11 };
+  let snap = std.ref.snapshot(r);
+  ts_eq(snap.value, 11);
+  parent.send(std.thread.Message.from(snap));
+
+  let caught = false;
+  let sent = parent.send(std.thread.Message.from(r)) on error(e) {
+    caught = true;
+    recover null;
+  };
+  ts_true(caught);
+});
+
+ts_test("nested ref and weak handles are rejected", func() {
+  let ends = std.thread.Channel(4);
+  let parent = ends[0];
+  let r = ref RefNode { value: 12 };
+  let holder = ref RefNode { value: 13 };
+  holder.prev = r;
+  let weak_ref = holder.prev;
+
+  let caught_nested = false;
+  let sent_nested = parent.send(std.thread.Message.from({"nodes": [r]})) on error(e) {
+    caught_nested = true;
+    recover null;
+  };
+  ts_true(caught_nested);
+
+  let caught_weak = false;
+  let sent_weak = parent.send(std.thread.Message.from(weak_ref)) on error(e) {
+    caught_weak = true;
+    recover null;
+  };
+  ts_true(caught_weak);
+
+  let snap = std.ref.snapshot({"nodes": [r]});
+  parent.send(std.thread.Message.from(snap));
+  ts_eq(snap["nodes"][0].value, 12);
+});
+
+ts_test("snapshot rejects a cyclic ref graph", func() {
+  let a = ref RefNode { value: 1 };
+  let b = ref RefNode { value: 2 };
+  a.next = b;
+  b.next = a;
+  let caught = false;
+  let snap = std.ref.snapshot(a) on error(e) {
+    caught = true;
+    recover null;
+  };
+  ts_true(caught);
+});
+
+ts_test("ref captures are rejected when transferring a function", func() {
+  let shared = ref RefNode { value: 21 };
+  let worker = func(msg) { return shared.value; };
+  let message = "";
+  let done = std.thread.spawn_function(worker,
+      std.thread.Message.from(1)) on error(e) {
+    message = std.error.message(e);
+    recover null;
+  };
+  ts_eq(std.string.contains(message, "std.ref.snapshot"), 1);
+});
+
+ts_finish();

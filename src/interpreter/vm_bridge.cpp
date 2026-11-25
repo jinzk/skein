@@ -879,7 +879,8 @@ value_t *skein_vm_build_struct(const skein::bc::ConstructDesc &desc,
         yyerror("JIT struct service is not installed");
         return nullptr;
     }
-    return fn(desc.source.c_str(), desc.name.c_str(), entries, desc.spread);
+    return fn(desc.source.c_str(), desc.name.c_str(), entries, desc.spread,
+              desc.is_ref);
 }
 
 static bool jit_generator_step(value_t *value, value_t *&out, bool &done) {

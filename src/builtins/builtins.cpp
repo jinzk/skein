@@ -49,6 +49,7 @@
 #include "process_spawn.h"
 #include "random_builtin.h"
 #include "regex_builtin.h"
+#include "refvalue.h"
 #include "serialization.h"
 #include "repl.h"
 #include "stdio_stream.h"
@@ -538,12 +539,38 @@ struct value_t *call_slice_builtin(
     return NULL;
 }
 
+static struct value_t *call_ref_builtin(
+    int functype, const std::vector<struct value_t *> &args) {
+    const char *name = functype == B_ref_set ? "std.ref.set"
+                       : functype == B_ref_upgrade ? "std.ref.upgrade"
+                                                   : "std.ref.snapshot";
+    if (functype == B_ref_set) {
+        if (args.size() != 2) {
+            yyerror("%s expects 2 arguments, got %d", name,
+                    (int)args.size());
+            return NULL;
+        }
+        if (!ref_replace_target(args[0], args[1]))
+            return NULL;
+        return dupval(args[1]);
+    }
+    if (args.size() != 1) {
+        yyerror("%s expects 1 argument, got %d", name, (int)args.size());
+        return NULL;
+    }
+    if (functype == B_ref_upgrade)
+        return ref_upgrade(args[0]);
+    return ref_snapshot(args[0]);
+}
+
 } // namespace
 
 struct value_t *call_builtin(int functype,
                              const std::vector<struct value_t *> &args) {
     if (functype == B_slice)
         return call_slice_builtin(args);
+    if (functype >= B_ref_set && functype <= B_ref_snapshot)
+        return call_ref_builtin(functype, args);
     if (functype >= B_meta_type_info && functype <= B_meta_has_type)
         return call_meta_builtin(functype, args);
     if (functype >= B_fn_compose && functype <= B_fn_always)

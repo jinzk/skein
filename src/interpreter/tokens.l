@@ -274,7 +274,7 @@ static void note_function_signature_token(int tok) {
 /* After '.', keywords and builtin names are ordinary member names. */
 #define MEMBER_NAME_AFTER_DOT()                                   \
     do {                                                            \
-        if (last_token == '.') {                                    \
+        if (last_token == '.' || last_token == SKEIN_TOK_QUESTION_DOT) { \
             int member_tok = make_name_token(yytext, yyleng);       \
             if (member_tok == 0)                                    \
                 return 0;                                           \
@@ -724,6 +724,7 @@ static bool reserved_name(const char *text, int len) {
     static const char *const words[] = {
         "if",       "else",     "while",    "do",       "for",
         "struct",   "extern",   "enum",     "impl",     "protocol",
+        "ref",      "weak",
         "switch",   "match",    "case",     "default",  "let",
         "const",    "func",     "yield",    "launch",   "wait",
         "defer",    "package",  "import",   "include",  "export",
@@ -811,6 +812,7 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 
 ^"#!"[^\n]*\n? { }
 
+"?." { YYRET(SKEIN_TOK_QUESTION_DOT); }
 "++" { YYRET(SKEIN_TOK_INC); }
 "--" { YYRET(SKEIN_TOK_DEC); }
 
@@ -1096,6 +1098,8 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
     }
     YYRET(SKEIN_TOK_PROTOCOL);
 }
+"ref" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_REF); }
+"weak" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_WEAK); }
 "switch" { MEMBER_NAME_AFTER_DOT();
     start_header_context(SKEIN_TOK_SWITCH);
     YYRET(SKEIN_TOK_SWITCH);

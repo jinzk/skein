@@ -70,6 +70,7 @@ struct value_t *compound_name(struct symref *ref, int op,
 struct value_t *compound_index(struct ast *target, int op,
                                struct ast *value_ast);
 struct value_t *assign_index(struct ast *target, struct ast *value_ast);
+struct value_t *assign_ref_target(struct ast *target, struct ast *value_ast);
 struct value_t *increment_index(struct ast *target, int delta, bool prefix);
 struct value_t *read_member_value(struct value_t *container,
                                   struct value_t *index,

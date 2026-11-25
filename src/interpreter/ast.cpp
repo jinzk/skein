@@ -1341,8 +1341,23 @@ struct ast *append_protocol_method(struct ast *head, struct ast *method) {
     return head;
 }
 
+struct ast *newoptionalchain(struct ast *base, char *name) {
+    struct optional_chain_node *a =
+        (struct optional_chain_node *)
+            ast_node_alloc(sizeof(struct optional_chain_node));
+    if (!a) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    a->nodetype = NODE_OPTIONAL_CHAIN;
+    set_loc(a, base ? base->line : 0, base ? base->column : 0);
+    a->l = base;
+    a->r = newstr(name ? name : "");
+    return (struct ast *)a;
+}
+
 struct ast *newstructlit(char *name, char *source,
-                         struct struct_init *fields) {
+                         struct struct_init *fields, bool is_ref) {
     struct struct_lit_node *a =
         (struct struct_lit_node *)
             ast_node_alloc(sizeof(struct struct_lit_node));
@@ -1355,6 +1370,7 @@ struct ast *newstructlit(char *name, char *source,
     a->name = name;
     a->source = source;
     a->fields = fields;
+    a->is_ref = is_ref;
     return (struct ast *)a;
 }
 
@@ -1478,6 +1494,8 @@ void treefree(struct ast *a) {
         case '6':
         case 'L':
         case NODE_FUNCTION_BODY:
+        case NODE_OPTIONAL_CHAIN:
+        case NODE_REF_TARGET:
             treefree(a->r);
             treefree(a->l);
             break;

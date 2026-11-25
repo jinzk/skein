@@ -15,6 +15,7 @@
 #include "package.h"
 #include "parser_lock.h"
 #include "platform.h"
+#include "refvalue.h"
 #include "runtime_context.h"
 #include "runtime_state.h"
 #include "scopestack.h"
@@ -567,6 +568,17 @@ bool validate_data_value(struct value_t *value,
         case T_func:
             error = "Message payload does not support standalone function "
                     "values";
+            return false;
+        case T_userdata:
+            if (is_ref_like_value(value)) {
+                error = std::string(
+                            "Message payload cannot contain a ref or weak "
+                            "handle; ") +
+                        ref_transfer_guidance();
+                return false;
+            }
+            error = std::string("Message payload does not support ") +
+                    typename_of(value);
             return false;
         default:
             error = std::string("Message payload does not support ") +
@@ -2712,6 +2724,12 @@ struct thread_payload_builder {
                 dupval(value), thread_value_deleter());
             return true;
         }
+        if (value->type == T_userdata && is_ref_like_value(value)) {
+            error = std::string(what ? what : "value") +
+                    " contains a ref or weak handle; " +
+                    ref_transfer_guidance();
+            return false;
+        }
         {
             std::unordered_set<const void *> special_visiting;
             if (contains_transfer_special(value, special_visiting)) {
@@ -3314,6 +3332,7 @@ void thread_entry_main(
     fiber_shutdown();
     event_loop_shutdown();
     ast_thread_shutdown();
+    ref_shutdown();
     skein_vm_stats_merge_thread();
     skein_vm_shutdown();
     set_active_eval_context(nullptr);
@@ -4172,6 +4191,7 @@ void thread_worker_end() {
     fiber_shutdown();
     event_loop_shutdown();
     ast_thread_shutdown();
+    ref_shutdown();
     skein_vm_stats_merge_thread();
     skein_vm_shutdown();
     set_active_eval_context(nullptr);

@@ -48,7 +48,7 @@ struct value_t *eval_enum_lit(struct enum_lit_node *lit);
 struct value_t *build_struct_value(
     const char *source, const char *name,
     std::vector<std::pair<std::string, struct value_t *>> &fields,
-    const std::vector<bool> &spread);
+    const std::vector<bool> &spread, bool is_ref = false);
 struct value_t *build_enum_value(
     const char *source, const char *name, const char *variant,
     std::vector<std::pair<std::string, struct value_t *>> &fields,

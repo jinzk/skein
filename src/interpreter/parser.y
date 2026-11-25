@@ -932,6 +932,14 @@ static struct type_constraint *make_nullable_type(
     return skein::typecheck::type_apply_nullable(base);
 }
 
+static struct type_constraint *make_ref_type(struct type_constraint *inner) {
+    return skein::typecheck::type_apply_prefix(TYPE_REF, inner);
+}
+
+static struct type_constraint *make_weak_type(struct type_constraint *inner) {
+    return skein::typecheck::type_apply_prefix(TYPE_WEAK, inner);
+}
+
 struct parsed_type_list {
     struct type_constraint *type;
     struct parsed_type_list *next;
@@ -1103,6 +1111,7 @@ static struct type_constraint *runtime_type_or_error(
 %token LAUNCH "launch"
 %token WAIT "wait"
 %token STRUCT "struct" IMPL "impl" PROTOCOL "protocol" ENUM "enum"
+%token REF "ref" WEAK "weak" QUESTION_DOT "?."
 %token EXTERN "extern"
 %token SWITCH "switch" CASE "case" DEFAULT "default" ARROW "=>"
 %token MATCH "match"
@@ -1149,7 +1158,7 @@ static struct type_constraint *runtime_type_or_error(
 %right INC DEC
 %precedence PRIMARY
 %precedence '['
-%precedence '.'
+%precedence '.' QUESTION_DOT
 %precedence '('
 %precedence ON
 %precedence NOELSE
@@ -2030,6 +2039,8 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
         $$ = newslice($1, NULL, NULL, $4);
       }
     | exp '.' fieldname                   { $$ = newast('j', $1, newstr($3)); free($3); }
+    | exp '.' '*'                         { $$ = newast(NODE_REF_TARGET, $1, NULL); }
+    | exp QUESTION_DOT fieldname          { $$ = newoptionalchain($1, $3); free($3); }
     | '[' valuelist ']'                   { $$ = $2; }
     | '{' EMPTY_DICT_CLOSE                { $$ = newdict(NULL, NULL, NULL); }
     | '{' pairlist '}'                    { $$ = $2; }
@@ -2043,9 +2054,22 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
                           copy_text(diag_current_source_name().c_str()),
                           (struct struct_init *)$3);
       }
+    | REF NAME '{' empty_body             {
+        $$ = newstructlit($2,
+                          copy_text(diag_current_source_name().c_str()),
+                          NULL, true);
+      }
+    | REF NAME '{' struct_fields '}'      {
+        $$ = newstructlit($2,
+                          copy_text(diag_current_source_name().c_str()),
+                          (struct struct_init *)$4, true);
+      }
     | NAME '.' fieldname {
         $$ = newast('j', newref($1), newstr($3));
         free($3);
+      }
+    | NAME '.' '*' {
+        $$ = newast(NODE_REF_TARGET, newref($1), NULL);
       }
     | NAME '.' NAME '{' struct_fields '}' {
         $$ = newenumlit($1,
@@ -2364,6 +2388,8 @@ symlist: %empty                           { $$ = NULL; }
  * is `(x as Foo)[0]` for postfix access on a cast, so generic arguments win.
  */
 type: type_name %prec AS                  { $$ = $1; }
+    | REF type_name                       { $$ = make_ref_type($2); }
+    | WEAK type_name                      { $$ = make_weak_type($2); }
     | type '?'                            { $$ = make_nullable_type($1); }
     | type_name '[' type ']'              {
         $$ = make_generic_type($1, $3, NULL);

@@ -783,7 +783,8 @@ public:
                     op == Op::NewStruct
                         ? build_struct_value(desc.source.c_str(),
                                              desc.name.c_str(),
-                                             fields, desc.spread)
+                                             fields, desc.spread,
+                                             desc.is_ref)
                         : build_enum_value(desc.source.c_str(),
                                            desc.name.c_str(),
                                            desc.variant.c_str(),

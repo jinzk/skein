@@ -15,7 +15,19 @@
 - 函数 bytecode cache 和 inline cache 按线程隔离。
 - 跨线程继承的 proto 会在接收线程复制，inline cache 不共享。
 - JIT 环境开关使用 `std::call_once` 初始化。
+- `ref` / `weak` 对象注册表严格线程本地，不跨线程共享，也不需要锁。
 - TSan 覆盖线程压力、key 语义、worker VM、env/FFI 和网络测试。
+
+## `ref` / `weak` 与 GC
+
+实现：`src/runtime/refvalue.{h,cpp}`
+
+- 每个线程维护独立的 `ref_object` 注册表、strong/weak handle 和 generation；
+- GC mark 只沿强 `ref` 边走，sweep 后递增 generation 使 weak handle 失效；
+- 不存在跨线程 GC root、共享 ref heap、generation 迁移或保护注册表用的锁；
+- `value_reaches_any()` 在 `ref` 边界停止，普通值环仍按原逻辑拒绝；
+- channel payload 校验和序列化路径递归拒绝 `ref` / weak，错误提示引导
+  `std.ref.snapshot()` 或 `std.arena` id；跨线程传递的是接收侧值快照。
 
 ## 类型注册表
 

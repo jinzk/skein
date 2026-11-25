@@ -1219,6 +1219,44 @@ impl Q {
 
 - 未导出的类型不能通过包路径引用，但它的值仍可作为普通值传递和方法调用。
 
+#### `ref` / `weak` 与可选链
+
+需要共享可变对象或表达环形引用时，显式使用 `ref T`；普通 `T { ... }`
+仍是 COW 值：
+
+```text
+struct Node {
+  value: int;
+  next: ref Node? = null;   // 强边
+  prev: weak Node? = null;  // 弱边，不保活
+  func bump(self) { self.value = self.value + 1; }
+}
+
+let a = ref Node { value: 1 };
+let b = ref Node { value: 2 };
+a.next = b;
+b.prev = a;
+
+b.bump();                 // ref 接收者上的修改会持久化
+print(a.next.value);      // 3
+print(b.prev?.value);     // 3；弱引用失效时为 null
+print(std.ref.upgrade(b.prev).value);  // 3
+```
+
+规则：
+
+- `let c = a` 复制句柄而不是目标；`a = b` 只是重新绑定变量；
+- 替换目标整体内容写 `a.* = Node { value: 9 }` 或
+  `std.ref.set(a, Node { value: 9 })`；
+- `weak T` 保存 `{id, generation}`，目标被 GC 回收后升级为 `null`；
+- `?.` 是通用可选字段访问，左侧为 `null` 时结果为 `null`；目前只支持字段，
+  不支持 `?.()` 或 `?.[index]`；
+- 强 `ref` 环交给 GC，普通 struct / list / dict 的值环仍报
+  `recursive value would create a cycle`；
+- ref heap 严格线程本地。`ref` / `weak`（含嵌套）不能作为 channel payload，
+  跨线程前用 `std.ref.snapshot(a)` 取普通值快照，或发送
+  `std.arena` id / owner 线程消息。
+
 命名函数装饰器：
 
 ```text

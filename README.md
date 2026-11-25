@@ -182,7 +182,7 @@ let desc = match (event) {
 - `match` 是表达式，支持字面量、绑定、dict / list / tuple / struct 模式、or-pattern、整数范围和守卫；
 - 支持 Python 风格切片、`for ... in`、标签跳转和 `switch`。
 
-### 组织代码：struct、protocol 与枚举
+### 组织代码：struct、protocol、`ref` 与枚举
 
 `struct` 声明数据和方法，`impl` 可追加方法，`protocol` 声明结构式接口；枚举支持带载荷变体和穷尽匹配：
 
@@ -213,7 +213,9 @@ impl Point {
 - `impl Type` 给已有类型追加方法，与内联方法共享方法命名空间；同名重复会报错；
 - 方法支持默认参数、可变参数、装饰器和 generator；
 - enum 支持带字段变体、`impl`、protocol 和 `match` 穷尽性检查；enum 方法仍写在 `impl` 中；
-- list / dict / struct 是值语义，内部使用写时复制。
+- list / dict / struct 是值语义，内部使用写时复制；
+- 需要共享可变对象时用 `ref T`，弱观察用 `weak T`；强引用环由 GC 回收，`?.` 处理 `null` 和失效弱引用；
+- `ref` / `weak` 不能跨线程发送，用 `std.ref.snapshot()` 取快照，或发送 `std.arena` id。
 
 ### 并发：task 与 launch
 

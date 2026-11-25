@@ -229,6 +229,7 @@ add_library(skein_runtime STATIC
   src/runtime/structtype.cpp
   src/runtime/symbol.cpp
   src/runtime/cycle.cpp
+  src/runtime/refvalue.cpp
   src/runtime/serialization.cpp
   src/runtime/typeinfo.cpp
   src/runtime/json.cpp

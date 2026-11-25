@@ -11,7 +11,8 @@ const propagation, and slice cases live in
 tests/skein/language_core_updates.skein.  Default-parameter and closure cases
 live in tests/skein/language_core_defaults.skein.  Lambda, pipe, placeholder,
 string-append, and protocol cases live in tests/skein/language_core_functions.skein
-and tests/skein/language_core_traits.skein.  Control-flow header forms live in
+and tests/skein/language_core_traits.skein.  Ref / weak / `?.` cases live in
+tests/skein/language_core_refs.skein.  Control-flow header forms live in
 tests/skein/language_core_headers.skein.
 """
 import os
@@ -29,6 +30,7 @@ def run_cases():
     run_skein("language_core_defaults.skein")
     run_skein("language_core_functions.skein")
     run_skein("language_core_traits.skein")
+    run_skein("language_core_refs.skein")
     run_skein("language_core_headers.skein")
     check(
         "numeric golden output",

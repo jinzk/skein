@@ -2,8 +2,10 @@
 
 #include "ast.h"
 #include "compiler.h"
+#include "cycle.h"
 #include "dict.h"
 #include "eval.h"
+#include "refvalue.h"
 #include "scopestack.h"
 #include "structeval.h"
 #include "structtype.h"
@@ -24,7 +26,7 @@
 namespace {
 
 constexpr uint32_t kPayloadMagic = 0x48545453u; /* "STTH" */
-constexpr uint32_t kPayloadVersion = 12u;
+constexpr uint32_t kPayloadVersion = 13u;
 constexpr uint32_t kEndianMarker = 0x01020304u;
 constexpr uint32_t kMaxCount = 1000000u;
 constexpr uint32_t kMaxString = 64u * 1024u * 1024u;
@@ -450,6 +452,15 @@ bool write_value_inner(writer &out, const struct value_t *value, int depth,
             }
             return true;
         }
+        case T_userdata:
+            if (is_ref_like_value(value)) {
+                error = std::string("cannot serialize a ref or weak handle; ") +
+                        ref_transfer_guidance();
+                return false;
+            }
+            error = std::string("cannot serialize value of type ") +
+                    typename_of(value);
+            return false;
         default:
             error = std::string("cannot serialize value of type ") +
                     typename_of(value);
@@ -860,9 +871,38 @@ void collect_used_globals(const skein::bc::Proto &proto,
     }
 }
 
-bool data_capture_supported(const struct value_t *value) {
+bool contains_ref_like_value(
+    const struct value_t *value, std::unordered_set<const void *> &visiting,
+    int depth = 0) {
+    if (!value || depth > 64)
+        return false;
+    if (is_ref_like_value(value))
+        return true;
+    const void *identity = value_payload(value);
+    if (identity && !visiting.insert(identity).second)
+        return false;
+    bool found = false;
+    for_each_value_child(value, [&](const struct value_t *child) {
+        if (!found)
+            found = contains_ref_like_value(child, visiting, depth + 1);
+    });
+    if (identity)
+        visiting.erase(identity);
+    return found;
+}
+
+bool data_capture_supported(const struct value_t *value,
+                            std::string *detail = nullptr) {
     if (!value)
         return true;
+    if (detail)
+        detail->clear();
+    std::unordered_set<const void *> visiting;
+    if (contains_ref_like_value(value, visiting)) {
+        if (detail)
+            *detail = ref_transfer_guidance();
+        return false;
+    }
     if (value->type == T_func || value->type == T_heap ||
         value->type == T_native)
         return false;
@@ -930,11 +970,14 @@ bool build_simple_function(const std::shared_ptr<function_def> &def,
                                                     : "parameter");
             return false;
         }
-        if (!data_capture_supported(default_value)) {
+        std::string detail;
+        if (!data_capture_supported(default_value, &detail)) {
             freeval(default_value);
             error = std::string(what) + " has a non-data default for " +
                     (param->sym && param->sym->name ? param->sym->name
                                                     : "parameter");
+            if (!detail.empty())
+                error += std::string("; ") + detail;
             return false;
         }
         thread_transfer_value transfer;
@@ -978,8 +1021,11 @@ bool build_simple_function(const std::shared_ptr<function_def> &def,
                     name;
             return false;
         }
-        if (!data_capture_supported(captured)) {
+        std::string detail;
+        if (!data_capture_supported(captured, &detail)) {
             error = std::string(what) + " captures a non-data value: " + name;
+            if (!detail.empty())
+                error += std::string("; ") + detail;
             return false;
         }
         thread_transfer_value capture;
@@ -1020,9 +1066,12 @@ bool build_simple_function(const std::shared_ptr<function_def> &def,
             struct value_t *value = lookup_global_symbol(name.c_str());
             if (!value)
                 continue;
-            if (!data_capture_supported(value)) {
+            std::string detail;
+            if (!data_capture_supported(value, &detail)) {
                 error = std::string(what) + " uses a non-data global: " +
                         name;
+                if (!detail.empty())
+                    error += std::string("; ") + detail;
                 return false;
             }
             thread_transfer_value transfer;
@@ -2267,6 +2316,7 @@ bool write_proto(writer &out, const skein::bc::Proto &proto,
         out.str(construct.source);
         out.str(construct.name);
         out.str(construct.variant);
+        out.u8(construct.is_ref ? 1 : 0);
         out.u32((uint32_t)construct.fields.size());
         for (const std::string &field : construct.fields)
             out.str(field);
@@ -2648,11 +2698,14 @@ bool read_proto(reader &in, std::shared_ptr<skein::bc::Proto> &proto,
         skein::bc::ConstructDesc construct;
         uint32_t field_count = 0;
         uint32_t spread_count = 0;
+        uint8_t is_ref = 0;
         if (!in.str(construct.source) || !in.str(construct.name) ||
-            !in.str(construct.variant) || !in.count(field_count)) {
+            !in.str(construct.variant) || !in.u8(is_ref) ||
+            !in.count(field_count)) {
             error = in.error;
             return false;
         }
+        construct.is_ref = is_ref != 0;
         construct.fields.reserve(field_count);
         for (uint32_t j = 0; j < field_count; ++j) {
             std::string field;

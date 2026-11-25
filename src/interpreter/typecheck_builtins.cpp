@@ -781,6 +781,19 @@ const TypeNode *builtin_polymorphic_type(const std::string &path) {
         return poly_builtin({any_type(), any_type()},
                             type_builtin(TYPE_NULL));
 
+    if (path == "std.ref.set") {
+        const TypeNode *ref_t = type_container(TYPE_REF, {T});
+        return poly_builtin({ref_t, T}, type_builtin(TYPE_NULL));
+    }
+    if (path == "std.ref.upgrade") {
+        const TypeNode *ref_t = type_container(TYPE_REF, {T});
+        const TypeNode *weak_t = type_container(TYPE_WEAK, {T});
+        return poly_builtin({type_nullable(weak_t)},
+                            type_nullable(ref_t));
+    }
+    if (path == "std.ref.snapshot")
+        return poly_builtin({any_type()}, any_type());
+
     if (path == "std.fn.compose")
         return poly_builtin(
             {poly_callback({B}, C), poly_callback({A}, B)},

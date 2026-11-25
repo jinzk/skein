@@ -2,6 +2,7 @@
 
 #include "cycle.h"
 #include "gc_roots.h"
+#include "refvalue.h"
 #include "scopestack.h"
 #include "structtype.h"
 #include "symbol.h"
@@ -100,6 +101,13 @@ struct cycle_collector {
                         mark_function(method->method);
                         break;
                     }
+                    case T_userdata:
+                        gc_mark_ref_value(
+                            v, gc_cell_epoch,
+                            [this](struct value_t *child) {
+                                mark_value(child);
+                            });
+                        break;
                     default:
                         break;
                 }
@@ -210,6 +218,7 @@ void collect_cycles(scope_context &context) {
         }
     }
 
+    gc_sweep_unmarked_refs(gc_cell_epoch);
     sweep_cells(false, &context);
     scopes.clear();
     collect_thread_cycles();
@@ -220,6 +229,7 @@ void maybe_collect_cycles() {
     scope_context &context = active_scope_context();
     static constexpr int COLLECT_INTERVAL = 64;
     static constexpr std::size_t SCOPE_GROWTH_THRESHOLD = 1024;
+    static constexpr std::size_t REF_ALLOCATION_THRESHOLD = 256;
 
     ++context.statements_since_collect;
     prune_scopes(context);
@@ -228,10 +238,13 @@ void maybe_collect_cycles() {
     if (!due && context.all_scopes.size() >
                     context.scopes_at_last_collect + SCOPE_GROWTH_THRESHOLD)
         due = true;
+    if (!due && gc_ref_allocation_due(REF_ALLOCATION_THRESHOLD))
+        due = true;
     if (!due)
         return;
 
     context.statements_since_collect = 0;
+    gc_reset_ref_allocation_counter();
     collect_cycles(context);
     prune_scopes(context);
     context.scopes_at_last_collect = context.all_scopes.size();

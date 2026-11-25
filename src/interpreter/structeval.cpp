@@ -4,6 +4,7 @@
 #include "compiler.h"
 #include "diagnostics.h"
 #include "eval.h"
+#include "refvalue.h"
 #include "scopestack.h"
 #include "structtype.h"
 #include "valuetype.h"
@@ -599,7 +600,8 @@ static void free_struct_init_entries(
 }
 
 static value_t *build_struct_from_entries(
-    struct_def *def, std::vector<struct_init_entry> &entries) {
+    struct_def *def, std::vector<struct_init_entry> &entries,
+    bool is_ref = false) {
     if (!def) {
         free_struct_init_entries(entries);
         return NULL;
@@ -745,6 +747,8 @@ static value_t *build_struct_from_entries(
         return NULL;
     }
     entries.clear();
+    if (is_ref)
+        return new_ref_value(def, payload);
     return newstructval(def, payload);
 }
 
@@ -768,7 +772,7 @@ struct value_t *eval_struct_lit(struct struct_lit_node *lit) {
         entry.spread = init->name == NULL;
         entries.push_back(std::move(entry));
     }
-    return build_struct_from_entries(def, entries);
+    return build_struct_from_entries(def, entries, lit->is_ref);
 }
 
 static void free_constructed_fields(
@@ -781,7 +785,7 @@ static void free_constructed_fields(
 value_t *build_struct_value(
     const char *source, const char *name,
     std::vector<std::pair<std::string, value_t *>> &fields,
-    const std::vector<bool> &spread) {
+    const std::vector<bool> &spread, bool is_ref) {
     struct_def *def = structtype_find_struct(source, name);
     if (!def) {
         yyerror("unknown struct type %s", name ? name : "");
@@ -800,7 +804,7 @@ value_t *build_struct_value(
         entries.push_back(std::move(entry));
     }
     fields.clear();
-    return build_struct_from_entries(def, entries);
+    return build_struct_from_entries(def, entries, is_ref);
 }
 
 static value_t *build_enum_from_entries(

@@ -31,7 +31,7 @@ let foo变量 = 4;
 let const func yield defer launch wait
 if else while do for
 switch case default
-struct impl protocol
+struct impl protocol ref weak
 return break continue goto
 fail on error recover pass
 is
@@ -382,13 +382,15 @@ d["key"]
 obj.field
 a[0][1]
 d["x"].field
+obj?.field
 ```
 
 - list 下标必须是整数；
 - string 下标按 UTF-8 码点计数，返回 `char`，字符串索引不能赋值；
 - dict 键按值相等判断；
 - bytes 下标是字节下标，返回 `0..255`，索引赋值接受 `0..255`；
-- 字段访问用于 struct 字段、enum 变体和 `std`/包命名空间；普通 dict 的键必须用下标。
+- 字段访问用于 struct 字段、enum 变体和 `std`/包命名空间；普通 dict 的键必须用下标；
+- `?.` 是可选字段访问，左侧为 `null` 时整个表达式为 `null`，详见 5.12.3。
 
 切片使用 Python 风格的 `start:stop:step`：
 
@@ -2066,7 +2068,7 @@ let d = Point { ...p, x: 9 };
 - 结构体使用 copy-on-write 值语义；
 - 所有成员都是公开的，`_` 前缀没有特殊含义；
 - 字段类型必须是已声明的类型；支持自引用，例如 `struct Node { value: int; next: Node?; }`；
-- 不允许创建环：`a.next = b; b.next = a;` 会报 `recursive value would create a cycle`；共享子结构（DAG）允许；
+- 普通值不允许创建环：`a.next = b; b.next = a;` 会报 `recursive value would create a cycle`；共享子结构（DAG）允许；使用 `ref` 字段的强引用环由 GC 回收，见 5.12.3；
 - 字段可以保存 `callable` / `function` 值，作为普通回调使用，不会自动绑定 `self`；
 - 不支持继承、静态方法、用户自定义泛型、动态添加方法或运算符重载；内建容器的类型参数见变量类型标注章节。
 
@@ -2288,6 +2290,44 @@ render(Point { x: 1, y: 2 });
 - struct、enum 和 protocol 名称共享类型命名空间，不能在同一个包中重名；
 - 类型名按包注册，一个包对应一个源文件；不同包可以定义同名结构体或 protocol；
 - 未标注类型的方法调用按运行时能力查找；protocol 标注和 `is Protocol` 是结构式契约；跨包返回的结构体值仍可以通过字段和方法使用。
+
+#### 5.12.3 `ref` / `weak` 与可选链
+
+```text
+struct Node {
+  value: int;
+  next: ref Node? = null;
+  prev: weak Node? = null;
+  func bump(self) { self.value = self.value + 1; }
+}
+
+let a = ref Node { value: 1 };
+let b = ref Node { value: 2 };
+a.next = b;
+b.prev = a;
+b.bump();
+print(a.next.value);        // 2
+print(b.prev?.value);       // 1
+```
+
+规则：
+
+- `ref T` 是类型化、受 GC 管理的安全句柄；不支持地址运算、手动释放或裸指针；
+- `T { ... }` 仍是普通值；只有 `ref T { ... }` 创建引用对象；
+- 复制 `ref` 只复制句柄：`let c = a` 与原值指向同一对象；`a = b` 只重新绑定
+  `a`；替换整个目标内容用 `a.* = T { ... }` 或 `std.ref.set(a, T { ... })`；
+- 通过 `ref` 调用方法时 `self` 是句柄，方法内修改会持久化；普通值接收者仍是
+  副本语义；
+- `weak T` 不保活，保存 `{id, generation}`；目标回收后 generation 失效；
+  `std.ref.upgrade(w)` 得到 `ref T?`；
+- `?.` 是通用可选字段访问：`a?.b` 在 `a` 为 `null`（包括失效弱引用升级失败）时
+  返回 `null`，否则读取字段；可继续组合成员访问，例如 `b.prev?.value`；
+  目前不支持 `?.()` 或 `?.[index]`；
+- 强引用环交给 GC 回收；普通 `struct` / `list` / `dict` 值环仍报
+  `recursive value would create a cycle`；
+- ref heap 是线程本地的；`ref` / `weak`（包括嵌套在容器、struct、enum 字段中）
+  不能跨线程发送，需要显式 `std.ref.snapshot(r)` 得到值语义快照，或发送
+  `std.arena` id / owner 线程消息。
 
 ### 5.13 枚举
 
@@ -2596,6 +2636,7 @@ std.process
 std.worker
 std.thread
 std.type
+std.ref
 std.meta
 std.plugin
 std.module
@@ -4340,6 +4381,18 @@ fsm.restore(snap, decode = null)    -> Context
 - 非法 `step` 会 `fail("step must be callable")`，非法回调会 `fail("on_transition must be callable")`。
 
 性能提示：单步 `step` 每次都会为值语义复制历史表，O(history)/次；`run` 在单次调用内复用同一份历史，整体 O(events)，`history` 为 O(n)。线性撤销/重做适合中小规模，超长历史请等待原生 fsm 实现。
+
+### std.ref
+
+```text
+std.ref.set(target, value)   // 替换整个 ref 目标内容
+std.ref.upgrade(weak)        // weak T? -> ref T?；目标已回收时返回 null
+std.ref.snapshot(value)      // 递归得到不含 ref / weak 的普通值快照
+```
+
+`std.ref.snapshot` 可用于 channel payload；`ref` / `weak`（含嵌套）不能直接
+跨线程发送。ref heap 严格线程本地，GC 在 safepoint 回收强引用环并使弱引用
+失效。详见 5.12.3。
 
 ### std.meta
 

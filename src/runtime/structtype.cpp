@@ -1,5 +1,7 @@
 #include "structtype.h"
 
+#include "refvalue.h"
+
 #include <algorithm>
 #include <cstring>
 #include <functional>
@@ -1298,6 +1300,17 @@ bool named_type_matches(const char *source, const char *name,
     std::lock_guard<std::recursive_mutex> lock(type_registry_mutex);
     if (!source || !name || !value)
         return false;
+
+    if (is_ref_value(value)) {
+        ref_object *object = ref_target(const_cast<struct value_t *>(value));
+        if (!object || !object->def)
+            return false;
+        struct struct_value_t plain;
+        plain.type = T_struct;
+        plain.def = object->def;
+        plain.payload = object->payload;
+        return named_type_matches(source, name, (const struct value_t *)&plain);
+    }
 
     if (value->type == T_enum) {
         const struct enum_value_t *ev = (const struct enum_value_t *)value;

@@ -34,7 +34,7 @@
 | 包生态与信任（M3） | 按需 | 公共生态暂缓，先支持私有/本地生态；SumDB / proxy / 私有认证按私有需求推进 |
 | JIT / VM 与 GC（M4） | 优化冻结 | moving GC 与 AOT / 字节码缓存均已确认不做；已完成记录见第 3 节 |
 | 长尾能力与体验（M5） | 按需 | 旧编码、HTTP/2 CONNECT、REPL / LSP 体验、LevelDB / RocksDB |
-| 对象抽象 / `protocol` / `ref` / Channel 模型（M8） | 阶段 1/2 与 inline 方法已完成 | Channel 端点对、结构化 `protocol` 与 struct 内联方法已落地；下一步实现 `ref` / `weak`、GC 接入与 channel payload 拒绝 |
+| 对象抽象 / `protocol` / `ref` / Channel 模型（M8） | 阶段 1–3 与 inline 方法已完成 | Channel 端点对、结构化 `protocol`、struct 内联方法，以及 `ref` / `weak` / GC / channel payload 拒绝已落地；下一步完成文档与 CI 收尾 |
 | `std.cache`（M7）/ `std.kv` | 已完成 | 维护；Valkey 独立 CI 服务可按需补 |
 | FFI 平台 CI / fuzz | 按需 | Windows x64（MinGW/MSVC）进入正式发布；32 位 / ARM 与 fuzz 按需，见 `architecture.md` |
 
@@ -54,10 +54,9 @@
 3. 公共生态已确认暂缓；M3 先支持私有/本地生态，SumDB / proxy / 私有认证
    按私有需求推进。
 4. M8 已确认只保留 `protocol` 并直接删除 `trait`，且以 duplex 端点对作为
-   唯一 Channel 模型并删除旧共享队列；阶段 1（端点对）与阶段 2（结构化
-   protocol）已完成；下一步实现 `ref` / `weak`，复用现有
-   `collect_cycles()` / `gc_roots` / epoch sweep，不另起一套全值 GC，并在
-   channel payload 校验处拒绝 `ref`。
+   唯一 Channel 模型并删除旧共享队列；阶段 1（端点对）、阶段 2（结构化
+   protocol）与阶段 3（`ref` / `weak` / GC / channel payload 拒绝）已完成；
+   下一步只做文档与 CI 收尾。
 5. M4 的 GC root 审计、热点 opcode / frame 分配、字符串拼接、
    启动解析优化和 JIT 默认启用已完成；moving GC 与 AOT / 字节码缓存均已
    确认不做；per-pc liveness / OSR / deopt 保持不做。
@@ -285,9 +284,11 @@ REPL / 工具链体验：
 - 补全候选弹窗 / 分栏
 - 多行历史条目
 
-### 2.6 对象抽象、`protocol` 与引用模型（M8；阶段 2 与 inline 方法已完成）
+### 2.6 对象抽象、`protocol` 与引用模型（M8；阶段 3 已完成）
 
-状态：结构化 `protocol`、直接删除 `trait`，以及 struct 内联 `func` 方法已实现；顶层 `impl Type` 保留为补充方法容器。`ref` / `weak` 设计已明确，待实现。
+状态：结构化 `protocol`、直接删除 `trait`、struct 内联 `func` 方法，以及
+`ref` / `weak` / GC 接入与 channel payload 拒绝均已实现；顶层 `impl Type`
+保留为补充方法容器。剩余工作仅为文档同步和全量 CI 收尾。
 
 背景与问题：
 
@@ -341,7 +342,7 @@ render(Point {});   // 有匹配的 draw(self)，自动满足
   结构化语义；
 - 如果 `T` 满足 protocol，则 `ref T` 也自动满足。
 
-`ref` / `weak` 语义（待实现）：
+`ref` / `weak` 语义（已实现）：
 
 ```skein
 struct Node {
@@ -375,7 +376,7 @@ print(a.next.value);  // 9，引用不是值快照
   新对象；
 - 跨线程或序列化边界使用 `std.ref.snapshot(r)` 显式得到普通值快照。
 
-GC 接入（待实现）：
+GC 接入（已实现）：
 
 - 现有 `collect_cycles()` 已具备 tracing 骨架：`gc_roots` / thread root
   visitor、`for_each_value_child()` 递归 mark、upvalue cell 的 epoch sweep、
@@ -406,8 +407,8 @@ GC 接入（待实现）：
    `impl Trait for Type`~~（已完成）；
 3. ~~允许 `struct` 体内直接定义 `func` 方法；顶层 `impl Type` 仍可继续添加
    方法，二者共用方法命名空间且重名报错~~（已完成）；
-4. 实现 `ref` / `weak` 内部值、`std.ref` API、通用 `?.` 可选链、GC sweep
-   与 channel payload 拒绝；
+4. ~~实现 `ref` / `weak` 内部值、`std.ref` API、通用 `?.` 可选链、GC sweep
+   与 channel payload 拒绝~~（已完成）；
 5. 验收：强引用环可被回收，weak 在目标释放后升级为 `null`，普通值环仍
    被拒绝，channel 发送 `ref` / weak（含嵌套）报错且 snapshot 可发送，
    `SKEIN_GC_STRESS` 无漏根，JIT/VM 差分与语言核心测试稳定。
@@ -415,7 +416,11 @@ GC 接入（待实现）：
 阶段 2 验收已通过：结构化签名匹配、默认方法覆盖与冲突、`is protocol`、
 `std.meta.protocols` / `implements`，以及 AST/VM/JIT 与线程 transfer 差分均稳定。
 
-### 2.7 Channel 模型调整（M8；待实现）
+阶段 3 验收已通过：`ref` 别名与替换、ref 方法、protocol 转发、`?.`、
+强环 sweep / weak 失效、普通值环拒绝、channel 嵌套拒绝与 snapshot 发送，
+在 AST / VM / JIT 与 `SKEIN_GC_STRESS` 下一致。
+
+### 2.7 Channel 模型调整（M8；阶段 1 已完成）
 
 状态：已确认以 duplex 端点对为唯一 Channel 模型；删除旧共享队列，不做兼容别名。阶段 1（端点对迁移）已实现。
 

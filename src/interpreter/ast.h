@@ -47,6 +47,8 @@ constexpr int NODE_ENUM_LITERAL = '?';
 constexpr int NODE_INCLUDE = 0x130;
 constexpr int NODE_GOTO = 0x140;
 constexpr int NODE_FUNCTION_BODY = 0x142;
+constexpr int NODE_OPTIONAL_CHAIN = 0x150;
+constexpr int NODE_REF_TARGET = 0x151;
 
 
 struct ast {
@@ -126,6 +128,24 @@ struct cast_node {
     int column;
     struct ast *value;
     struct type_constraint *type;
+};
+
+/* `a?.b`: evaluate `base` once; when it is null the whole chain is null. */
+struct optional_chain_node {
+    int nodetype;
+    int line;
+    int column;
+    struct ast *l;
+    struct ast *r;
+};
+
+/* `a.*`: the whole payload of a ref object, used for target replacement. */
+struct ref_target_node {
+    int nodetype;
+    int line;
+    int column;
+    struct ast *l;
+    struct ast *r;
 };
 
 struct spread_node {
@@ -402,6 +422,7 @@ struct struct_lit_node {
     char *name;
     char *source;
     struct struct_init *fields;
+    bool is_ref;
 };
 
 struct enum_variant {
@@ -616,7 +637,9 @@ struct ast *newprotocolmethod(char *name, struct symlist *params,
                            bool has_default);
 struct ast *append_protocol_method(struct ast *head, struct ast *method);
 struct ast *newstructlit(char *name, char *source,
-                         struct struct_init *fields);
+                         struct struct_init *fields,
+                         bool is_ref = false);
+struct ast *newoptionalchain(struct ast *base, char *name);
 struct ast *newenumdecl(char *name, char *source,
                         struct enum_variant *variants,
                         bool exported = false);

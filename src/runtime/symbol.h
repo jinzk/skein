@@ -29,6 +29,9 @@ enum type_constraint_kind {
     TYPE_RESULT,
     TYPE_ERROR,
     TYPE_NAMED,
+    /* Typed handles.  `name`/`source` describe the inner target type. */
+    TYPE_REF,
+    TYPE_WEAK,
     TYPE_INVALID,
     /* Static-only type variable used by builtin polymorphic signatures. */
     TYPE_VAR,
@@ -48,7 +51,7 @@ enum type_constraint_kind {
 
 struct type_constraint {
     enum type_constraint_kind kind;
-    /* Interned; non-NULL only for TYPE_NAMED. */
+    /* Interned; used by TYPE_NAMED and the inner type of ref/weak. */
     const char *name;
     const char *source;
     bool nullable;

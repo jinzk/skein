@@ -3524,9 +3524,7 @@ std.thread.spawn_source
 std.thread.spawn_function
 std.entry.encode
 std.thread.spawn_entry
-std.thread.duplex
 std.thread.spawn_script_with_channel
-std.thread.spawn_script_with_duplex
 std.thread.collect
 std.thread.debug_counts
 std.thread.select

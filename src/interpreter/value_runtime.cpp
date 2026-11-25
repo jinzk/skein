@@ -1173,13 +1173,9 @@ struct value_t *read_member_value(struct value_t *container,
         }
         int functype = ((struct builtin_value_t *)container)->functype;
         const char *name = ((struct string_value_t *)index)->value;
-        if (functype == B_thread_channel) {
-            if (std::strcmp(name, "unbounded") == 0)
-                return newbuiltinval(B_thread_unbounded_channel);
-            if (std::strcmp(name, "bounded") == 0 ||
-                std::strcmp(name, "new") == 0)
-                return newbuiltinval(B_thread_channel);
-        }
+        if (functype == B_thread_channel &&
+            std::strcmp(name, "unbounded") == 0)
+            return newbuiltinval(B_thread_unbounded_channel);
         yyerror("builtin has no field %s", name);
         return NULL;
     }

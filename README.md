@@ -240,7 +240,7 @@ let total = std.task.scope(func() {
 - `wait t` 是 `t.wait()` 的前缀写法；`wait launch f()` 等价于 `(launch f()).wait()`；
 - `launch` 作用于完整调用链，`.` 优先级高于前缀 `wait` / `launch`：`launch f().wait()` 启动的是 `f().wait()`，不是“启动后再等待”；
 - `std.task.scope` 等待并管理一组子任务，支持取消和错误传播；
-- `std.thread.Channel` 支持有界、无界和 rendezvous 队列，以及 `select` / `broadcast`；
+- `std.thread.Channel` 返回有方向端点对，支持有界、无界和 rendezvous lane，以及 `select` / `broadcast`；
 - 线程池、worker 池、进程入口 `std.entry` / `std.process.run_entry`；
 - 同步 API 与 `*_task` 异步 API 共用同一套事件循环。
 

@@ -35,13 +35,13 @@ def main():
             "  }\n"
             "  pool.close();\n"
             "  pool.join();\n"
-            "  let ch = std.thread.Channel(1);\n"
+            "  let ends = std.thread.Channel(1);\n"
             '  let msg = std.thread.Message.from({"n": 7}, '
-            '{"signal": ch});\n'
+            '{"signal": ends[1]});\n'
             f'  let t = std.thread.spawn_script("{worker_text}", msg);\n'
-            "  let signal = ch.recv();\n"
+            "  let signal = ends[0].recv();\n"
             "  let joined = t.join();\n"
-            "  ch.close();\n"
+            "  ends[0].close();\n"
             "}\n"
             "let base = std.thread.debug_counts();\n"
             "for (let i = 0; i < 10; i++) {\n"
@@ -51,7 +51,7 @@ def main():
             "let after = std.thread.debug_counts();\n"
             'print("m=" + str(after["messages"] - base["messages"]) + "|");\n'
             'print("c=" + str(after["channels"] - base["channels"]) + "|");\n'
-            'print("d=" + str(after["duplexes"] - base["duplexes"]) + "|");\n'
+            'print("d=" + str(after["pairs"] - base["pairs"]) + "|");\n'
             'print("e=" + str(after["endpoints"] - base["endpoints"]) + "|");\n'
             'print("g=" + str(after["collected"] > base["collected"]) + "|");\n'
         )

@@ -38,7 +38,7 @@ def main():
             'print("served=" + str(served) + "|");\n'
             'print("m=" + str(after["messages"] - base["messages"]) + "|");\n'
             'print("c=" + str(after["channels"] - base["channels"]) + "|");\n'
-            'print("d=" + str(after["duplexes"] - base["duplexes"]) + "|");\n'
+            'print("d=" + str(after["pairs"] - base["pairs"]) + "|");\n'
             'print("e=" + str(after["endpoints"] - base["endpoints"]) + "|");\n'
         )
         server = subprocess.Popen(

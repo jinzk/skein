@@ -95,28 +95,32 @@ def pool_driver_source(worker, workers, jobs, batch):
 
 
 def channel_driver_source(messages):
+    # Endpoint pairs are directional, so measure one-way producer/consumer
+    # throughput.  A shared reply lane would turn this into a round-trip
+    # benchmark instead of a channel throughput benchmark.
     return (
         "import std;\n"
-        "func echo(ctx) {\n"
+        "func consume(ctx) {\n"
         '  let ch = ctx.handles["ch"];\n'
+        "  let count = 0;\n"
         "  while (true) {\n"
         "    let m = ch.recv(10000);\n"
         "    if (m == null) { return; }\n"
         '    if (m.payload["stop"]) { return; }\n'
-        "    ch.send(m);\n"
+        "    count = count + 1;\n"
         "  }\n"
         "}\n"
-        "let ch = std.thread.Channel.bounded(1);\n"
-        "let worker = std.thread.spawn_function(echo, "
-        'std.thread.Message.from({"n": 0}, {"ch": ch}));\n'
+        "let ends = std.thread.Channel(64);\n"
+        "let worker = std.thread.spawn_function(consume, "
+        'std.thread.Message.from({"n": 0}, {"ch": ends[1]}));\n'
         "let t0 = std.time.monotonic_ms();\n"
         f"for (let i = 0; i < {messages}; i = i + 1) {{\n"
-        '  ch.send(std.thread.Message.from({"i": i, "stop": false}));\n'
-        "  let m = ch.recv(10000);\n"
+        '  ends[0].send(std.thread.Message.from({"i": i, '
+        '"stop": false}));\n'
         "}\n"
-        "let elapsed = std.time.monotonic_ms() - t0;\n"
-        'ch.send(std.thread.Message.from({"i": 0, "stop": true}));\n'
+        'ends[0].send(std.thread.Message.from({"i": 0, "stop": true}));\n'
         "worker.join();\n"
+        "let elapsed = std.time.monotonic_ms() - t0;\n"
         'print("TIME "); print(elapsed); print(" TOTAL "); println(0);\n'
     )
 

@@ -408,21 +408,23 @@ GC 接入（待实现）：
 
 ### 2.7 Channel 模型调整（M8；待实现）
 
-状态：已确认以 duplex 端点对为唯一 Channel 模型；删除旧共享队列，不做兼容别名。
+状态：已确认以 duplex 端点对为唯一 Channel 模型；删除旧共享队列，不做兼容别名。阶段 1（端点对迁移）已实现。
 
 背景与问题：
 
-- 当前 `std.thread.Channel` 是无方向共享队列，`std.thread.duplex` 是有方向
+- 原 `std.thread.Channel` 是无方向共享队列，`std.thread.duplex` 是有方向
   端点对；两者是两个独立 userdata 类型；
 - 现有跨线程用法主要是请求 / 响应、signal / reply，本身就带方向；共享队列
   的方向完全靠约定，容易误用；
 - `broadcast` 的“多消费者共享队列”语义没有实际用户场景，测试中只有一处；
 - 之前确定的“跨线程只能通过 channel + owner 线程消息协议”更贴近端点对模型。
 
-新模型（待实现）：
+新模型：
 
 ```skein
-let (parent, child) = std.thread.Channel(2);
+let ends = std.thread.Channel(2);
+let parent = ends[0];
+let child = ends[1];
 
 parent.send(req);        // parent -> child
 let res = parent.recv(); // parent <- child
@@ -436,7 +438,7 @@ let got = parent.recv();
 - `std.thread.Channel(n)` 返回一对有方向端点（`parent` / `child`）；
 - 单向通信只使用其中一个方向，不再需要单独的共享队列类型；
 - 每条 lane 对应一个 `channel_state`；`capacity == 0` rendezvous 与
-  `-1` unbounded 对每条 lane 生效，放开当前 duplex 的 `>= 1` 限制；
+  `-1` unbounded 对每条 lane 生效，放开原 duplex 的 `>= 1` 限制；
 - `send` / `try_send` 沿 out 方向，`recv` / `try_recv` 沿 in 方向；
   `close_send` / `close_recv` 保留，`close()` 关闭该端点的两个方向；
 - `select` 接受 endpoint，使用 in 方向；`broadcast` 重定义为“向一组
@@ -451,9 +453,9 @@ let got = parent.recv();
 - `protocol` 落地后可定义通用 `Endpoint` 协议（`send` / `recv` / `try_*`），
   但不是合并类型的必经步骤；
 - 与 `ref` 边界一致：`validate_data_value()` 继续拒绝 `ref` / weak payload
-  （含嵌套），channel / duplex 句柄只放在 `handles`。
+  （含嵌套），channel / endpoint 句柄只放在 `handles`。
 
-阶段与验收：
+阶段与验收（阶段 1 已完成）：
 
 1. 实现统一 endpoint 内部表示（in / out lane + peer），底层复用
    `channel_state` 作为每条 lane 的队列；

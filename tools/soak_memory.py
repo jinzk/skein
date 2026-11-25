@@ -113,9 +113,9 @@ def thread_driver_source(worker, rounds, workers, jobs):
         "  }\n"
         "  pool.close();\n"
         "  pool.join();\n"
-        "  let ch = std.thread.Channel.bounded(1);\n"
-        '  ch.send(std.thread.Message.from({"k": i}));\n'
-        "  let msg = ch.recv(2000);\n"
+        "  let ends = std.thread.Channel(1);\n"
+        '  ends[0].send(std.thread.Message.from({"k": i}));\n'
+        "  let msg = ends[1].recv(2000);\n"
         '  if (msg != null) { sum = sum + msg.payload["k"]; }\n'
         "  return sum;\n"
         "}\n"

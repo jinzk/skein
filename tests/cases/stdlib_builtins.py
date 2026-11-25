@@ -1998,8 +1998,8 @@ def run_cases():
         'str(std.dict.has(std.ffi, "call_task")) + "," + '
         'str(std.dict.has(std.type, "package_name")) + "," + '
         'str(std.dict.has(std.type, "module_name")));\n'
-        "  let ch = std.thread.Channel.unbounded();\n"
-        '  println("unbounded=" + str(ch.capacity));\n'
+        "  let ends = std.thread.Channel.unbounded();\n"
+        '  println("unbounded=" + str(ends[0].capacity));\n'
         "}\n"
         "main();\n",
         stdout="stale=0\nprimary=1,1,1,1,1,1,1,1,1\nunbounded=-1\n",

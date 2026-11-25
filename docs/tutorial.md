@@ -2290,46 +2290,50 @@ print(value + same);
 
 
 ```text
-std.thread.Channel(capacity) -> channel
-std.thread.Channel.bounded(capacity) -> channel
-std.thread.Channel.new(capacity) -> channel
-std.thread.Channel.unbounded() -> channel
+std.thread.Channel(capacity) -> (parent_endpoint, child_endpoint)
+std.thread.Channel.unbounded() -> (parent_endpoint, child_endpoint)
 std.thread.Message.from(payload[, handles]) -> message
 
-channel.send(message)
-channel.try_send(message) -> bool
-channel.recv([timeout_ms]) -> message | null
-channel.try_recv() -> {"ok": bool, "closed": bool, "value": message?}
-channel.close()
+endpoint.send(message)
+endpoint.try_send(message) -> bool
+endpoint.recv([timeout_ms]) -> message | null
+endpoint.try_recv() -> {"ok": bool, "closed": bool, "value": message?}
+endpoint.close_send()
+endpoint.close_recv()
+endpoint.close()
 
-channel.closed
-channel.capacity
-channel.length
-channel.waiters
-channel.send_waiters
-channel.recv_waiters
-channel.total_sends
-channel.total_recvs
-channel.send_timeouts
-channel.recv_timeouts
-channel.stats -> dict
+endpoint.child / endpoint.peer -> endpoint
+endpoint.closed
+endpoint.send_closed
+endpoint.recv_closed
+endpoint.capacity
+endpoint.length
+endpoint.waiters
+endpoint.send_waiters
+endpoint.recv_waiters
+endpoint.total_sends
+endpoint.total_recvs
+endpoint.send_timeouts
+endpoint.recv_timeouts
+endpoint.stats -> dict
 ```
 
+- `Channel` 返回一对有方向端点；每条 lane 独立：`parent.send` 发往 `child.recv`，
+  `child.send` 发往 `parent.recv`；
 - `capacity >= 1` 为有界队列；`capacity == 0` 为 rendezvous；`capacity == -1`
-  为无界队列；
-- `Channel.unbounded()` 返回无界 Channel，`capacity == -1`；
-  `Channel.bounded(n)` / `Channel.new(n)` 等价于 `Channel(n)`；
-  旧名 `unbounded_channel()` 已移除；
+  为无界队列；`Channel.unbounded()` 等价于 `Channel(-1)`；
+  旧名 `Channel.bounded(n)` / `Channel.new(n)` / `unbounded_channel()` 已移除；
 - Channel 只接收 `std.thread.Message`；
 - `Message.from` 共享 payload（COW）；发送方后续写入会分离，不影响消息；
 - payload 支持标量、`error` / `result`、`list` / `dict`、`lru` / `deque` / `set`、`struct` / `enum`；`heap` 因比较器函数不能跨线程，暂不支持；LRU 现在是普通 struct，函数 / heap 等特殊值不能嵌套在 LRU 字段中传输；
-- `handles` 是字符串到线程 handle 的 dict，目前支持 `Channel`；
-- `send` 在队列满时阻塞；rendezvous（capacity 0）下阻塞到有接收者等待；
+- `handles` 是字符串到线程 handle 的 dict，目前支持 `thread_endpoint`；
+- `send` 写入本端 out lane，队列满时阻塞；rendezvous（capacity 0）下阻塞到对端接收者等待；
   `try_send` 不阻塞，无空间/无接收者时返回 `false`；
-- `recv` 在队列空时阻塞；关闭且排空后返回 `null`；
+- `recv` 读取本端 in lane，队列空时阻塞；关闭且排空后返回 `null`；
 - `recv(timeout_ms)` 超时抛错；
-- `close()` 幂等，保留队列中未读消息，并唤醒所有 send/recv/select 等待者；
-- fiber 中的 Channel send/recv/select 通过事件循环 async wake 挂起/唤醒；
+- `close_send` 关闭 out lane，`close_recv` 关闭 in lane，`close` 同时关闭；幂等，
+  保留队列中未读消息，并唤醒所有等待者；
+- fiber 中的端点 send/recv/select 通过事件循环 async wake 挂起/唤醒；
   非 fiber 上下文使用 OS 线程等待；
 - 等待者按 FIFO 唤醒（OS 线程等待者优先于 fiber 等待者）；
 - `std.thread.select` 使用 round-robin 起点，避免固定顺序造成饥饿；
@@ -2342,22 +2346,24 @@ channel.stats -> dict
 ```skein
 import std;
 
-let ch = std.thread.Channel(2);
+let ends = std.thread.Channel(2);
+let parent = ends[0];
+let child = ends[1];
 let msg = std.thread.Message.from({"x": 1});
-ch.send(msg);
+parent.send(msg);
 
-let r = ch.try_recv();
+let r = child.try_recv();
 print(r["value"].payload["x"]);
-print(ch.stats["total_sends"]);
+print(parent.stats["total_sends"]);
 
-ch.close();
+parent.close();
 ```
 
 无界与 rendezvous：
 
 ```skein
-let a = std.thread.Channel.unbounded();
-let b = std.thread.Channel(0);   // send 等待 recv
+let a = std.thread.Channel.unbounded();   // 每条 lane capacity == -1
+let b = std.thread.Channel(0);            // send 等待 recv
 ```
 
 #### 线程池
@@ -2494,14 +2500,14 @@ func main(ctx) {
 ```skein
 import std;
 
-let ch = std.thread.Channel(1);
+let ends = std.thread.Channel(1);
 let msg = std.thread.Message.from(
     {"x": 5},
-    {"signal": ch}
+    {"signal": ends[1]}
 );
 
 let t = std.thread.spawn_script("thread_worker.skein", msg);
-let signal = ch.recv();
+let signal = ends[0].recv();
 let result = t.join();
 
 print(signal.payload["x"]);
@@ -2519,46 +2525,32 @@ print(result["value"]["x"]);
 - `cancel()` 只设置协作取消标记，不能抢占执行中的线程；
 - 子线程结果必须是 data-only 值；返回值经校验后按 COW 共享，调用方写入时分离。
 
-#### 双向 duplex
+#### 有方向端点对
+
+Channel 是唯一的有方向模型；旧的共享队列与 `std.thread.duplex` 已移除。
+`Channel(n)` 返回 `(parent, child)`，每个端点各有一条 in lane 和一条 out lane：
+`parent.send` 发往 `child.recv`，`child.send` 发往 `parent.recv`。
+`endpoint.child` / `endpoint.peer` 返回对端端点。
 
 ```text
-std.thread.duplex(capacity) -> link
-link.child -> endpoint
-
-link.send(message)
-link.try_send(message) -> bool
-link.recv([timeout_ms]) -> message | null
-link.try_recv() -> {"ok": bool, "closed": bool, "value": message?}
-link.close_send()
-link.close_recv()
-link.close()
-link.closed
-link.capacity
-link.length
-
 std.thread.spawn_script_with_channel(script, message, capacity[, options]) -> thread
-std.thread.spawn_script_with_duplex(script, message, capacity[, options]) -> thread
-thread.channel
-thread.link
+thread.channel -> endpoint
 ```
 
-- `duplex` 内部有 `parent_to_child` 和 `child_to_parent` 两条 lane；
-- `link.send` 发往 child，`link.recv` 接收 child 发来的消息；
-- `link.child` 是反方向端点：`child.send` 发往 parent，`child.recv` 接收 parent 的消息；
+- `spawn_script_with_channel` 创建端点对，子端注入 `ctx.handles["channel"]`，父端通过 `thread.channel` 访问；
 - `close_send` 只关闭 out 方向；对端 `recv` 排空后得到 `null`；
-- `close_recv` 只关闭 in 方向；`closed` 反映 in 方向是否关闭；
-- `select` 接受 Channel 或 duplex endpoint，endpoint 使用其 in 方向；`broadcast` 仅接受 Channel；
-- `spawn_script_with_channel` 自动创建 Channel 并注入 `ctx.handles["channel"]`，父端通过 `thread.channel` 访问；
-- `spawn_script_with_duplex` 自动创建 duplex，子端注入 `ctx.handles["link"]`，父端通过 `thread.link` 访问。
-- `std.thread.collect()` 主动回收不可达的 Message/Channel/duplex 环；仅在没有活动 worker 线程时执行。
-- `std.thread.debug_counts()` 返回 `messages/channels/duplexes/endpoints/collected` 诊断计数。
+- `close_recv` 只关闭 in 方向；`closed` 反映任一方向关闭；
+- `select` 接受端点并使用其 in 方向；`broadcast` / `try_broadcast` 向端点列表的 out 方向各发一份；
+- 脚本可见的 handle 类型统一为 `thread_endpoint`；
+- `std.thread.collect()` 主动回收不可达的 Message / Channel / 端点环；仅在没有活动 worker 线程时执行。
+- `std.thread.debug_counts()` 返回 `messages/channels/pairs/endpoints/collected` 诊断计数。
 
 #### select / broadcast
 
 ```text
-std.thread.select(channels[, timeout_ms]) -> dict
-std.thread.try_broadcast(channels, message) -> dict
-std.thread.broadcast(channels, message) -> null
+std.thread.select(endpoints[, timeout_ms]) -> dict
+std.thread.try_broadcast(endpoints, message) -> dict
+std.thread.broadcast(endpoints, message) -> null
 ```
 
 `select` 返回：
@@ -2572,9 +2564,10 @@ std.thread.broadcast(channels, message) -> null
 示例：
 
 ```skein
-let a = std.thread.Channel(1);
-let b = std.thread.Channel(1);
-b.send(std.thread.Message.from({"v": "b"}));
+let a = std.thread.Channel(1)[0];
+let ends = std.thread.Channel(1);
+ends[0].send(std.thread.Message.from({"v": "b"}));
+let b = ends[1];
 
 let r = std.thread.select([a, b], 1000);
 print(r["index"]);
@@ -2583,8 +2576,8 @@ print(r["value"].payload["v"]);
 
 规则：
 
-- 当前只支持 Channel；
-- 多个 channel 同时就绪时使用轮转起点，避免总是选 0 号；
+- 当前只支持 `thread_endpoint`；`select` 从每个端点的 in lane 取消息；
+- 多个端点同时就绪时使用轮转起点，避免总是选 0 号；
 - 有数据优先，排空后才返回 closed；
 - `timeout_ms = 0` 表示不超时；
 - `try_broadcast` 返回：

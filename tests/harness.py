@@ -3364,14 +3364,16 @@ def check_extended_stdlib():
         check(
             "std.thread channel copy and close",
             "import std;\n"
-            'let ch = std.thread.Channel(2);\n'
+            'let ends = std.thread.Channel(2);\n'
+            'let parent = ends[0];\n'
+            'let child = ends[1];\n'
             'let msg = std.thread.Message.from({"x": 1, "items": [1, 2]});\n'
-            'print("sent="); print(ch.try_send(msg));\n'
-            'let r = ch.try_recv();\n'
+            'print("sent="); print(parent.try_send(msg));\n'
+            'let r = child.try_recv();\n'
             'print("x="); print(r["value"].payload["x"]);\n'
             'print("items="); print(r["value"].payload["items"]);\n'
-            'ch.close();\n'
-            'let r2 = ch.try_recv();\n'
+            'parent.close();\n'
+            'let r2 = child.try_recv();\n'
             'print("empty_ok="); print(r2["ok"]);\n'
             'print("closed="); print(r2["closed"]);\n',
             stdout_all=["sent=true", "x=1", "items=[1, 2]",
@@ -3409,51 +3411,58 @@ def check_extended_stdlib():
             "std.thread message handles",
             "import std;\n"
             'let inner = std.thread.Channel(1);\n'
+            'let inner_parent = inner[0];\n'
+            'let inner_child = inner[1];\n'
             'let msg = std.thread.Message.from({"x": 1}, '
-            '{"reply": inner});\n'
+            '{"reply": inner_child});\n'
             'let ch = std.thread.Channel(1);\n'
-            'ch.send(msg);\n'
-            'let got = ch.try_recv();\n'
+            'let parent = ch[0];\n'
+            'let child = ch[1];\n'
+            'parent.send(msg);\n'
+            'let got = child.try_recv();\n'
             'got["value"].handles["reply"].send('
             'std.thread.Message.from({"ok": true}));\n'
-            'let reply = inner.try_recv();\n'
+            'let reply = inner_parent.try_recv();\n'
             'print("ok="); print(reply["value"].payload["ok"]);\n',
             stdout_all=["ok=true"],
         )
         check(
             "std.thread unbounded channel",
             "import std;\n"
-            'let ch = std.thread.Channel.unbounded();\n'
+            'let ends = std.thread.Channel.unbounded();\n'
+            'let parent = ends[0];\n'
             'for (let i = 0; i < 5; i++) {\n'
-            '  ch.send(std.thread.Message.from(i));\n'
+            '  parent.send(std.thread.Message.from(i));\n'
             '}\n'
-            'print("capacity="); print(ch.capacity);\n'
-            'print("length="); print(ch.length);\n',
+            'print("capacity="); print(parent.capacity);\n'
+            'print("length="); print(parent.length);\n',
             stdout_all=["capacity=-1", "length=5"],
         )
         check(
             "std.thread Channel constructors and stats",
             "import std;\n"
-            'let a = std.thread.Channel.unbounded();\n'
+            'let aends = std.thread.Channel.unbounded();\n'
+            'let a = aends[0];\n'
+            'let arecv = aends[1];\n'
             'print("cap="); print(a.capacity); print("|");\n'
-            'let b = std.thread.Channel.bounded(2);\n'
-            'print("b="); print(b.capacity); print("|");\n'
-            'let c = std.thread.Channel.new(3);\n'
-            'print("c="); print(c.capacity); print("|");\n'
+            'let b = std.thread.Channel(2);\n'
+            'print("b="); print(b[0].capacity); print("|");\n'
+            'let c = std.thread.Channel(3);\n'
+            'print("c="); print(c[0].capacity); print("|");\n'
             'a.send(std.thread.Message.from(1));\n'
             'print("len="); print(a.length); print("|");\n'
             'print("sends="); print(a.total_sends); print("|");\n'
             'print("waiters="); print(a.waiters); print("|");\n'
-            'let r = a.try_recv();\n'
-            'print("recvs="); print(a.total_recvs); print("|");\n'
+            'let r = arecv.try_recv();\n'
+            'print("recvs="); print(arecv.total_recvs); print("|");\n'
             'let s = a.stats;\n'
             'print("stats="); print(s["capacity"]); print(":"); '
             'print(s["length"]); print("|");\n'
             'a.close();\n'
-            'let empty = a.try_recv();\n'
+            'let empty = arecv.try_recv();\n'
             'print("closed="); print(empty["closed"]); print("|");\n'
             'let zero = std.thread.Channel(0);\n'
-            'print("try0="); print(zero.try_send('
+            'print("try0="); print(zero[0].try_send('
             'std.thread.Message.from(2))); print("|");\n',
             stdout_all=["cap=-1|", "b=2|", "c=3|", "len=1|", "sends=1|",
                         "waiters=0|", "recvs=1|", "stats=-1:0|",
@@ -3462,44 +3471,48 @@ def check_extended_stdlib():
         check(
             "std.thread Channel rendezvous",
             "import std;\n"
-            'let ch = std.thread.Channel(0);\n'
+            'let ends = std.thread.Channel(0);\n'
+            'let parent = ends[0];\n'
+            'let child = ends[1];\n'
             'let src = "import std;\\nfunc run(ctx) {\\n'
             '  ctx.handles[\\"ch\\"].send(std.thread.Message.from('
             'ctx.payload[\\"v\\"]));\\n'
             '  return {\\"ok\\": true};\\n}\\n";\n'
             'let t = std.thread.spawn_source(src, '
-            'std.thread.Message.from({"v": 7}, {"ch": ch}), '
+            'std.thread.Message.from({"v": 7}, {"ch": parent}), '
             '{"entry": "run"});\n'
-            'let msg = ch.recv(5000);\n'
+            'let msg = child.recv(5000);\n'
             'print("got="); print(msg.payload); print("|");\n'
             'let r = t.join();\n'
             'print("ok="); print(r["ok"]); print("|");\n'
-            'print("sends="); print(ch.total_sends); print("|");\n'
-            'print("recvs="); print(ch.total_recvs); print("|");\n',
+            'print("sends="); print(parent.total_sends); print("|");\n'
+            'print("recvs="); print(child.total_recvs); print("|");\n',
             stdout_all=["got=7|", "ok=true|", "sends=1|", "recvs=1|"],
         )
         check(
             "std.thread Channel waiter fifo",
             "import std;\n"
-            'let ch = std.thread.Channel(1);\n'
+            'let ends = std.thread.Channel(1);\n'
+            'let parent = ends[0];\n'
+            'let child = ends[1];\n'
             'let src = "import std;\\nfunc run(ctx) {\\n'
             '  ctx.handles[\\"ch\\"].send(std.thread.Message.from('
             'ctx.payload[\\"v\\"]));\\n'
             '  return {\\"ok\\": true};\\n}\\n";\n'
-            'ch.send(std.thread.Message.from(0));\n'
+            'parent.send(std.thread.Message.from(0));\n'
             'let t1 = std.thread.spawn_source(src, '
-            'std.thread.Message.from({"v": 1}, {"ch": ch}), '
+            'std.thread.Message.from({"v": 1}, {"ch": parent}), '
             '{"entry": "run"});\n'
             'std.time.sleep(200);\n'
-            'print("w1="); print(ch.send_waiters); print("|");\n'
+            'print("w1="); print(parent.send_waiters); print("|");\n'
             'let t2 = std.thread.spawn_source(src, '
-            'std.thread.Message.from({"v": 2}, {"ch": ch}), '
+            'std.thread.Message.from({"v": 2}, {"ch": parent}), '
             '{"entry": "run"});\n'
             'std.time.sleep(200);\n'
-            'print("w2="); print(ch.send_waiters); print("|");\n'
-            'let a = ch.recv(); print("a="); print(a.payload); print("|");\n'
-            'let b = ch.recv(); print("b="); print(b.payload); print("|");\n'
-            'let c = ch.recv(); print("c="); print(c.payload); print("|");\n'
+            'print("w2="); print(parent.send_waiters); print("|");\n'
+            'let a = child.recv(); print("a="); print(a.payload); print("|");\n'
+            'let b = child.recv(); print("b="); print(b.payload); print("|");\n'
+            'let c = child.recv(); print("c="); print(c.payload); print("|");\n'
             'print("j1="); print(t1.join()["ok"]); print("|");\n'
             'print("j2="); print(t2.join()["ok"]); print("|");\n',
             stdout_all=["w1=1|", "w2=2|", "a=0|", "b=1|", "c=2|",
@@ -3508,17 +3521,19 @@ def check_extended_stdlib():
         check(
             "std.thread Channel close wakes waiters",
             "import std;\n"
-            'let ch = std.thread.Channel(1);\n'
+            'let ends = std.thread.Channel(1);\n'
+            'let parent = ends[0];\n'
+            'let child = ends[1];\n'
             'let src = "func run(ctx) {\\n'
             '  let m = ctx.handles[\\"ch\\"].recv();\\n'
             '  return {\\"is_null\\": m == null, '
             '\\"closed\\": ctx.handles[\\"ch\\"].closed};\\n}\\n";\n'
             'let t = std.thread.spawn_source(src, '
-            'std.thread.Message.from({}, {"ch": ch}), '
+            'std.thread.Message.from({}, {"ch": child}), '
             '{"entry": "run"});\n'
             'std.time.sleep(200);\n'
-            'print("waiters="); print(ch.recv_waiters); print("|");\n'
-            'ch.close();\n'
+            'print("waiters="); print(child.recv_waiters); print("|");\n'
+            'parent.close_send();\n'
             'let r = t.join();\n'
             'print("r="); print(r); print("|");\n',
             stdout_all=["waiters=1|", "is_null: true", "closed: true"],
@@ -3542,9 +3557,9 @@ def check_extended_stdlib():
             'let r2 = t2.join();\n'
             'print("encoded="); print(r2["value"]["top"]); print(":"); '
             'print(r2["value"]["n"]); print("|");\n'
-            'let ch = std.thread.Channel(1);\n'
-            'ch.send(msg);\n'
-            'let got = ch.recv();\n'
+            'let ends = std.thread.Channel(1);\n'
+            'ends[0].send(msg);\n'
+            'let got = ends[1].recv();\n'
             'print("channel="); '
             'print(std.heap.peek(got.payload["heap"])); print("|");\n',
             stdout="spawn=1:5|encoded=1:5|channel=1|",
@@ -3775,11 +3790,11 @@ def check_extended_stdlib():
             check(
                 "std.thread spawn and join",
                 "import std;\n"
-                'let ch = std.thread.Channel(1);\n'
+                'let ends = std.thread.Channel(1);\n'
                 f'let msg = std.thread.Message.from({{"x": 5, '
-                f'"fail": false}}, {{"signal": ch}});\n'
+                f'"fail": false}}, {{"signal": ends[0]}});\n'
                 f'let t = std.thread.spawn_script("{spawn_worker_path}", msg);\n'
-                'let signal = ch.recv();\n'
+                'let signal = ends[1].recv();\n'
                 'let r = t.join();\n'
                 'print("signal="); print(signal.payload["x"]);\n'
                 'print("ok="); print(r["ok"]); print(":"); '
@@ -4055,10 +4070,11 @@ def check_extended_stdlib():
             )
 
             check(
-                "std.thread duplex basic",
+                "std.thread Channel endpoint pair basic",
                 "import std;\n"
-                'let link = std.thread.duplex(2);\n'
-                'let child = link.child;\n'
+                'let ends = std.thread.Channel(2);\n'
+                'let link = ends[0];\n'
+                'let child = ends[1];\n'
                 'link.send(std.thread.Message.from({"v": "p2c"}));\n'
                 'print("child="); print(child.recv().payload["v"]); '
                 'print("|");\n'
@@ -4075,10 +4091,11 @@ def check_extended_stdlib():
                        "recv_null=true|closed2=true|",
             )
             check(
-                "std.thread select duplex endpoint",
+                "std.thread select endpoint",
                 "import std;\n"
-                'let link = std.thread.duplex(1);\n'
-                'let child = link.child;\n'
+                'let ends = std.thread.Channel(1);\n'
+                'let link = ends[0];\n'
+                'let child = ends[1];\n'
                 'child.send(std.thread.Message.from({"v": 7}));\n'
                 'let r = std.thread.select([link], 1000);\n'
                 'print("index="); print(r["index"]); print(":");\n'
@@ -4086,19 +4103,6 @@ def check_extended_stdlib():
                 stdout="index=0:7",
             )
 
-            duplex_worker = os.path.join(
-                thread_tmp, "thread_duplex_worker.skein")
-            with open(duplex_worker, "w", encoding="utf-8") as handle:
-                handle.write(
-                    "import std;\n"
-                    "func main(ctx) {\n"
-                    "    let link = ctx.handles[\"link\"];\n"
-                    "    link.send(std.thread.Message.from(\n"
-                    "        {\"reply\": ctx.payload[\"v\"] + 1}));\n"
-                    "    return {\"done\": true};\n"
-                    "}\n"
-                )
-            duplex_worker_path = duplex_worker.replace("\\", "\\\\")
             channel_worker = os.path.join(
                 thread_tmp, "thread_channel_worker.skein")
             with open(channel_worker, "w", encoding="utf-8") as handle:
@@ -4112,19 +4116,6 @@ def check_extended_stdlib():
                     "}\n"
                 )
             channel_worker_path = channel_worker.replace("\\", "\\\\")
-            check(
-                "std.thread spawn_script_with_duplex",
-                "import std;\n"
-                f'let t = std.thread.spawn_script_with_duplex('
-                f'"{duplex_worker_path}", '
-                f'std.thread.Message.from({{"v": 41}}), 1);\n'
-                'let reply = t.link.recv(1000);\n'
-                'print("reply="); print(reply.payload["reply"]); '
-                'print("|");\n'
-                'let r = t.join();\n'
-                'print("ok="); print(r["ok"]); print("|");\n',
-                stdout="reply=42|ok=true|",
-            )
             check(
                 "std.thread spawn_script_with_channel",
                 "import std;\n"
@@ -4142,11 +4133,15 @@ def check_extended_stdlib():
                 "std.thread message cycle collection",
                 "import std;\n"
                 'let base = std.thread.debug_counts();\n'
-                'let ch = std.thread.Channel(1);\n'
+                'let ends = std.thread.Channel(1);\n'
+                'let parent = ends[0];\n'
+                'let child = ends[1];\n'
                 'let msg = std.thread.Message.from({"x": 1}, '
-                '{"ch": ch});\n'
-                'ch.send(msg);\n'
-                'ch = null;\n'
+                '{"ch": parent});\n'
+                'child.send(msg);\n'
+                'parent = null;\n'
+                'child = null;\n'
+                'ends = null;\n'
                 'msg = null;\n'
                 'std.thread.collect();\n'
                 'let after = std.thread.debug_counts();\n'
@@ -4160,11 +4155,15 @@ def check_extended_stdlib():
                 'print(after["collected"] > base["collected"]); '
                 'print("|");\n'
                 'let base2 = std.thread.debug_counts();\n'
-                'let link = std.thread.duplex(1);\n'
+                'let pair2 = std.thread.Channel(1);\n'
+                'let parent2 = pair2[0];\n'
+                'let child2 = pair2[1];\n'
                 'let dmsg = std.thread.Message.from({"x": 2}, '
-                '{"link": link});\n'
-                'link.send(dmsg);\n'
-                'link = null;\n'
+                '{"link": parent2});\n'
+                'child2.send(dmsg);\n'
+                'parent2 = null;\n'
+                'child2 = null;\n'
+                'pair2 = null;\n'
                 'dmsg = null;\n'
                 'std.thread.collect();\n'
                 'let after2 = std.thread.debug_counts();\n'
@@ -4175,7 +4174,7 @@ def check_extended_stdlib():
                 'print(after2["channels"] - base2["channels"]); '
                 'print("|");\n'
                 'print("dd="); '
-                'print(after2["duplexes"] - base2["duplexes"]); '
+                'print(after2["pairs"] - base2["pairs"]); '
                 'print("|");\n'
                 'print("de="); '
                 'print(after2["endpoints"] - base2["endpoints"]); '
@@ -4185,11 +4184,15 @@ def check_extended_stdlib():
             auto_cycle_source = (
                 "import std;\n"
                 'let base = std.thread.debug_counts();\n'
-                'let ch = std.thread.Channel(1);\n'
+                'let ends = std.thread.Channel(1);\n'
+                'let parent = ends[0];\n'
+                'let child = ends[1];\n'
                 'let msg = std.thread.Message.from({"x": 1}, '
-                '{"ch": ch});\n'
-                'ch.send(msg);\n'
-                'ch = null;\n'
+                '{"ch": parent});\n'
+                'child.send(msg);\n'
+                'parent = null;\n'
+                'child = null;\n'
+                'ends = null;\n'
                 'msg = null;\n'
             )
             for index in range(80):
@@ -4265,12 +4268,12 @@ def check_extended_stdlib():
             check(
                 "std.thread result copy on write",
                 "import std;\n"
-                'let ch = std.thread.Channel(1);\n'
+                'let ends = std.thread.Channel(1);\n'
                 'let msg = std.thread.Message.from({"x": 0}, '
-                '{"signal": ch});\n'
+                '{"signal": ends[0]});\n'
                 f'let t = std.thread.spawn_script("{cow_result_worker_path}", '
                 f'msg);\n'
-                'let signal = ch.recv();\n'
+                'let signal = ends[1].recv();\n'
                 'let r = t.join();\n'
                 'let out = r["value"]["shared"];\n'
                 'out["items"][0] = 99;\n'
@@ -4285,13 +4288,16 @@ def check_extended_stdlib():
             check(
                 "std.thread select data and timeout",
                 "import std;\n"
-                'let a = std.thread.Channel(1);\n'
-                'let b = std.thread.Channel(1);\n'
-                'b.send(std.thread.Message.from({"v": "b"}));\n'
+                'let aends = std.thread.Channel(1);\n'
+                'let a = aends[0];\n'
+                'let bends = std.thread.Channel(1);\n'
+                'let bsend = bends[0];\n'
+                'let b = bends[1];\n'
+                'bsend.send(std.thread.Message.from({"v": "b"}));\n'
                 'let r = std.thread.select([a, b], 1000);\n'
                 'print("index="); print(r["index"]); print(":"); '
                 'print(r["value"].payload["v"]);\n'
-                'let empty = std.thread.Channel(1);\n'
+                'let empty = std.thread.Channel(1)[0];\n'
                 'let t = std.thread.select([empty], 10);\n'
                 'print("timeout="); print(t["timeout"]);\n'
                 'empty.close();\n'
@@ -4303,12 +4309,14 @@ def check_extended_stdlib():
             check(
                 "std.thread select blocks until send",
                 "import std;\n"
-                'let signal = std.thread.Channel(1);\n'
-                'let empty = std.thread.Channel(1);\n'
+                'let pair = std.thread.Channel(1);\n'
+                'let signal = pair[0];\n'
+                'let signal_wait = pair[1];\n'
+                'let empty = std.thread.Channel(1)[0];\n'
                 f'let msg = std.thread.Message.from({{"x": 7, '
                 f'"fail": false}}, {{"signal": signal}});\n'
                 f'let t = std.thread.spawn_script("{spawn_worker_path}", msg);\n'
-                'let r = std.thread.select([empty, signal], 1000);\n'
+                'let r = std.thread.select([empty, signal_wait], 1000);\n'
                 'print("index="); print(r["index"]); print(":"); '
                 'print(r["value"].payload["x"]);\n'
                 't.join();\n',
@@ -4319,11 +4327,11 @@ def check_extended_stdlib():
                 "import std;\n"
                 'let x = std.thread.Channel(1);\n'
                 'let y = std.thread.Channel(1);\n'
-                'let sent = std.thread.try_broadcast([x, y], '
+                'let sent = std.thread.try_broadcast([x[1], y[1]], '
                 'std.thread.Message.from({"v": 2}));\n'
                 'print("sent="); print(sent["sent"]);\n'
-                'let rx = x.try_recv();\n'
-                'let ry = y.try_recv();\n'
+                'let rx = x[0].try_recv();\n'
+                'let ry = y[0].try_recv();\n'
                 'print("x="); print(rx["value"].payload["v"]);\n'
                 'print("y="); print(ry["value"].payload["v"]);\n',
                 stdout_all=["sent=[0, 1]", "x=2", "y=2"],
@@ -4349,10 +4357,10 @@ def check_extended_stdlib():
                 "    let msg = ch.recv();\n"
                 "    return msg.payload[\"x\"];\n"
                 "}\n"
-                'let ch = std.thread.Channel(1);\n'
+                'let ends = std.thread.Channel(1);\n'
                 f'let t = std.thread.spawn_script("{delay_worker_path}", '
-                f'std.thread.Message.from({{}}, {{"signal": ch}}));\n'
-                'let task = launch wait_channel(ch);\n'
+                f'std.thread.Message.from({{}}, {{"signal": ends[0]}}));\n'
+                'let task = launch wait_channel(ends[1]);\n'
                 'print("before|");\n'
                 'std.io.flush(std.io.stdout);\n'
                 'std.task.sleep(10).wait();\n'
@@ -4371,11 +4379,13 @@ def check_extended_stdlib():
                 "func wait_timeout(ch) {\n"
                 "    return std.thread.select([ch], 10);\n"
                 "}\n"
-                'let signal = std.thread.Channel(1);\n'
-                'let empty = std.thread.Channel(1);\n'
+                'let pair = std.thread.Channel(1);\n'
+                'let signal = pair[0];\n'
+                'let signal_send = pair[1];\n'
+                'let empty = std.thread.Channel(1)[0];\n'
                 'let task = launch watch(empty, signal);\n'
                 'std.task.sleep(10).wait();\n'
-                'signal.send(std.thread.Message.from({"x": 11}));\n'
+                'signal_send.send(std.thread.Message.from({"x": 11}));\n'
                 'let r = task.wait();\n'
                 'print("index="); print(r["index"]); print(":");\n'
                 'print(r["value"].payload["x"]);\n'

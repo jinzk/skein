@@ -1176,6 +1176,7 @@ static struct type_constraint *runtime_type_or_error(
 %type <a> struct_decl impl_decl protocol_decl struct_members struct_member
 %type <a> enum_decl enum_variants enum_variant variant_fields variant_field
 %type <a> generic_params generic_param_list generic_param
+%type <a> generic_constraint generic_constraint_and generic_constraint_or
 %type <a> func_decl
 %type <a> impl_methods protocol_methods protocol_method method_decl method_member
 %type <a> decorators decorator decorator_expr
@@ -1607,15 +1608,40 @@ generic_param_list: generic_param        { $$ = $1; }
       }
     ;
 
-generic_param: NAME type                 {
-        $$ = (struct ast *)newgenericparam($1, $2);
+generic_constraint: generic_constraint_or      { $$ = $1; }
+    ;
+
+generic_constraint_or: generic_constraint_and  { $$ = $1; }
+    | generic_constraint_or '|' generic_constraint_and {
+        $$ = (struct ast *)combine_genericconstraint(
+            (struct generic_constraint *)$1, '|',
+            (struct generic_constraint *)$3);
+      }
+    ;
+
+generic_constraint_and: type                   {
+        $$ = (struct ast *)newgenericconstraint(
+            GENERIC_CONSTRAINT_SINGLE, $1);
+      }
+    | generic_constraint_and '&' type          {
+        struct generic_constraint *right =
+            newgenericconstraint(GENERIC_CONSTRAINT_SINGLE, $3);
+        $$ = (struct ast *)combine_genericconstraint(
+            (struct generic_constraint *)$1, '&', right);
+      }
+    ;
+
+generic_param: NAME generic_constraint        {
+        $$ = (struct ast *)newgenericparam(
+            $1, (struct generic_constraint *)$2);
       }
     | NAME '=' type                      {
         $$ = (struct ast *)newgenericparam($1, NULL);
         ((struct generic_param *)$$)->default_type = $3;
       }
-    | NAME type '=' type                 {
-        $$ = (struct ast *)newgenericparam($1, $2);
+    | NAME generic_constraint '=' type   {
+        $$ = (struct ast *)newgenericparam(
+            $1, (struct generic_constraint *)$2);
         ((struct generic_param *)$$)->default_type = $4;
       }
     ;

@@ -1218,8 +1218,67 @@ struct ast *newdict(struct ast *k, struct ast *v, struct ast *l) {
     return (struct ast *)p;
 }
 
+static struct generic_constraint_item *new_generic_constraint_item(
+    struct type_constraint *type) {
+    struct generic_constraint_item *item =
+        (struct generic_constraint_item *)
+            ast_node_alloc(sizeof(struct generic_constraint_item));
+    if (!item) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    item->type = type;
+    item->next = NULL;
+    return item;
+}
+
+struct generic_constraint *newgenericconstraint(
+    enum generic_constraint_kind kind, struct type_constraint *type) {
+    struct generic_constraint *constraint =
+        (struct generic_constraint *)
+            ast_node_alloc(sizeof(struct generic_constraint));
+    if (!constraint) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    constraint->kind = kind;
+    constraint->items = new_generic_constraint_item(type);
+    return constraint;
+}
+
+struct generic_constraint *combine_genericconstraint(
+    struct generic_constraint *left, int op,
+    struct generic_constraint *right) {
+    if (!left)
+        return right;
+    if (!right)
+        return left;
+    enum generic_constraint_kind wanted =
+        op == '&' ? GENERIC_CONSTRAINT_AND : GENERIC_CONSTRAINT_OR;
+    enum generic_constraint_kind forbidden =
+        op == '&' ? GENERIC_CONSTRAINT_OR : GENERIC_CONSTRAINT_AND;
+    if (left->kind == forbidden || right->kind == forbidden) {
+        yyerror("generic constraints cannot mix '&' and '|'");
+        return left;
+    }
+    if (left->kind == GENERIC_CONSTRAINT_SINGLE)
+        left->kind = wanted;
+    if (left->kind != wanted) {
+        yyerror("generic constraints cannot mix '&' and '|'");
+        return left;
+    }
+    struct generic_constraint_item *tail = left->items;
+    while (tail && tail->next)
+        tail = tail->next;
+    if (tail)
+        tail->next = right->items;
+    else
+        left->items = right->items;
+    return left;
+}
+
 struct generic_param *newgenericparam(char *name,
-                                      struct type_constraint *constraint) {
+                                      struct generic_constraint *constraint) {
     struct generic_param *param =
         (struct generic_param *)ast_node_alloc(sizeof(struct generic_param));
     if (!param) {
@@ -1502,10 +1561,23 @@ static void freepatternfields(struct pattern_field *field) {
     }
 }
 
+static void free_generic_constraint(struct generic_constraint *constraint) {
+    if (!constraint)
+        return;
+    struct generic_constraint_item *item = constraint->items;
+    while (item) {
+        struct generic_constraint_item *next = item->next;
+        free_type_constraint(item->type);
+        ast_node_free(item);
+        item = next;
+    }
+    ast_node_free(constraint);
+}
+
 static void free_generic_params(struct generic_param *params) {
     while (params) {
         struct generic_param *next = params->next;
-        free_type_constraint(params->constraint);
+        free_generic_constraint(params->constraint);
         free_type_constraint(params->default_type);
         std::free(params->name);
         ast_node_free(params);

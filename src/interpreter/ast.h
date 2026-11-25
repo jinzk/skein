@@ -361,15 +361,36 @@ struct struct_member {
     struct struct_member *next;
 };
 
+enum generic_constraint_kind {
+    GENERIC_CONSTRAINT_SINGLE,
+    GENERIC_CONSTRAINT_AND,
+    GENERIC_CONSTRAINT_OR,
+};
+
+struct generic_constraint_item {
+    struct type_constraint *type;
+    struct generic_constraint_item *next;
+};
+
+struct generic_constraint {
+    enum generic_constraint_kind kind;
+    struct generic_constraint_item *items;
+};
+
 struct generic_param {
-    struct type_constraint *constraint;
+    struct generic_constraint *constraint;
     struct type_constraint *default_type;
     char *name;
     struct generic_param *next;
 };
 
+struct generic_constraint *newgenericconstraint(
+    enum generic_constraint_kind kind, struct type_constraint *type);
+struct generic_constraint *combine_genericconstraint(
+    struct generic_constraint *left, int op,
+    struct generic_constraint *right);
 struct generic_param *newgenericparam(char *name,
-                                      struct type_constraint *constraint);
+                                      struct generic_constraint *constraint);
 struct generic_param *append_genericparam(struct generic_param *head,
                                           struct generic_param *param);
 

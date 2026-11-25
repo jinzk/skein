@@ -202,8 +202,9 @@ struct value_t *newboolval(bool b) {
 struct value_t *newstrval(const char *s) {
     struct string_value_t *v = new string_value_t;
     v->type = T_string;
-    v->storage = std::make_shared<std::string>(s ? s : "");
-    v->value = v->storage->data();
+    v->storage = std::make_shared<string_storage>(
+        std::string(s ? s : ""));
+    v->value = v->storage->data.data();
     return (struct value_t *)v;
 }
 
@@ -212,9 +213,9 @@ struct value_t *newstrval(const char *s, size_t len) {
     v->type = T_string;
     if (len > 0 && !s)
         len = 0;
-    v->storage = std::make_shared<std::string>(s ? std::string(s, len)
-                                                 : std::string());
-    v->value = v->storage->data();
+    v->storage = std::make_shared<string_storage>(
+        s ? std::string(s, len) : std::string());
+    v->value = v->storage->data.data();
     return (struct value_t *)v;
 }
 

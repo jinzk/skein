@@ -30,6 +30,71 @@ ts_test("utf8 string index second", func() {
   ts_eq(str("你好"[1]), "好");
 });
 
+ts_test("long non-ascii sparse index", func() {
+  let text = "";
+  let i = 0;
+  while (i < 100) {
+    text = text + str(char(233));
+    i = i + 1;
+  }
+  ts_eq(len(text), 100);
+  ts_eq(str(text[0]), str(char(233)));
+  ts_eq(str(text[63]), str(char(233)));
+  ts_eq(str(text[64]), str(char(233)));
+  ts_eq(str(text[99]), str(char(233)));
+  text = text + str(char(234));
+  ts_eq(len(text), 101);
+  ts_eq(str(text[100]), str(char(234)));
+  ts_eq(str(text[99]), str(char(233)));
+});
+
+ts_test("long four-byte sparse index", func() {
+  let text = "";
+  let i = 0;
+  while (i < 80) {
+    text = text + str(char(128512));
+    i = i + 1;
+  }
+  ts_eq(len(text), 80);
+  ts_eq(str(text[0]), str(char(128512)));
+  ts_eq(str(text[16]), str(char(128512)));
+  ts_eq(str(text[64]), str(char(128512)));
+  ts_eq(str(text[79]), str(char(128512)));
+});
+
+ts_test("sparse index survives copy and append", func() {
+  let text = "";
+  let i = 0;
+  while (i < 70) {
+    text = text + str(char(233));
+    i = i + 1;
+  }
+  ts_eq(str(text[69]), str(char(233)));
+  let copy = text;
+  text = text + "x";
+  ts_eq(len(copy), 70);
+  ts_eq(str(copy[69]), str(char(233)));
+  ts_eq(len(text), 71);
+  ts_eq(str(text[69]), str(char(233)));
+  ts_eq(str(text[70]), "x");
+});
+
+ts_test("long non-ascii iteration", func() {
+  let text = "";
+  let i = 0;
+  while (i < 100) {
+    text = text + str(char(233));
+    i = i + 1;
+  }
+  let count = 0;
+  for ch in text {
+    if (str(ch) == str(char(233))) {
+      count = count + 1;
+    }
+  }
+  ts_eq(count, 100);
+});
+
 ts_test("string trim", func() {
   ts_eq(std.string.trim("  hi\t\n"), "hi");
 });

@@ -1168,8 +1168,8 @@ struct value_t *call_builtin(int functype,
 
         case B_len:
             if (arg->type == T_string) {
-                ret = newintval((long long)utf8_length(
-                    ((struct string_value_t *)arg)->value));
+                ret = newintval((long long)string_length(
+                    (struct string_value_t *)arg));
             } else if (arg->type == T_char || arg->type == T_byte) {
                 ret = newintval(1);
             } else if (arg->type == T_bytes) {

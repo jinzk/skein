@@ -1560,8 +1560,8 @@ public:
                             ((struct dict_value_t *)iterable)
                                 ->payload->items.size();
                     else if (iterable->type == T_string)
-                        state.count = utf8_length(
-                            ((struct string_value_t *)iterable)->value);
+                        state.count = string_length(
+                            (struct string_value_t *)iterable);
                     else if (iterable->type == T_bytes)
                         state.count = ((struct bytes_value_t *)iterable)
                                           ->value.size();
@@ -1690,17 +1690,10 @@ public:
                     if (state.two_vars)
                         second = dupval(dict->payload->items[index].second);
                 } else if (state.iterable->type == T_string) {
-                    std::string ch;
-                    if (!utf8_char_at(
-                            ((struct string_value_t *)state.iterable)->value,
-                            index, ch)) {
-                        yyerror("invalid UTF-8 string iteration");
-                        return OpResult::Abort;
-                    }
-                    size_t consumed = 0;
                     unsigned int codepoint = 0;
-                    if (!utf8_decode_one(ch.data(), ch.size(), consumed,
-                                         codepoint)) {
+                    if (!string_codepoint_at(
+                            (struct string_value_t *)state.iterable, index,
+                            codepoint)) {
                         yyerror("invalid UTF-8 string iteration");
                         return OpResult::Abort;
                     }

@@ -1158,18 +1158,14 @@ struct value_t *read_member_value(struct value_t *container,
             return NULL;
         }
         long long i = ((struct int_value_t *)index)->value;
-        const char *s = ((struct string_value_t *)container)->value;
-        size_t len = utf8_length(s);
+        struct string_value_t *text = (struct string_value_t *)container;
+        size_t len = string_length(text);
         if (i < 0 || (unsigned long long)i >= len) {
             yyerror("string index %lld out of range", i);
             return NULL;
         }
-        std::string ch;
-        if (!utf8_char_at(s, (size_t)i, ch))
-            return NULL;
-        size_t consumed = 0;
         unsigned int codepoint = 0;
-        if (!utf8_decode_one(ch.data(), ch.size(), consumed, codepoint))
+        if (!string_codepoint_at(text, (size_t)i, codepoint))
             return NULL;
         return newcharval(codepoint);
     }

@@ -3,6 +3,7 @@
 #include "dict.h"
 #include "structtype.h"
 #include "cycle.h"
+#include "unicode.h"
 
 #include <cmath>
 #include <cstddef>
@@ -112,6 +113,132 @@ bool utf8_char_at(const char *s, size_t index, std::string &out) {
         ++current;
     }
     return false;
+}
+
+namespace {
+
+/* Short strings are cheap to scan directly, so only pay for an offset table
+ * once a string has enough codepoints to benefit.  Sampling every 16
+ * codepoints keeps random access bounded while using roughly half a byte per
+ * codepoint instead of a full offset table. */
+constexpr std::size_t kSparseIndexThreshold = 64;
+constexpr std::size_t kSparseIndexStride = 16;
+
+bool string_index_valid(const string_index *index,
+                        const string_value_t *text) {
+    if (!index || !text->storage)
+        return false;
+    return index->value == text->value &&
+           index->storage_size == text->storage->data.size();
+}
+
+/* Build or refresh codepoint metadata.  Offsets stay empty until the first
+ * random access so `len` and ordinary string use only pay for one scan. */
+const string_index *ensure_string_metadata(const string_value_t *text) {
+    if (!text || !text->storage || !text->value)
+        return nullptr;
+    if (string_index_valid(text->storage->index.get(), text))
+        return text->storage->index.get();
+
+    auto fresh = std::make_shared<string_index>();
+    fresh->value = text->value;
+    fresh->byte_length = std::strlen(text->value);
+    fresh->storage_size = text->storage->data.size();
+    fresh->ascii = true;
+    std::size_t pos = 0;
+    std::size_t count = 0;
+    while (pos < fresh->byte_length) {
+        const std::size_t n = utf8_valid_sequence_length(
+            fresh->value + pos, fresh->byte_length - pos);
+        if (n != 1 || (unsigned char)fresh->value[pos] >= 0x80)
+            fresh->ascii = false;
+        pos += n;
+        ++count;
+    }
+    fresh->codepoint_count = count;
+    text->storage->index = fresh;
+    return text->storage->index.get();
+}
+
+void ensure_sparse_offsets(const string_index *index) {
+    if (!index || index->ascii || index->offsets_ready ||
+        index->codepoint_count <= kSparseIndexThreshold)
+        return;
+
+    string_index *mutable_index = const_cast<string_index *>(index);
+    mutable_index->offsets_ready = true;
+    mutable_index->offsets.clear();
+    mutable_index->offsets.reserve(
+        (index->codepoint_count + kSparseIndexStride - 1) /
+        kSparseIndexStride);
+    std::size_t pos = 0;
+    for (std::size_t codepoint = 0; codepoint < index->codepoint_count;
+         ++codepoint) {
+        if (codepoint % kSparseIndexStride == 0)
+            mutable_index->offsets.push_back(pos);
+        pos += utf8_valid_sequence_length(index->value + pos,
+                                          index->byte_length - pos);
+    }
+}
+
+}  // namespace
+
+size_t string_length(const struct string_value_t *text) {
+    if (!text)
+        return 0;
+    const string_index *index = ensure_string_metadata(text);
+    if (index)
+        return index->ascii ? index->byte_length : index->codepoint_count;
+    return utf8_length(text->value ? text->value : "");
+}
+
+bool string_codepoint_at(const struct string_value_t *text, size_t index,
+                         unsigned int &codepoint) {
+    if (!text || !text->value)
+        return false;
+
+    const string_index *meta = ensure_string_metadata(text);
+    if (!meta) {
+        std::string ch;
+        if (!utf8_char_at(text->value, index, ch))
+            return false;
+        std::size_t consumed = 0;
+        return utf8_decode_one(ch.data(), ch.size(), consumed, codepoint);
+    }
+
+    const std::size_t count =
+        meta->ascii ? meta->byte_length : meta->codepoint_count;
+    if (index >= count)
+        return false;
+    if (meta->ascii) {
+        codepoint = (unsigned char)meta->value[index];
+        return true;
+    }
+
+    ensure_sparse_offsets(meta);
+
+    std::size_t pos = 0;
+    std::size_t skip = index;
+    if (meta->offsets_ready && !meta->offsets.empty()) {
+        const std::size_t base = index / kSparseIndexStride;
+        if (base < meta->offsets.size()) {
+            pos = meta->offsets[base];
+            skip = index - base * kSparseIndexStride;
+        }
+    }
+    for (std::size_t i = 0; i < skip; ++i) {
+        pos += utf8_valid_sequence_length(meta->value + pos,
+                                          meta->byte_length - pos);
+    }
+    const std::size_t n = utf8_valid_sequence_length(
+        meta->value + pos, meta->byte_length - pos);
+    std::size_t consumed = 0;
+    return utf8_decode_one(meta->value + pos, n, consumed, codepoint);
+}
+
+void string_index_invalidate(struct string_value_t *text) {
+    if (text && text->storage)
+        text->storage->index.reset();
 }
 
 bool truthy(const struct value_t *v) {

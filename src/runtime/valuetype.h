@@ -158,14 +158,36 @@ struct bool_value_t {
     bool value;
 };
 
+/* Lazily built positional metadata for a string value.  Byte offsets are
+ * sampled every sparse_index_stride codepoints so random access only rescans
+ * a bounded number of characters. */
+struct string_index {
+    const char *value = nullptr;
+    std::size_t byte_length = 0;
+    std::size_t storage_size = 0;
+    std::size_t codepoint_count = 0;
+    bool ascii = false;
+    bool offsets_ready = false;
+    std::vector<std::size_t> offsets;
+};
+
+struct string_storage {
+    std::string data;
+    /* Shared by every string value/slice that uses this buffer. */
+    mutable std::shared_ptr<string_index> index;
+
+    string_storage() = default;
+    explicit string_storage(std::string value) : data(std::move(value)) {}
+};
+
 struct string_value_t {
     enum val_type type;
-    /* `value` points at `storage->data()` when storage is set.  Borrowed
+    /* `value` points at `storage->data` when storage is set.  Borrowed
      * names (VM member lookups) leave storage null and point `value` at
      * caller-owned memory that outlives the temporary value.  The buffer is
      * mutable so STRING_APPEND_SELF can grow it when uniquely owned. */
     char *value = nullptr;
-    std::shared_ptr<std::string> storage;
+    std::shared_ptr<string_storage> storage;
 };
 
 struct char_value_t {

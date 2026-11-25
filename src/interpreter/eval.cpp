@@ -1358,7 +1358,8 @@ struct value_t *eval(struct ast *a) {
             else if (iter->type == T_dict)
                 count = ((struct dict_value_t *)iter)->payload->items.size();
             else if (iter->type == T_string)
-                count = utf8_length(((struct string_value_t *)iter)->value);
+                count = string_length(
+                    (struct string_value_t *)iter);
             else if (iter->type == T_bytes)
                 count = ((struct bytes_value_t *)iter)->value.size();
             else {
@@ -1408,17 +1409,9 @@ struct value_t *eval(struct ast *a) {
                     if (f->value_name)
                         second = dupval(dict->payload->items[i].second);
                 } else if (iter->type == T_string) {
-                    std::string ch;
-                    if (!utf8_char_at(((struct string_value_t *)iter)->value, i,
-                                      ch)) {
-                        yyerror("invalid UTF-8 string iteration");
-                        leave = true;
-                        break;
-                    }
-                    size_t consumed = 0;
                     unsigned int codepoint = 0;
-                    if (!utf8_decode_one(ch.data(), ch.size(), consumed,
-                                         codepoint)) {
+                    if (!string_codepoint_at(
+                            (struct string_value_t *)iter, i, codepoint)) {
                         yyerror("invalid UTF-8 string iteration");
                         leave = true;
                         break;

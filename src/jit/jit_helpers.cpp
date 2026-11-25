@@ -1785,7 +1785,7 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_iter_new(
     } else if (iterable->type == T_dict) {
         count = ((struct dict_value_t *)iterable)->payload->items.size();
     } else if (iterable->type == T_string) {
-        count = utf8_length(((struct string_value_t *)iterable)->value);
+        count = string_length((struct string_value_t *)iterable);
     } else if (iterable->type == T_bytes) {
         count = ((struct bytes_value_t *)iterable)->value.size();
     } else {
@@ -1863,15 +1863,9 @@ extern "C" SKEIN_JIT_SYSV int skein_jit_iter_next(
         if (desc->two_vars)
             second = dupval(dict->payload->items[index].second);
     } else if ((*slot)->type == T_string) {
-        std::string ch;
-        if (!utf8_char_at(((struct string_value_t *)*slot)->value, index,
-                          ch)) {
-            yyerror("invalid UTF-8 string iteration");
-            return -1;
-        }
-        size_t consumed = 0;
         unsigned int codepoint = 0;
-        if (!utf8_decode_one(ch.data(), ch.size(), consumed, codepoint)) {
+        if (!string_codepoint_at((struct string_value_t *)*slot, index,
+                                 codepoint)) {
             yyerror("invalid UTF-8 string iteration");
             return -1;
         }

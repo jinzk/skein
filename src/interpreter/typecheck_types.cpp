@@ -9,6 +9,7 @@
 
 #include <cstddef>
 #include <cstring>
+#include <unordered_set>
 
 namespace skein {
 namespace typecheck {
@@ -507,6 +508,160 @@ bool lookup_named_type(const TypeNode *type,
                type->source.c_str(), diag_current_package_name().c_str(),
                type->name.c_str(), out, error) ==
            STRUCTTYPE_LOOKUP_FOUND;
+}
+
+namespace {
+
+bool key_method_matches(const type_def *def, const char *name, int nparams,
+                        enum type_constraint_kind result_kind) {
+    std::shared_ptr<function_def> method = structtype_method(def, name);
+    if (!method || !method->code)
+        return false;
+    const function_code *code = method->code.get();
+    if (code->variadic || code->nparams != nparams || !code->ret_type)
+        return false;
+    const TypeNode *result = type_from_constraint(code->ret_type.get());
+    return result && result->kind == result_kind && !result->nullable;
+}
+
+struct KeyContractState {
+    std::unordered_set<const type_def *> active;
+};
+
+KeyContract key_contract_inner(const TypeNode *type,
+                               KeyContractState &state);
+
+KeyContract key_contract_named(const TypeNode *type,
+                               KeyContractState &state) {
+    structtype_lookup_result lookup;
+    if (!lookup_named_type(type, lookup))
+        return KeyContract::Unknown;
+    if (lookup.kind == STRUCTTYPE_LOOKUP_PROTOCOL)
+        return KeyContract::Unknown;
+    const type_def *def = lookup.kind == STRUCTTYPE_LOOKUP_STRUCT
+                              ? static_cast<const type_def *>(lookup.structure)
+                              : static_cast<const type_def *>(lookup.enumeration);
+    if (!def)
+        return KeyContract::Unknown;
+
+    std::shared_ptr<function_def> hash = structtype_method(def, "dict_hash");
+    if (hash) {
+        if (!key_method_matches(def, "dict_hash", 1, TYPE_INT))
+            return KeyContract::No;
+        std::shared_ptr<function_def> eq = structtype_method(def, "key_eq");
+        if (eq && !key_method_matches(def, "key_eq", 2, TYPE_BOOL))
+            return KeyContract::No;
+        return KeyContract::Yes;
+    }
+
+    if (!state.active.insert(def).second)
+        return KeyContract::No;
+
+    KeyContract result = KeyContract::Yes;
+    auto inspect_fields = [&](const std::vector<field_def> &fields) {
+        for (const field_def &field : fields) {
+            KeyContract field_contract =
+                key_contract_inner(type_from_constraint(&field.type), state);
+            if (field_contract == KeyContract::No) {
+                result = KeyContract::No;
+                return;
+            }
+            if (field_contract == KeyContract::Unknown)
+                result = KeyContract::Unknown;
+        }
+    };
+
+    if (lookup.kind == STRUCTTYPE_LOOKUP_STRUCT) {
+        inspect_fields(lookup.structure->fields);
+    } else {
+        for (const variant_def &variant : lookup.enumeration->variants)
+            inspect_fields(variant.fields);
+    }
+
+    state.active.erase(def);
+    return result;
+}
+
+KeyContract key_contract_inner(const TypeNode *type,
+                               KeyContractState &state) {
+    if (!type || type->kind == TYPE_ANY || type->kind == TYPE_VAR)
+        return KeyContract::Unknown;
+
+    switch (type->kind) {
+        case TYPE_ANY:
+        case TYPE_VAR:
+            return KeyContract::Unknown;
+
+        case TYPE_INT:
+        case TYPE_FLOAT:
+        case TYPE_NUMBER:
+        case TYPE_BOOL:
+        case TYPE_STRING:
+        case TYPE_CHAR:
+        case TYPE_BYTE:
+        case TYPE_BYTES:
+        case TYPE_NULL:
+            return KeyContract::Yes;
+
+        case TYPE_TUPLE:
+        case TYPE_PAIR: {
+            KeyContract result = KeyContract::Yes;
+            for (const TypeNode *arg : type->args) {
+                KeyContract item = key_contract_inner(arg, state);
+                if (item == KeyContract::No)
+                    return KeyContract::No;
+                if (item == KeyContract::Unknown)
+                    result = KeyContract::Unknown;
+            }
+            return result;
+        }
+
+        case TYPE_UNION: {
+            KeyContract result = KeyContract::Yes;
+            for (const TypeNode *arg : type->args) {
+                KeyContract item = key_contract_inner(arg, state);
+                if (item == KeyContract::No)
+                    return KeyContract::No;
+                if (item == KeyContract::Unknown)
+                    result = KeyContract::Unknown;
+            }
+            return result;
+        }
+
+        case TYPE_NAMED:
+            return key_contract_named(type, state);
+
+        case TYPE_LIST:
+        case TYPE_DICT:
+        case TYPE_SET:
+        case TYPE_DEQUE:
+        case TYPE_HEAP:
+        case TYPE_REF:
+        case TYPE_WEAK:
+        case TYPE_RESULT:
+        case TYPE_ERROR:
+        case TYPE_FUNCTION:
+        case TYPE_BUILTIN:
+        case TYPE_CALLABLE:
+        case TYPE_USERDATA:
+        case TYPE_TASK:
+        case TYPE_GENERATOR:
+        case TYPE_SOCKET:
+        case TYPE_LISTENER:
+        case TYPE_WEBSOCKET:
+        case TYPE_STREAM:
+        case TYPE_VOID:
+        case TYPE_INVALID:
+            return KeyContract::No;
+    }
+    return KeyContract::Unknown;
+}
+
+} // namespace
+
+KeyContract key_contract(const TypeNode *type) {
+    KeyContractState state;
+    return key_contract_inner(type, state);
 }
 
 MatchResult match_type(const TypeNode *actual, const TypeNode *expected) {

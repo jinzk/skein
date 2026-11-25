@@ -1554,6 +1554,8 @@ struct Checker : public BuiltinContext {
             has_path &&
             (canonical.rfind("std.iter.", 0) == 0 ||
              canonical.rfind("std.generator.", 0) == 0 ||
+             canonical == "std.set.from_list" ||
+             canonical == "std.dict.index_by" ||
              needs_static_check(expected) ||
              (!args.empty() &&
               expr_has_declared_container(args[0], env)));
@@ -2532,6 +2534,40 @@ struct Checker : public BuiltinContext {
         return true;
     }
 
+    bool check_type_contracts(const TypeNode *type, int line, int column) {
+        if (!type)
+            return true;
+
+        bool ok = true;
+        if (type->kind == TYPE_DICT && !type->args.empty()) {
+            const TypeNode *key = type->args[0];
+            if (key_contract(key) == KeyContract::No) {
+                std::string message =
+                    std::string("dict key type ") + type_display(key) +
+                    " is not hashable; remove mutable fields or implement "
+                    "std.dict_key.DictKey";
+                report_error(line, column, message.c_str());
+                ok = false;
+            }
+        } else if (type->kind == TYPE_SET && !type->args.empty()) {
+            const TypeNode *element = type->args[0];
+            if (key_contract(element) == KeyContract::No) {
+                std::string message =
+                    std::string("set element type ") + type_display(element) +
+                    " is not hashable; remove mutable fields or implement "
+                    "std.dict_key.DictKey";
+                report_error(line, column, message.c_str());
+                ok = false;
+            }
+        }
+
+        for (const TypeNode *arg : type->args) {
+            if (!check_type_contracts(arg, line, column))
+                ok = false;
+        }
+        return ok;
+    }
+
     bool check_funcdef(struct funcdef *def, Env &env,
                        const TypeNode *self_type = nullptr) {
         if (!def)
@@ -2546,7 +2582,16 @@ struct Checker : public BuiltinContext {
         if (def->name)
             functions[def->name] = sig;
 
+        if (def->ret_type &&
+            !check_type_contracts(type_from_constraint(def->ret_type),
+                                  def->line, def->column))
+            return false;
+
         for (struct symlist *item = def->sl; item; item = item->next) {
+            if (item->type &&
+                !check_type_contracts(type_from_constraint(item->type),
+                                      def->line, def->column))
+                return false;
             struct ast *default_value = symlist_default_ast(item);
             if (!default_value)
                 continue;
@@ -2682,9 +2727,14 @@ struct Checker : public BuiltinContext {
         info.is_enum = false;
         for (struct struct_member *member = decl->members; member;
              member = member->next) {
-            if (member->name && member->type && !member->func)
-                info.fields[member->name] =
+            if (member->name && member->type && !member->func) {
+                const TypeNode *field_type =
                     type_from_constraint(member->type);
+                if (!check_type_contracts(field_type, member->line,
+                                          member->column))
+                    return false;
+                info.fields[member->name] = field_type;
+            }
             if (member->name && member->func &&
                 member->func->nodetype == 'Z')
                 info.methods[member->name] =
@@ -2720,9 +2770,14 @@ struct Checker : public BuiltinContext {
                                              : ""];
             for (struct struct_member *field = variant->fields; field;
                  field = field->next) {
-                if (field->name && field->type)
-                    fields[field->name] =
+                if (field->name && field->type) {
+                    const TypeNode *field_type =
                         type_from_constraint(field->type);
+                    if (!check_type_contracts(field_type, field->line,
+                                              field->column))
+                        return false;
+                    fields[field->name] = field_type;
+                }
             }
         }
         for (struct enum_variant *variant = decl->variants; variant;
@@ -2798,6 +2853,9 @@ struct Checker : public BuiltinContext {
                 if (def->type) {
                     declared = type_from_constraint(def->type);
                     fixed = true;
+                    if (!check_type_contracts(declared, def->line,
+                                              def->column))
+                        return false;
                     if (def->v &&
                         !check_expr(def->v, declared, env, false,
                                     needs_static_check(declared)))

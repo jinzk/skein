@@ -93,7 +93,7 @@ def run_cases():
           stdout_all=["0"])
     check("dict index_by invalid key",
           'import std;\n'
-          'std.dict.index_by([1], func(x) { return [x]; });\n',
+          'std.dict.index_by([1], func(x): any { return [x]; });\n',
           stderr="std.dict.index_by: dict key must be")
     check("dict large indexed reads",
           "import std;\n"

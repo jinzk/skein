@@ -21,6 +21,28 @@ eq(a, b)   -> 确认两个 key 是否为同一个 key
 `dict` 当前是“按插入顺序保存的数组 + 延迟构建的 hash 索引”；小 dict 会直接
 线性扫描。`set` 是按 key hash 排序的持久化 treap，并用 bucket 处理 hash 冲突。
 
+## 1.1 静态检查
+
+类型已知时，类型检查器会检查 `dict[K, V]` 的 `K` 和 `set[T]` 的 `T`：
+
+```skein
+struct Bad {
+  xs: list[int];
+}
+
+let d: dict[Bad, int] = {};   // 类型错误：Bad 不可哈希
+let s: set[Bad] = ...;        // 类型错误：Bad 不可哈希
+```
+
+- `dict[K, V]` / `set[T]` 的显式类型注解、函数参数、返回值和 struct/enum 字段都会检查；
+- `std.set.add` / `std.set.from_list` / `std.dict.get` / `std.dict.index_by` 等 builtin 在元素或 key 类型已知时也会检查；
+- `dict[any, V]` / `set[any]` 以及 `any` 参数不会静态拒绝，仍由运行时 `dict_key_allowed()` 检查；
+- 自定义 `dict_hash(self): int` 可以让 struct/enum 跳过字段递归检查；
+- `key_eq(self, other): bool` 只有在同时存在 `dict_hash` 时才参与 key 相等；
+- `dict_hash` / `key_eq` 的 `impl` 必须在类型第一次作为 key/element 使用之前声明；当前不支持后置 `impl`。
+
+静态检查只发生在类型检查阶段，不给 `dict[...]` / `set[...]` 的运行时读写路径增加递归检查。
+
 ## 2. 可自动作为 key 的类型
 
 以下类型自动满足 hash + eq：

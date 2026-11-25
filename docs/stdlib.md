@@ -2444,7 +2444,7 @@ let h = heap.from_list([3, 1, 2], func(a, b) { return a < b; });
 heap.peek(h)         // 1
 ```
 
-`set` 元素必须是合法 dict key（`int/float/bool/string/char/byte/bytes/null`，或由这些类型递归组成的 tuple/pair，或所有字段递归可哈希的 struct/enum，或实现 `std.dict_key.DictKey` 的 struct/enum）。`set` / `deque` / `heap` 都是原生值类型：`set` 的 add/remove/has 为 O(log n)、`from_list` 为 O(n log n)，`values` 保持插入顺序；`deque` 的 push/pop/size/peek 为均摊 O(1)、`to_list` 为 O(n)；`heap` 的 push/pop 为 O(log n)、`from_list` 为 O(n log n)。`deque.pop_*` 和 `heap.pop` 返回 `{ok, ..., value}`。
+`set` 元素必须是合法 dict key（`int/float/bool/string/char/byte/bytes/null`，或由这些类型递归组成的 tuple/pair，或所有字段递归可哈希的 struct/enum，或实现 `std.dict_key.DictKey` 的 struct/enum）。`set` / `deque` / `heap` 都是原生值类型：`set` 的 add/remove/has 为 O(log n)、`from_list` 为 O(n log n)，`values` 保持插入顺序；`deque` 的 push/pop/size/peek 为均摊 O(1)、`to_list` 为 O(n)；`heap` 的 push/pop 为 O(log n)、`from_list` 为 O(n log n)。`deque.pop_*` 和 `heap.pop` 返回 `{ok, ..., value}`。当 `K` / `T` 静态已知时，`dict[K, V]` / `set[T]` 会在类型检查阶段拒绝不可哈希的类型；`dict[any, V]` / `set[any]` 仍由运行时检查。
 
 `std.route` 是显式注册的 Web 路由：
 

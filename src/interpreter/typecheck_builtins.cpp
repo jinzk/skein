@@ -65,6 +65,21 @@ bool check_builtin(BuiltinContext &context, const std::string &path,
         context.report_error(args[i]->line, args[i]->column, message);
         return false;
     };
+    auto require_key_contract = [&](const TypeNode *type, std::size_t arg,
+                                    const char *what) -> bool {
+        if (key_contract(type) != KeyContract::No)
+            return true;
+        std::string message = std::string(what) + " type " +
+                              type_display(type) +
+                              " is not hashable; remove mutable fields or "
+                              "implement std.dict_key.DictKey";
+        struct ast *where = arg < args.size()
+                                ? args[arg]
+                                : (args.empty() ? nullptr : args.back());
+        context.report_error(where ? where->line : 0,
+                             where ? where->column : 0, message.c_str());
+        return false;
+    };
 
     if (path == "std.generator.next" ||
         path == "std.generator.done" ||
@@ -314,6 +329,9 @@ bool check_builtin(BuiltinContext &context, const std::string &path,
                         key = type_function_result(mapper_type);
                 }
             }
+            if (!require_key_contract(key, args.size() > 1 ? 1 : 0,
+                                      "dict key"))
+                return true;
             result = type_container(TYPE_DICT, {key, target_list});
             return true;
         }
@@ -379,6 +397,8 @@ bool check_builtin(BuiltinContext &context, const std::string &path,
                 }
             }
         }
+        if (!require_key_contract(key, args.size() > 1 ? 1 : 0, "dict key"))
+            return true;
         result = type_container(TYPE_DICT, {key, element});
         return true;
     }
@@ -397,6 +417,8 @@ bool check_builtin(BuiltinContext &context, const std::string &path,
             value = dict_type->args[1];
         const TypeNode *target_dict =
             type_container(TYPE_DICT, {key, value});
+        if (!require_key_contract(key, 0, "dict key"))
+            return true;
         if (!check_arg(0, target_dict, false))
             return true;
 
@@ -464,6 +486,8 @@ bool check_builtin(BuiltinContext &context, const std::string &path,
                                                        TYPE_LIST, 1);
             if (element->kind == TYPE_ANY && list_type->args.size() > 0)
                 element = list_type->args[0];
+            if (!require_key_contract(element, 0, "set element"))
+                return true;
             if (!check_arg(0,
                            type_container(TYPE_LIST, {element}), false))
                 return true;
@@ -480,6 +504,8 @@ bool check_builtin(BuiltinContext &context, const std::string &path,
             element = set_type->args[0];
         const TypeNode *target_set =
             type_container(TYPE_SET, {element});
+        if (!require_key_contract(element, 0, "set element"))
+            return true;
         if (!check_arg(0, target_set, false))
             return true;
         if (name == "add" || name == "remove") {

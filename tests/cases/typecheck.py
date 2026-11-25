@@ -118,6 +118,90 @@ def run_cases():
           's = std.set.add(s, "a");\n',
           stderr="type error: expected int, got string")
 
+    check("dict key contract mutable struct",
+          "struct Bad { xs: list[int]; }\n"
+          "let d: dict[Bad, int] = {};\n",
+          stderr="type error: dict key type Bad is not hashable")
+
+    check("set element contract mutable struct",
+          "import std;\n"
+          "struct Bad { xs: list[int]; }\n"
+          "let s: set[Bad] = std.set.new();\n",
+          stderr="type error: set element type Bad is not hashable")
+
+    check("nested dict key contract",
+          "struct Bad { xs: list[int]; }\n"
+          "let xs: list[dict[Bad, int]] = [];\n",
+          stderr="type error: dict key type Bad is not hashable")
+
+    check("dict key contract custom hash",
+          "import std;\n"
+          "import std.dict_key;\n"
+          "struct User { id: int; cache: list[int]; }\n"
+          "impl User { func dict_hash(self): int { return self.id; } }\n"
+          "let d: dict[User, int] = {};\n"
+          "println(len(d));\n",
+          stdout="0", not_stderr="type warning")
+
+    check("set element contract custom hash",
+          "import std;\n"
+          "import std.dict_key;\n"
+          "struct User { id: int; cache: list[int]; }\n"
+          "impl User { func dict_hash(self): int { return self.id; } }\n"
+          "let s: set[User] = std.set.from_list([]);\n"
+          "println(std.set.size(s));\n",
+          stdout="0", not_stderr="type warning")
+
+    check("key_eq without dict_hash keeps structural key",
+          "import std;\n"
+          "struct User { id: int; }\n"
+          "impl User { func key_eq(self, other): bool "
+          "{ return self.id == other.id; } }\n"
+          "let d: dict[User, int] = {};\n"
+          "println(len(d));\n",
+          stdout="0", not_stderr="type warning")
+
+    check("dict hash impl must precede use",
+          "struct User { xs: list[int]; }\n"
+          "let d: dict[User, int] = {};\n"
+          "impl User { func dict_hash(self): int { return 1; } }\n",
+          stderr="type error: dict key type User is not hashable")
+
+    check("dict key contract invalid hash return",
+          "import std;\n"
+          "struct User { id: int; }\n"
+          "impl User { func dict_hash(self) { return \"x\"; } }\n"
+          "let d: dict[User, int] = {};\n",
+          stderr="type error: dict key type User is not hashable")
+
+    check("dict key contract invalid key_eq return",
+          "import std;\n"
+          "struct User { id: int; }\n"
+          "impl User { func dict_hash(self): int { return self.id; } }\n"
+          "impl User { func key_eq(self, other) { return 1; } }\n"
+          "let d: dict[User, int] = {};\n",
+          stderr="type error: dict key type User is not hashable")
+
+    check("dict builtin key contract",
+          "import std;\n"
+          "struct Bad { xs: list[int]; }\n"
+          "let d = std.dict.index_by([1], "
+          "func(x) { return Bad { xs: [] }; });\n",
+          stderr="type error: dict key type Bad is not hashable")
+
+    check("set builtin key contract",
+          "import std;\n"
+          "struct Bad { xs: list[int]; }\n"
+          "let s = std.set.from_list([Bad { xs: [] }]);\n",
+          stderr="type error: set element type Bad is not hashable")
+
+    check("dict any key keeps runtime fallback",
+          "import std;\n"
+          "struct Bad { xs: list[int]; }\n"
+          "let d: dict[any, int] = {};\n"
+          "d[Bad { xs: [] }] = 1;\n",
+          stderr="runtime error: dict key must be")
+
     check("generic deque initialization error",
           "import std;\n"
           'let q: deque[int] = std.deque.from_list([1, "a"]);\n',

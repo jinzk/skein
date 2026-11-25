@@ -345,7 +345,7 @@ ts_test("key index_by composite projection", func() {
 
 ts_test("key index_by invalid key", func() {
   ts_error(func() {
-    return std.dict.index_by([1], func(x) { return [x]; });
+    return std.dict.index_by([1], func(x): any { return [x]; });
   }, "std.dict.index_by: dict key must be");
 });
 

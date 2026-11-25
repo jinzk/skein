@@ -58,6 +58,19 @@ bool lookup_named_type(const TypeNode *type,
 MatchResult match_type(const TypeNode *actual, const TypeNode *expected);
 
 /*
+ * Whether a static type can be used as a dict key or set element.
+ * Yes/No are definitive; Unknown means the value is dynamic (any, type
+ * variables, unresolved protocol types) and must be checked at runtime.
+ */
+enum class KeyContract {
+    Yes,
+    No,
+    Unknown,
+};
+
+KeyContract key_contract(const TypeNode *type);
+
+/*
  * Builtin polymorphic values use static-only type variables (for example
  * list.append has type (list[T], T) -> list[T]).  bind_type unifies an
  * inferred concrete type with a template, and instantiate_type replaces

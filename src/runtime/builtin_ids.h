@@ -309,7 +309,7 @@ enum bifs {
     B_meta_fields,
     B_meta_variants,
     B_meta_methods,
-    B_meta_traits,
+    B_meta_protocols,
     B_meta_implements,
     B_meta_has_type,
     B_encoding_decode,

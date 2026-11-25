@@ -22,13 +22,13 @@ struct value_t *typeinfo_variants(const char *importer_source,
 struct value_t *typeinfo_methods(const char *importer_source,
                                  const char *importer_module,
                                  struct value_t *type_arg);
-struct value_t *typeinfo_traits(const char *importer_source,
+struct value_t *typeinfo_protocols(const char *importer_source,
                                 const char *importer_module,
                                 struct value_t *type_arg);
 struct value_t *typeinfo_implements(const char *importer_source,
                                     const char *importer_module,
                                     struct value_t *type_arg,
-                                    struct value_t *trait_arg);
+                                    struct value_t *protocol_arg);
 struct value_t *typeinfo_has_type(const char *importer_source,
                                   const char *importer_module,
                                   struct value_t *type_arg);

@@ -100,7 +100,7 @@ const char *op_name(Op op) {
         case Op::NewEnum: return "NEW_ENUM";
         case Op::DeclareStruct: return "DECLARE_STRUCT";
         case Op::DeclareEnum: return "DECLARE_ENUM";
-        case Op::DeclareTrait: return "DECLARE_TRAIT";
+        case Op::DeclareProtocol: return "DECLARE_PROTOCOL";
         case Op::DeclareImpl: return "DECLARE_IMPL";
         case Op::Closure: return "CLOSURE";
         case Op::BindFunc: return "BIND_FUNC";
@@ -227,8 +227,8 @@ std::string disassemble(const Proto &proto) {
             out << " struct=" << proto.struct_decls[ins.b].name;
         if (op == Op::DeclareEnum && ins.b < proto.enum_decls.size())
             out << " enum=" << proto.enum_decls[ins.b].name;
-        if (op == Op::DeclareTrait && ins.b < proto.trait_decls.size())
-            out << " trait=" << proto.trait_decls[ins.b].name;
+        if (op == Op::DeclareProtocol && ins.b < proto.protocol_decls.size())
+            out << " protocol=" << proto.protocol_decls[ins.b].name;
         if (op == Op::DeclareImpl && ins.b < proto.impl_decls.size())
             out << " impl=" << proto.impl_decls[ins.b].type_name;
         if (op == Op::DeclarePackage && ins.b < proto.packages.size())

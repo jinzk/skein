@@ -177,7 +177,7 @@ bool can_use_slots(const struct ast *node) {
         case 'Z': // nested function body is compiled separately
         case 'Y': // struct methods are compiled separately
         case 'H': // impl methods are compiled separately
-        case 't': // trait declaration has no body
+        case 't': // protocol declaration has no body
         case '<': // enum declaration has no body
         case 'n': // defer expression is compiled separately
             return true;

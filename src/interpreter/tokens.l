@@ -723,7 +723,7 @@ static bool brace_starts_block() {
 static bool reserved_name(const char *text, int len) {
     static const char *const words[] = {
         "if",       "else",     "while",    "do",       "for",
-        "struct",   "extern",   "enum",     "impl",     "trait",
+        "struct",   "extern",   "enum",     "impl",     "protocol",
         "switch",   "match",    "case",     "default",  "let",
         "const",    "func",     "yield",    "launch",   "wait",
         "defer",    "package",  "import",   "include",  "export",
@@ -1089,12 +1089,12 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
     }
     YYRET(SKEIN_TOK_IMPL);
 }
-"trait" { MEMBER_NAME_AFTER_DOT();
+"protocol" { MEMBER_NAME_AFTER_DOT();
     if (last_token != '.') {
-        pending_decl_kind = SKEIN_TOK_TRAIT;
+        pending_decl_kind = SKEIN_TOK_PROTOCOL;
         pending_decl_skip = true;
     }
-    YYRET(SKEIN_TOK_TRAIT);
+    YYRET(SKEIN_TOK_PROTOCOL);
 }
 "switch" { MEMBER_NAME_AFTER_DOT();
     start_header_context(SKEIN_TOK_SWITCH);

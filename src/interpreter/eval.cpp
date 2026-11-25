@@ -381,7 +381,7 @@ struct value_t *eval(struct ast *a) {
             break;
 
         case 't':
-            eval_trait_decl((struct trait_node *)a);
+            eval_protocol_decl((struct protocol_node *)a);
             break;
 
         case 'y':

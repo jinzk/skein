@@ -182,12 +182,12 @@ let desc = match (event) {
 - `match` 是表达式，支持字面量、绑定、dict / list / tuple / struct 模式、or-pattern、整数范围和守卫；
 - 支持 Python 风格切片、`for ... in`、标签跳转和 `switch`。
 
-### 组织代码：struct、trait 与枚举
+### 组织代码：struct、protocol 与枚举
 
-`struct` 声明数据，`impl` 声明方法，`trait` 声明接口；枚举支持带载荷变体和穷尽匹配：
+`struct` 声明数据，`impl` 声明方法，`protocol` 声明结构式接口；枚举支持带载荷变体和穷尽匹配：
 
 ```skein
-trait Drawable {
+protocol Drawable {
   func draw(self);
 }
 
@@ -200,9 +200,7 @@ impl Point {
   func area(self) {
     return self.x * self.y;
   }
-}
 
-impl Drawable for Point {
   func draw(self) {
     print("point " + str(self.area()));
   }
@@ -211,7 +209,7 @@ impl Drawable for Point {
 
 - struct 支持字段默认值和 copy-with：`Point { ...p, x: 9 }`；
 - 方法支持默认参数、可变参数、装饰器和 generator；
-- enum 支持带字段变体、`impl`、trait 和 `match` 穷尽性检查；
+- enum 支持带字段变体、`impl`、protocol 和 `match` 穷尽性检查；
 - list / dict / struct 是值语义，内部使用写时复制。
 
 ### 并发：task 与 launch

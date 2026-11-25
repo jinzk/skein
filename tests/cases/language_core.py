@@ -10,7 +10,7 @@ live in tests/skein/language_core_match.skein.  Increment, compound assignment,
 const propagation, and slice cases live in
 tests/skein/language_core_updates.skein.  Default-parameter and closure cases
 live in tests/skein/language_core_defaults.skein.  Lambda, pipe, placeholder,
-string-append, and trait cases live in tests/skein/language_core_functions.skein
+string-append, and protocol cases live in tests/skein/language_core_functions.skein
 and tests/skein/language_core_traits.skein.  Control-flow header forms live in
 tests/skein/language_core_headers.skein.
 """
@@ -78,9 +78,9 @@ def run_cases():
         stdout="42",
     )
     check(
-        "traits golden output",
-        "trait G { func d(self) { return \"g\"; } }\n"
-        "struct S with G { x: int; }\n"
+        "protocols golden output",
+        "protocol G { func d(self) { return \"g\"; } }\n"
+        "struct S { x: int; }\n"
         "println(S { x: 1 }.d());\n",
         stdout="g",
     )
@@ -384,18 +384,31 @@ def run_cases():
           stderr="default must be the last match arm")
 
 
-    check("trait default conflict",
-          'trait A { func m(self) { return 1; } }\n'
-          'trait B { func m(self) { return 2; } }\n'
+    check("protocol default conflict",
+          'protocol A { func m(self) { return 1; } }\n'
+          'protocol B { func m(self) { return 2; } }\n'
+          'struct S { }\n',
+          stderr="conflicts with another protocol default")
+    check("protocol default conflict resolved by concrete override",
           'struct S { }\n'
-          'impl A for S { }\n'
-          'impl B for S { }\n',
-          stderr="conflicts with another trait default")
-    check("trait missing method still rejected",
-          'trait T { func m(self); }\n'
+          'impl S { func m(self) { return 3; } }\n'
+          'protocol A { func m(self) { return 1; } }\n'
+          'protocol B { func m(self) { return 2; } }\n'
+          'println(S {}.m());\n',
+          stdout="3")
+    check("protocol missing method still rejected",
+          'protocol T { func m(self); }\n'
           'struct S { }\n'
-          'impl T for S { }\n',
-          stderr="does not implement method m")
+          'func use(x: T) { return x.m(); }\n'
+          'use(S {});\n',
+          stderr="expected T, got S")
+    check("protocol return type mismatch rejected",
+          'protocol R { func m(self) -> int; }\n'
+          'struct S { }\n'
+          'impl S { func m(self): string { return "x"; } }\n'
+          'func use(x: R) { return x.m(); }\n'
+          'use(S {});\n',
+          stderr="expected R, got S")
     check("default parameter forward reference",
           'func f(a = b + 1, b = 2) { return a; }\nf();\n',
           stderr="parameter b is used before it is initialized")
@@ -417,9 +430,36 @@ def run_cases():
     check("default parameter self default rejected",
           'struct S {}\nimpl S { func m(self = S {}, x = 1) -> x; }\n',
           stderr="method self cannot have a default value")
-    check("default parameter trait rejected",
-          'trait T { func m(self, x: int = 1); }\n',
-          stderr="trait method m cannot have default parameter values")
+    check("default parameter protocol rejected",
+          'protocol T { func m(self, x: int = 1); }\n',
+          stderr="protocol method m cannot have default parameter values")
+
+    check("trait keyword removed",
+          'trait T { func m(self); }\n',
+          stderr="syntax error")
+    check("impl Protocol for Type removed",
+          'protocol D { func d(self); }\n'
+          'struct S { }\n'
+          'impl D for S { func d(self) { return 1; } }\n',
+          stderr="syntax error")
+    check("protocol with shorthand removed",
+          'protocol D { func d(self) { return 1; } }\n'
+          'struct S with D { }\n',
+          stderr="syntax error")
+    check("export protocol removed",
+          'export protocol D { func d(self); }\n',
+          stderr="syntax error")
+    check("std.meta.traits removed",
+          'import std;\n'
+          'import std.meta;\n'
+          'println(str(std.dict.has(std.meta, "traits")));\n',
+          stdout="0")
+    check("with remains ordinary identifier",
+          'let with = 7;\n'
+          'struct S { with: int; }\n'
+          'let s = S { with: 9 };\n'
+          'println(with + s.with);\n',
+          stdout="16")
 
     check("export expression function",
           'package p { export func twice(x) -> x * 2; }\n'

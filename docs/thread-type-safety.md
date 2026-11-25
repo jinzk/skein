@@ -2,7 +2,7 @@
 
 本文记录 P2.5 的并发模型和剩余假设。适用范围：
 
-- struct / enum / trait 类型注册表
+- struct / enum / protocol 类型注册表
 - 类型方法表
 - 跨线程方法传输
 - VM proto / inline cache / JIT 缓存
@@ -26,10 +26,10 @@
 ```text
 struct_types
 enum_types
-trait_types
+protocol_types
 logical_structs
 logical_enums
-logical_traits
+logical_protocols
 source_aliases
 ```
 
@@ -44,7 +44,7 @@ std::recursive_mutex type_registry_mutex
 - 类型查找
 - 类型创建 / prepare / finalize / rollback
 - alias 注册
-- trait 关系检查
+- protocol 关系检查
 - 类型名解析
 - shutdown
 
@@ -59,8 +59,8 @@ std::shared_mutex type_method_mutex
 ```
 
 - `structtype_method()`、`structtype_method_names()`、
-  `structtype_trait_default()` 使用共享锁。
-- `structtype_add_method()`、`structtype_add_trait_default()` 使用独占锁。
+  `structtype_protocol_default()` 使用共享锁。
+- `structtype_add_method()`、`structtype_add_protocol_default()` 使用独占锁。
 - `structtype_visit_functions()` 先在锁内收集 `shared_ptr`，释放锁后再回调，
   避免 GC 回调期间持锁。
 
@@ -85,7 +85,7 @@ thread_methods[type_def][method_name] = function_def
 
 ## 类型定义字段
 
-`struct_def->fields`、`enum_def->variants`、`trait_def->methods` 等字段在类型
+`struct_def->fields`、`enum_def->variants`、`protocol_def->methods` 等字段在类型
 finalize 后视为只读。
 
 当前约定：

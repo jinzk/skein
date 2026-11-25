@@ -23,8 +23,8 @@ struct CollectionsMoreListKey {
   id: int;
 }
 
-impl dict_key.DictKey for CollectionsMoreLruHashUser {
-  func dict_hash(self) {
+impl CollectionsMoreLruHashUser {
+  func dict_hash(self): int {
     return self.id;
   }
 }

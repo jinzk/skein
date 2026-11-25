@@ -11,7 +11,7 @@ const char *meta_builtin_name(int functype) {
         case B_meta_fields: return "std.meta.fields";
         case B_meta_variants: return "std.meta.variants";
         case B_meta_methods: return "std.meta.methods";
-        case B_meta_traits: return "std.meta.traits";
+        case B_meta_protocols: return "std.meta.protocols";
         case B_meta_implements: return "std.meta.implements";
         case B_meta_has_type: return "std.meta.has_type";
         default: return "std.meta";
@@ -55,8 +55,8 @@ struct value_t *call_meta_builtin(
         case B_meta_methods:
             return typeinfo_methods(importer_source.c_str(),
                                     importer_module.c_str(), args[0]);
-        case B_meta_traits:
-            return typeinfo_traits(importer_source.c_str(),
+        case B_meta_protocols:
+            return typeinfo_protocols(importer_source.c_str(),
                                    importer_module.c_str(), args[0]);
         case B_meta_has_type:
             return typeinfo_has_type(importer_source.c_str(),

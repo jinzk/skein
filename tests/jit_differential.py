@@ -150,8 +150,8 @@ CASES = [
         "custom-struct-hash",
         "import std.dict_key;\n"
         "struct Key { id: int; cache: list[int]; }\n"
-        "impl dict_key.DictKey for Key {\n"
-        "  func dict_hash(self) { return self.id; }\n"
+        "impl Key {\n"
+        "  func dict_hash(self): int { return self.id; }\n"
         "}\n"
         "func roundtrip(i) {\n"
         "  let d = {Key { id: 1, cache: [] }: i};\n"
@@ -167,11 +167,11 @@ CASES = [
         "custom-key-equality",
         "import std.dict_key;\n"
         "struct Key { id: int; cache: list[int]; }\n"
-        "impl dict_key.DictKey for Key {\n"
-        "  func dict_hash(self) { return self.id; }\n"
+        "impl Key {\n"
+        "  func dict_hash(self): int { return self.id; }\n"
         "}\n"
-        "impl dict_key.KeyEq for Key {\n"
-        "  func key_eq(self, other) { return self.id == other.id; }\n"
+        "impl Key {\n"
+        "  func key_eq(self, other): bool { return self.id == other.id; }\n"
         "}\n"
         "func roundtrip(i) {\n"
         "  let d = {Key { id: 1, cache: [] }: i};\n"
@@ -182,6 +182,37 @@ CASES = [
         "let i = 0;\n"
         "while (i < 20) { println(str(roundtrip(i))); i = i + 1; }\n",
         expect_debug="[jit] enter roundtrip",
+    ),
+    case(
+        "structural-protocol-dispatch",
+        "protocol Doubler {\n"
+        "  func value(self) -> int;\n"
+        "  func double(self) { return self.value() * 2; }\n"
+        "}\n"
+        "struct Num { n: int; }\n"
+        "impl Num { func value(self): int { return self.n; } }\n"
+        "func roundtrip(x: Doubler) { return x.double(); }\n"
+        "let i = 0;\n"
+        "while (i < 20) { println(str(roundtrip(Num { n: i }))); i = i + 1; }\n",
+    ),
+    case(
+        "structural-protocol-thread-transfer",
+        "import std;\n"
+        "protocol Doubler {\n"
+        "  func value(self) -> int;\n"
+        "  func double(self) { return self.value() * 2; }\n"
+        "}\n"
+        "struct Num { n: int; }\n"
+        "impl Num { func value(self): int { return self.n; } }\n"
+        "func work(x: Doubler) {\n"
+        "  std.task.sleep(1).wait();\n"
+        "  return x.double();\n"
+        "}\n"
+        "let i = 0;\n"
+        "while (i < 20) {\n"
+        "  println(str(wait launch work(Num { n: i })));\n"
+        "  i = i + 1;\n"
+        "}\n",
     ),
     case(
         "globals-and-upvalues",

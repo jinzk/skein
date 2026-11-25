@@ -24,7 +24,7 @@
 namespace {
 
 constexpr uint32_t kPayloadMagic = 0x48545453u; /* "STTH" */
-constexpr uint32_t kPayloadVersion = 11u;
+constexpr uint32_t kPayloadVersion = 12u;
 constexpr uint32_t kEndianMarker = 0x01020304u;
 constexpr uint32_t kMaxCount = 1000000u;
 constexpr uint32_t kMaxString = 64u * 1024u * 1024u;
@@ -2008,6 +2008,12 @@ bool prepare_inline_functions(const skein::bc::Proto &proto,
             }
         }
     }
+    for (const skein::bc::ProtocolDeclMeta &decl : proto.protocol_decls) {
+        for (const skein::bc::ProtocolMethodMeta &method : decl.methods) {
+            if (!prepare(method.code, "protocol default method"))
+                return false;
+        }
+    }
     for (const skein::bc::ImplDeclMeta &decl : proto.impl_decls) {
         for (const skein::bc::DeclMethodMeta &method : decl.methods) {
             if (!prepare(method.code, "impl method"))
@@ -2150,6 +2156,12 @@ bool is_declaration_function(const skein::bc::Proto &proto,
                 if (field.default_code.get() == code)
                     return true;
             }
+        }
+    }
+    for (const skein::bc::ProtocolDeclMeta &decl : proto.protocol_decls) {
+        for (const skein::bc::ProtocolMethodMeta &method : decl.methods) {
+            if (method.code.get() == code)
+                return true;
         }
     }
     for (const skein::bc::ImplDeclMeta &decl : proto.impl_decls) {
@@ -2374,24 +2386,26 @@ bool write_proto(writer &out, const skein::bc::Proto &proto,
             }
         }
     }
-    out.u32((uint32_t)proto.trait_decls.size());
-    for (const skein::bc::TraitDeclMeta &decl : proto.trait_decls) {
+    out.u32((uint32_t)proto.protocol_decls.size());
+    for (const skein::bc::ProtocolDeclMeta &decl : proto.protocol_decls) {
         out.str(decl.source);
         out.str(decl.name);
         out.u8(decl.exported ? 1 : 0);
         out.u32((uint32_t)decl.methods.size());
-        for (const skein::bc::TraitMethodMeta &method : decl.methods) {
+        for (const skein::bc::ProtocolMethodMeta &method : decl.methods) {
             out.str(method.name);
             out.u32((uint32_t)method.params.size());
-            for (const skein::bc::TraitParamMeta &param : method.params) {
+            for (const skein::bc::ProtocolParamMeta &param : method.params) {
                 out.str(param.name);
                 if (!write_type(out, &param.type))
                     return false;
                 out.u8(param.variadic ? 1 : 0);
                 out.u8(param.has_default ? 1 : 0);
             }
+            if (!write_type(out, method.return_type.get()))
+                return false;
             if (!write_inline_function(out, method.code,
-                                       "trait default method", nullptr,
+                                       "protocol default method", nullptr,
                                        error))
                 return false;
         }
@@ -2400,8 +2414,8 @@ bool write_proto(writer &out, const skein::bc::Proto &proto,
     for (const skein::bc::ImplDeclMeta &decl : proto.impl_decls) {
         out.str(decl.source);
         out.str(decl.type_name);
-        out.str(decl.trait_name);
-        out.u8(decl.has_trait ? 1 : 0);
+        out.str(decl.protocol_name);
+        out.u8(decl.has_protocol ? 1 : 0);
         out.u32((uint32_t)decl.methods.size());
         for (const skein::bc::DeclMethodMeta &method : decl.methods) {
             out.str(method.name);
@@ -2934,14 +2948,14 @@ bool read_proto(reader &in, std::shared_ptr<skein::bc::Proto> &proto,
         }
         proto->enum_decls.push_back(std::move(decl));
     }
-    uint32_t trait_count = 0;
-    if (!in.count(trait_count)) {
+    uint32_t protocol_count = 0;
+    if (!in.count(protocol_count)) {
         error = in.error;
         return false;
     }
-    proto->trait_decls.reserve(trait_count);
-    for (uint32_t i = 0; i < trait_count; ++i) {
-        skein::bc::TraitDeclMeta decl;
+    proto->protocol_decls.reserve(protocol_count);
+    for (uint32_t i = 0; i < protocol_count; ++i) {
+        skein::bc::ProtocolDeclMeta decl;
         uint8_t exported = 0;
         uint32_t method_count = 0;
         if (!in.str(decl.source) || !in.str(decl.name) ||
@@ -2952,7 +2966,7 @@ bool read_proto(reader &in, std::shared_ptr<skein::bc::Proto> &proto,
         decl.exported = exported != 0;
         decl.methods.reserve(method_count);
         for (uint32_t j = 0; j < method_count; ++j) {
-            skein::bc::TraitMethodMeta method;
+            skein::bc::ProtocolMethodMeta method;
             uint32_t param_count = 0;
             if (!in.str(method.name) || !in.count(param_count)) {
                 error = in.error;
@@ -2960,7 +2974,7 @@ bool read_proto(reader &in, std::shared_ptr<skein::bc::Proto> &proto,
             }
             method.params.reserve(param_count);
             for (uint32_t k = 0; k < param_count; ++k) {
-                skein::bc::TraitParamMeta param;
+                skein::bc::ProtocolParamMeta param;
                 uint8_t variadic = 0;
                 uint8_t has_default = 0;
                 if (!in.str(param.name) ||
@@ -2973,11 +2987,15 @@ bool read_proto(reader &in, std::shared_ptr<skein::bc::Proto> &proto,
                 param.has_default = has_default != 0;
                 method.params.push_back(std::move(param));
             }
+            owned_type return_type;
+            if (!read_type_ptr(in, return_type, error))
+                return false;
+            method.return_type = std::move(return_type);
             if (!read_inline_function(in, method.code, error))
                 return false;
             decl.methods.push_back(std::move(method));
         }
-        proto->trait_decls.push_back(std::move(decl));
+        proto->protocol_decls.push_back(std::move(decl));
     }
     uint32_t impl_count = 0;
     if (!in.count(impl_count)) {
@@ -2987,15 +3005,15 @@ bool read_proto(reader &in, std::shared_ptr<skein::bc::Proto> &proto,
     proto->impl_decls.reserve(impl_count);
     for (uint32_t i = 0; i < impl_count; ++i) {
         skein::bc::ImplDeclMeta decl;
-        uint8_t has_trait = 0;
+        uint8_t has_protocol = 0;
         uint32_t method_count = 0;
         if (!in.str(decl.source) || !in.str(decl.type_name) ||
-            !in.str(decl.trait_name) || !in.u8(has_trait) ||
+            !in.str(decl.protocol_name) || !in.u8(has_protocol) ||
             !in.count(method_count)) {
             error = in.error;
             return false;
         }
-        decl.has_trait = has_trait != 0;
+        decl.has_protocol = has_protocol != 0;
         decl.methods.reserve(method_count);
         for (uint32_t j = 0; j < method_count; ++j) {
             skein::bc::DeclMethodMeta method;

@@ -993,6 +993,21 @@ struct Checker : public BuiltinContext {
                     return function_type_from_sig(sig);
                 }
             }
+            if (lookup.protocol) {
+                for (const method_sig &sig : lookup.protocol->methods) {
+                    if (sig.name != name)
+                        continue;
+                    FunctionSig function_sig;
+                    for (size_t i = 1; i < sig.params.size(); ++i)
+                        function_sig.params.push_back(
+                            type_from_constraint(&sig.params[i]));
+                    function_sig.result =
+                        sig.return_type
+                            ? type_from_constraint(sig.return_type.get())
+                            : type_any();
+                    return function_type_from_sig(function_sig);
+                }
+            }
         }
 
         struct funcdef *method = static_method(base_type, name);
@@ -1177,6 +1192,23 @@ struct Checker : public BuiltinContext {
                     sig = method_signature_from_code(method->code.get());
                     method_code = method->code.get();
                     found = true;
+                }
+            }
+            if (!found && lookup.protocol) {
+                for (const method_sig &protocol_sig :
+                     lookup.protocol->methods) {
+                    if (protocol_sig.name != method_name)
+                        continue;
+                    for (size_t i = 1; i < protocol_sig.params.size(); ++i)
+                        sig.params.push_back(
+                            type_from_constraint(&protocol_sig.params[i]));
+                    sig.result =
+                        protocol_sig.return_type
+                            ? type_from_constraint(
+                                  protocol_sig.return_type.get())
+                            : type_any();
+                    found = true;
+                    break;
                 }
             }
         }

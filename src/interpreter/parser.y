@@ -45,7 +45,7 @@ static bool include_declaration_allowed(struct ast *node) {
         case 'Z':  /* func */
         case 'Y':  /* struct */
         case 'H':  /* impl */
-        case 't':  /* trait */
+        case 't':  /* protocol */
         case NODE_ENUM_DECL:
         case 'D':  /* let / const */
         case NODE_DESTRUCTURE:
@@ -666,6 +666,23 @@ static struct type_constraint *type_constraint_from_name(const char *name) {
                                      diag_current_source_name().c_str());
 }
 
+static struct type_constraint *type_constraint_from_builtin(int functype);
+
+/* `func m(...) -> Type;` uses an expression-shaped type annotation. */
+static struct type_constraint *type_constraint_from_return_exp(struct ast *exp) {
+    if (!exp)
+        return NULL;
+    if (exp->nodetype == 'N')
+        return type_constraint_from_name(((struct symref *)exp)->name);
+    if (exp->nodetype == 'V') {
+        const struct val *literal = (const struct val *)exp;
+        if (literal->val && literal->val->type == T_builtin)
+            return type_constraint_from_builtin(
+                ((struct builtin_value_t *)literal->val)->functype);
+    }
+    return NULL;
+}
+
 static int destructure_param_id = 0;
 
 static struct symlist *new_destructure_param(struct ast *pattern) {
@@ -852,74 +869,6 @@ static struct ast *new_wait_call(struct ast *value) {
         ((struct ufncall *)value)->launch)
         ((struct ufncall *)value)->awaited = 1;
     return (struct ast *)call;
-}
-
-/*
- * `struct Name with Trait, pkg.Other { ... }` and the enum form lower to
- * the declaration followed by `impl Trait for Name;` statements.  `with` is
- * not a reserved word: it is parsed as a NAME and validated here, so code
- * can still use `with` as an ordinary identifier elsewhere.
- */
-static struct ast *lower_type_with(char *name, char *with_token,
-                                   char *traits, void *members,
-                                   bool is_enum, bool exported) {
-    bool with_ok =
-        with_token && std::strcmp(with_token, "with") == 0;
-    if (!with_ok) {
-        diag_set_location(g_token_line, g_token_column);
-        yyerror("expected 'with' after type name");
-    }
-    std::free(with_token);
-
-    std::vector<std::string> names;
-    if (traits) {
-        std::string text(traits);
-        std::free(traits);
-        size_t start = 0;
-        for (;;) {
-            size_t sep = text.find('\x1f', start);
-            std::string item = text.substr(
-                start, sep == std::string::npos ? std::string::npos
-                                                : sep - start);
-            if (!item.empty())
-                names.push_back(item);
-            if (sep == std::string::npos)
-                break;
-            start = sep + 1;
-        }
-    }
-
-    std::string source = diag_current_source_name();
-    struct ast *decl = NULL;
-    if (is_enum) {
-        decl = newenumdecl(copy_text(name), copy_text(source.c_str()),
-                           (struct enum_variant *)members, exported);
-    } else {
-        decl = newstructdecl(copy_text(name), copy_text(source.c_str()),
-                             (struct struct_member *)members, exported);
-    }
-    struct ast *tail = NULL;
-    for (size_t i = names.size(); i > 0; --i) {
-        struct ast *impl = newimpl(
-            copy_text(name), copy_text(names[i - 1].c_str()),
-            copy_text(source.c_str()), NULL);
-        tail = tail ? newast('L', impl, tail) : impl;
-    }
-    std::free(name);
-    if (!with_ok || !tail)
-        return decl;
-    return newast('L', decl, tail);
-}
-
-static char *concat_with_trait(char *head, char *next) {
-    std::string joined = head ? std::string(head) : std::string();
-    if (!joined.empty())
-        joined.push_back('\x1f');
-    if (next)
-        joined += next;
-    std::free(head);
-    std::free(next);
-    return copy_text(joined.c_str());
 }
 
 static struct type_constraint *type_constraint_from_builtin(int functype) {
@@ -1121,7 +1070,7 @@ static struct type_constraint *runtime_type_or_error(
 %token YIELD "yield" DEFER "defer"
 %token LAUNCH "launch"
 %token WAIT "wait"
-%token STRUCT "struct" IMPL "impl" TRAIT "trait" ENUM "enum"
+%token STRUCT "struct" IMPL "impl" PROTOCOL "protocol" ENUM "enum"
 %token EXTERN "extern"
 %token SWITCH "switch" CASE "case" DEFAULT "default" ARROW "=>"
 %token MATCH "match"
@@ -1183,16 +1132,16 @@ static struct type_constraint *runtime_type_or_error(
 %type <a> tuple_body
 %type <pf> pattern_fields pattern_field_items pattern_field
 %type <a> let_pattern
-%type <a> struct_decl impl_decl trait_decl struct_members struct_member
+%type <a> struct_decl impl_decl protocol_decl struct_members struct_member
 %type <a> enum_decl enum_variants enum_variant variant_fields variant_field
 %type <a> func_decl
-%type <a> impl_methods trait_methods trait_method method_decl method_member
+%type <a> impl_methods protocol_methods protocol_method method_decl method_member
 %type <a> decorators decorator decorator_expr
 %type <a> struct_fields struct_field
 %type <sl> param symlist
 %type <type> type type_name func_ret_opt
 %type <tl> type_list
-%type <str> importref importpath fieldname impl_trait_name with_trait with_traits
+%type <str> importref importpath fieldname
 %type <a> ffi_items ffi_item ffi_fields ffi_params ffi_param_list ffi_param ffi_type ffi_const_value ffi_annotations ffi_annotation_list ffi_annotation
 
 %destructor { treefree($$); } <a>
@@ -1297,23 +1246,6 @@ stmt: IF HEADER_LPAREN exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, 
                            copy_text(diag_current_source_name().c_str()),
                            (struct struct_member *)$5, true);
       }
-    | EXPORT STRUCT NAME NAME with_traits '{' empty_body {
-        $$ = lower_type_with($3, $4, $5, NULL, false, true);
-      }
-    | EXPORT STRUCT NAME NAME with_traits '{' struct_members '}' {
-        $$ = lower_type_with($3, $4, $5,
-                             (struct struct_member *)$7, false, true);
-      }
-    | EXPORT TRAIT NAME '{' empty_body   {
-        $$ = newtraitdecl($3,
-                          copy_text(diag_current_source_name().c_str()),
-                          NULL, true);
-      }
-    | EXPORT TRAIT NAME '{' trait_methods '}' {
-        $$ = newtraitdecl($3,
-                          copy_text(diag_current_source_name().c_str()),
-                          (struct trait_method *)$5, true);
-      }
     | EXPORT ENUM NAME '{' empty_body    {
         $$ = newenumdecl($3,
                          copy_text(diag_current_source_name().c_str()),
@@ -1324,17 +1256,10 @@ stmt: IF HEADER_LPAREN exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, 
                          copy_text(diag_current_source_name().c_str()),
                          (struct enum_variant *)$5, true);
       }
-    | EXPORT ENUM NAME NAME with_traits '{' empty_body {
-        $$ = lower_type_with($3, $4, $5, NULL, true, true);
-      }
-    | EXPORT ENUM NAME NAME with_traits '{' enum_variants '}' {
-        $$ = lower_type_with($3, $4, $5,
-                             (struct enum_variant *)$7, true, true);
-      }
     | LABEL non_empty_scope            { $$ = newlabel($1, $2); }
     | struct_decl
     | impl_decl
-    | trait_decl
+    | protocol_decl
     | enum_decl
     | PACKAGE NAME '{' EMPTY_BLOCK_CLOSE  { $$ = newpackage($2, NULL); }
     | PACKAGE NAME '{' list '}'           { $$ = newpackage($2, $4); }
@@ -1613,13 +1538,6 @@ struct_decl: STRUCT NAME '{' empty_body  {
                            copy_text(diag_current_source_name().c_str()),
                            (struct struct_member *)$4);
       }
-    | STRUCT NAME NAME with_traits '{' empty_body {
-        $$ = lower_type_with($2, $3, $4, NULL, false, false);
-      }
-    | STRUCT NAME NAME with_traits '{' struct_members '}' {
-        $$ = lower_type_with($2, $3, $4,
-                             (struct struct_member *)$6, false, false);
-      }
     ;
 
 enum_decl: ENUM NAME '{' empty_body      {
@@ -1631,13 +1549,6 @@ enum_decl: ENUM NAME '{' empty_body      {
         $$ = newenumdecl($2,
                          copy_text(diag_current_source_name().c_str()),
                          (struct enum_variant *)$4);
-      }
-    | ENUM NAME NAME with_traits '{' empty_body {
-        $$ = lower_type_with($2, $3, $4, NULL, true, false);
-      }
-    | ENUM NAME NAME with_traits '{' enum_variants '}' {
-        $$ = lower_type_with($2, $3, $4,
-                             (struct enum_variant *)$6, true, false);
       }
     ;
 
@@ -1727,34 +1638,12 @@ method_member: method_decl               { $$ = $1; }
 
 impl_decl: IMPL NAME '{' empty_body      {
         $$ = lower_impl_decorators((struct impl_node *)newimpl(
-            $2, NULL, copy_text(diag_current_source_name().c_str()), NULL));
+            $2, copy_text(diag_current_source_name().c_str()), NULL));
       }
     | IMPL NAME '{' impl_methods '}'     {
         $$ = lower_impl_decorators((struct impl_node *)newimpl(
-            $2, NULL, copy_text(diag_current_source_name().c_str()),
+            $2, copy_text(diag_current_source_name().c_str()),
             (struct struct_member *)$4));
-      }
-    | IMPL impl_trait_name FOR NAME '{' empty_body  {
-        $$ = lower_impl_decorators((struct impl_node *)newimpl(
-            $4, $2, copy_text(diag_current_source_name().c_str()), NULL));
-      }
-    | IMPL impl_trait_name FOR NAME '{' impl_methods '}' {
-        $$ = lower_impl_decorators((struct impl_node *)newimpl(
-            $4, $2, copy_text(diag_current_source_name().c_str()),
-            (struct struct_member *)$6));
-      }
-    | IMPL impl_trait_name FOR NAME ';'  {
-        $$ = lower_impl_decorators((struct impl_node *)newimpl(
-            $4, $2, copy_text(diag_current_source_name().c_str()), NULL));
-      }
-    ;
-
-impl_trait_name: NAME                  { $$ = $1; }
-    | NAME '.' NAME            {
-        std::string qualified = std::string($1) + "." + $3;
-        $$ = copy_text(qualified.c_str());
-        free($1);
-        free($3);
       }
     ;
 
@@ -1762,60 +1651,49 @@ impl_methods: method_member              { $$ = $1; }
     | impl_methods method_member         { $$ = append_struct_member($1, $2); }
     ;
 
-trait_decl: TRAIT NAME '{' empty_body    {
-        $$ = newtraitdecl($2,
+protocol_decl: PROTOCOL NAME '{' empty_body    {
+        $$ = newprotocoldecl($2,
                           copy_text(diag_current_source_name().c_str()),
                           NULL);
       }
-    | TRAIT NAME '{' trait_methods '}'   {
-        $$ = newtraitdecl($2,
+    | PROTOCOL NAME '{' protocol_methods '}'   {
+        $$ = newprotocoldecl($2,
                           copy_text(diag_current_source_name().c_str()),
-                          (struct trait_method *)$4);
+                          (struct protocol_method *)$4);
       }
     ;
 
-trait_methods: trait_method              { $$ = $1; }
-    | trait_methods trait_method         { $$ = append_trait_method($1, $2); }
+protocol_methods: protocol_method              { $$ = $1; }
+    | protocol_methods protocol_method         { $$ = append_protocol_method($1, $2); }
     ;
 
 /*
- * Trait methods may be signatures (`;`) or provide a default body.  The
- * default body is kept as a function AST and compiled with the trait; an
+ * Protocol methods may be signatures (`;`) or provide a default body.  The
+ * default body is kept as a function AST and compiled with the protocol; an
  * impl that omits the method falls back to this definition.
  */
-trait_method: funcstart NAME '(' symlist ')' ';' {
-        $$ = newtraitmethod($2, $4, NULL);
+protocol_method: funcstart NAME '(' symlist ')' func_ret_opt ';' {
+        $$ = newprotocolmethod($2, $4, $6, NULL, false);
         (void)finish_function();
       }
     | funcstart NAME '(' symlist ')' func_ret_opt '{' EMPTY_BLOCK_CLOSE {
-        $$ = newtraitmethod(
-            $2, NULL,
-            newfunc(NULL, $4, NULL, false, finish_function(), $6));
+        $$ = newprotocolmethod(
+            $2, NULL, NULL,
+            newfunc(NULL, $4, NULL, false, finish_function(), $6), true);
       }
     | funcstart NAME '(' symlist ')' func_ret_opt '{' list '}' {
-        $$ = newtraitmethod(
-            $2, NULL,
-            newfunc(NULL, $4, $8, false, finish_function(), $6));
+        $$ = newprotocolmethod(
+            $2, NULL, NULL,
+            newfunc(NULL, $4, $8, false, finish_function(), $6), true);
       }
     | funcstart NAME '(' symlist ')' func_ret_opt RARROW exp ';' {
-        $$ = newtraitmethod(
-            $2, NULL,
-            newfunc(NULL, $4, newret($8), false, finish_function(),
-                    $6));
+        struct type_constraint *annotation =
+            type_constraint_from_return_exp($8);
+        $$ = newprotocolmethod(
+            $2, NULL, annotation,
+            newfunc(NULL, $4, newret($8), false, finish_function(), $6),
+            annotation == NULL);
       }
-    ;
-
-with_trait: NAME                         { $$ = $1; }
-    | NAME '.' NAME {
-        std::string qualified = std::string($1) + "." + $3;
-        free($1);
-        free($3);
-        $$ = copy_text(qualified.c_str());
-      }
-    ;
-
-with_traits: with_trait                  { $$ = $1; }
-    | with_traits ',' with_trait         { $$ = concat_with_trait($1, $3); }
     ;
 
 struct_fields: struct_field              { $$ = $1; }

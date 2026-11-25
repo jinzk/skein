@@ -177,9 +177,9 @@ def run_cases():
     run_case(
         "import std;\n"
         "func identity(fn) { return fn; }\n"
-        "trait Source { func items(self); }\n"
+        "protocol Source { func items(self); }\n"
         "struct P { n: int; }\n"
-        "impl Source for P {\n"
+        "impl P {\n"
         "  @identity\n"
         "  func items(self) { yield 1; yield self.n; }\n"
         "}\n"

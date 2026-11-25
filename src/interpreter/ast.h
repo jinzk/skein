@@ -356,30 +356,33 @@ struct impl_node {
     int line;
     int column;
     char *type_name;
-    char *trait_name;
     char *source;
     struct struct_member *methods;
 };
 
-struct trait_method {
+struct protocol_method {
     int nodetype;
     int line;
     int column;
     char *name;
     struct symlist *params;
+    /* Optional declared return type, shared with the function AST if present. */
+    struct type_constraint *ret_type;
     /* Optional default implementation (a function AST node). */
     struct ast *func;
-    struct trait_method *next;
+    /* False for signature-only methods, including `-> Type` annotations. */
+    bool has_default;
+    struct protocol_method *next;
 };
 
-struct trait_node {
+struct protocol_node {
     int nodetype;
     int line;
     int column;
     char *name;
     char *source;
     char *module;
-    struct trait_method *methods;
+    struct protocol_method *methods;
     int exported;
 };
 
@@ -603,14 +606,15 @@ struct ast *newstructdecl(char *name, char *source,
 struct ast *newstructfield(char *name, struct type_constraint *type);
 struct ast *newstructmethod(char *name, struct ast *func);
 struct ast *append_struct_member(struct ast *head, struct ast *member);
-struct ast *newimpl(char *type_name, char *trait_name, char *source,
+struct ast *newimpl(char *type_name, char *source,
                     struct struct_member *methods);
-struct ast *newtraitdecl(char *name, char *source,
-                         struct trait_method *methods,
+struct ast *newprotocoldecl(char *name, char *source,
+                         struct protocol_method *methods,
                          bool exported = false);
-struct ast *newtraitmethod(char *name, struct symlist *params,
-                           struct ast *func = NULL);
-struct ast *append_trait_method(struct ast *head, struct ast *method);
+struct ast *newprotocolmethod(char *name, struct symlist *params,
+                           struct type_constraint *ret_type, struct ast *func,
+                           bool has_default);
+struct ast *append_protocol_method(struct ast *head, struct ast *method);
 struct ast *newstructlit(char *name, char *source,
                          struct struct_init *fields);
 struct ast *newenumdecl(char *name, char *source,

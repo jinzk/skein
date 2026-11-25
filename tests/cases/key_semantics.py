@@ -14,11 +14,9 @@ USER_KEYEQ = (
     "import std;\n"
     "import std.dict_key;\n"
     "struct User { id: int; cache: list[int]; }\n"
-    "impl dict_key.DictKey for User {\n"
-    "  func dict_hash(self) { return self.id; }\n"
-    "}\n"
-    "impl dict_key.KeyEq for User {\n"
-    "  func key_eq(self, other) { return self.id == other.id; }\n"
+    "impl User {\n"
+    "  func dict_hash(self): int { return self.id; }\n"
+    "  func key_eq(self, other): bool { return self.id == other.id; }\n"
     "}\n"
 )
 

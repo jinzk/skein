@@ -32,7 +32,7 @@ syntax match skeinFloat '\<\.[0-9][0-9_]*\([eE][+-]\?[0-9_]\+\)\?'
 " These are defined before keywords and builtins so that a later keyword or
 " builtin match wins when both start at the same position.
 syntax match skeinFunctionDef '\<func\s\+\zs\h\w*'
-syntax match skeinTypeDef '\<\(struct\|enum\|trait\|impl\|package\|extern\)\s\+\zs\h\w*'
+syntax match skeinTypeDef '\<\(struct\|enum\|protocol\|impl\|package\|extern\)\s\+\zs\h\w*'
 syntax match skeinStructInit '\<\u\w*\ze\s*{'
 syntax match skeinFunction '\<\h\w*\ze\s*('
 syntax match skeinMethod '\.\h\w*\ze\s*('
@@ -54,7 +54,7 @@ syntax keyword skeinConditional if else switch case default match
 syntax keyword skeinRepeat while do for
 syntax keyword skeinStatement return break continue goto fail on error recover pass
 syntax keyword skeinDeclaration package import include export extern
-syntax keyword skeinDeclaration struct impl trait enum
+syntax keyword skeinDeclaration struct impl protocol enum
 syntax keyword skeinBoolean true false
 syntax keyword skeinNull null
 syntax keyword skeinSelf self

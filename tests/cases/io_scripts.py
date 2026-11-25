@@ -1159,9 +1159,11 @@ def run_cases():
             "package aa {\n"
             "  export struct P { x: int; }\n"
             "  struct Hidden { h: int; }\n"
-            "  export trait D { func d(self); }\n"
-            "  impl D for P { func d(self) { return self.x; } }\n"
-            "  impl P { func get(self) { return self.x; } }\n"
+            "  protocol D { func d(self); }\n"
+            "  impl P {\n"
+            "    func d(self) { return self.x; }\n"
+            "    func get(self) { return self.x; }\n"
+            "  }\n"
             "  export func make() { return P { x: 7 }; }\n"
             "  export func hidden() { return Hidden { h: 9 }; }\n"
             "}\n",
@@ -1225,9 +1227,8 @@ def run_cases():
             "app/lib.skein",
             "package lib {\n"
             "  export struct P { x: int; }\n"
-            "  export trait D { func d(self); }\n"
-            "  export trait T { func take(self, p: P); }\n"
-            "  trait Secret { func s(self); }\n"
+            "  protocol D { func d(self); }\n"
+            "  protocol T { func take(self, p: P); }\n"
             "  func default_x() { return 7; }\n"
             "  export struct C { v: int = default_x(); }\n"
             "  export func make_p(x: int) { return P { x: x }; }\n"
@@ -1238,12 +1239,12 @@ def run_cases():
             "app/main.skein",
             "import lib;\n"
             "struct Q { y: int; }\n"
-            "impl lib.D for Q { func d(self) { return self.y; } }\n"
-            "impl lib.T for Q {\n"
+            "impl Q {\n"
+            "  func d(self) { return self.y; }\n"
             "  func take(self, p: lib.P) { return self.y + p.x; }\n"
             "}\n"
             "enum E { A { n: int; }; B; }\n"
-            "impl lib.D for E {\n"
+            "impl E {\n"
             "  func d(self) {\n"
             "    return match (self) {\n"
             "      case E.A { n } => n;\n"
@@ -1271,7 +1272,7 @@ def run_cases():
             "app/alias.skein",
             "import lib as l;\n"
             "struct Q2 { y: int; }\n"
-            "impl l.D for Q2 { func d(self) { return self.y; } }\n"
+            "impl Q2 { func d(self) { return self.y; } }\n"
             "println(Q2 { y: 6 }.d());\n"
             "println(Q2 { y: 1 } is l.D);\n",
         )
@@ -1284,28 +1285,18 @@ def run_cases():
             "import lib;\n"
             "struct Q3 { y: int; }\n"
             "impl Q3 { func d(self) { return self.y; } }\n"
-            "impl lib.D for Q3;\n"
+            "println(Q3 { y: 8 } is lib.D);\n"
             "println(Q3 { y: 8 }.d());\n",
         )
         proc = run_file(adapter_main)
         assert proc.returncode == 0, proc.stderr
-        assert proc.stdout.splitlines() == ["8"], proc.stdout
-
-        secret_main = write(
-            "app/secret.skein",
-            "import lib;\n"
-            "struct Q4 { y: int; }\n"
-            "impl lib.Secret for Q4 { func s(self) { return 1; } }\n",
-        )
-        proc = run_file(secret_main)
-        assert proc.returncode == 1, proc.stdout
-        assert "trait lib.Secret is not exported" in proc.stderr, proc.stderr
+        assert proc.stdout.splitlines() == ["true", "8"], proc.stdout
 
         write(
             "app/badlib.skein",
             "package badlib {\n"
             "  struct Hidden { x: int; }\n"
-            "  export trait Bad { func b(self, h: Hidden); }\n"
+            "  protocol Bad { func b(self, h: Hidden); }\n"
             "}\n",
         )
         bad_main = write(
@@ -1328,18 +1319,18 @@ def run_cases():
             "app/d.skein",
             "package d {\n"
             "  func helper(x) { return x + 1; }\n"
-            "  export trait D {\n"
+            "  protocol D {\n"
             "    func d(self, x) { return helper(x); }\n"
             "  }\n"
-            '  export trait E { func e(self) { return "e"; } }\n'
-            "  export struct P with D, E { x: int; }\n"
+            '  protocol E { func e(self) { return "e"; } }\n'
+            "  export struct P { x: int; }\n"
             "  export func make() { return P { x: 1 }; }\n"
             "}\n",
         )
         main = write(
             "app/main.skein",
             "import d;\n"
-            "struct S with d.D, d.E { }\n"
+            "struct S { }\n"
             "println(S { }.d(4));\n"
             "println(S { }.e());\n"
             "let p = d.make();\n"

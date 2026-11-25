@@ -22,18 +22,22 @@ enum MetaEnumInfo {
   B;
 }
 
-trait MetaTraitD {
+protocol MetaProtocolD {
   func draw(self);
 }
 
-struct MetaTraitP {
+struct MetaProtocolP {
   x: int;
 }
 
-impl MetaTraitD for MetaTraitP {
+impl MetaProtocolP {
   func draw(self) {
     return self.x;
   }
+}
+
+struct MetaNoProtocolP {
+  x: int;
 }
 
 struct MetaKindP {
@@ -88,14 +92,19 @@ ts_test("meta enum info", func() {
   ts_eq(std.meta.variants("MetaEnumInfo")[1]["name"], "B");
 });
 
-ts_test("meta trait info", func() {
-  ts_true(std.meta.implements(MetaTraitP { x: 1 }, "MetaTraitD"));
-  ts_true(std.meta.implements("MetaTraitP", "MetaTraitD"));
-  ts_eq(std.meta.traits("MetaTraitP"), ["main.MetaTraitD"]);
-  ts_eq(std.meta.type_info("MetaTraitD")["kind"], "trait");
-  ts_eq(len(std.meta.type_info("MetaTraitD")["methods"][0]["params"]), 0);
-  ts_eq(std.meta.fields("MetaTraitD"), []);
-  ts_eq(std.meta.variants("MetaTraitD"), []);
+ts_test("meta protocol info", func() {
+  ts_true(std.meta.implements(MetaProtocolP { x: 1 }, "MetaProtocolD"));
+  ts_true(std.meta.implements("MetaProtocolP", "MetaProtocolD"));
+  ts_false(std.meta.implements(MetaNoProtocolP { x: 1 }, "MetaProtocolD"));
+  ts_false(std.meta.implements("MetaNoProtocolP", "MetaProtocolD"));
+  ts_eq(std.meta.protocols("MetaProtocolP"), ["main.MetaProtocolD"]);
+  ts_eq(std.meta.protocols("MetaNoProtocolP"), []);
+  ts_eq(std.meta.type_info("MetaProtocolP")["protocols"],
+        ["main.MetaProtocolD"]);
+  ts_eq(std.meta.type_info("MetaProtocolD")["kind"], "protocol");
+  ts_eq(len(std.meta.type_info("MetaProtocolD")["methods"][0]["params"]), 0);
+  ts_eq(std.meta.fields("MetaProtocolD"), []);
+  ts_eq(std.meta.variants("MetaProtocolD"), []);
 });
 
 ts_test("meta builtin types", func() {
@@ -110,7 +119,7 @@ ts_test("meta builtin types", func() {
   ts_eq(std.meta.fields("int"), []);
   ts_eq(std.meta.variants("int"), []);
   ts_eq(std.meta.methods("int"), []);
-  ts_eq(std.meta.traits("int"), []);
+  ts_eq(std.meta.protocols("int"), []);
 });
 
 ts_test("meta builtin descriptor fields", func() {
@@ -121,7 +130,7 @@ ts_test("meta builtin descriptor fields", func() {
   ts_eq(info["fields"], []);
   ts_eq(info["variants"], []);
   ts_eq(info["methods"], []);
-  ts_eq(info["traits"], []);
+  ts_eq(info["protocols"], []);
 });
 
 ts_test("meta builtin name table", func() {
@@ -152,10 +161,10 @@ ts_test("meta unknown type", func() {
   }, "unknown type Nope");
 });
 
-ts_test("meta unknown trait", func() {
+ts_test("meta unknown protocol", func() {
   ts_error(func() {
     return std.meta.implements("int", "Nope");
-  }, "unknown trait Nope");
+  }, "unknown protocol Nope");
 });
 
 ts_test("meta result isolation", func() {

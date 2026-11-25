@@ -568,9 +568,9 @@ bool effect_for(const Proto &proto, const Instr &ins, size_t pc,
                 return fail(error, at_pc("enum declaration out of range", pc));
             stack(0, 1);
             break;
-        case Op::DeclareTrait:
-            if (ins.b >= proto.trait_decls.size())
-                return fail(error, at_pc("trait declaration out of range", pc));
+        case Op::DeclareProtocol:
+            if (ins.b >= proto.protocol_decls.size())
+                return fail(error, at_pc("protocol declaration out of range", pc));
             stack(0, 1);
             break;
         case Op::DeclareImpl:

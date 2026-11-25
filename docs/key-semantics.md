@@ -63,7 +63,7 @@ struct User {
   cache: list[int];
 }
 
-impl dict_key.DictKey for User {
+impl User {
   func dict_hash(self) {
     return self.id;
   }
@@ -85,7 +85,7 @@ impl dict_key.DictKey for User {
 `KeyEq` 是可选的 key 相等接口：
 
 ```skein
-impl dict_key.KeyEq for User {
+impl User {
   func key_eq(self, other) {
     return self.id == other.id;
   }

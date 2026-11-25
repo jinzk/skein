@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Standard library, FFI, encoding, traits and processes.
+"""Standard library, FFI, encoding, protocols and processes.
 
 Extracted from the original test_skein.py main() body, lines 7539-8920.
 """
@@ -2510,9 +2510,9 @@ def run_cases():
     check("call spread requires list",
           "func f(...xs) { return len(xs); }\nf(...1)\n",
           stderr="spread expects a list, got int")
-    check("trait variadic rejected",
-          "trait T { func f(self, ...args); }\n",
-          stderr="trait methods cannot be variadic")
+    check("protocol variadic rejected",
+          "protocol T { func f(self, ...args); }\n",
+          stderr="protocol methods cannot be variadic")
 
     many_globals = "".join(f"let v{i} = {i};\n" for i in range(40))
     check("large symbol table lookup", many_globals + "v0 + v39\n",
@@ -2910,10 +2910,10 @@ def run_cases():
           "f()\np.get()\n",
           stdout_all=["= 5", "= 1", "= 5"])
 
-    check("trait implementation",
-          "trait Drawable { func draw(self); }\n"
+    check("protocol implementation",
+          "protocol Drawable { func draw(self); }\n"
           "struct Point { x: int; }\n"
-          "impl Drawable for Point {\n"
+          "impl Point {\n"
           "  func draw(self) { print(\"point\"); }\n"
           "}\n"
           "let p = Point { x: 1 };\n"
@@ -2921,52 +2921,39 @@ def run_cases():
           "func render(x: Drawable) { x.draw(); }\n"
           "render(p)\n",
           stdout_all=["point", "point"])
-    check("trait adapter with existing method",
-          "trait Drawable { func draw(self); }\n"
+    check("protocol typed variable",
+          "protocol Drawable { func draw(self); }\n"
           "struct Point { x: int; }\n"
-          "impl Point { func draw(self) { print(\"existing\"); } }\n"
-          "impl Drawable for Point;\n"
-          "let p = Point { x: 1 };\n"
-          "func render(x: Drawable) { x.draw(); }\n"
-          "render(p)\n",
-          stdout="existing")
-    check("trait nominal only",
-          "trait Drawable { func draw(self); }\n"
-          "struct Point { x: int; }\n"
-          "impl Point { func draw(self) { print(\"point\"); } }\n"
-          "func render(x: Drawable) { x.draw(); }\n"
-          "render(Point { x: 1 });\n",
-          stderr="type error: expected Drawable, got Point")
-    check("trait typed variable",
-          "trait Drawable { func draw(self); }\n"
-          "struct Point { x: int; }\n"
-          "impl Drawable for Point { func draw(self) { return 1; } }\n"
+          "impl Point { func draw(self) { return 1; } }\n"
           "let d: Drawable = Point { x: 1 };\nd.draw()\n",
           stdout="= 1")
-    check("trait adapter signature mismatch",
-          "trait Drawable { func draw(self, x: int); }\n"
+    check("protocol signature mismatch",
+          "protocol Drawable { func draw(self, x: int); }\n"
           "struct Point { x: int; }\n"
           "impl Point { func draw(self, x: string) { return x; } }\n"
-          "impl Drawable for Point;\n",
-          stderr="method draw does not match the trait signature")
-    check("trait missing method",
-          "trait Drawable { func draw(self); }\n"
+          "func render(x: Drawable) { return x.draw(1); }\n"
+          "render(Point { x: 1 });\n",
+          stderr="expected Drawable, got Point")
+    check("protocol missing method",
+          "protocol Drawable { func draw(self); }\n"
           "struct Point { x: int; }\n"
-          "impl Drawable for Point { }\n",
-          stderr="does not implement method draw required by trait Drawable")
-    check("trait extra method",
-          "trait Drawable { func draw(self); }\n"
+          "func render(x: Drawable) { x.draw(); }\n"
+          "render(Point { x: 1 });\n",
+          stderr="expected Drawable, got Point")
+    check("protocol extra method allowed",
+          "protocol Drawable { func draw(self); }\n"
           "struct Point { x: int; }\n"
-          "impl Drawable for Point {\n"
-          "  func other(self) { return 1; }\n"
-          "}\n",
-          stderr="method other is not declared by trait Drawable")
-    check("duplicate trait implementation",
-          "trait Drawable { func draw(self); }\n"
-          "struct Point { x: int; }\n"
-          "impl Drawable for Point { func draw(self) { return 1; } }\n"
-          "impl Drawable for Point { func draw(self) { return 2; } }\n",
-          stderr="method repeated draw")
+          "impl Point {\n"
+          "  func draw(self) { return 1; }\n"
+          "  func other(self) { return 2; }\n"
+          "}\n"
+          "func render(x: Drawable) { return x.draw(); }\n"
+          "println(render(Point { x: 1 }));\n"
+          "println(Point { x: 1 }.other());\n",
+          stdout_all=["1", "2"])
+    check("protocol method repeated",
+          "protocol Drawable { func draw(self); func draw(self); }\n",
+          stderr="protocol method repeated draw")
     check("duplicate method",
           "struct Point { x: int; }\n"
           "impl Point { func get(self) { return 1; } }\n"
@@ -3004,10 +2991,10 @@ def run_cases():
           "let f = e.value;\n"
           "print(f());\n",
           stdout="4")
-    check("enum trait implementation",
-          "trait Drawable { func draw(self); }\n"
+    check("enum protocol implementation",
+          "protocol Drawable { func draw(self); }\n"
           "enum Shape { Circle { r: int; }; Empty; }\n"
-          "impl Drawable for Shape {\n"
+          "impl Shape {\n"
           "  func draw(self) {\n"
           "    return match (self) {\n"
           "      case Shape.Circle { r } => r;\n"
@@ -3018,18 +3005,17 @@ def run_cases():
           "let s: Drawable = Shape.Circle { r: 7 };\n"
           "print(s.draw());\nprint(s is Drawable);\n",
           stdout_all=["7", "true"])
-    check("enum trait adapter",
-          "trait D { func d(self); }\n"
+    check("enum protocol structural match",
+          "protocol D { func d(self); }\n"
           "enum E { A; }\n"
           "impl E { func d(self) { return 1; } }\n"
-          "impl D for E;\n"
           "let e = E.A;\n"
           "print(e is D);\nprint(e.d());\n",
           stdout_all=["true", "1"])
-    check("enum trait pattern",
-          "trait D { func d(self); }\n"
+    check("enum protocol pattern",
+          "protocol D { func d(self); }\n"
           "enum E { A { n: int; }; }\n"
-          "impl D for E { func d(self) { return self.n; } }\n"
+          "impl E { func d(self) { return self.n; } }\n"
           "func describe(x) {\n"
           "  return match (x) {\n"
           "    case is D as v => v.d();\n"
@@ -3083,11 +3069,11 @@ def run_cases():
           'null is null\n1 is any\n',
           stdout_all=["= true", "= true", "= false", "= true",
                       "= true", "= true", "= true", "= true"])
-    check("is struct and trait",
-          "trait Drawable { func draw(self); }\n"
+    check("is struct and protocol",
+          "protocol Drawable { func draw(self); }\n"
           "struct Point { x: int; }\n"
           "struct Other { x: int; }\n"
-          "impl Drawable for Point { func draw(self) { return 1; } }\n"
+          "impl Point { func draw(self) { return 1; } }\n"
           "let p = Point { x: 1 };\n"
           "let o = Other { x: 1 };\n"
           "p is Point\np is Other\np is Drawable\no is Drawable\n",

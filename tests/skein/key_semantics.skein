@@ -57,64 +57,64 @@ struct KeyCaseIndexUser {
   name: string;
 }
 
-impl dict_key.DictKey for KeyCaseHashUser {
-  func dict_hash(self) {
+impl KeyCaseHashUser {
+  func dict_hash(self): int {
     return self.id;
   }
 }
 
-impl dict_key.DictKey for KeyCaseBadHash {
+impl KeyCaseBadHash {
   func dict_hash(self) {
     return "x";
   }
 }
 
-impl dict_key.DictKey for KeyCaseEqUser {
-  func dict_hash(self) {
+impl KeyCaseEqUser {
+  func dict_hash(self): int {
     return self.id;
   }
 }
 
-impl dict_key.KeyEq for KeyCaseEqUser {
-  func key_eq(self, other) {
+impl KeyCaseEqUser {
+  func key_eq(self, other): bool {
     return self.id == other.id;
   }
 }
 
-impl dict_key.DictKey for KeyCaseBadEq {
-  func dict_hash(self) {
+impl KeyCaseBadEq {
+  func dict_hash(self): int {
     return self.id;
   }
 }
 
-impl dict_key.KeyEq for KeyCaseBadEq {
+impl KeyCaseBadEq {
   func key_eq(self, other) {
     return 1;
   }
 }
 
-impl dict_key.DictKey for KeyCaseReenterA {
-  func dict_hash(self) {
+impl KeyCaseReenterA {
+  func dict_hash(self): int {
     return self.id;
   }
 }
 
-impl dict_key.DictKey for KeyCaseReenterB {
-  func dict_hash(self) {
+impl KeyCaseReenterB {
+  func dict_hash(self): int {
     return self.id;
   }
 }
 
-impl dict_key.KeyEq for KeyCaseReenterA {
-  func key_eq(self, other) {
+impl KeyCaseReenterA {
+  func key_eq(self, other): bool {
     let m = {KeyCaseReenterB { id: 1 }: 1};
     let n = {KeyCaseReenterB { id: 1 }: 1};
     return m[KeyCaseReenterB { id: 1 }] == 1;
   }
 }
 
-impl dict_key.KeyEq for KeyCaseReenterB {
-  func key_eq(self, other) {
+impl KeyCaseReenterB {
+  func key_eq(self, other): bool {
     return self.id == other.id;
   }
 }

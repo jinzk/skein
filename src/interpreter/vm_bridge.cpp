@@ -1168,7 +1168,7 @@ static void ensure_vm_host() {
         host.fn_build_enum_value = &build_enum_value;
         host.fn_declare_struct_meta = &declare_struct_meta;
         host.fn_declare_enum_meta = &declare_enum_meta;
-        host.fn_declare_trait_meta = &declare_trait_meta;
+        host.fn_declare_protocol_meta = &declare_protocol_meta;
         host.fn_declare_impl_meta = &declare_impl_meta;
         host.fn_fiber_await_task = &fiber_await_task;
         host.fn_fiber_launch_value = &fiber_launch_value;

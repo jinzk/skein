@@ -260,22 +260,22 @@ impl DecTimedP {
   }
 }
 
-trait DecTraitS {
+protocol DecHandleS {
   func handle(self);
 }
 
-struct DecTraitC {
+struct DecHandleC {
   x: int;
 }
 
-impl DecTraitS for DecTraitC {
+impl DecHandleC {
   @dec_before_after
   func handle(self) {
     return self.x;
   }
 }
 
-func dec_use(s: DecTraitS) {
+func dec_use(s: DecHandleS) {
   return s.handle();
 }
 
@@ -291,7 +291,7 @@ impl DecEnum {
   }
 }
 
-trait DecDraw {
+protocol DecDraw {
   func draw(self);
 }
 
@@ -299,7 +299,7 @@ struct DecDrawP {
   x: int;
 }
 
-impl DecDraw for DecDrawP {
+impl DecDrawP {
   @dec_trace
   func draw(self) {
     return "P" + str(self.x);
@@ -310,7 +310,7 @@ func dec_render(x: DecDraw) {
   return x.draw();
 }
 
-trait DecAdapterD {
+protocol DecAdapterD {
   func draw(self);
 }
 
@@ -324,8 +324,6 @@ impl DecAdapterP {
     return "P" + str(self.x);
   }
 }
-
-impl DecAdapterD for DecAdapterP;
 
 func dec_adapter_render(x: DecAdapterD) {
   return x.draw();
@@ -447,9 +445,9 @@ ts_test("decorator timed method", func() {
   ts_eq(dec_log, ["before", "after"]);
 });
 
-ts_test("decorator timed trait method", func() {
+ts_test("decorator timed protocol method", func() {
   dec_reset();
-  ts_eq(dec_use(DecTraitC { x: 5 }), 5);
+  ts_eq(dec_use(DecHandleC { x: 5 }), 5);
   ts_eq(dec_log, ["before", "after"]);
 });
 
@@ -459,13 +457,13 @@ ts_test("decorator enum method", func() {
   ts_eq(dec_log, ["enter", "exit"]);
 });
 
-ts_test("decorator trait method", func() {
+ts_test("decorator protocol method", func() {
   dec_reset();
   ts_eq(dec_render(DecDrawP { x: 7 }), "P7");
   ts_eq(dec_log, ["enter", "exit"]);
 });
 
-ts_test("decorator trait adapter", func() {
+ts_test("decorator structural protocol match", func() {
   dec_reset();
   ts_eq(dec_adapter_render(DecAdapterP { x: 8 }), "P8");
   ts_eq(dec_log, ["enter", "exit"]);

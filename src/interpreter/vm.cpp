@@ -687,22 +687,23 @@ public:
                 return OpResult::Continue;
             }
 
-            case Op::DeclareTrait: {
-                if (ins.b >= proto().trait_decls.size()) {
-                    yyerror("invalid bytecode trait declaration");
+            case Op::DeclareProtocol: {
+                if (ins.b >= proto().protocol_decls.size()) {
+                    yyerror("invalid bytecode protocol declaration");
                     return OpResult::Abort;
                 }
-                const skein::bc::TraitDeclMeta &meta =
-                    proto().trait_decls[ins.b];
-                std::vector<trait_method_meta> methods;
+                const skein::bc::ProtocolDeclMeta &meta =
+                    proto().protocol_decls[ins.b];
+                std::vector<protocol_method_meta> methods;
                 methods.reserve(meta.methods.size());
                 for (const auto &method : meta.methods) {
-                    trait_method_meta method_meta;
+                    protocol_method_meta method_meta;
                     method_meta.name = method.name;
                     method_meta.code = method.code;
+                    method_meta.return_type = method.return_type;
                     method_meta.params.reserve(method.params.size());
                     for (const auto &param : method.params) {
-                        trait_param_meta param_meta;
+                        protocol_param_meta param_meta;
                         param_meta.name = param.name;
                         param_meta.type = param.type;
                         param_meta.variadic = param.variadic;
@@ -716,7 +717,7 @@ public:
                 if (closure && closure->is_global)
                     closure.reset();
                 std::string error;
-                if (!declare_trait_meta(
+                if (!declare_protocol_meta(
                         meta.source.c_str(),
                         diag_current_package_name().c_str(),
                         meta.module.c_str(),
@@ -749,8 +750,7 @@ public:
                 if (!declare_impl_meta(
                         meta.source.c_str(),
                         diag_current_package_name().c_str(),
-                        meta.type_name.c_str(), meta.has_trait,
-                        meta.trait_name.c_str(), methods, closure,
+                        meta.type_name.c_str(), methods, closure,
                         error, [this](const std::string &name) {
                             return capture_upvalue(name);
                         }))
@@ -3377,7 +3377,7 @@ public:
 
                 case Op::DeclareStruct:
                 case Op::DeclareEnum:
-                case Op::DeclareTrait:
+                case Op::DeclareProtocol:
                 case Op::DeclareImpl:
                 case Op::NewStruct:
                 case Op::NewEnum:

@@ -7,7 +7,7 @@
  * When g_check_only is true the parser still builds the AST and runs the
  * static typechecker, but skips evaluation of statements that have runtime
  * side effects.  Declaration-like statements are still evaluated so imports,
- * struct/enum/trait definitions and packages can populate the symbol and type
+ * struct/enum/protocol definitions and packages can populate the symbol and type
  * tables needed by the checker.  The flag is thread-local so nested parses
  * (package imports) inherit it.
  */

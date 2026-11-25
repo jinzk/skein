@@ -22,7 +22,7 @@ struct vm_host {
     decltype(&build_enum_value) fn_build_enum_value = nullptr;
     decltype(&declare_struct_meta) fn_declare_struct_meta = nullptr;
     decltype(&declare_enum_meta) fn_declare_enum_meta = nullptr;
-    decltype(&declare_trait_meta) fn_declare_trait_meta = nullptr;
+    decltype(&declare_protocol_meta) fn_declare_protocol_meta = nullptr;
     decltype(&declare_impl_meta) fn_declare_impl_meta = nullptr;
 
     decltype(&fiber_await_task) fn_fiber_await_task = nullptr;

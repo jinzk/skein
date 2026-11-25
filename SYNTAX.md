@@ -31,7 +31,7 @@ let foo变量 = 4;
 let const func yield defer launch wait
 if else while do for
 switch case default
-struct impl trait
+struct impl protocol
 return break continue goto
 fail on error recover pass
 is
@@ -693,55 +693,45 @@ p is Point        // true
 p is int          // false
 ```
 
-trait：
+protocol：
 
 ```text
-trait Drawable {
+protocol Drawable {
   func draw(self);
 }
 
-impl Drawable for Point {
+impl Point {
   func draw(self) {
     print("point");
   }
 }
 
-p is Drawable     // true
+p is Drawable     // true，Point 有签名匹配的 draw
 ```
 
-trait 默认方法：
+protocol 默认方法：
 
 ```text
-trait Drawable {
+protocol Drawable {
   func draw(self) { print("default"); }
   func area(self);
 }
 
-impl Drawable for Point {
+impl Point {
   func area(self) { return 1; }
-  // draw 使用默认实现
+  // draw 使用 protocol 默认实现
 }
 ```
 
-- `impl` 显式提供同名方法时覆盖默认实现；
-- 没有默认体的纯签名方法仍必须实现；
-- 多个 trait 的同名默认方法冲突时，必须在 `impl` 中显式覆盖。
+- protocol 方法可以写签名或默认方法体；`impl Type` 的同名方法覆盖默认实现；
+- 没有默认体的纯签名方法必须由类型方法匹配，否则不满足 protocol；
+- 多个 protocol 提供同名默认方法而类型没有自己的实现时报冲突，需要在 `impl Type` 中显式实现。
 
-`with` 简写：
+protocol 是结构式契约：方法名、参数个数、参数类型、`self` 接收者和返回类型都匹配即满足，不需要 `impl Protocol for Type` 声明。`trait`、`impl Protocol for Type`、`export protocol`、`struct Name with Protocol` / `enum Name with Protocol` 简写均已移除，没有兼容别名；`with` 仍是普通标识符。
 
-```text
-struct Point with Drawable {
-  x: int;
-  y: int;
-}
+未标注类型的方法调用按值的运行时能力查找：值上有同名方法即可调用，不要求事先写 protocol 标注。protocol 标注和 `is Protocol` 则按上述签名规则做结构式检查。
 
-enum Event with Drawable, Serializable { ... }
-```
-
-等价于类型声明后再写 `impl Drawable for Point;`；`with` 只在
-`struct` / `enum` 名称后作为上下文关键字，其他位置仍是普通标识符。
-
-`is` 只接受类型名或 trait 名，不接受任意表达式作为右操作数。类型名按包解析，因此同名结构体不会混淆。
+`is` 只接受类型名或 protocol 名作为右操作数，并做结构式运行时检查；不接受任意表达式。类型名按包解析，因此同名结构体不会混淆。
 
 ### 4.12 运算优先级
 
@@ -849,7 +839,7 @@ let d: char?;                  // 默认 null
 
 `function`、`builtin`、`callable`、`userdata`、`heap`、`task`、`generator`、`socket`、`listener`、`websocket`、`stream`、`pair`、`tuple`，以及不包含 `null` 的 `union` 没有默认值，必须提供初始值。
 
-已声明的 `struct` / `trait` 类型也可以用于类型标注，但没有默认值，必须提供初始值：
+已声明的 `struct` / `protocol` 类型也可以用于类型标注，但没有默认值，必须提供初始值：
 
 ```text
 let x: int = 1;
@@ -880,7 +870,7 @@ let h: heap[int] = std.heap.from_list([1, 2], less);
 ```
 
 - 支持 `list[T]`、`dict[K,V]`、`set[T]`、`deque[T]`、`heap[T]`、`task[T]`、`generator[T]`、`generator[T, S]`、`pair[A, B]`、`tuple[A, B, ...]`、`union[A, B, ...]`，以及嵌套和可空形式，例如 `list[int?]`、`dict[int, list[int]]`、`list[int]?`、`union[int, string]?`；
-- 只支持内建容器的类型参数，不支持用户自定义泛型：`struct Box<T>`、`func f<T>`、泛型 trait / 别名都不允许；
+- 只支持内建容器的类型参数，不支持用户自定义泛型：`struct Box<T>`、`func f<T>`、泛型 protocol / 别名都不允许；
 - 用户类型可以作为参数，例如 `list[Point]`、`dict[string, Point]`；
 - 不带参数的 `list` / `dict` / `set` / `deque` / `heap` 仍然表示无元素约束。
 
@@ -1234,7 +1224,7 @@ if (d == {"a": 1}) { ... }
 if ((Point { x: 1 }) is Point) { ... }
 ```
 
-所有控制流和声明体的 `{` 必须和头部在同一行，`if` / `while` / `for` / `switch` / `match` / `func` / `struct` / `enum` / `trait` / `impl` / `package` / `extern` 都适用；`else` 必须和前面的 `}` 在同一行；`do ... while` 的 `while` 必须和 `}` 在同一行。进入 `{}` 后可以自由换行，表达式和字面量内部的换行仍然会被忽略。
+所有控制流和声明体的 `{` 必须和头部在同一行，`if` / `while` / `for` / `switch` / `match` / `func` / `struct` / `enum` / `protocol` / `impl` / `package` / `extern` 都适用；`else` 必须和前面的 `}` 在同一行；`do ... while` 的 `while` 必须和 `}` 在同一行。进入 `{}` 后可以自由换行，表达式和字面量内部的换行仍然会被忽略。
 
 ### 5.4 while / do while
 
@@ -1480,7 +1470,7 @@ let next = match (state) {
 | 绑定 | `x` | 匹配任意值并绑定 |
 | 通配 | `_` | 匹配任意值，不绑定 |
 | 整体绑定 | `p as Point {x}` | 先匹配子模式，再把整个值绑定到 `p` |
-| 类型 | `case is int`、`case is Point as p` | 按运行时类型匹配，支持内建类型、结构体、enum 和 trait |
+| 类型 | `case is int`、`case is Point as p` | 按运行时类型匹配，支持内建类型、结构体、enum 和 protocol |
 | or | `case 1 \| 2`、`case E.A \| E.B` | 任一子模式匹配即可 |
 | 整数范围 | `case 1..9` | 包含两端，按 int 比较 |
 | dict | `{kind: "tool", data: d}` | 开放匹配，只要求列出的字符串 key 存在 |
@@ -1830,7 +1820,7 @@ impl Box {
 Box { v: 10 }.add()      // 21
 ```
 
-`self` 本身不能有默认值，trait 方法声明也不能有默认值。
+`self` 本身不能有默认值，protocol 方法声明也不能有默认值。
 
 表达式函数同样支持类型约束：
 
@@ -1908,7 +1898,7 @@ sum(1, 2, 3)    // 6
 - 类型标注作用于每个额外参数；
 - 固定参数不足会报错；
 - 方法中 `self` 仍是第一个固定参数，例如 `func std.math.log(self, ...items)`；
-- trait 方法暂不支持可变参数。
+- protocol 方法暂不支持可变参数。
 
 调用点展开：
 
@@ -1990,11 +1980,11 @@ func fetch(x) { return x; }
 当前限制：
 
 - 匿名函数和 `let f = func(...)` 仍然手动包装：`f = dec(f)`；
-- 不支持 `struct` / `enum` / `trait` 声明装饰器；
+- 不支持 `struct` / `enum` / `protocol` 声明装饰器；
 - 不支持在 `let` / `const` 声明前写 `@`；
 - 方法装饰器见 5.12.1。
 
-### 5.12 结构体、impl 与 trait
+### 5.12 结构体、impl 与 protocol
 
 结构体：
 
@@ -2094,7 +2084,7 @@ p.area()      // enter / exit / 12
 规则：
 
 - `@expr` 放在 `impl` 方法声明前，可以连续写多个；
-- 支持固有方法和 `impl Trait for Type` 方法；
+- 支持 `impl Type` 中的方法；protocol 默认方法也走同一套方法签名检查；
 - 多个装饰器从下往上应用，`@a @b func m` 等价于 `a(b(m))`；
 - 装饰器在 `impl` 声明执行时应用一次，不随方法调用重复执行；
 - 装饰器就是普通高阶函数，不新增 `decorator` 关键字；
@@ -2102,8 +2092,8 @@ p.area()      // enter / exit / 12
 - 装饰器必须返回 callable，否则在 `impl` 安装时报告 `expects callable`；
 - 方法装饰器收到的是 unbound function，`self` 是第一个参数；推荐用 `...args` 转发；
 - 装饰器可以修改参数，包括 `args[0]`（`self`），再调用原方法；
-- 调用点不变：`p.area()`、`let f = p.area; f()`、trait 分派都经过装饰器；
-- `std.meta.methods` / `std.meta.traits` 看到的方法签名不变；
+- 调用点不变：`p.area()`、`let f = p.area; f()`，protocol 默认方法也走同一套方法查找；
+- `std.meta.methods` / `std.meta.protocols` 看到的方法签名不变；
 - generator 方法也支持装饰器：生成的 wrapper 是普通函数，直接返回装饰器链产生的
   generator；是否惰性由装饰器决定，与自由函数的 generator 装饰器一致。
   `next` / `for` 仍按 generator 协议驱动，迭代、发送值和 `close` / `defer`
@@ -2144,7 +2134,7 @@ for (let x in Counter { n: 3 }.items()) {
 当前限制：
 
 - 自由函数装饰器见 5.11.1；
-- 不支持 `struct` / `enum` / `trait` 声明装饰器；
+- 不支持 `struct` / `enum` / `protocol` 声明装饰器；
 - 被装饰方法不能使用解构参数；
 - 被装饰方法可以调用会挂起的 API；wrapper 会在当前 fiber 上一起挂起；
 - 装饰器不能改变方法名或声明签名。
@@ -2196,7 +2186,7 @@ let result = c.get("/api");
 - 方法内部可以使用 `defer`、默认参数和可变参数；
 - 默认值在方法体执行前求值；
 - `self` 是接收者副本；字段中的 userdata 等共享句柄正常共享，普通字段修改不会自动回写调用方；
-- enum 方法和 trait 方法同样适用，所有方法语义一致；
+- enum 方法和 protocol 默认方法同样适用，所有方法语义一致；
 - 需要显式 task 句柄时使用 `launch c.get("/api")`，再 `task.wait()`；
 - generator 方法可以挂起后 `yield`，类型仍为 `generator[T]`。
 
@@ -2215,54 +2205,37 @@ func show(p: Point) {
 ```text
 // package aa
 export struct P { x: int; }
-export trait D { func d(self); }
 
 // main
 import aa;
 let p: aa.P = aa.make();
-p is aa.D
 
 import aa as lib;
 let q: lib.P = lib.make();
 ```
 
-- 类型默认只在声明包内可见；
-- `export struct` / `export trait` 后才能通过包路径引用；
+- 类型默认只在声明包内可见；`export struct` / `export enum` 后才能通过包路径引用；
+- `export protocol` 已移除；protocol 名称按包解析，不使用 `export` 建立实现关系；
 - 限定类型名使用 `.`；
 - 未导出的类型不能通过 `aa.Hidden` 引用，但它的值仍能正常传递和调用方法；
-- 其他包可以为自己的类型实现导入的已导出 trait：
+- 其他包的类型只要方法签名匹配就满足 protocol，不需要声明实现关系。
+
+protocol 定义接口：
 
 ```text
-// main
-import aa;
-struct Q { y: int; }
-impl aa.D for Q {
-  func d(self) { return self.y; }
-}
-```
-
-trait 定义接口：
-
-```text
-trait Drawable {
+protocol Drawable {
   func draw(self);
 }
 ```
 
-实现接口：
+类型在 `impl Type` 中提供匹配方法即满足接口：
 
 ```text
-impl Drawable for Point {
+impl Point {
   func draw(self) {
     print("point");
   }
 }
-```
-
-如果方法已在 `impl Point` 中定义，可以只做接口适配：
-
-```text
-impl Drawable for Point;
 ```
 
 接口使用：
@@ -2277,19 +2250,16 @@ render(Point { x: 1, y: 2 });
 
 规则：
 
-- trait 只包含方法签名；
-- 接口是名义式的，必须显式 `impl Trait for Type`；
-- 实现块只能定义 trait 中声明的方法；
-- 实现方法的参数数量和除 `self` 外的参数类型必须与 trait 一致；
-- trait 方法声明不支持默认值；实现方法可以额外提供默认值；
-- 一个类型对同一个 trait 只能实现一次；
-- trait 方法名不能与类型已有方法冲突；enum 上也不能与任意变体字段重名；
-- `impl` 必须写在接收者类型所在的包中；trait 可以来自其他包，但必须是 `export trait`；
-- 导出的 trait 签名只能引用已导出的类型或内建类型；
-- 不支持 trait 继承、默认方法、泛型、静态方法；
-- struct、enum 和 trait 名称共享类型命名空间，不能在同一个包中重名；
-- 类型名按包注册，一个包对应一个源文件；不同包可以定义同名结构体或 trait；
-- 类型名不会自动跨包可见；跨包返回的结构体值仍可以通过字段和方法使用。
+- protocol 可以包含方法签名和默认方法体，不包含字段或 protocol 继承；
+- 一致性是结构式的：方法名、参数个数、参数类型、`self` 接收者和返回类型都要匹配，不需要 `impl Protocol for Type`；
+- 没有默认体的签名必须由 `impl Type` 中的方法匹配，否则不满足 protocol；
+- `impl Type` 的同名方法覆盖 protocol 默认方法；多个 protocol 提供同名默认方法而类型没有自己的实现时报冲突，需要在 `impl Type` 中显式实现；
+- protocol 方法声明不支持默认值和可变参数；`impl Type` 中的方法可以额外提供默认值；
+- enum 上的方法名不能与任意变体字段重名；
+- 不支持 protocol 继承、泛型和静态方法；`trait`、`impl Protocol for Type`、`export protocol` 和 `with` 协议简写均已移除；
+- struct、enum 和 protocol 名称共享类型命名空间，不能在同一个包中重名；
+- 类型名按包注册，一个包对应一个源文件；不同包可以定义同名结构体或 protocol；
+- 未标注类型的方法调用按运行时能力查找；protocol 标注和 `is Protocol` 是结构式契约；跨包返回的结构体值仍可以通过字段和方法使用。
 
 ### 5.13 枚举
 
@@ -2319,7 +2289,7 @@ let b = Event.Timeout;
 - 载荷字段只读：`a.text` 可读，`a.text = ...` 会报错；
 - 字段访问按当前变体校验：`Event.Timeout.text` 报错；
 - 方法只能写在 `impl Event` 中；方法内 `self` 只读，修改状态时返回新 enum；
-- `impl Trait for Event` 可以让 enum 参与 trait 接口；enum 也能用于 `is` 和类型标注；
+- enum 方法同样按结构式规则满足 protocol：只要 `impl Event` 的方法签名匹配即可；`Event` 也能用于 `is` 和类型标注；
 - 方法名不能与任意变体的字段重名；
 - `kind_of(e)` → `"enum"`，`type_name(e)` → `"Event"`，`type_package(e)` → 包名；
 - 类型标注：`let e: Event = Event.UserMsg { text: "hi" };`；
@@ -2338,9 +2308,7 @@ impl Shape {
       case Shape.Rect { w, h } => w * h;
     };
   }
-}
 
-impl Drawable for Shape {
   func draw(self) { return self.area(); }
 }
 ```
@@ -2382,7 +2350,6 @@ export let value = 1;
 export const fixed = 2;
 export func hello() { return "hi"; }
 export struct Point { x: int; }
-export trait Drawable { func draw(self); }
 
 export x = 3;
 ```
@@ -2394,7 +2361,7 @@ export let NAME = expr;
 export const NAME = expr;
 export func NAME(params) { ... }
 export struct NAME { ... }
-export trait NAME { ... }
+export enum NAME { ... }
 export NAME = expr;
 ```
 
@@ -2490,7 +2457,7 @@ include "shared/helpers.skein";
 ```
 
 - 只在声明层允许（顶层或 `package {}` 内）；
-- 只导入声明：`import`、`include`、`func`、`struct`、`enum`、`trait`、
+- 只导入声明：`import`、`include`、`func`、`struct`、`enum`、`protocol`、
   `impl`、`let` / `const`；
 - 被包含文件可 `import std`；相对 import 以被包含文件目录为基准；
 - 被包含文件不能声明 `package` / `module`，不能含顶层可执行代码；
@@ -3111,7 +3078,7 @@ std.io.write_task(stream, data[, timeout_ms])
 - `std.json`：JSON 解析与序列化，object 映射为 `dict`；
 - `std.websocket`：WebSocket 握手与帧编解码；
 - `std.type`：`kind_of`、`name`、`module`、`source`；
-- `std.meta`：只读类型反射，查询字段、变体、方法和 trait；
+- `std.meta`：只读类型反射，查询字段、变体、方法和 protocol；
 - `std.net`：同步和 task 形式异步的 TCP/DNS，底层使用 libuv；
 - `std.http`：基于 llhttp 的 HTTP/1.1 客户端和服务端，客户端支持 sync/task；
 - `std.tls`：基于 OpenSSL 的同步 TLS 流包装（可选）；
@@ -4353,8 +4320,8 @@ std.meta.type_info(type)                -> dict
 std.meta.fields(type)                   -> list
 std.meta.variants(type)                 -> list
 std.meta.methods(type)                  -> list
-std.meta.traits(type)                   -> list
-std.meta.implements(type, trait_name)   -> bool
+std.meta.protocols(type)                -> list
+std.meta.implements(type, protocol_name) -> bool
 std.meta.has_type(type)                 -> bool
 ```
 
@@ -4391,7 +4358,7 @@ info["methods"][0]["has_defaults"]; // true
 
 ```text
 {
-  "kind": "struct" | "enum" | "trait" | "builtin",
+  "kind": "struct" | "enum" | "protocol" | "builtin",
   "name": "Point",
   "module": "main",
   "source": "main",
@@ -4399,7 +4366,7 @@ info["methods"][0]["has_defaults"]; // true
   "fields": [ ... ],
   "variants": [ ... ],
   "methods": [ ... ],
-  "traits": [ ... ]
+  "protocols": [ ... ]
 }
 ```
 
@@ -4428,7 +4395,7 @@ enum 变体字段的 `readonly` 为 `true`。变体描述：
 
 规则：
 
-- `fields` / `variants` / `methods` / `traits` 对不适用的类型返回空列表；
+- `fields` / `variants` / `methods` / `protocols` 对不适用的类型返回空列表；
 - 只查询**已加载且可见**的类型：当前包/当前源文件中的类型可见；其他包的
   类型必须 `export`。不可见类型在 `type_info` 等函数中报
   `type X is not visible`，`has_type` 返回 `false`；
@@ -4443,7 +4410,7 @@ enum 变体字段的 `readonly` 为 `true`。变体描述：
 - `method` / `native` / `class` / `struct` / `enum` 是运行时 kind，
   不是类型名；
 - `has_type` 对未知类型返回 `false`；其他函数对未知类型报错；
-- `implements` 要求 trait 名已知，未知 trait 报错；
+- `protocols` / `implements` 按结构式签名匹配返回满足的 protocol；`implements` 要求 protocol 名已知，未知 protocol 报错；
 - 不返回值默认值，只提供 `has_default` 标记。
 
 ### std.enum
@@ -4614,13 +4581,11 @@ struct User {
   cache: list[int];
 }
 
-impl dict_key.DictKey for User {
+impl User {
   func dict_hash(self) {
     return self.id;
   }
-}
 
-impl dict_key.KeyEq for User {
   func key_eq(self, other) {
     return self.id == other.id;
   }
@@ -5237,7 +5202,8 @@ try/catch
 可变 self
 私有成员
 struct 继承
-trait 继承 / 默认方法
+protocol 继承
+trait / impl Protocol for Type / export protocol / with 协议简写
 用户自定义泛型（仅内建容器支持 `[...]` 类型参数）/ Option / 匿名联合类型
 ```
 

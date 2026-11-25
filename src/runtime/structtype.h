@@ -21,9 +21,13 @@ struct method_sig {
     std::string name;
     /* Includes the receiver as the first parameter. */
     std::vector<struct type_constraint> params;
+    int required_params = 0;
+    bool variadic = false;
+    /* Null means the protocol does not constrain the return type. */
+    std::shared_ptr<const struct type_constraint> return_type;
 };
 
-struct trait_def {
+struct protocol_def {
     std::string name;
     std::string source;
     std::string package;
@@ -53,12 +57,13 @@ struct type_def {
     std::string module;
     bool exported;
     std::unordered_map<std::string, std::shared_ptr<function_def>> methods;
+    /* Method names explicitly declared by `impl Type`, not injected defaults. */
+    std::unordered_set<std::string> explicit_methods;
     /*
-     * Method names supplied by a trait default rather than an impl, mapped
-     * to the trait that supplied them (for conflict detection).
+     * Method names supplied by a protocol default rather than an impl, mapped
+     * to the protocol that supplied them (for conflict detection).
      */
-    std::unordered_map<std::string, const trait_def *> default_methods;
-    std::vector<const trait_def *> traits;
+    std::unordered_map<std::string, const protocol_def *> default_methods;
 };
 
 struct enum_def : type_def {
@@ -116,11 +121,11 @@ struct_def *structtype_find_struct_by_name(const char *package,
                                            const char *name,
                                            bool *ambiguous = NULL);
 type_def *structtype_find_type(const char *module, const char *name);
-trait_def *structtype_find_trait(const char *module, const char *name);
-trait_def *structtype_find_trait_by_name(const char *package,
+protocol_def *structtype_find_protocol(const char *module, const char *name);
+protocol_def *structtype_find_protocol_by_name(const char *package,
                                          const char *name,
                                          bool *ambiguous = NULL);
-trait_def *structtype_resolve_trait(const char *module, const char *name,
+protocol_def *structtype_resolve_protocol(const char *module, const char *name,
                                     bool require_exported,
                                     std::string &error);
 enum_def *structtype_find_enum(const char *module, const char *name);
@@ -128,12 +133,13 @@ enum_def *structtype_find_enum_by_name(const char *package,
                                        const char *name,
                                        bool *ambiguous = NULL);
 bool structtype_type_exists(const char *module, const char *name);
+bool named_type_visible(const char *source, const char *name);
 
 enum structtype_lookup_kind {
     STRUCTTYPE_LOOKUP_NONE,
     STRUCTTYPE_LOOKUP_STRUCT,
     STRUCTTYPE_LOOKUP_ENUM,
-    STRUCTTYPE_LOOKUP_TRAIT,
+    STRUCTTYPE_LOOKUP_PROTOCOL,
 };
 
 enum structtype_lookup_status {
@@ -148,13 +154,13 @@ struct structtype_lookup_result {
     enum structtype_lookup_kind kind;
     struct_def *structure;
     enum_def *enumeration;
-    trait_def *trait;
+    protocol_def *protocol;
 
     structtype_lookup_result()
         : kind(STRUCTTYPE_LOOKUP_NONE),
           structure(NULL),
           enumeration(NULL),
-          trait(NULL) {}
+          protocol(NULL) {}
 };
 
 /*
@@ -180,15 +186,15 @@ bool structtype_finalize_struct(struct_def *def,
                                 std::vector<field_def> fields,
                                 std::string &error);
 void structtype_rollback_struct(struct_def *def);
-bool structtype_create_trait(const char *source, const char *package,
+bool structtype_create_protocol(const char *source, const char *package,
                              const char *module, const char *name, bool exported,
                              std::vector<method_sig> methods,
-                             trait_def *&out, std::string &error);
+                             protocol_def *&out, std::string &error);
 bool structtype_create_enum(const char *source, const char *package,
                             const char *module, const char *name, bool exported,
                             std::vector<variant_def> variants,
                             enum_def *&out, std::string &error);
-bool structtype_add_trait_default(trait_def *trait, const std::string &name,
+bool structtype_add_protocol_default(protocol_def *protocol, const std::string &name,
                                   std::shared_ptr<function_def> code,
                                   std::string &error);
 bool structtype_prepare_enum(const char *source, const char *package,
@@ -201,18 +207,29 @@ void structtype_rollback_enum(enum_def *def);
 bool structtype_add_method(type_def *def, const std::string &name,
                            std::shared_ptr<function_def> code,
                            std::string &error);
+bool structtype_set_default_method(type_def *def, const std::string &name,
+                                   std::shared_ptr<function_def> code,
+                                   const protocol_def *protocol,
+                                   std::string &error);
 std::shared_ptr<function_def> structtype_method(const type_def *def,
                                                 const std::string &name);
 void structtype_set_thread_method(const type_def *def, const std::string &name,
                                   std::shared_ptr<function_def> method);
 uint64_t structtype_method_generation();
 std::vector<std::string> structtype_method_names(const type_def *def);
-std::shared_ptr<function_def> structtype_trait_default(
-    const trait_def *trait, const std::string &name);
-bool structtype_add_trait(type_def *def, trait_def *trait,
-                          std::string &error);
+std::shared_ptr<function_def> structtype_protocol_default(
+    const protocol_def *protocol, const std::string &name);
 
-bool structtype_has_trait(const type_def *def, const trait_def *trait);
+/* Structural protocol conformance and injected default-method refresh. */
+bool structtype_method_signature_matches(const method_sig &sig,
+                                          const struct function_code *code,
+                                          std::string &error);
+bool structtype_satisfies_protocol(const type_def *def,
+                                   const protocol_def *protocol);
+std::vector<const protocol_def *> structtype_protocols(const type_def *def);
+bool structtype_refresh_protocol_defaults(type_def *def, std::string &error);
+bool structtype_refresh_all_protocol_defaults(std::string &error);
+bool structtype_has_protocol(const type_def *def, const protocol_def *protocol);
 int structtype_field_index(const struct_def *def, const std::string &name);
 int structtype_variant_index(const enum_def *def, const std::string &name);
 int structtype_variant_field_index(const variant_def *variant,

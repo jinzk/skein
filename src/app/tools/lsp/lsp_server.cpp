@@ -218,7 +218,7 @@ const char *keyword_detail(const std::string &word) {
         {"default", "switch default"},{"match", "pattern match"},
         {"let", "binding"},           {"const", "constant binding"},
         {"func", "function"},         {"struct", "struct type"},
-        {"enum", "enum type"},        {"trait", "trait"},
+        {"enum", "enum type"},        {"protocol", "protocol"},
         {"impl", "implementation"},   {"extern", "external declaration"},
         {"package", "package"},       {"module", "module"},
         {"import", "import"},         {"include", "include"},
@@ -250,14 +250,14 @@ int symbol_kind_for_keyword(const std::string &keyword) {
     if (keyword == "const") return 14;      // Constant
     if (keyword == "struct" || keyword == "impl") return 5; // Class
     if (keyword == "enum") return 10;       // Enum
-    if (keyword == "trait") return 11;      // Interface
+    if (keyword == "protocol") return 11;      // Interface
     if (keyword == "package" || keyword == "module") return 3; // Namespace
     return 12;
 }
 
 std::vector<doc_symbol> scan_document_symbols(const std::string &text) {
     static const std::vector<std::string> keywords = {
-        "func", "struct", "enum", "trait", "impl", "let", "const",
+        "func", "struct", "enum", "protocol", "impl", "let", "const",
         "package", "module", "extern",
     };
     std::vector<doc_symbol> symbols;

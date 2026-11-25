@@ -498,7 +498,7 @@ struct Compiler {
             case Op::BindFunc:
             case Op::DeclareStruct:
             case Op::DeclareEnum:
-            case Op::DeclareTrait:
+            case Op::DeclareProtocol:
             case Op::DeclareImpl:
                 proto.uses_names = true;
                 break;
@@ -785,15 +785,15 @@ struct Compiler {
         return static_cast<uint32_t>(proto.packages.size() - 1);
     }
 
-    uint32_t add_trait_decl(struct trait_node *node) {
-        skein::bc::TraitDeclMeta meta;
+    uint32_t add_protocol_decl(struct protocol_node *node) {
+        skein::bc::ProtocolDeclMeta meta;
         meta.source = node->source ? node->source : "";
         meta.module = node->module ? node->module : "";
         meta.name = node->name ? node->name : "";
         meta.exported = node->exported != 0;
-        for (struct trait_method *method = node->methods; method;
+        for (struct protocol_method *method = node->methods; method;
              method = method->next) {
-            skein::bc::TraitMethodMeta method_meta;
+            skein::bc::ProtocolMethodMeta method_meta;
             method_meta.name = method->name ? method->name : "";
             struct symlist *params =
                 method->func
@@ -801,7 +801,7 @@ struct Compiler {
                     : method->params;
             for (struct symlist *param = params; param;
                  param = param->next) {
-                skein::bc::TraitParamMeta param_meta;
+                skein::bc::ProtocolParamMeta param_meta;
                 param_meta.name =
                     param->sym && param->sym->name ? param->sym->name : "";
                 param_meta.type =
@@ -811,7 +811,16 @@ struct Compiler {
                 param_meta.has_default = param->has_default;
                 method_meta.params.push_back(std::move(param_meta));
             }
-            if (method->func) {
+            struct funcdef *default_func =
+                method->func ? (struct funcdef *)method->func : NULL;
+            struct type_constraint *declared_return =
+                default_func && default_func->ret_type
+                    ? default_func->ret_type
+                    : method->ret_type;
+            if (declared_return)
+                method_meta.return_type =
+                    std::make_shared<type_constraint>(*declared_return);
+            if (method->has_default) {
                 uint32_t function =
                     add_function((struct funcdef *)method->func);
                 if (!ok)
@@ -820,16 +829,14 @@ struct Compiler {
             }
             meta.methods.push_back(std::move(method_meta));
         }
-        proto.trait_decls.push_back(std::move(meta));
-        return static_cast<uint32_t>(proto.trait_decls.size() - 1);
+        proto.protocol_decls.push_back(std::move(meta));
+        return static_cast<uint32_t>(proto.protocol_decls.size() - 1);
     }
 
     uint32_t add_impl_decl(struct impl_node *node) {
         skein::bc::ImplDeclMeta meta;
         meta.source = node->source ? node->source : "";
         meta.type_name = node->type_name ? node->type_name : "";
-        meta.has_trait = node->trait_name != NULL;
-        meta.trait_name = node->trait_name ? node->trait_name : "";
         for (struct struct_member *member = node->methods; member;
              member = member->next) {
             if (member->nodetype != 'm')
@@ -2249,9 +2256,9 @@ struct Compiler {
 
             case 't': {
                 uint32_t descriptor =
-                    add_trait_decl((struct trait_node *)node);
+                    add_protocol_decl((struct protocol_node *)node);
                 if (!ok) return;
-                emit(Op::DeclareTrait, 0, 0, descriptor, here);
+                emit(Op::DeclareProtocol, 0, 0, descriptor, here);
                 emit_null(here);
                 return;
             }

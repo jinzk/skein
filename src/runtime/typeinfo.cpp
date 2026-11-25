@@ -39,7 +39,7 @@ const char *builtin_type_for_value(const struct value_t *value) {
 enum resolved_kind {
     RESOLVED_STRUCT,
     RESOLVED_ENUM,
-    RESOLVED_TRAIT,
+    RESOLVED_PROTOCOL,
     RESOLVED_BUILTIN,
 };
 
@@ -47,7 +47,7 @@ struct resolved_type {
     resolved_kind kind = RESOLVED_BUILTIN;
     const struct_def *structure = NULL;
     const enum_def *enumeration = NULL;
-    const trait_def *trait = NULL;
+    const protocol_def *protocol = NULL;
     const char *builtin_name = NULL;
     std::string input_name;
 };
@@ -167,9 +167,9 @@ resolve_status resolve_type_arg(const char *importer_source,
             out.kind = RESOLVED_ENUM;
             out.enumeration = lookup.enumeration;
             break;
-        case STRUCTTYPE_LOOKUP_TRAIT:
-            out.kind = RESOLVED_TRAIT;
-            out.trait = lookup.trait;
+        case STRUCTTYPE_LOOKUP_PROTOCOL:
+            out.kind = RESOLVED_PROTOCOL;
+            out.protocol = lookup.protocol;
             break;
         default:
             error = "invalid type " + text;
@@ -178,20 +178,20 @@ resolve_status resolve_type_arg(const char *importer_source,
     return RESOLVE_FOUND;
 }
 
-resolve_status resolve_trait_arg(const char *importer_source,
+resolve_status resolve_protocol_arg(const char *importer_source,
                                  const char *importer_package,
-                                 struct value_t *arg, const trait_def *&out,
+                                 struct value_t *arg, const protocol_def *&out,
                                  std::string &error) {
     out = NULL;
     error.clear();
     if (!arg || arg->type != T_string) {
-        error = "std.meta.implements expects a trait name string";
+        error = "std.meta.implements expects a protocol name string";
         return RESOLVE_ERROR;
     }
 
     std::string text = ((const string_value_t *)arg)->value;
     if (type_constraint_canonical_builtin_name(text.c_str())) {
-        error = "type " + text + " is not a trait";
+        error = "type " + text + " is not a protocol";
         return RESOLVE_ERROR;
     }
 
@@ -202,7 +202,7 @@ resolve_status resolve_trait_arg(const char *importer_source,
         case STRUCTTYPE_LOOKUP_FOUND:
             break;
         case STRUCTTYPE_LOOKUP_NOT_FOUND:
-            error = "unknown trait " + text;
+            error = "unknown protocol " + text;
             return RESOLVE_NOT_FOUND;
         case STRUCTTYPE_LOOKUP_AMBIGUOUS:
         case STRUCTTYPE_LOOKUP_NOT_VISIBLE:
@@ -210,11 +210,11 @@ resolve_status resolve_trait_arg(const char *importer_source,
             return RESOLVE_ERROR;
     }
 
-    if (lookup.kind != STRUCTTYPE_LOOKUP_TRAIT) {
-        error = "type " + text + " is not a trait";
+    if (lookup.kind != STRUCTTYPE_LOOKUP_PROTOCOL) {
+        error = "type " + text + " is not a protocol";
         return RESOLVE_ERROR;
     }
-    out = lookup.trait;
+    out = lookup.protocol;
     return RESOLVE_FOUND;
 }
 
@@ -236,12 +236,12 @@ std::string type_text(const struct type_constraint *type) {
     return std::string(type_constraint_name(type));
 }
 
-std::string trait_name(const trait_def *trait) {
-    if (!trait)
+std::string protocol_name(const protocol_def *protocol) {
+    if (!protocol)
         return std::string();
-    if (trait->package.empty())
-        return trait->name;
-    return trait->package + "." + trait->name;
+    if (protocol->package.empty())
+        return protocol->name;
+    return protocol->package + "." + protocol->name;
 }
 
 struct value_t *field_info(const field_def &field, bool readonly) {
@@ -324,7 +324,7 @@ struct value_t *type_methods(const type_def *definition) {
     return (struct value_t *)methods;
 }
 
-struct value_t *trait_methods(const trait_def *definition) {
+struct value_t *protocol_methods(const protocol_def *definition) {
     struct list_value_t *methods = newlistval();
     if (!definition)
         return (struct value_t *)methods;
@@ -342,23 +342,25 @@ struct value_t *trait_methods(const trait_def *definition) {
     return (struct value_t *)methods;
 }
 
-struct value_t *type_traits(const type_def *definition) {
-    struct list_value_t *traits = newlistval();
+struct value_t *type_protocols(const type_def *definition) {
+    struct list_value_t *protocols = newlistval();
     if (!definition)
-        return (struct value_t *)traits;
+        return (struct value_t *)protocols;
 
+    std::vector<const protocol_def *> matched =
+        structtype_protocols(definition);
     std::vector<std::string> names;
-    names.reserve(definition->traits.size());
-    for (const trait_def *trait : definition->traits) {
-        if (!trait)
+    names.reserve(matched.size());
+    for (const protocol_def *protocol : matched) {
+        if (!protocol)
             continue;
-        names.push_back(trait_name(trait));
+        names.push_back(protocol_name(protocol));
     }
     std::sort(names.begin(), names.end());
     names.erase(std::unique(names.begin(), names.end()), names.end());
     for (const std::string &name : names)
-        list_add(traits, newstrval(name.c_str()));
-    return (struct value_t *)traits;
+        list_add(protocols, newstrval(name.c_str()));
+    return (struct value_t *)protocols;
 }
 
 struct value_t *struct_fields(const struct_def *definition) {
@@ -387,7 +389,7 @@ struct value_t *new_type_dict(const char *kind, const char *name,
                               struct value_t *fields,
                               struct value_t *variants,
                               struct value_t *methods,
-                              struct value_t *traits) {
+                              struct value_t *protocols) {
     struct dict_value_t *dict = newdictval();
     dict_add(dict, "kind", newstrval(kind));
     dict_add(dict, "name", newstrval(name));
@@ -398,7 +400,7 @@ struct value_t *new_type_dict(const char *kind, const char *name,
     dict_add(dict, "fields", fields);
     dict_add(dict, "variants", variants);
     dict_add(dict, "methods", methods);
-    dict_add(dict, "traits", traits);
+    dict_add(dict, "protocols", protocols);
     return (struct value_t *)dict;
 }
 
@@ -413,21 +415,21 @@ struct value_t *make_type_info(const resolved_type &type) {
             return new_type_dict("struct", def->name.c_str(), def->package,
                                  def->module, def->source, def->exported,
                                  struct_fields(def), new_string_list(),
-                                 type_methods(def), type_traits(def));
+                                 type_methods(def), type_protocols(def));
         }
         case RESOLVED_ENUM: {
             const enum_def *def = type.enumeration;
             return new_type_dict("enum", def->name.c_str(), def->package,
                                  def->module, def->source, def->exported,
                                  new_string_list(), enum_variants(def),
-                                 type_methods(def), type_traits(def));
+                                 type_methods(def), type_protocols(def));
         }
-        case RESOLVED_TRAIT: {
-            const trait_def *def = type.trait;
-            return new_type_dict("trait", def->name.c_str(), def->package,
+        case RESOLVED_PROTOCOL: {
+            const protocol_def *def = type.protocol;
+            return new_type_dict("protocol", def->name.c_str(), def->package,
                                  def->module, def->source, def->exported,
                                  new_string_list(), new_string_list(),
-                                 trait_methods(def), new_string_list());
+                                 protocol_methods(def), new_string_list());
         }
     }
     return NULL;
@@ -461,18 +463,18 @@ struct value_t *resolved_variants(const resolved_type &type) {
 }
 
 struct value_t *resolved_methods(const resolved_type &type) {
-    if (type.kind == RESOLVED_TRAIT)
-        return trait_methods(type.trait);
+    if (type.kind == RESOLVED_PROTOCOL)
+        return protocol_methods(type.protocol);
     const type_def *definition = as_type_def(type);
     if (definition)
         return type_methods(definition);
     return new_string_list();
 }
 
-struct value_t *resolved_traits(const resolved_type &type) {
+struct value_t *resolved_protocols(const resolved_type &type) {
     const type_def *definition = as_type_def(type);
     if (definition)
-        return type_traits(definition);
+        return type_protocols(definition);
     return new_string_list();
 }
 
@@ -530,7 +532,7 @@ struct value_t *typeinfo_methods(const char *importer_source,
     return resolved_methods(type);
 }
 
-struct value_t *typeinfo_traits(const char *importer_source,
+struct value_t *typeinfo_protocols(const char *importer_source,
                                 const char *importer_package,
                                 struct value_t *type_arg) {
     resolved_type type;
@@ -540,13 +542,13 @@ struct value_t *typeinfo_traits(const char *importer_source,
                                                type, error),
                               error))
         return NULL;
-    return resolved_traits(type);
+    return resolved_protocols(type);
 }
 
 struct value_t *typeinfo_implements(const char *importer_source,
                                     const char *importer_package,
                                     struct value_t *type_arg,
-                                    struct value_t *trait_arg) {
+                                    struct value_t *protocol_arg) {
     resolved_type type;
     std::string error;
     if (!report_resolve_error(resolve_type_arg(importer_source,
@@ -555,17 +557,17 @@ struct value_t *typeinfo_implements(const char *importer_source,
                               error))
         return NULL;
 
-    const trait_def *trait = NULL;
-    if (!report_resolve_error(resolve_trait_arg(importer_source,
-                                                importer_package, trait_arg,
-                                                trait, error),
+    const protocol_def *protocol = NULL;
+    if (!report_resolve_error(resolve_protocol_arg(importer_source,
+                                                importer_package, protocol_arg,
+                                                protocol, error),
                               error))
         return NULL;
 
     const type_def *definition = as_type_def(type);
     if (!definition)
         return newboolval(false);
-    return newboolval(structtype_has_trait(definition, trait));
+    return newboolval(structtype_has_protocol(definition, protocol));
 }
 
 struct value_t *typeinfo_has_type(const char *importer_source,

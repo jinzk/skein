@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Task methods, trait methods and launch/task metadata.
+"""Task methods, protocol methods and launch/task metadata.
 
 Method and launch/scope behavior cases live in tests/skein/task_methods_basic.skein
 and tests/skein/task_methods_launch.skein.  GC, error, and temp-package cases

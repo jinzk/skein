@@ -31,7 +31,7 @@ bool ast_is_declaration(const struct ast *node) {
         case 'H': // impl
         case 'K': // package
         case 'J': // import
-        case 't': // trait declaration
+        case 't': // protocol declaration
         case NODE_ENUM_DECL:
         case NODE_INCLUDE:
             return true;
@@ -306,7 +306,7 @@ bool walk_members(const struct struct_member *member,
     return true;
 }
 
-bool walk_trait_methods(const struct trait_method *method,
+bool walk_protocol_methods(const struct protocol_method *method,
                         const AstWalkEnter &enter,
                         const AstWalkLeave &leave) {
     for (; method; method = method->next) {
@@ -365,8 +365,8 @@ bool walk_impl(const struct ast *node, const AstWalkEnter &enter,
                     return false;
                 break;
             case 't':
-                if (!walk_trait_methods(
-                        ((struct trait_node *)node)->methods, enter, leave))
+                if (!walk_protocol_methods(
+                        ((struct protocol_node *)node)->methods, enter, leave))
                     return false;
                 break;
             case NODE_ENUM_DECL:

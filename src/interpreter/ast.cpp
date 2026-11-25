@@ -1279,7 +1279,7 @@ struct ast *append_struct_member(struct ast *head, struct ast *member) {
     return head;
 }
 
-struct ast *newimpl(char *type_name, char *trait_name, char *source,
+struct ast *newimpl(char *type_name, char *source,
                     struct struct_member *methods) {
     struct impl_node *a =
         (struct impl_node *)ast_node_alloc(sizeof(struct impl_node));
@@ -1290,16 +1290,15 @@ struct ast *newimpl(char *type_name, char *trait_name, char *source,
     a->nodetype = 'H';
     set_loc(a, 0, 0);
     a->type_name = type_name;
-    a->trait_name = trait_name;
     a->source = source;
     a->methods = methods;
     return (struct ast *)a;
 }
 
-struct ast *newtraitdecl(char *name, char *source,
-                         struct trait_method *methods, bool exported) {
-    struct trait_node *a =
-        (struct trait_node *)ast_node_alloc(sizeof(struct trait_node));
+struct ast *newprotocoldecl(char *name, char *source,
+                         struct protocol_method *methods, bool exported) {
+    struct protocol_node *a =
+        (struct protocol_node *)ast_node_alloc(sizeof(struct protocol_node));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -1314,10 +1313,11 @@ struct ast *newtraitdecl(char *name, char *source,
     return (struct ast *)a;
 }
 
-struct ast *newtraitmethod(char *name, struct symlist *params,
-                           struct ast *func) {
-    struct trait_method *a =
-        (struct trait_method *)ast_node_alloc(sizeof(struct trait_method));
+struct ast *newprotocolmethod(char *name, struct symlist *params,
+                           struct type_constraint *ret_type, struct ast *func,
+                           bool has_default) {
+    struct protocol_method *a =
+        (struct protocol_method *)ast_node_alloc(sizeof(struct protocol_method));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
@@ -1326,16 +1326,18 @@ struct ast *newtraitmethod(char *name, struct symlist *params,
     set_loc(a, 0, 0);
     a->name = name;
     a->params = params;
+    a->ret_type = ret_type;
     a->func = func;
+    a->has_default = has_default;
     a->next = NULL;
     return (struct ast *)a;
 }
 
-struct ast *append_trait_method(struct ast *head, struct ast *method) {
+struct ast *append_protocol_method(struct ast *head, struct ast *method) {
     if (!head) return method;
-    struct trait_method *current = (struct trait_method *)head;
+    struct protocol_method *current = (struct protocol_method *)head;
     while (current->next) current = current->next;
-    current->next = (struct trait_method *)method;
+    current->next = (struct protocol_method *)method;
     return head;
 }
 
@@ -1683,12 +1685,11 @@ void treefree(struct ast *a) {
             struct impl_node *i = (struct impl_node *)a;
             treefree((struct ast *)i->methods);
             std::free(i->type_name);
-            std::free(i->trait_name);
             std::free(i->source);
             break;
         }
         case 't': {
-            struct trait_node *t = (struct trait_node *)a;
+            struct protocol_node *t = (struct protocol_node *)a;
             treefree((struct ast *)t->methods);
             std::free(t->name);
             std::free(t->source);
@@ -1712,10 +1713,11 @@ void treefree(struct ast *a) {
             break;
         }
         case 'q': {
-            struct trait_method *m = (struct trait_method *)a;
+            struct protocol_method *m = (struct protocol_method *)a;
             treefree((struct ast *)m->next);
             treefree(m->func);
             symlistfree_full(m->params);
+            free_type_constraint(m->ret_type);
             std::free(m->name);
             break;
         }

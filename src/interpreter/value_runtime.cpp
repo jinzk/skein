@@ -1276,8 +1276,7 @@ struct value_t *read_member_value(struct value_t *container,
 bool validate_type_constraint(const struct type_constraint *type) {
     if (!type) return true;
     if (type->kind == TYPE_NAMED) {
-        if (!type->name ||
-            !structtype_type_exists(type->source, type->name)) {
+        if (!type->name || !named_type_visible(type->source, type->name)) {
             yyerror("unknown type name %s",
                     type->name ? type->name : "invalid");
             return false;

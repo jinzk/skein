@@ -14,7 +14,7 @@
 #define build_enum_value (skein_vm_host().fn_build_enum_value)
 #define declare_struct_meta (skein_vm_host().fn_declare_struct_meta)
 #define declare_enum_meta (skein_vm_host().fn_declare_enum_meta)
-#define declare_trait_meta (skein_vm_host().fn_declare_trait_meta)
+#define declare_protocol_meta (skein_vm_host().fn_declare_protocol_meta)
 #define declare_impl_meta (skein_vm_host().fn_declare_impl_meta)
 
 #define fiber_await_task (skein_vm_host().fn_fiber_await_task)

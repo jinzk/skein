@@ -34,7 +34,7 @@
 | 包生态与信任（M3） | 按需 | 公共生态暂缓，先支持私有/本地生态；SumDB / proxy / 私有认证按私有需求推进 |
 | JIT / VM 与 GC（M4） | 优化冻结 | moving GC 与 AOT / 字节码缓存均已确认不做；已完成记录见第 3 节 |
 | 长尾能力与体验（M5） | 按需 | 旧编码、HTTP/2 CONNECT、REPL / LSP 体验、LevelDB / RocksDB |
-| 对象抽象 / `protocol` / `ref` / Channel 模型（M8） | 待实现 | protocol-only、直接删除 trait、duplex 端点对作为唯一 Channel 已确认；一次性迁移后实现 `ref` / `weak` 与 GC 接入 |
+| 对象抽象 / `protocol` / `ref` / Channel 模型（M8） | 阶段 1/2 已完成 | Channel 端点对与结构化 `protocol` 已落地；下一步实现 `ref` / `weak`、GC 接入与 channel payload 拒绝 |
 | `std.cache`（M7）/ `std.kv` | 已完成 | 维护；Valkey 独立 CI 服务可按需补 |
 | FFI 平台 CI / fuzz | 按需 | Windows x64（MinGW/MSVC）进入正式发布；32 位 / ARM 与 fuzz 按需，见 `architecture.md` |
 
@@ -54,9 +54,10 @@
 3. 公共生态已确认暂缓；M3 先支持私有/本地生态，SumDB / proxy / 私有认证
    按私有需求推进。
 4. M8 已确认只保留 `protocol` 并直接删除 `trait`，且以 duplex 端点对作为
-   唯一 Channel 模型并删除旧共享队列；一次性迁移文档、stdlib、测试与 LSP；
-   `ref` / `weak` 复用现有 `collect_cycles()` / `gc_roots` / epoch sweep，
-   不另起一套全值 GC，并在新 channel 的 payload 校验处拒绝 `ref`。
+   唯一 Channel 模型并删除旧共享队列；阶段 1（端点对）与阶段 2（结构化
+   protocol）已完成；下一步实现 `ref` / `weak`，复用现有
+   `collect_cycles()` / `gc_roots` / epoch sweep，不另起一套全值 GC，并在
+   channel payload 校验处拒绝 `ref`。
 5. M4 的 GC root 审计、热点 opcode / frame 分配、字符串拼接、
    启动解析优化和 JIT 默认启用已完成；moving GC 与 AOT / 字节码缓存均已
    确认不做；per-pc liveness / OSR / deopt 保持不做。
@@ -284,9 +285,9 @@ REPL / 工具链体验：
 - 补全候选弹窗 / 分栏
 - 多行历史条目
 
-### 2.6 对象抽象、`protocol` 与引用模型（M8；待实现）
+### 2.6 对象抽象、`protocol` 与引用模型（M8；阶段 2 已完成）
 
-状态：protocol-only 与直接删除 `trait` 已确认；`ref` / `weak` 设计已明确，待实现。
+状态：结构化 `protocol` 与直接删除 `trait` 已实现；`ref` / `weak` 设计已明确，待实现。
 
 背景与问题：
 
@@ -307,7 +308,7 @@ REPL / 工具链体验：
 - 不把现有 `trait` 直接改成结构化语义，否则会破坏显式契约和已有诊断；
 - 不提供 deprecated alias；`trait` 与 `impl Trait for Type` 直接删除，一次性迁移。
 
-`protocol` 语义（待实现）：
+`protocol` 语义（已实现）：
 
 ```skein
 protocol Drawable {
@@ -396,15 +397,18 @@ GC 接入（待实现）：
 
 阶段与验收：
 
-1. 修 `SYNTAX.md` / `docs/tutorial.md` 的 trait 默认方法矛盾，并补
-   “动态调用看运行时能力，接口看显式/结构化契约”的说明；
-2. 新增 `protocol`，一次性迁移测试、stdlib、LSP 和文档，并删除 `trait` /
-   `impl Trait for Type`；
+1. ~~修 `SYNTAX.md` / `docs/tutorial.md` 的 trait 默认方法矛盾，并补
+   “动态调用看运行时能力，接口看显式/结构化契约”的说明~~（已完成）；
+2. ~~新增 `protocol`，一次性迁移测试、stdlib、LSP 和文档，并删除 `trait` /
+   `impl Trait for Type`~~（已完成）；
 3. 实现 `ref` / `weak` 内部值、`std.ref` API、通用 `?.` 可选链、GC sweep
    与 channel payload 拒绝；
 4. 验收：强引用环可被回收，weak 在目标释放后升级为 `null`，普通值环仍
    被拒绝，channel 发送 `ref` / weak（含嵌套）报错且 snapshot 可发送，
    `SKEIN_GC_STRESS` 无漏根，JIT/VM 差分与语言核心测试稳定。
+
+阶段 2 验收已通过：结构化签名匹配、默认方法覆盖与冲突、`is protocol`、
+`std.meta.protocols` / `implements`，以及 AST/VM/JIT 与线程 transfer 差分均稳定。
 
 ### 2.7 Channel 模型调整（M8；待实现）
 

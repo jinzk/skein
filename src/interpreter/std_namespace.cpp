@@ -444,7 +444,7 @@ value_t *build_namespace_impl() {
             {"fields", B_meta_fields},
             {"variants", B_meta_variants},
             {"methods", B_meta_methods},
-            {"traits", B_meta_traits},
+            {"protocols", B_meta_protocols},
             {"implements", B_meta_implements},
             {"has_type", B_meta_has_type},
         })));

@@ -482,14 +482,14 @@ bool lookup_named_type(const TypeNode *type,
         out.enumeration = enumeration;
         return true;
     }
-    trait_def *trait =
-        structtype_find_trait(type->source.c_str(), type->name.c_str());
-    if (!trait)
-        trait = structtype_find_trait_by_name(
+    protocol_def *protocol =
+        structtype_find_protocol(type->source.c_str(), type->name.c_str());
+    if (!protocol)
+        protocol = structtype_find_protocol_by_name(
             logical_module, type->name.c_str(), NULL);
-    if (trait) {
-        out.kind = STRUCTTYPE_LOOKUP_TRAIT;
-        out.trait = trait;
+    if (protocol) {
+        out.kind = STRUCTTYPE_LOOKUP_PROTOCOL;
+        out.protocol = protocol;
         return true;
     }
 
@@ -638,7 +638,7 @@ MatchResult match_type(const TypeNode *actual, const TypeNode *expected) {
             return MatchResult::Ok;
         structtype_lookup_result expected_lookup;
         if (lookup_named_type(expected, expected_lookup) &&
-            expected_lookup.trait) {
+            expected_lookup.protocol) {
             structtype_lookup_result actual_lookup;
             if (!lookup_named_type(actual, actual_lookup))
                 return MatchResult::Unknown;
@@ -648,10 +648,9 @@ MatchResult match_type(const TypeNode *actual, const TypeNode *expected) {
                     : static_cast<const type_def *>(actual_lookup.enumeration);
             if (!actual_type)
                 return MatchResult::Unknown;
-            for (const trait_def *trait : actual_type->traits) {
-                if (trait == expected_lookup.trait)
-                    return MatchResult::Ok;
-            }
+            if (structtype_satisfies_protocol(actual_type,
+                                              expected_lookup.protocol))
+                return MatchResult::Ok;
             return MatchResult::Mismatch;
         }
         return MatchResult::Mismatch;

@@ -1,103 +1,134 @@
 import std;
 include "_support.skein";
 
-trait TraitDrawable {
+protocol ProtoDrawable {
   func draw(self) {
     return "default";
   }
 
-  func area(self);
+  func area(self) -> int;
 }
 
-struct TraitPoint {
+struct ProtoPoint {
   x: int;
 }
 
-impl TraitDrawable for TraitPoint {
-  func area(self) {
+impl ProtoPoint {
+  func area(self): int {
     return self.x;
   }
 }
 
-trait TraitD {
-  func m(self) {
-    return "trait";
+func proto_area(value: ProtoDrawable) {
+  return value.area();
+}
+
+protocol ProtoOverride {
+  func label(self) {
+    return "protocol";
   }
 }
 
-struct TraitS {}
+struct ProtoOverrideC {}
 
-impl TraitD for TraitS {
-  func m(self) {
+impl ProtoOverrideC {
+  func label(self) {
     return "impl";
   }
 }
 
-trait TraitT {
-  func a(self);
+protocol ProtoRequired {
+  func base(self);
 
-  func b(self) {
-    return self.a() + 1;
+  func doubled(self) {
+    return self.base() * 2;
   }
 }
 
-struct TraitQ {}
+struct ProtoRequiredC {}
 
-impl TraitT for TraitQ {
-  func a(self) {
+impl ProtoRequiredC {
+  func base(self) {
     return 4;
   }
 }
 
-trait TraitShorthand {
-  func d(self) {
-    return "d";
+protocol ProtoStructDefault {
+  func struct_default(self) {
+    return "struct";
   }
 }
 
-struct TraitShorthandS with TraitShorthand {
+struct ProtoStructC {
   x: int;
 }
 
-trait TraitEnumShorthand {
-  func d(self) {
-    return "e";
+protocol ProtoEnumRequired {
+  func value(self) -> int;
+}
+
+enum ProtoEnumC {
+  A { n: int; }
+  B;
+}
+
+impl ProtoEnumC {
+  func value(self): int {
+    return match (self) {
+      case ProtoEnumC.A { n } => n;
+      case ProtoEnumC.B => 0;
+    };
   }
 }
 
-enum TraitEnumE with TraitEnumShorthand {
-  A;
+func proto_value(value: ProtoEnumRequired) {
+  return value.value();
 }
 
-struct TraitWithS {
+protocol ProtoEnumDefault {
+  func enum_default(self) {
+    return "enum";
+  }
+}
+
+struct ProtoWithS {
   with: int;
 }
 
-ts_test("trait default method", func() {
-  let p = TraitPoint { x: 3 };
+ts_test("protocol default method", func() {
+  let p = ProtoPoint { x: 3 };
   ts_eq(p.draw(), "default");
-  ts_eq(p.area(), 3);
+  ts_eq(proto_area(p), 3);
 });
 
-ts_test("trait default method override", func() {
-  ts_eq(TraitS {}.m(), "impl");
+ts_test("protocol default method override", func() {
+  ts_eq(ProtoOverrideC {}.label(), "impl");
 });
 
-ts_test("trait default calls trait method", func() {
-  ts_eq(TraitQ {}.b(), 5);
+ts_test("protocol default calls required method", func() {
+  ts_eq(ProtoRequiredC {}.doubled(), 8);
 });
 
-ts_test("trait with struct shorthand", func() {
-  ts_eq(TraitShorthandS { x: 1 }.d(), "d");
+ts_test("structural struct protocol match", func() {
+  ts_eq(ProtoStructC { x: 1 }.struct_default(), "struct");
+  ts_true(ProtoStructC { x: 1 } is ProtoStructDefault);
 });
 
-ts_test("trait with enum shorthand", func() {
-  ts_eq(TraitEnumE.A.d(), "e");
+ts_test("structural enum protocol match", func() {
+  ts_eq(proto_value(ProtoEnumC.A { n: 5 }), 5);
+  ts_eq(proto_value(ProtoEnumC.B), 0);
+  ts_true(ProtoEnumC.B is ProtoEnumRequired);
+  ts_eq(ProtoEnumC.B.enum_default(), "enum");
+});
+
+ts_test("protocol is structural", func() {
+  ts_true(ProtoPoint { x: 1 } is ProtoDrawable);
+  ts_false(ProtoPoint { x: 1 } is ProtoEnumRequired);
 });
 
 ts_test("with remains an identifier", func() {
   let with = 7;
-  let s = TraitWithS { with: 9 };
+  let s = ProtoWithS { with: 9 };
   ts_eq(with + s.with, 16);
 });
 

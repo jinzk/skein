@@ -159,7 +159,7 @@ print(len(d));
         "imports": ("std", "std.dict_key"),
         "src": """
 struct Key { id: int; cache: list[int]; }
-impl dict_key.DictKey for Key {
+impl Key {
   func dict_hash(self) { return self.id; }
 }
 let d = {};
@@ -187,10 +187,8 @@ print(std.set.size(s));
         "imports": ("std", "std.dict_key"),
         "src": """
 struct User { id: int; cache: list[int]; }
-impl dict_key.DictKey for User {
+impl User {
   func dict_hash(self) { return self.id; }
-}
-impl dict_key.KeyEq for User {
   func key_eq(self, other) { return self.id == other.id; }
 }
 let d = {};
@@ -206,10 +204,8 @@ print(len(d));
         "imports": ("std", "std.dict_key"),
         "src": """
 struct User { id: int; cache: list[int]; }
-impl dict_key.DictKey for User {
+impl User {
   func dict_hash(self) { return self.id; }
-}
-impl dict_key.KeyEq for User {
   func key_eq(self, other) { return self.id == other.id; }
 }
 let d = {};

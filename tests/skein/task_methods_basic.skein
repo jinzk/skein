@@ -59,15 +59,15 @@ impl TaskMethodE {
   }
 }
 
-trait TaskMethodS {
+protocol TaskMethodS {
   func handle(self, x: int);
 }
 
-struct TaskTraitC {
+struct TaskProtocolC {
   base: int;
 }
 
-impl TaskMethodS for TaskTraitC {
+impl TaskProtocolC {
   func handle(self, x: int) {
     return self.base + x;
   }
@@ -77,7 +77,7 @@ func task_use(s: TaskMethodS) {
   return s.handle(2);
 }
 
-trait TaskAdapterS {
+protocol TaskAdapterS {
   func handle(self);
 }
 
@@ -91,13 +91,11 @@ impl TaskAdapterC {
   }
 }
 
-impl TaskAdapterS for TaskAdapterC;
-
 func task_adapter_use(s: TaskAdapterS) {
   return s.handle();
 }
 
-trait TaskDefaultS {
+protocol TaskDefaultS {
   func handle(self);
 
   func twice(self) {
@@ -109,7 +107,7 @@ struct TaskDefaultC {
   x: int;
 }
 
-impl TaskDefaultS for TaskDefaultC {
+impl TaskDefaultC {
   func handle(self) {
     return self.x;
   }
@@ -164,15 +162,15 @@ ts_test("enum method", func() {
   ts_eq(TaskMethodE.A { n: 2 }.value(), 1);
 });
 
-ts_test("trait method", func() {
-  ts_eq(task_use(TaskTraitC { base: 5 }), 7);
+ts_test("protocol method", func() {
+  ts_eq(task_use(TaskProtocolC { base: 5 }), 7);
 });
 
-ts_test("trait adapter", func() {
+ts_test("protocol adapter", func() {
   ts_eq(task_adapter_use(TaskAdapterC { x: 11 }), 11);
 });
 
-ts_test("trait default method", func() {
+ts_test("protocol default method", func() {
   ts_eq(TaskDefaultC { x: 11 }.twice(), 22);
 });
 

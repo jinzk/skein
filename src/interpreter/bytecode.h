@@ -141,7 +141,7 @@ enum class Op : uint8_t {
     NewEnum,
     DeclareStruct,
     DeclareEnum,
-    DeclareTrait,
+    DeclareProtocol,
     DeclareImpl,
 
     Closure,
@@ -338,33 +338,36 @@ struct EnumDeclMeta {
     std::vector<EnumVariantMeta> variants;
 };
 
-struct TraitParamMeta {
+struct ProtocolParamMeta {
     std::string name;
     type_constraint type;
     bool variadic = false;
     bool has_default = false;
 };
 
-struct TraitMethodMeta {
+struct ProtocolMethodMeta {
     std::string name;
-    std::vector<TraitParamMeta> params;
-    /* Optional default implementation compiled with the trait. */
+    std::vector<ProtocolParamMeta> params;
+    /* Optional declared return type of the protocol method. */
+    std::shared_ptr<const type_constraint> return_type;
+    /* Optional default implementation compiled with the protocol. */
     std::shared_ptr<function_code> code;
 };
 
-struct TraitDeclMeta {
+struct ProtocolDeclMeta {
     std::string source;
     std::string module;
     std::string name;
     bool exported = false;
-    std::vector<TraitMethodMeta> methods;
+    std::vector<ProtocolMethodMeta> methods;
 };
 
 struct ImplDeclMeta {
     std::string source;
     std::string type_name;
-    std::string trait_name;
-    bool has_trait = false;
+    /* Reserved for serialization compatibility; protocol impls were removed. */
+    std::string protocol_name;
+    bool has_protocol = false;
     std::vector<DeclMethodMeta> methods;
 };
 
@@ -463,7 +466,7 @@ struct Proto {
     std::vector<FieldOrEnumDesc> field_or_enum;
     std::vector<StructDeclMeta> struct_decls;
     std::vector<EnumDeclMeta> enum_decls;
-    std::vector<TraitDeclMeta> trait_decls;
+    std::vector<ProtocolDeclMeta> protocol_decls;
     std::vector<ImplDeclMeta> impl_decls;
     std::vector<PackageDesc> packages;
     std::vector<PatternDesc> patterns;

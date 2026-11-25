@@ -24,7 +24,7 @@ const char *keyword_detail(const std::string &word) {
         {"default", "switch default"},{"match", "pattern match"},
         {"let", "binding"},           {"const", "constant binding"},
         {"func", "function"},         {"struct", "struct type"},
-        {"enum", "enum type"},        {"trait", "trait"},
+        {"enum", "enum type"},        {"protocol", "protocol"},
         {"impl", "implementation"},   {"extern", "external declaration"},
         {"package", "package"},       {"module", "module"},
         {"import", "import"},         {"include", "include"},

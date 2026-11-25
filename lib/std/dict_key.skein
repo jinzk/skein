@@ -2,13 +2,13 @@ package dict_key {
   // Opt-in custom hashing for struct/enum dict/set keys.  Implementations
   // must return a deterministic, side-effect-free int that is consistent
   // with structural equality.
-  export trait DictKey {
+  protocol DictKey {
     func dict_hash(self) -> int;
   }
 
   // Optional key equality.  Only consulted for types that also implement
   // DictKey, so a custom key equality is always paired with an explicit hash.
-  export trait KeyEq {
+  protocol KeyEq {
     func key_eq(self, other) -> bool;
   }
 }

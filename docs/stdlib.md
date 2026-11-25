@@ -2351,7 +2351,8 @@ print(std.meta.has_type("int"));      // true
 字符串参数始终按类型名解释，查询 string 类型请用 `"string"`。
 `std.meta` 只查询已加载且可见的类型：当前包/当前源文件的类型可见，其他包
 的类型必须 `export`；不可见类型报错，`has_type` 返回 `false`。
-`fields` / `variants` / `methods` / `traits` 对不适用的类型返回空列表。
+`fields` / `variants` / `methods` / `protocols` 对不适用的类型返回空列表。
+`protocols` / `implements` 按结构式方法签名匹配检查 protocol。
 返回字典同时包含 `package`、`module`、`source`：
 `package` 是完整包身份，`module` 是 Module 容器名（普通包和入口为空字符串），
 `source` 是源文件路径。
@@ -2388,13 +2389,11 @@ struct User {
   cache: list[int];
 }
 
-impl dict_key.DictKey for User {
+impl User {
   func dict_hash(self) {
     return self.id;
   }
-}
 
-impl dict_key.KeyEq for User {
   func key_eq(self, other) {
     return self.id == other.id;
   }
@@ -3220,7 +3219,7 @@ std.meta.type_info
 std.meta.fields
 std.meta.variants
 std.meta.methods
-std.meta.traits
+std.meta.protocols
 std.meta.implements
 std.meta.has_type
 
@@ -3580,7 +3579,7 @@ std.thread.capabilities
 - `std.fs` 提供文件读写和文件句柄操作；
 - `std.process` 提供命令执行和状态查询；
 - `std.type` 提供 `kind_of`、`type_name`、`type_package`、`type_module_name`、`type_source`；
-- `std.meta` 提供只读类型反射，查询字段、变体、方法和 trait；
+- `std.meta` 提供只读类型反射，查询字段、变体、方法和 protocol；
 - `std.net` 提供同步和 task 形式异步的 TCP/DNS，数据使用 `bytes`，底层由 libuv 驱动；
 - `std.net` 的阻塞操作支持可选 `timeout_ms`，超时是运行时错误；
 - `std.net` 的 `local_addr` / `peer_addr` 返回 `address`、`port`、`family` 三项 dict；

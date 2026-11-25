@@ -207,7 +207,7 @@ void eval_struct_decl(struct struct_node *s) {
     for (struct struct_member *m = s->members; m; m = m->next) {
         if (m->nodetype != 'f')
             continue;
-        if (!validate_type_constraint(m->type)) {
+        if (!validate_field_type_constraint(m->type)) {
             structtype_rollback_struct(def);
             return;
         }
@@ -372,7 +372,7 @@ bool declare_struct_meta(
 
     std::vector<field_def> declared_fields;
     for (const auto &field : fields) {
-        if (!validate_type_constraint(&field.type)) {
+        if (!validate_field_type_constraint(&field.type)) {
             structtype_rollback_struct(def);
             return false;
         }
@@ -416,7 +416,7 @@ bool declare_enum_meta(
         variant_def declared;
         declared.name = variant.name;
         for (const auto &field : variant.fields) {
-            if (!validate_type_constraint(&field.type)) {
+            if (!validate_field_type_constraint(&field.type)) {
                 structtype_rollback_enum(def);
                 return false;
             }
@@ -975,7 +975,7 @@ void eval_enum_decl(struct enum_node *e) {
         for (struct struct_member *m = v->fields; m; m = m->next) {
             if (m->nodetype != 'f')
                 continue;
-            if (!validate_type_constraint(m->type)) {
+            if (!validate_field_type_constraint(m->type)) {
                 structtype_rollback_enum(def);
                 return;
             }

@@ -52,6 +52,7 @@ struct value_t *apply_binary_value(int op, struct value_t *left,
 struct value_t *new_int_checked(__int128 n);
 
 bool validate_type_constraint(const struct type_constraint *type);
+bool validate_field_type_constraint(const struct type_constraint *type);
 
 /*
  * Upvalue cell access shared by the VM and the JIT.  Cells either point at a

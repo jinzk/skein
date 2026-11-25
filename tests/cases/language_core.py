@@ -125,6 +125,10 @@ def run_cases():
           "struct P { x: int = 1; }\n"
           'for p in P { x: 1 } { println(p.x); }\n',
           stderr="syntax error")
+    check("mutually recursive plain struct fields require ref",
+          "struct A { b: B? = null; }\n"
+          "struct B { a: A? = null; }\n",
+          stderr="mutually recursive fields require ref B? or weak B?")
     check("for in without let two vars require dict",
           "for k, v in [1, 2] { println(k); }\n",
           stderr="two-variable for-in requires dict")

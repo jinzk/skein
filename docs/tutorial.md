@@ -1109,6 +1109,7 @@ p.sum()
 - 结构体是值语义，赋值和作为参数传递时使用 copy-on-write；
 - 结构体类型可以用在变量和参数类型标注中：`let p: Point = Point { x: 1, y: 2 }`、`func f(p: Point)`；结构体类型没有默认值，变量必须初始化；
 - 字段类型必须是已声明的类型；支持自引用，例如 `struct Node { value: int; next: Node?; }`；
+  两个 `struct` 互引用需使用 `ref T?` / `weak T?`；
 - 不允许创建环：`a.next = b; b.next = a;` 会报 `recursive value would create a cycle`；共享子结构（DAG）允许；
 - 所有字段和方法都是公开的；暂不实现 `_` 私有语法；
 - 字段可以保存函数值，作为普通回调使用，不会自动绑定 `self`：
@@ -1251,6 +1252,7 @@ print(std.ref.upgrade(b.prev).value);  // 3
 - `weak T` 保存 `{id, generation}`，目标被 GC 回收后升级为 `null`；
 - `?.` 是通用可选字段访问，左侧为 `null` 时结果为 `null`；目前只支持字段，
   不支持 `?.()` 或 `?.[index]`；
+- 不同类型互引用时，`ref T?` 可以指向尚未声明的类型，`weak T?` 用于不保活的反向边；
 - 强 `ref` 环交给 GC，普通 struct / list / dict 的值环仍报
   `recursive value would create a cycle`；
 - ref heap 严格线程本地。`ref` / `weak`（含嵌套）不能作为 channel payload，

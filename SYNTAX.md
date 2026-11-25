@@ -2068,6 +2068,7 @@ let d = Point { ...p, x: 9 };
 - 结构体使用 copy-on-write 值语义；
 - 所有成员都是公开的，`_` 前缀没有特殊含义；
 - 字段类型必须是已声明的类型；支持自引用，例如 `struct Node { value: int; next: Node?; }`；
+  两个 `struct` 的普通值互递归字段不支持，需使用 `ref T?` / `weak T?`（见 5.12.3）；
 - 普通值不允许创建环：`a.next = b; b.next = a;` 会报 `recursive value would create a cycle`；共享子结构（DAG）允许；使用 `ref` 字段的强引用环由 GC 回收，见 5.12.3；
 - 字段可以保存 `callable` / `function` 值，作为普通回调使用，不会自动绑定 `self`；
 - 不支持继承、静态方法、用户自定义泛型、动态添加方法或运算符重载；内建容器的类型参数见变量类型标注章节。
@@ -2323,6 +2324,7 @@ print(b.prev?.value);       // 1
 - `?.` 是通用可选字段访问：`a?.b` 在 `a` 为 `null`（包括失效弱引用升级失败）时
   返回 `null`，否则读取字段；可继续组合成员访问，例如 `b.prev?.value`；
   目前不支持 `?.()` 或 `?.[index]`；
+- 两个不同类型互引用时应使用 `ref T?` / `weak T?`；普通值字段不支持前向互递归；
 - 强引用环交给 GC 回收；普通 `struct` / `list` / `dict` 值环仍报
   `recursive value would create a cycle`；
 - ref heap 是线程本地的；`ref` / `weak`（包括嵌套在容器、struct、enum 字段中）

@@ -15,6 +15,16 @@ struct RefNode {
   func draw(self): int { return self.value; }
 }
 
+struct MutualA {
+  value: int;
+  b: ref MutualB? = null;
+}
+
+struct MutualB {
+  value: int;
+  a: weak MutualA? = null;
+}
+
 func ref_render(item: RefDrawable): int {
   return item.draw();
 }
@@ -59,6 +69,15 @@ ts_test("ref methods mutate the receiver", func() {
   a.bump();
   ts_eq(a.get(), 2);
   ts_eq(ref_render(a), 2);
+});
+
+ts_test("different struct types can reference each other", func() {
+  let a = ref MutualA { value: 31 };
+  let b = ref MutualB { value: 32 };
+  a.b = b;
+  b.a = a;
+  ts_eq(a.b.value, 32);
+  ts_eq(b.a?.value, 31);
 });
 
 ts_test("weak upgrade and optional chaining", func() {

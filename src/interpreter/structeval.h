@@ -30,6 +30,7 @@ struct variant_meta {
 };
 
 bool validate_type_constraint(const struct type_constraint *type);
+bool validate_field_type_constraint(const struct type_constraint *type);
 struct type_constraint any_type_constraint();
 struct type_constraint copy_type_constraint(
     const struct type_constraint *type);

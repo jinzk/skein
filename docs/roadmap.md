@@ -297,7 +297,8 @@ REPL / 工具链体验：
 - 可选自引用字段可以表达形状，例如 `next: Node?`，但 `struct` 是 COW
   值类型，`a.next = b; b.next = a;` 仍会报
   `recursive value would create a cycle`；
-- 互递归 struct 类型声明目前不支持（`struct A { b: B? }` 会报未知类型名）；
+- 普通值互递归 struct 字段仍不支持（`struct A { b: B? }` 会报未知类型名并提示改用
+  `ref B?` / `weak B?`）；`ref` / `weak` 字段支持前向互引用；
 - `SYNTAX.md` 对 trait 默认方法前后描述不一致：前文支持默认方法和冲突
   规则，规则列表又写“不支持 trait 默认方法”；实现是支持默认方法的，
   先修文档再推进语言调整。
@@ -374,7 +375,8 @@ print(a.next.value);  // 9，引用不是值快照
   通用 `?.` 可选链，可写 `b.prev?.value`；
 - 弱引用保存 `{id, generation}`，目标释放后 generation 失效，不会误指向
   新对象；
-- 跨线程或序列化边界使用 `std.ref.snapshot(r)` 显式得到普通值快照。
+- 跨线程或序列化边界使用 `std.ref.snapshot(r)` 显式得到普通值快照；
+- 两个不同类型互引用时用 `ref T?` / `weak T?`，普通值字段必须是已声明类型。
 
 GC 接入（已实现）：
 

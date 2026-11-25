@@ -1290,6 +1290,18 @@ bool validate_type_constraint(const struct type_constraint *type) {
     return true;
 }
 
+bool validate_field_type_constraint(const struct type_constraint *type) {
+    if (type && type->kind == TYPE_NAMED &&
+        (!type->name || !named_type_visible(type->source, type->name))) {
+        const char *name = type->name ? type->name : "invalid";
+        yyerror("unknown type name %s in field declaration; mutually "
+                "recursive fields require ref %s? or weak %s?",
+                name, name, name);
+        return false;
+    }
+    return validate_type_constraint(type);
+}
+
 bool switch_value_supported(const struct value_t *v) {
     if (!v) return false;
     switch (v->type) {

@@ -1524,7 +1524,11 @@ for (let x in [1, 2, 3]) {
   print(x);
 }
 
-for (let key in {"a": 1, "b": 2}) {
+for (let entry in {"a": 1, "b": 2}) {
+  print(entry[0] + "=" + str(entry[1]));
+}
+
+for (let key in ({"a": 1, "b": 2}).keys()) {
   print(key);
 }
 
@@ -1594,7 +1598,7 @@ for a, b, c in triples() {
 - 显式惰性迭代使用 `std.list.iter(xs)`、`std.dict.iter_keys(d)`、`std.dict.iter_values(d)`、`std.dict.iter_items(d)` 或 `std.dict.iter(d)`；这些返回 generator，可直接用于 `for` 或 `std.iter.*`；
 - 省略形式中的循环变量是块级新变量，会遮蔽外层同名变量，循环结束后外层变量不变；
 - 省略形式的循环体必须是 `{ ... }`，不支持单条语句；
-- 操作数以 dict 字面量开头时可以省略括号，例如 `for k in {"a": 1}`；
+- 操作数以 dict 字面量开头时可以省略括号，例如 `for k, v in {"a": 1}`；
 - 操作数本身以 struct / 函数 / match 等复合字面量结尾时仍要加括号，例如
   `for p in (Point { x: 1 })`；
 - `in` 是 contextual keyword，只在循环变量列表后作分隔符；其他位置仍是普通
@@ -1602,7 +1606,7 @@ for a, b, c in triples() {
 - 省略形式在顶层要求 `{` 和头部同一行，规则与 `if` / `while` 相同；
 - list 单变量遍历元素；需要下标时用 `range(len(list))` 或 C 风格 `for`；
 - deque / heap / set 单变量遍历元素（heap 按层序，set 按插入顺序）；
-- dict 单变量遍历 key，双变量得到 `key, value`；非 dict 的双变量按 tuple 解构；静态类型是 `any` 时保留运行时 dict key/value 行为；
+- dict 单变量遍历 entry pair，双变量得到 `key, value`；遍历 key 使用 `dict.keys()` 或 `dict.iter_keys(d)`；非 dict 的双变量按 tuple 解构；静态类型是 `any` 的双变量保留运行时 dict key/value 行为；
 - string 单变量遍历 UTF-8 字符，元素是 `char`；
 - bytes 单变量遍历 `0..255` 的字节值；
 - 可以配合 `range()` 做计数循环；

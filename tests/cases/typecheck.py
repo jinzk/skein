@@ -886,7 +886,7 @@ def run_cases():
     check("iter map accepts dict",
           "import std;\n"
           'let g = std.iter.map({"a": 1}, '
-          "func(k: string): int -> 1);\n"
+          "func(entry) -> entry[1]);\n"
           "println(std.iter.collect(g));\n",
           stdout="[1]")
 

@@ -4034,7 +4034,7 @@ while (true) {
     if (len(request["params"]) > 8 &&
         kind_of(request["params"][8]) == "dict") {
         let context = request["params"][8];
-        for (let key in context) {
+        for (let key in std.dict.keys(context)) {
             req[key] = context[key];
         }
     }

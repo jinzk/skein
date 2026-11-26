@@ -2589,7 +2589,7 @@ func collect[T iterable](x: T) { ... }
 
 注意事项：
 
-- `dict.iter()` 产出 entry pair；裸 `for k in dict` 仍然遍历 key，二者语义尚未统一。
+- `dict.iter()` 产出 entry pair；裸 `for x in dict` 也遍历 entry pair，二者语义一致。遍历 key 使用 `dict.keys()` 或 `dict.iter_keys(d)`。
 - 裸 `for x in userValue` 不会自动调用 `iter()`；自定义类型请使用 `iter!(userValue)` 或显式 `.iter()`。
 - `std.meta.implements("list", "Iterable")`、`std.meta.protocols("int")` 等反射入口会看到内置 conformance。
 - `std.meta.implements` 的字符串参数目前不接受 `generator[int]` 这类带类型参数的文本，使用 `type_info` 或值本身查询。
@@ -3221,6 +3221,7 @@ std.deque.iter(q)
 std.heap.iter(h)
 std.iter.elements("ab")    // char
 std.iter.elements(bytes)   // byte
+std.iter.elements(d)       // dict: generator[pair[K, V]]
 
 std.iter.elements(xs)      // 通用元素迭代
 std.iter.keys(d)

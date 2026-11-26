@@ -63,10 +63,19 @@ ts_test("for in list", func() {
   ts_eq(out, [1, 2, 3]);
 });
 
-ts_test("for in dict keys", func() {
+ts_test("for in dict entries", func() {
   let d = {"a": 1, "b": 2};
   let out = [];
-  for (let k in d) {
+  for (let entry in d) {
+    out = std.list.append(out, entry[0] + "=" + str(entry[1]));
+  }
+  ts_eq(out, ["a=1", "b=2"]);
+});
+
+ts_test("for in dict keys via keys", func() {
+  let d = {"a": 1, "b": 2};
+  let out = [];
+  for (let k in d.keys()) {
     out = std.list.append(out, k + "=" + str(d[k]));
   }
   ts_eq(out, ["a=1", "b=2"]);

@@ -659,7 +659,11 @@ for (let i in range(0, 3)) {
   print(i);
 }
 
-for (let key in {"a": 1, "b": 2}) {
+for (let entry in {"a": 1, "b": 2}) {
+  print(entry[0] + "=" + str(entry[1]));
+}
+
+for (let key in ({"a": 1, "b": 2}).keys()) {
   print(key);
 }
 ```
@@ -728,15 +732,16 @@ for a, b, c in triples() {
 
 `for ... in` 规则：
 
-- 单变量：list 遍历元素，dict 遍历键；deque / heap / set 也遍历元素（heap 按层序，set 按插入顺序）；
-- 双变量：iterable 是 dict 时得到 `key, value`；非 dict 时按 tuple 解构；静态类型是 `any` 时保留运行时 dict key/value 行为；
+- 单变量：list 遍历元素，dict 遍历 entry pair；deque / heap / set 也遍历元素（heap 按层序，set 按插入顺序）；
+- 双变量：iterable 是 dict 时得到 `key, value`；非 dict 时按 tuple 解构；静态类型是 `any` 的双变量保留运行时 dict key/value 行为；
+- 遍历 dict 的 key 使用 `dict.keys()` 或 `dict.iter_keys(d)`；
 - `for (a, b, ...) in iterable` 或 `for a, b, ... in iterable` 对每个元素做 tuple 解构，支持 list、generator 等单值迭代；元素静态类型必须是 pair 或 tuple，元素个数必须一致；
 - 显式惰性迭代使用 `std.list.iter(xs)`、`std.dict.iter_keys(d)`、`std.dict.iter_values(d)`、`std.dict.iter_items(d)` 或 `std.dict.iter(d)`；这些返回 generator，可直接用于 `for` 或 `std.iter.*`；
 - list 需要下标时用 `range(len(list))` 或 C 风格 `for`；
 - string 遍历 UTF-8 字符；bytes 遍历 `0..255` 的字节值；
 - 迭代遍历对象在循环开始时求值一次，循环期间修改原对象不会改变本次遍历；
 - 循环变量只在循环作用域内有效；省略 `let` 时同样是块级新变量，会遮蔽外层同名变量；
-- 省略 `let` 和圆括号时，循环体必须是 `{ ... }`；操作数以 dict 字面量开头时可以省略括号（如 `for k in {"a": 1}`），但 struct / 函数 / match 等复合字面量作操作数时仍要加括号；
+- 省略 `let` 和圆括号时，循环体必须是 `{ ... }`；操作数以 dict 字面量开头时可以省略括号（如 `for k, v in {"a": 1}`），但 struct / 函数 / match 等复合字面量作操作数时仍要加括号；
 - 支持 `break` / `continue` / `return`。
 
 `do ... while` 至少执行一次循环体；`while` 必须和 `}` 在同一行，结尾分号可省略。

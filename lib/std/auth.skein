@@ -307,7 +307,7 @@ package auth {
       "secure": true,
       "same_site": "Lax"
     };
-    for (let key in options) {
+    for (let key in std.dict.keys(options)) {
       settings[key] = options[key];
     }
     return std.http.set_cookie(store.cookie_name, id, settings);
@@ -321,7 +321,7 @@ package auth {
       "same_site": "Lax",
       "max_age": 0
     };
-    for (let key in options) {
+    for (let key in std.dict.keys(options)) {
       settings[key] = options[key];
     }
     return std.http.set_cookie(store.cookie_name, null, settings);
@@ -380,7 +380,7 @@ package auth {
       fail("auth.jwt_sign ttl must be a positive integer");
     }
     let claims = {};
-    for (let key in payload) {
+    for (let key in std.dict.keys(payload)) {
       claims[key] = payload[key];
     }
     let now = std.time.now();

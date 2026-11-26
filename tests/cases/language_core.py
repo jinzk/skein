@@ -170,7 +170,7 @@ def run_cases():
           stderr="two-variable for-in over list[int] requires pair/tuple elements")
     check("for in without let rejects three variables over dict",
           'for a, b, c in ({"a": 1}) { println(a); }\n',
-          stderr="tuple pattern requires a pair or tuple")
+          stderr="tuple pattern expects 3 element(s), got 2")
     check("if condition composite literal needs parens",
           'let d = {"a": 1};\n'
           'if d == {"a": 1} { println("yes"); }\n',

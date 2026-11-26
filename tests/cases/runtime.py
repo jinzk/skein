@@ -593,6 +593,19 @@ def run_cases():
           stderr="cannot iterate int")
     check("for in variable scope", "for (let x in [1]) { }\nx\n",
           stderr="symbol not found x")
+    check("for in dict single variable yields entry pair",
+          'let d: dict[string, int] = {"a": 1};\n'
+          'for e in d { println(e[0] + "=" + str(e[1])); }\n',
+          stdout="a=1\n")
+    check("for in dict keys via keys",
+          'let d: dict[string, int] = {"a": 1};\n'
+          'for k in d.keys() { println(k); }\n',
+          stdout="a\n")
+    check("std.iter.elements dict yields entries",
+          "import std;\n"
+          'let d: dict[string, int] = {"a": 1};\n'
+          'for e in std.iter.elements(d) { println(e[0]); }\n',
+          stdout="a\n")
     check(
         "for in two variables requires pair or dict list",
         "for (let i, v in [10, 20]) { println(v); }\n",

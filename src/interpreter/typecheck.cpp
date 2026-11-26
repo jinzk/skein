@@ -3776,7 +3776,10 @@ struct Checker : public BuiltinContext {
             case TYPE_DICT:
                 if (iterable->args.size() < 2)
                     return type_any();
-                return iterable->args[value_part ? 1 : 0];
+                if (value_part)
+                    return iterable->args[1];
+                return type_container(
+                    TYPE_PAIR, {iterable->args[0], iterable->args[1]});
             case TYPE_STRING:
                 return type_builtin(TYPE_CHAR);
             case TYPE_BYTES:
@@ -3942,12 +3945,14 @@ struct Checker : public BuiltinContext {
                 child.parent = &env;
                 if (f->value_name) {
                     if (iterable->kind == TYPE_DICT) {
-                        child.define(f->name ? f->name : "",
-                                     iterable_element(iterable, false),
-                                     fixed);
-                        child.define(f->value_name,
-                                     iterable_element(iterable, true),
-                                     fixed);
+                        const TypeNode *key =
+                            iterable->args.empty() ? type_any()
+                                                   : iterable->args[0];
+                        const TypeNode *value =
+                            iterable->args.size() > 1 ? iterable->args[1]
+                                                      : type_any();
+                        child.define(f->name ? f->name : "", key, fixed);
+                        child.define(f->value_name, value, fixed);
                         return check_stmt(f->body, child);
                     }
                     if (iterable->kind == TYPE_ANY) {

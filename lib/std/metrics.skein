@@ -12,7 +12,7 @@ package metrics {
     let parts = [];
     if (kind_of(labels) == "dict") {
       let keys = [];
-      for (let key in labels) {
+      for (let key in std.dict.keys(labels)) {
         keys = std.list.append(keys, key);
       }
       keys = std.list.sort(keys);
@@ -174,19 +174,19 @@ package metrics {
 
     let render = func() {
       let lines = [];
-      for (let key in counters) {
+      for (let key in std.dict.keys(counters)) {
         let record = counters[key];
         lines = std.list.append(
           lines, record.name + _label_text(record.labels) + " " +
                  _number(record.value));
       }
-      for (let key in gauges) {
+      for (let key in std.dict.keys(gauges)) {
         let record = gauges[key];
         lines = std.list.append(
           lines, record.name + _label_text(record.labels) + " " +
                  _number(record.value));
       }
-      for (let key in histograms) {
+      for (let key in std.dict.keys(histograms)) {
         let record = histograms[key];
         let i = 0;
         while (i < len(record.buckets)) {

@@ -101,7 +101,7 @@ package web {
       }
       let headers = _cors_headers(origin, options);
       let existing = response["headers"];
-      for (let key in headers) {
+      for (let key in std.dict.keys(headers)) {
         existing[key] = headers[key];
       }
       response["headers"] = existing;
@@ -132,7 +132,7 @@ package web {
     }
     let extra = std.dict.get(options, "headers", null);
     if (extra != null && kind_of(extra) == "dict") {
-      for (let key in extra) {
+      for (let key in std.dict.keys(extra)) {
         headers[key] = extra[key];
       }
     }
@@ -142,7 +142,7 @@ package web {
   export func apply_security_headers(response, options = {}) {
     let headers = security_headers(options);
     let existing = response["headers"];
-    for (let key in headers) {
+    for (let key in std.dict.keys(headers)) {
       existing[key] = headers[key];
     }
     response["headers"] = existing;

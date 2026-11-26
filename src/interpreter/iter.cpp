@@ -83,8 +83,12 @@ struct iter_source {
             case T_dict: {
                 auto *dict = (struct dict_value_t *)value;
                 out.reserve(dict->payload->items.size());
-                for (auto &entry : dict->payload->items)
-                    out.push_back(dupval(entry.first));
+                for (auto &entry : dict->payload->items) {
+                    struct list_value_t *pair = newtupleval();
+                    pair->payload->items.push_back(dupval(entry.first));
+                    pair->payload->items.push_back(dupval(entry.second));
+                    out.push_back((struct value_t *)pair);
+                }
                 return true;
             }
             case T_string: {

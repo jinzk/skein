@@ -1934,9 +1934,17 @@ extern "C" SKEIN_JIT_SYSV int skein_jit_iter_next(
         item = dupval(((struct list_value_t *)*slot)->payload->items[index]);
     } else if ((*slot)->type == T_dict) {
         struct dict_value_t *dict = (struct dict_value_t *)*slot;
-        item = dupval(dict->payload->items[index].first);
-        if (desc->two_vars)
+        if (desc->two_vars) {
+            item = dupval(dict->payload->items[index].first);
             second = dupval(dict->payload->items[index].second);
+        } else {
+            struct list_value_t *pair = newtupleval();
+            pair->payload->items.push_back(
+                dupval(dict->payload->items[index].first));
+            pair->payload->items.push_back(
+                dupval(dict->payload->items[index].second));
+            item = (value_t *)pair;
+        }
     } else if ((*slot)->type == T_string) {
         unsigned int codepoint = 0;
         if (!string_codepoint_at((struct string_value_t *)*slot, index,

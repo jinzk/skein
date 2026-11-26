@@ -27,9 +27,18 @@ ts_test("for in without let over list", func() {
   ts_eq(out, [1, 2, 3]);
 });
 
-ts_test("for in without let over dict keys", func() {
+ts_test("for in without let over dict entries", func() {
   let out = [];
-  for k in ({"a": 1, "b": 2}) {
+  for entry in ({"a": 1, "b": 2}) {
+    out = std.list.append(out, entry[0] + "=" + str(entry[1]));
+  }
+  ts_eq(out, ["a=1", "b=2"]);
+});
+
+ts_test("for in dict keys via keys", func() {
+  let d: dict[string, int] = {"a": 1, "b": 2};
+  let out = [];
+  for k in d.keys() {
     out = std.list.append(out, k);
   }
   ts_eq(out, ["a", "b"]);
@@ -160,9 +169,17 @@ ts_test("std.iter.for_each over list", func() {
   ts_eq(out, [1, 2, 3]);
 });
 
+ts_test("std.iter.for_each over dict entries", func() {
+  let out = [];
+  std.iter.for_each({"a": 1, "b": 2}, func(entry) {
+    out = std.list.append(out, entry[0] + "=" + str(entry[1]));
+  });
+  ts_eq(out, ["a=1", "b=2"]);
+});
+
 ts_test("std.iter.for_each over dict keys", func() {
   let out = [];
-  std.iter.for_each({"a": 1, "b": 2}, func(k) {
+  std.iter.for_each(std.dict.keys({"a": 1, "b": 2}), func(k) {
     out = std.list.append(out, k);
   });
   ts_eq(out, ["a", "b"]);

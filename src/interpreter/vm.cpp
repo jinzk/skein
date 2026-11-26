@@ -1777,9 +1777,18 @@ public:
                 } else if (state.iterable->type == T_dict) {
                     struct dict_value_t *dict =
                         (struct dict_value_t *)state.iterable;
-                    item = dupval(dict->payload->items[index].first);
-                    if (state.two_vars)
-                        second = dupval(dict->payload->items[index].second);
+                    if (state.two_vars) {
+                        item = dupval(dict->payload->items[index].first);
+                        second =
+                            dupval(dict->payload->items[index].second);
+                    } else {
+                        struct list_value_t *pair = newtupleval();
+                        pair->payload->items.push_back(
+                            dupval(dict->payload->items[index].first));
+                        pair->payload->items.push_back(
+                            dupval(dict->payload->items[index].second));
+                        item = (value_t *)pair;
+                    }
                 } else if (state.iterable->type == T_string) {
                     unsigned int codepoint = 0;
                     if (!string_codepoint_at(

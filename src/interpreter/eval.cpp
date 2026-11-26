@@ -1480,9 +1480,17 @@ struct value_t *eval(struct ast *a) {
                         ((struct list_value_t *)iter)->payload->items[i]);
                 } else if (iter->type == T_dict) {
                     struct dict_value_t *dict = (struct dict_value_t *)iter;
-                    item = dupval(dict->payload->items[i].first);
-                    if (f->value_name)
+                    if (f->value_name) {
+                        item = dupval(dict->payload->items[i].first);
                         second = dupval(dict->payload->items[i].second);
+                    } else {
+                        struct list_value_t *pair = newtupleval();
+                        pair->payload->items.push_back(
+                            dupval(dict->payload->items[i].first));
+                        pair->payload->items.push_back(
+                            dupval(dict->payload->items[i].second));
+                        item = (struct value_t *)pair;
+                    }
                 } else if (iter->type == T_string) {
                     unsigned int codepoint = 0;
                     if (!string_codepoint_at(

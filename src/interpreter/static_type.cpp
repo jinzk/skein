@@ -111,6 +111,18 @@ std::string node_display(enum type_constraint_kind kind,
         text = name.empty() ? "T" : name;
     } else if (kind == TYPE_NAMED) {
         text = name.empty() ? "invalid" : name;
+        if (!args.empty()) {
+            text += '[';
+            for (std::size_t i = 0; i < args.size(); ++i) {
+                if (i != 0)
+                    text += ", ";
+                text += function_arg_display(args[i]);
+            }
+            text += ']';
+        }
+        if (nullable)
+            text += '?';
+        return text;
     } else if ((kind == TYPE_CALLABLE || kind == TYPE_FUNCTION ||
                 kind == TYPE_BUILTIN) && !args.empty()) {
         if (!variadic && args.size() == 2 && args[0] &&

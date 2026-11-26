@@ -376,6 +376,7 @@ add_library(skein_interpreter STATIC
   src/interpreter/static_type.cpp
   src/interpreter/typecheck_state.cpp
   src/interpreter/typecheck_types.cpp
+  src/interpreter/type_text_parser.cpp
   src/interpreter/typecheck_builtins.cpp
   src/interpreter/typecheck.cpp
   src/interpreter/defer_validation.cpp
@@ -904,6 +905,21 @@ if(BUILD_TESTING)
   endif()
   add_test(NAME lexer_test COMMAND lexer_test)
   set_tests_properties(lexer_test PROPERTIES LABELS "core")
+
+  add_executable(type_text_parser_test
+    tests/test_type_text_parser.cpp
+  )
+  target_link_libraries(type_text_parser_test PRIVATE skein_interpreter)
+  target_include_directories(type_text_parser_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/interpreter
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/runtime
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/platform
+  )
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(type_text_parser_test PRIVATE -Wall -Wextra)
+  endif()
+  add_test(NAME type_text_parser_test COMMAND type_text_parser_test)
+  set_tests_properties(type_text_parser_test PROPERTIES LABELS "core")
 
   add_executable(bytecode_verifier_test
     tests/test_bytecode_verifier.cpp

@@ -75,4 +75,19 @@ ts_test("iter macro other builtin iterables", func() {
   ts_eq(std.iter.collect(iter!((1, 2))), [1, 2]);
 });
 
+struct MacroIterBox {
+  xs: list[int];
+
+  func iter(self) {
+    return std.list.iter(self.xs);
+  }
+}
+
+ts_test("iter macro user method", func() {
+  let b = MacroIterBox { xs: [3, 4] };
+  ts_eq(std.iter.collect(iter!(b)), [3, 4]);
+  let any_b: any = MacroIterBox { xs: [5, 6] };
+  ts_eq(std.iter.collect(iter!(any_b)), [5, 6]);
+});
+
 ts_finish();

@@ -2281,6 +2281,50 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
                           copy_text(diag_current_source_name().c_str()),
                           NULL, NULL);
       }
+    | exp '[' exp ']' '{' empty_body {
+        $$ = newstructlit($1->nodetype == 'N'
+                              ? copy_text(((struct symref *)$1)->name)
+                              : copy_text(""),
+                          copy_text(diag_current_source_name().c_str()),
+                          NULL, NULL);
+        ((struct struct_lit_node *)$$)->has_type_args = true;
+        ((struct struct_lit_node *)$$)->type_args_span =
+            { @1.first_line, @1.first_column, @1.first_line,
+              @1.first_column };
+      }
+    | exp '[' exp ']' '{' struct_fields '}' {
+        $$ = newstructlit($1->nodetype == 'N'
+                              ? copy_text(((struct symref *)$1)->name)
+                              : copy_text(""),
+                          copy_text(diag_current_source_name().c_str()),
+                          NULL, (struct struct_init *)$6);
+        ((struct struct_lit_node *)$$)->has_type_args = true;
+        ((struct struct_lit_node *)$$)->type_args_span =
+            { @1.first_line, @1.first_column, @1.first_line,
+              @1.first_column };
+      }
+    | exp '[' exp ',' explist ']' '{' empty_body {
+        $$ = newstructlit($1->nodetype == 'N'
+                              ? copy_text(((struct symref *)$1)->name)
+                              : copy_text(""),
+                          copy_text(diag_current_source_name().c_str()),
+                          NULL, NULL);
+        ((struct struct_lit_node *)$$)->has_type_args = true;
+        ((struct struct_lit_node *)$$)->type_args_span =
+            { @1.first_line, @1.first_column, @1.first_line,
+              @1.first_column };
+      }
+    | exp '[' exp ',' explist ']' '{' struct_fields '}' {
+        $$ = newstructlit($1->nodetype == 'N'
+                              ? copy_text(((struct symref *)$1)->name)
+                              : copy_text(""),
+                          copy_text(diag_current_source_name().c_str()),
+                          NULL, (struct struct_init *)$8);
+        ((struct struct_lit_node *)$$)->has_type_args = true;
+        ((struct struct_lit_node *)$$)->type_args_span =
+            { @1.first_line, @1.first_column, @1.first_line,
+              @1.first_column };
+      }
     | NAME '{' struct_fields '}'          {
         $$ = newstructlit($1,
                           copy_text(diag_current_source_name().c_str()),

@@ -2637,6 +2637,8 @@ struct Checker : public BuiltinContext {
         enum_def *edef = nullptr;
         struct variant_def *variant = nullptr;
         const char *variant_name = nullptr;
+        bool has_type_args = false;
+        struct source_span type_args_span = {};
 
         if (expr->nodetype == 'y') {
             struct struct_lit_node *lit =
@@ -2644,6 +2646,8 @@ struct Checker : public BuiltinContext {
             name = lit->name;
             source = lit->source;
             fields = lit->fields;
+            has_type_args = lit->has_type_args;
+            type_args_span = lit->type_args_span;
             def = structtype_find_struct(source, name);
         } else if (expr->nodetype == '?') {
             struct enum_lit_node *lit = (struct enum_lit_node *)expr;
@@ -2651,6 +2655,8 @@ struct Checker : public BuiltinContext {
             source = lit->source;
             fields = lit->fields;
             variant_name = lit->variant;
+            has_type_args = lit->has_type_args;
+            type_args_span = lit->type_args_span;
             edef = structtype_find_enum(source, name);
             if (edef && lit->variant) {
                 auto it = edef->variant_index.find(lit->variant);
@@ -2696,6 +2702,66 @@ struct Checker : public BuiltinContext {
         const bool generic_literal =
             generic_params && !generic_params->empty();
         TypeBindings bindings;
+        std::vector<const TypeNode *> explicit_args;
+        bool explicit_bindings = false;
+        if (has_type_args) {
+            if (!generic_params) {
+                std::string message =
+                    std::string("type ") + (name ? name : "invalid") +
+                    " does not accept type arguments";
+                report_error(expr->line, expr->column, message.c_str());
+                return false;
+            }
+            std::string remainder = diag_source_text(
+                type_args_span.start_line, type_args_span.start_column,
+                type_args_span.start_line,
+                type_args_span.start_column + 512);
+            std::size_t open = remainder.find('[');
+            std::string text;
+            if (open != std::string::npos) {
+                int depth = 0;
+                for (std::size_t i = open; i < remainder.size(); ++i) {
+                    if (remainder[i] == '[')
+                        ++depth;
+                    else if (remainder[i] == ']') {
+                        --depth;
+                        if (depth == 0) {
+                            text = remainder.substr(open + 1, i - open - 1);
+                            break;
+                        }
+                    }
+                }
+            }
+            std::vector<struct type_constraint *> constraints;
+            std::string parse_error;
+            if (!parse_type_list_text(text, source, constraints,
+                                      parse_error, true)) {
+                report_error(expr->line, expr->column,
+                             parse_error.empty() ? "invalid type arguments"
+                                                 : parse_error.c_str());
+                for (struct type_constraint *constraint : constraints)
+                    free_type_constraint(constraint);
+                return false;
+            }
+            if (constraints.size() != generic_params->size()) {
+                std::string message =
+                    std::string("type ") + (name ? name : "invalid") +
+                    " expects " + std::to_string(generic_params->size()) +
+                    " type argument(s), got " +
+                    std::to_string(constraints.size());
+                report_error(expr->line, expr->column, message.c_str());
+                for (struct type_constraint *constraint : constraints)
+                    free_type_constraint(constraint);
+                return false;
+            }
+            for (std::size_t i = 0; i < constraints.size(); ++i) {
+                const TypeNode *arg = type_from_constraint(constraints[i]);
+                explicit_args.push_back(arg);
+                bindings[(*generic_params)[i]] = arg;
+                free_type_constraint(constraints[i]);
+            }
+            explicit_bindings = true;
+        }
         auto check_initializer = [&](struct ast *value,
                                      const TypeNode *expected) -> bool {
             if (!value)
@@ -2705,7 +2771,8 @@ struct Checker : public BuiltinContext {
                 return true;
             }
             const TypeNode *actual = infer(value, env);
-            if (generic_literal && type_contains_vars(expected)) {
+            if (generic_literal && !explicit_bindings &&
+                type_contains_vars(expected)) {
                 if (!bind_type(actual, expected, bindings)) {
                     char message[512];
                     std::snprintf(
@@ -2716,7 +2783,12 @@ struct Checker : public BuiltinContext {
                     return false;
                 }
                 expected = instantiate_type(expected, bindings);
+            } else if (explicit_bindings && type_contains_vars(expected)) {
+                expected = instantiate_type(expected, bindings);
             }
+            if (explicit_bindings)
+                return warn_or_error(actual, expected, value->line,
+                                     value->column, false, true);
             return check_expr(value, expected, env, false,
                               needs_static_check(expected));
         };
@@ -2758,13 +2830,17 @@ struct Checker : public BuiltinContext {
         }
 
         if (generic_literal) {
-            std::vector<const TypeNode *> args;
-            for (const std::string &name : *generic_params) {
-                auto it = bindings.find(name);
-                args.push_back(it == bindings.end() ? type_any()
-                                                    : it->second);
+            if (explicit_bindings) {
+                generic_literal_args[expr] = explicit_args;
+            } else {
+                std::vector<const TypeNode *> args;
+                for (const std::string &param : *generic_params) {
+                    auto it = bindings.find(param);
+                    args.push_back(it == bindings.end() ? type_any()
+                                                        : it->second);
+                }
+                generic_literal_args[expr] = args;
             }
-            generic_literal_args[expr] = args;
         }
         return true;
     }

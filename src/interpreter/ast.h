@@ -498,6 +498,8 @@ struct struct_lit_node {
     char *name;
     char *source;
     struct generic_type_arg *type_args;
+    bool has_type_args;
+    struct source_span type_args_span;
     struct struct_init *fields;
     bool is_ref;
 };
@@ -531,6 +533,8 @@ struct enum_lit_node {
     char *source;
     char *variant;
     struct generic_type_arg *type_args;
+    bool has_type_args;
+    struct source_span type_args_span;
     struct struct_init *fields;
 };
 

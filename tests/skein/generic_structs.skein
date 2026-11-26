@@ -37,6 +37,13 @@ ts_test("generic struct method return type", func() {
   ts_eq(text + "b", "ab");
 });
 
+ts_test("generic struct explicit literal", func() {
+  let a = Box[int] { value: 3 };
+  ts_eq(a.value, 3);
+  let b = Box[string] { value: "b" };
+  ts_eq(b.value, "b");
+});
+
 ts_test("generic struct multiple parameters", func() {
   let p: Pair[int, string] = Pair { first: 1, second: "a" };
   ts_eq(p.first, 1);

@@ -1532,6 +1532,8 @@ struct ast *newstructlit(char *name, char *source,
     a->name = name;
     a->source = source;
     a->type_args = type_args;
+    a->has_type_args = false;
+    a->type_args_span = {};
     a->fields = fields;
     a->is_ref = is_ref;
     return (struct ast *)a;
@@ -1598,6 +1600,8 @@ struct ast *newenumlit(char *name, char *source, char *variant,
     a->source = source;
     a->variant = variant;
     a->type_args = type_args;
+    a->has_type_args = false;
+    a->type_args_span = {};
     a->fields = fields;
     return (struct ast *)a;
 }

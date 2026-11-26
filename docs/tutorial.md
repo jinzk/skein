@@ -326,7 +326,7 @@ let first = (raw as list[int])[0];  // 对 cast 结果取下标要加括号
 ```
 
 - 支持 `list[T]` / `dict[K,V]` / `set[T]` / `deque[T]` / `heap[T]` / `task[T]` / `generator[T]` / `generator[T, S]` / `pair[A, B]` / `tuple[A, B, ...]` / `union[A, B, ...]`，支持嵌套和可空形式；
-- 只支持内建容器的类型参数，不支持 `struct Box<T>`、`func f<T>`、泛型 protocol 或类型别名；
+- 支持内建容器类型参数，也支持用户自定义泛型 `struct` / `enum` / `protocol` / 函数，见下文“用户自定义泛型”；
 - 用户类型可以作为参数，例如 `list[Point]`；`list` 仍然表示无元素约束；
 - 检查初始化（字面量、`from_list`、构造字段、函数参数、默认值）和插入（下标赋值、`append`、`+=`、`set.add`、`push`、`merge`）；
 - 运行时只检查外层容器类型，不扫描元素；动态路径仍可通过 `any` 绕过；
@@ -343,6 +343,81 @@ let first = (raw as list[int])[0];  // 对 cast 结果取下标要加括号
 - 解构声明、`match` 模式和 `for` 绑定会从值的静态类型推断元素/字段类型；
 - `std.list.map` 会推断简单表达式 lambda 或单 return lambda 的返回类型，`std.list.zip` 会检查第二个参数是 list；
 - 未注解的 `let` 会从初始化表达式推断类型；它不是固定标注，重新赋值为其他类型时会更新推断。
+
+#### 用户自定义泛型
+
+`struct`、`enum`、`protocol` 和自由函数都可以声明类型参数：
+
+```text
+struct Box[T any] { value: T; }
+enum Option[T any] { None; Some { value: T; } }
+
+protocol Keyed[K any] {
+  func key(self): K;
+}
+
+func identity[T any](x: T): T {
+  return x;
+}
+```
+
+约束写法：
+
+```text
+[T any]
+[T = any]                 // 默认类型实参
+[K type int | string]     // 具体类型集合
+[V proto Drawable]        // protocol 组
+[T hashable]
+[T proto hashable & Drawable]
+```
+
+实例化：
+
+```text
+let a: Box[int] = Box { value: 1 };
+let b = Box[int] { value: 2 };
+let c = Option[int].Some { value: 3 };
+let d = Option[int].None;
+
+identity(1);
+identity[int](1);
+
+let g = identity[int];
+g(1);
+```
+
+规则：
+
+- 泛型实例 invariant，`Box[int]` 不能赋给 `Box[any]`；
+- 类型实参只参与静态检查，运行时擦除；
+- `is Box` 合法，`is Box[int]` 报错；
+- 不支持泛型方法、`impl Box[int]` 特化或泛型继承；
+- 泛型 struct 支持递归字段，例如 `next: Node[T]?`；
+- `impl Box` 中的方法使用 struct 的类型参数。
+
+泛型 protocol 按结构式签名匹配：
+
+```text
+func need[T Keyed](x: T): T { return x; }
+func need_int[T Keyed[int]](x: T): T { return x; }
+
+x is Keyed        // 允许
+x is Keyed[int]   // 错误
+```
+
+元数据和序列化：
+
+```text
+std.meta.generic_info("Box[int]")
+std.meta.type_args("Box[int]")       // ["int"]
+std.meta.type_params("Box[int]")     // ["T"]
+
+std.struct.decode({"value": 1}, "Box[int]")
+std.struct.encode(box, "Box[int]")   // envelope，包含 $type
+```
+
+普通 payload 不保存类型实参；动态消息使用 envelope 的 `$type`。
 
 #### 函数类型
 
@@ -394,7 +469,7 @@ struct Handler {
 - 当 key/元素类型静态已知时，类型检查器会在 `dict[K, V]` / `set[T]` 注解、参数、返回值、字段和 `std.dict.*` / `std.set.*` builtin 调用处提前拒绝不可哈希类型；`dict[any, V]` / `set[any]` 仍由运行时检查；
 - key 的完整规则、错误和 `std.dict.index_by` 用法见 [key-semantics.md](key-semantics.md)；
 - `match (a, b)` 的 subject 是 tuple/pair；tuple 模式 `(x, y)` 只匹配 pair/tuple，序列模式 `[x, y]` 匹配任意二元素序列；传单个 tuple 参数使用 `f((a, b))`；
-- `std.list.append` / `std.dict.keys` / `std.set.from_list` 等容器 builtin 作为一等值时保留类型变量模板：`let f = std.list.append; f([1], 2)` 得到 `list[int]`，`f([1], "a")` 会报错；该支持仅限已知容器 builtin，不扩展到用户自定义泛型函数；
+- `std.list.append` / `std.dict.keys` / `std.set.from_list` 等容器 builtin 作为一等值时保留类型变量模板：`let f = std.list.append; f([1], 2)` 得到 `list[int]`，`f([1], "a")` 会报错；该模板行为仅限已知容器 builtin，用户自定义泛型函数见“用户自定义泛型”；
 - `is` 和模式类型不接受函数类型签名。
 
 #### 自增、自减与复合赋值
@@ -1140,7 +1215,7 @@ let b = Config { port: 8080 };
 let c = Config { ...a, port: 9090 };
 ```
 
-- 不支持继承、动态添加方法、静态方法、用户自定义泛型或运算符重载；内建容器的类型参数见变量类型标注章节。
+- 不支持继承、动态添加方法、静态方法或运算符重载；泛型 struct/enum/protocol/函数见“用户自定义泛型”，内建容器类型参数见变量类型标注章节。
 
 `protocol` 定义结构式接口：
 

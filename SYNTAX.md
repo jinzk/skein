@@ -877,7 +877,7 @@ let h: heap[int] = std.heap.from_list([1, 2], less);
 ```
 
 - 支持 `list[T]`、`dict[K,V]`、`set[T]`、`deque[T]`、`heap[T]`、`task[T]`、`generator[T]`、`generator[T, S]`、`pair[A, B]`、`tuple[A, B, ...]`、`union[A, B, ...]`，以及嵌套和可空形式，例如 `list[int?]`、`dict[int, list[int]]`、`list[int]?`、`union[int, string]?`；
-- 只支持内建容器的类型参数，不支持用户自定义泛型：`struct Box<T>`、`func f<T>`、泛型 protocol / 别名都不允许；
+- 支持内建容器类型参数，也支持用户自定义泛型 `struct` / `enum` / `protocol` / 函数，见下文“用户自定义泛型”；
 - 用户类型可以作为参数，例如 `list[Point]`、`dict[string, Point]`；
 - 不带参数的 `list` / `dict` / `set` / `deque` / `heap` 仍然表示无元素约束。
 
@@ -903,6 +903,87 @@ h = std.heap.push(h, "a");                            // 错误
 
 运行时只检查外层容器类型，不扫描元素：`list[int]` 在运行时就是 `list`。
 因此通过未注解代码、`any`、FFI 或 JSON 解码进入的元素不会被运行时检查。
+
+#### 用户自定义泛型
+
+`struct`、`enum`、`protocol` 和自由函数都可以声明类型参数：
+
+```text
+struct Box[T any] { value: T; }
+enum Option[T any] { None; Some { value: T; } }
+
+protocol Keyed[K any] {
+  func key(self): K;
+}
+
+func identity[T any](x: T): T {
+  return x;
+}
+```
+
+类型参数写法：
+
+```text
+[T any]
+[T = any]                 // 默认类型实参
+[K type int | string]     // 具体类型集合
+[V proto Drawable]        // protocol 组
+[T hashable]
+[T proto hashable & Drawable]
+```
+
+- `[T]`、`[T type]` 不合法；
+- 一个参数的约束不能混用 `&` 和 `|`；
+- protocol 不能作为 `|` 成员；
+- `hashable` 是内置约束，可参与 `&`；
+- protocol 不是类型实参：`Box[Keyed]` 非法。
+
+实例化和推断：
+
+```text
+let a: Box[int] = Box { value: 1 };
+let b = Box[int] { value: 2 };
+let c = Option[int].Some { value: 3 };
+let d = Option[int].None;
+
+identity(1);
+identity[int](1);
+
+let g = identity[int];
+g(1);
+```
+
+- 泛型实例是 invariant：`Box[int]` 不能赋给 `Box[any]` 或 `Box[int|string]`；
+- 运行时擦除类型实参，`Box[int]` 和 `Box[string]` 共享同一运行时形状；
+- `is Box` 合法，`is Box[int]` 报错；
+- 不支持泛型方法、`impl Box[int]` 特化或泛型继承；
+- 泛型 struct 支持递归字段，例如 `next: Node[T]?`。
+
+`impl Box` 中的方法使用 struct 的类型参数：
+
+```text
+impl Box {
+  func get(self): T {
+    return self.value;
+  }
+}
+```
+
+泛型 protocol 按结构式方法签名匹配，`[T Keyed]` 和 `[T Keyed[int]]` 都可用于约束；
+`x is Keyed` 只检查结构，`x is Keyed[int]` 非法。
+
+元数据和序列化：
+
+```text
+std.meta.generic_info("Box[int]")
+std.meta.type_args("Box[int]")       // ["int"]
+std.meta.type_params("Box[int]")     // ["T"]
+
+std.struct.decode({"value": 1}, "Box[int]")
+std.struct.encode(box, "Box[int]")   // {"$version": 1, "$type": "Box[int]", ...}
+```
+
+类型实参只在类型描述符或 envelope 中出现；普通 payload 不保存类型实参。
 
 静态检查模式：
 
@@ -1146,7 +1227,7 @@ struct Handler {
   f([1], "a");      // 错误
   ```
 
-  该支持仅限已知容器 builtin，不扩展到用户自定义泛型函数；
+  该模板行为仅限已知容器 builtin；用户自定义泛型函数使用独立的推断和显式实参规则，见“用户自定义泛型”；
 - `is` 和模式类型不接受函数类型签名：`f is (int) -> int` 会报错。
 
 `is` 和模式类型只接受不带类型参数的类型：
@@ -2071,7 +2152,7 @@ let d = Point { ...p, x: 9 };
   两个 `struct` 的普通值互递归字段不支持，需使用 `ref T?` / `weak T?`（见 5.12.3）；
 - 普通值不允许创建环：`a.next = b; b.next = a;` 会报 `recursive value would create a cycle`；共享子结构（DAG）允许；使用 `ref` 字段的强引用环由 GC 回收，见 5.12.3；
 - 字段可以保存 `callable` / `function` 值，作为普通回调使用，不会自动绑定 `self`；
-- 不支持继承、静态方法、用户自定义泛型、动态添加方法或运算符重载；唯一例外是构造函数，见 5.12.4；
+- 不支持继承、静态方法、动态添加方法或运算符重载；唯一例外是构造函数，见 5.12.4；泛型 `struct` / `enum` / `protocol` / 函数见“用户自定义泛型”；
 - 内建容器的类型参数见变量类型标注章节。
 
 #### 5.12.4 构造函数
@@ -2315,7 +2396,7 @@ render(Point { x: 1, y: 2 });
 - protocol 方法声明不支持默认值和可变参数；inline 方法和 `impl Type` 方法可以
   额外提供默认值；
 - enum 上的方法名不能与任意变体字段重名；
-- 不支持 protocol 继承、泛型和静态方法；`trait`、`impl Protocol for Type`、`export protocol` 和 `with` 协议简写均已移除；
+- protocol 可以声明类型参数和默认方法体；不支持 protocol 继承、关联类型和静态方法；`trait`、`impl Protocol for Type`、`export protocol` 和 `with` 协议简写均已移除；
 - struct、enum 和 protocol 名称共享类型命名空间，不能在同一个包中重名；
 - 类型名按包注册，一个包对应一个源文件；不同包可以定义同名结构体或 protocol；
 - 未标注类型的方法调用按运行时能力查找；protocol 标注和 `is Protocol` 是结构式契约；跨包返回的结构体值仍可以通过字段和方法使用。
@@ -5322,7 +5403,7 @@ try/catch
 struct 继承
 protocol 继承
 trait / impl Protocol for Type / export protocol / with 协议简写
-用户自定义泛型（仅内建容器支持 `[...]` 类型参数）/ Option / 匿名联合类型
+Option / 匿名联合类型
 ```
 
 动态链接库加载目前是设计方向，尚未作为语言语法实现。

@@ -48,7 +48,7 @@ func facade_web(l: web.LimiterApi) {
   let req = {"remote_addr": "127.0.0.1"};
   l.check(req);
   l.middleware(req);
-  l.reset();
+  l.reset("facade");
   l.cleanup();
 }
 

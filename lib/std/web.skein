@@ -337,7 +337,7 @@ package web {
   protocol LimiterApi {
     func check(self, req: dict);
     func middleware(self, req: dict);
-    func reset(self);
+    func reset(self, key);
     func cleanup(self);
   }
 
@@ -348,8 +348,8 @@ package web {
     func middleware(self, req: dict) {
       return self._middleware(req);
     }
-    func reset(self) {
-      self._reset();
+    func reset(self, key = null) {
+      return self._reset(key);
     }
     func cleanup(self) {
       return self._cleanup();

@@ -1110,7 +1110,43 @@ let ys: list[int] = b.add(2);       // 返回类型传播
 ys[0] = "a";                        // 错误
 ```
 
-#### 函数类型语法
+#### 内置容器方法
+
+内置容器支持与 `std.list` / `std.dict` / `std.set` / `std.deque` / `std.heap` 对应的值方法调用：
+
+```text
+let xs: list[int] = [1, 2, 3];
+xs.len();
+xs.contains(2);
+xs.map(func(x) { return x * 2; });
+for x in xs.iter() { ... }
+
+let d: dict[string, int] = {"a": 1};
+d.len();
+d.has("a");
+d.keys();
+d.values();
+d.items();
+for k in d.iter_keys() { ... }
+for (k, v) in d.iter() { ... }
+
+let q: deque[int] = std.deque.from_list([1, 2]);
+q.size();
+q = q.push_back(3);
+q.to_list();
+```
+
+方法名与对应命名空间函数一致；方法调用等价于把接收者作为第一个参数：
+
+```text
+xs.len()        == std.list.len(xs)
+d.iter_keys()   == std.dict.iter_keys(d)
+q.push_back(3)  == std.deque.push_back(q, 3)
+```
+
+方法调度基于接收者的静态容器类型。接收者静态类型是 `any` 时不会做内置方法解析，
+需要先标注为具体容器类型，或直接使用命名空间函数。
+
 
 函数值可以写函数类型：
 

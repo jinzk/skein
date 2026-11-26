@@ -1866,6 +1866,112 @@ struct Checker : public BuiltinContext {
         return true;
     }
 
+    struct BuiltinMethod {
+        enum type_constraint_kind receiver;
+        const char *name;
+        const char *canonical;
+        int functype;
+    };
+
+    static const BuiltinMethod *find_builtin_method(
+        enum type_constraint_kind receiver, const std::string &name) {
+        static const BuiltinMethod methods[] = {
+            {TYPE_LIST, "len", "std.list.len", B_len},
+            {TYPE_LIST, "iter", "std.list.iter", B_iter_elements},
+            {TYPE_LIST, "slice", "std.list.slice", B_list_slice},
+            {TYPE_LIST, "contains", "std.list.contains", B_list_contains},
+            {TYPE_LIST, "index", "std.list.index", B_list_index},
+            {TYPE_LIST, "reverse", "std.list.reverse", B_list_reverse},
+            {TYPE_LIST, "sort", "std.list.sort", B_list_sort},
+            {TYPE_LIST, "sort_by", "std.list.sort_by", B_list_sort_by},
+            {TYPE_LIST, "sort_desc", "std.list.sort_desc", B_list_sort_desc},
+            {TYPE_LIST, "is_sorted", "std.list.is_sorted",
+             B_list_is_sorted},
+            {TYPE_LIST, "append", "std.list.append", B_list_append},
+            {TYPE_LIST, "map", "std.list.map", B_list_map},
+            {TYPE_LIST, "filter", "std.list.filter", B_list_filter},
+            {TYPE_LIST, "reduce", "std.list.reduce", B_list_reduce},
+            {TYPE_LIST, "unique", "std.list.unique", B_list_unique},
+            {TYPE_LIST, "unique_by", "std.list.unique_by",
+             B_list_unique_by},
+            {TYPE_LIST, "group_by", "std.list.group_by", B_list_group_by},
+            {TYPE_LIST, "chunk", "std.list.chunk", B_list_chunk},
+            {TYPE_LIST, "window", "std.list.window", B_list_window},
+            {TYPE_LIST, "zip", "std.list.zip", B_list_zip},
+            {TYPE_LIST, "top_k", "std.list.top_k", B_list_top_k},
+            {TYPE_LIST, "binary_search", "std.list.binary_search",
+             B_list_binary_search},
+
+            {TYPE_DICT, "len", "std.dict.len", B_len},
+            {TYPE_DICT, "get", "std.dict.get", B_dict_get},
+            {TYPE_DICT, "has", "std.dict.has", B_dict_has},
+            {TYPE_DICT, "keys", "std.dict.keys", B_dict_keys},
+            {TYPE_DICT, "values", "std.dict.values", B_dict_values},
+            {TYPE_DICT, "items", "std.dict.items", B_dict_items},
+            {TYPE_DICT, "delete", "std.dict.delete", B_dict_delete},
+            {TYPE_DICT, "merge", "std.dict.merge", B_dict_merge},
+            {TYPE_DICT, "index_by", "std.dict.index_by",
+             B_dict_index_by},
+            {TYPE_DICT, "iter", "std.dict.iter", B_iter_items},
+            {TYPE_DICT, "iter_keys", "std.dict.iter_keys", B_iter_keys},
+            {TYPE_DICT, "iter_values", "std.dict.iter_values",
+             B_iter_values},
+            {TYPE_DICT, "iter_items", "std.dict.iter_items", B_iter_items},
+
+            {TYPE_SET, "size", "std.set.size", B_set_size},
+            {TYPE_SET, "iter", "std.set.iter", B_iter_elements},
+            {TYPE_SET, "add", "std.set.add", B_set_add},
+            {TYPE_SET, "remove", "std.set.remove", B_set_remove},
+            {TYPE_SET, "has", "std.set.has", B_set_has},
+            {TYPE_SET, "values", "std.set.values", B_set_values},
+            {TYPE_SET, "union", "std.set.union", B_set_union},
+            {TYPE_SET, "intersect", "std.set.intersect", B_set_intersect},
+            {TYPE_SET, "difference", "std.set.difference",
+             B_set_difference},
+            {TYPE_SET, "is_subset", "std.set.is_subset", B_set_is_subset},
+
+            {TYPE_DEQUE, "size", "std.deque.size", B_deque_size},
+            {TYPE_DEQUE, "iter", "std.deque.iter", B_iter_elements},
+            {TYPE_DEQUE, "push_front", "std.deque.push_front",
+             B_deque_push_front},
+            {TYPE_DEQUE, "push_back", "std.deque.push_back",
+             B_deque_push_back},
+            {TYPE_DEQUE, "peek_front", "std.deque.peek_front",
+             B_deque_peek_front},
+            {TYPE_DEQUE, "peek_back", "std.deque.peek_back",
+             B_deque_peek_back},
+            {TYPE_DEQUE, "pop_front", "std.deque.pop_front",
+             B_deque_pop_front},
+            {TYPE_DEQUE, "pop_back", "std.deque.pop_back",
+             B_deque_pop_back},
+            {TYPE_DEQUE, "to_list", "std.deque.to_list", B_deque_to_list},
+
+            {TYPE_HEAP, "size", "std.heap.size", B_heap_size},
+            {TYPE_HEAP, "iter", "std.heap.iter", B_iter_elements},
+            {TYPE_HEAP, "push", "std.heap.push", B_heap_push},
+            {TYPE_HEAP, "peek", "std.heap.peek", B_heap_peek},
+            {TYPE_HEAP, "pop", "std.heap.pop", B_heap_pop},
+            {TYPE_HEAP, "to_list", "std.heap.to_list", B_heap_to_list},
+        };
+        for (const BuiltinMethod &method : methods) {
+            if (method.receiver == receiver && name == method.name)
+                return &method;
+        }
+        return NULL;
+    }
+
+    static bool builtin_method_name(const struct ast *callee,
+                                    std::string &name) {
+        if (!callee || callee->nodetype != 'j' || !callee->r ||
+            callee->r->nodetype != 'V')
+            return false;
+        const struct value_t *value = ((const struct val *)callee->r)->val;
+        if (!value || value->type != T_string)
+            return false;
+        name = ((const struct string_value_t *)value)->value;
+        return true;
+    }
+
     bool check_explicit_generic_call(
         struct ufncall *call, struct index_node *bracket,
         const std::vector<struct ast *> &args, Env &env,
@@ -1998,6 +2104,52 @@ struct Checker : public BuiltinContext {
             if (arg && arg->nodetype == 'x') {
                 spread = true;
                 break;
+            }
+        }
+
+        /*
+         * Built-in container values expose their module functions as methods:
+         * `xs.len()`, `d.iter_keys()`, `q.push_back(x)`, ...  Resolve from the
+         * receiver's static container type and rewrite the call to the
+         * corresponding builtin with the receiver as the first argument.
+         */
+        if (!spread && call->callee && call->callee->nodetype == 'j' &&
+            call->callee->l) {
+            std::string method;
+            if (builtin_method_name(call->callee, method)) {
+                const TypeNode *receiver =
+                    infer(call->callee->l, env);
+                if (receiver &&
+                    (receiver->kind == TYPE_LIST ||
+                     receiver->kind == TYPE_DICT ||
+                     receiver->kind == TYPE_SET ||
+                     receiver->kind == TYPE_DEQUE ||
+                     receiver->kind == TYPE_HEAP)) {
+                    const BuiltinMethod *builtin =
+                        find_builtin_method(receiver->kind, method);
+                    if (builtin) {
+                        std::vector<struct ast *> call_args;
+                        call_args.push_back(call->callee->l);
+                        call_args.insert(call_args.end(), args.begin(),
+                                         args.end());
+                        const TypeNode *builtin_result = type_any();
+                        if (!check_builtin(*this, builtin->canonical,
+                                           call_args, expected, env,
+                                           builtin_result))
+                            return false;
+                        struct ast *receiver_expr = call->callee->l;
+                        struct ast *field = call->callee->r;
+                        call->callee->l = NULL;
+                        call->callee->r = NULL;
+                        treefree(field);
+                        treefree(call->callee);
+                        call->callee = newbuiltin(builtin->functype);
+                        call->args =
+                            newast('L', receiver_expr, call->args);
+                        result = builtin_result;
+                        return true;
+                    }
+                }
             }
         }
 

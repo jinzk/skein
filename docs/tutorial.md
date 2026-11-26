@@ -424,6 +424,40 @@ std.struct.encode(box, "Box[int]")   // envelope，包含 $type
 
 普通 payload 不保存类型实参；动态消息使用 envelope 的 `$type`。
 
+#### 内置容器方法
+
+内置容器支持值方法调用，方法名和对应命名空间函数一致：
+
+```text
+let xs: list[int] = [1, 2, 3];
+xs.len();
+xs.contains(2);
+xs.map(func(x) { return x * 2; });
+for x in xs.iter() { ... }
+
+let d: dict[string, int] = {"a": 1};
+d.len();
+d.has("a");
+d.keys();
+for k in d.iter_keys() { ... }
+for (k, v) in d.iter() { ... }
+
+let q: deque[int] = std.deque.from_list([1, 2]);
+q.size();
+q = q.push_back(3);
+```
+
+方法调用等价于把接收者作为第一个参数：
+
+```text
+xs.len()        == std.list.len(xs)
+d.iter_keys()   == std.dict.iter_keys(d)
+q.push_back(3)  == std.deque.push_back(q, 3)
+```
+
+方法调度基于接收者的静态容器类型；静态类型是 `any` 时需要先标注具体容器类型，
+或直接使用命名空间函数。
+
 #### 函数类型
 
 函数值可以写函数类型：

@@ -3158,6 +3158,19 @@ for k in std.dict.iter_keys(d) { ... }
 for (k, v) in std.dict.iter(d) { ... }
 ```
 
+这些函数也可以作为内置容器值的方法调用：
+
+```text
+xs.len()
+xs.iter()
+d.keys()
+d.iter_keys()
+q.push_back(3)
+```
+
+方法调用等价于把接收者作为第一个参数传给对应的 `std.list` / `std.dict` /
+`std.set` / `std.deque` / `std.heap` 函数。
+
 当前提供的函数：
 
 ```text

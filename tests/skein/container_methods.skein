@@ -1,0 +1,55 @@
+import std;
+include "_support.skein";
+
+ts_test("list methods", func() {
+  let xs: list[int] = [1, 2, 3];
+  ts_eq(xs.len(), 3);
+  ts_eq(xs.contains(2), 1);
+  ts_eq(xs.map(func(x) { return x * 2; }), [2, 4, 6]);
+  let out = [];
+  for x in xs.iter() {
+    out = std.list.append(out, x);
+  }
+  ts_eq(out, [1, 2, 3]);
+});
+
+ts_test("dict methods", func() {
+  let d: dict[string, int] = {"a": 1, "b": 2};
+  ts_eq(d.len(), 2);
+  ts_eq(d.has("a"), 1);
+  ts_eq(d.keys(), ["a", "b"]);
+  ts_eq(d.values(), [1, 2]);
+  ts_eq(d.items()[0][0], "a");
+  ts_eq(std.iter.collect(d.iter_keys()), ["a", "b"]);
+  ts_eq(std.iter.collect(d.iter_values()), [1, 2]);
+  let out = [];
+  for (k, v) in d.iter() {
+    out = std.list.append(out, k + "=" + str(v));
+  }
+  ts_eq(out, ["a=1", "b=2"]);
+});
+
+ts_test("set methods", func() {
+  let s: set[int] = std.set.from_list([1, 2]);
+  ts_eq(s.size(), 2);
+  ts_true(s.has(1));
+  ts_eq(std.iter.collect(s.iter()), [1, 2]);
+});
+
+ts_test("deque methods", func() {
+  let q: deque[int] = std.deque.from_list([1, 2]);
+  ts_eq(q.size(), 2);
+  q = q.push_back(3);
+  ts_eq(q.to_list(), [1, 2, 3]);
+  ts_eq(std.iter.collect(q.iter()), [1, 2, 3]);
+});
+
+ts_test("heap methods", func() {
+  let h: heap[int] = std.heap.from_list([2, 1],
+                                        func(a, b) { return a < b; });
+  ts_eq(h.size(), 2);
+  ts_eq(h.peek(), 1);
+  ts_eq(std.iter.collect(h.iter()), [1, 2]);
+});
+
+ts_finish();

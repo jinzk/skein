@@ -230,6 +230,66 @@ def run_cases():
     )
 
     check(
+        "await launches and waits for a call",
+        "import std;\n"
+        "func work(n) { return n + 1; }\n"
+        "println(await work(41));\n"
+        "println(wait launch work(41));\n",
+        stdout="42\n42\n",
+    )
+
+    check(
+        "await requires a call expression",
+        "import std;\n"
+        "let t = launch std.task.sleep(1);\n"
+        "await t;\n",
+        stderr="launch expects a call expression",
+    )
+
+    check(
+        "await on error catches task failure",
+        'import std;\n'
+        'func boom() { fail "await-boom"; }\n'
+        'let v = await boom() on error(e) { recover 7; };\n'
+        'println(v);\n',
+        stdout="7",
+        not_stderr="on error does not catch failures from the launched function",
+    )
+
+    check(
+        "await postfix binds before the prefix",
+        "import std;\n"
+        "struct Box { x: int; }\n"
+        "func make(): Box { return Box { x: 7 }; }\n"
+        "println(await make().x);\n"
+        "println((await make()).x);\n",
+        stdout="7\n7\n",
+    )
+
+    check(
+        "task keyword names are shadowable",
+        "import std;\n"
+        "func work(): int { return 8; }\n"
+        "let launch = work;\n"
+        "let wait = work;\n"
+        "let await = work;\n"
+        "println((launch)());\n"
+        "println((wait)());\n"
+        "println((await)());\n"
+        "println(await(work()));\n",
+        stdout="8\n8\n8\n8\n",
+    )
+
+    check(
+        "await as a member name stays an identifier",
+        "import std;\n"
+        "struct Holder { await: int; }\n"
+        "let h = Holder { await: 9 };\n"
+        "println(h.await);\n",
+        stdout="9",
+    )
+
+    check(
         "launch on error warns about task failures",
         "import std;\n"
         "func noop() {}\n"

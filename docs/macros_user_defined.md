@@ -1,6 +1,6 @@
 # 用户自定义宏设计（提案）
 
-- 状态：待决策，尚未实现
+- 状态：P1 / P2 / P3.1 已完成；P4 用户自定义宏待实施
 - 关联：[`docs/macros.md`](macros.md)、[`docs/roadmap.md`](roadmap.md)
 - 建议里程碑：M11，不回写已完成的 M10
 - 拟改动：`src/interpreter/tokens.l`、`src/interpreter/parser.y`、新增
@@ -375,7 +375,7 @@ wrap!(2) {
 5. **P2.3（已完成）**：`list` / `dict` 改为默认 import，新增 `std.list.new` /
    `std.dict.new`；`list(x)` / `dict(x)` 解析为对应构造器，值作用域可遮蔽，
    类型命名空间保持独立。不做 `list!` / `dict!` / `try!`。
-6. **P3.1**：`wait` 退出保留字；`launch` 与新增 `await` 改为表达式起始 contextual
+6. **P3.1（已完成）**：`wait` 退出保留字；`launch` / `wait` / `await` 改为表达式起始 contextual
    keyword。`launch f()` 启动 task，`await f()` 等价 `wait launch f()` 并要求
    后面是调用表达式；已有 task 写 `wait!(t)`。contextual 槽位覆盖语句开头、
    `=` / `return` / `yield` / `(` / `[` / `{` / `,` / `:` 和二元运算符之后；`.`

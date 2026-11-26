@@ -197,6 +197,29 @@ void check_switch_arm_label() {
             "switch arm label name mismatch");
 }
 
+void check_contextual_task_keywords() {
+    std::vector<token> tokens = lex_source(
+        "launch f();\n"
+        "let x = await f();\n"
+        "let launch = 1;\n"
+        "println(await);\n"
+        "value.await;\n"
+        "value.launch;\n"
+        "value.wait;\n");
+    require(count_kind(tokens, SKEIN_TOK_LAUNCH) == 1,
+            "launch keyword count mismatch");
+    require(count_kind(tokens, SKEIN_TOK_AWAIT) == 1,
+            "await keyword count mismatch");
+    require(count_kind(tokens, SKEIN_TOK_WAIT) == 0,
+            "wait must stay an identifier here");
+    require(has_text(tokens, SKEIN_TOK_NAME, "launch"),
+            "launch declaration name must stay an identifier");
+    require(has_text(tokens, SKEIN_TOK_NAME, "await"),
+            "await variable reference must stay an identifier");
+    require(has_text(tokens, SKEIN_TOK_NAME, "wait"),
+            "wait member name must stay an identifier");
+}
+
 } // namespace
 
 int main() {
@@ -215,6 +238,7 @@ int main() {
     check_boolean_dict_key_is_not_label();
     check_label_body_block();
     check_switch_arm_label();
+    check_contextual_task_keywords();
 
     std::printf("lexer_test: ok\n");
     return 0;

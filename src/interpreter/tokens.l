@@ -193,6 +193,69 @@ static bool statement_start_token(int tok) {
     }
 }
 
+/* `launch` / `wait` / `await` are contextual at the start of an expression.
+ * They stay ordinary identifiers in declaration names and after `.`. */
+static bool expression_start_token(int tok) {
+    if (statement_start_token(tok))
+        return true;
+    switch (tok) {
+        case '=':
+        case SKEIN_TOK_PLUS_ASSIGN:
+        case SKEIN_TOK_MINUS_ASSIGN:
+        case SKEIN_TOK_MUL_ASSIGN:
+        case SKEIN_TOK_DIV_ASSIGN:
+        case SKEIN_TOK_MOD_ASSIGN:
+        case SKEIN_TOK_AND_ASSIGN:
+        case SKEIN_TOK_OR_ASSIGN:
+        case SKEIN_TOK_XOR_ASSIGN:
+        case SKEIN_TOK_SHL_ASSIGN:
+        case SKEIN_TOK_SHR_ASSIGN:
+        case '+':
+        case '-':
+        case '*':
+        case '/':
+        case '%':
+        case '^':
+        case '&':
+        case '|':
+        case '~':
+        case '!':
+        case SKEIN_TOK_LOGAND:
+        case SKEIN_TOK_LOGOR:
+        case SKEIN_TOK_SHL:
+        case SKEIN_TOK_SHR:
+        case SKEIN_TOK_PIPE:
+        case SKEIN_TOK_CMP:
+        case SKEIN_TOK_IS:
+        case SKEIN_TOK_AS:
+        case '?':
+        case ':':
+        case ',':
+        case '(':
+        case '[':
+        case '{':
+        case SKEIN_TOK_HEADER_LPAREN:
+        case SKEIN_TOK_DO_WHILE_LPAREN:
+        case SKEIN_TOK_RARROW:
+        case SKEIN_TOK_ARROW:
+        case SKEIN_TOK_IF:
+        case SKEIN_TOK_WHILE:
+        case SKEIN_TOK_FOR:
+        case SKEIN_TOK_MATCH:
+        case SKEIN_TOK_CASE:
+        case SKEIN_TOK_DEFAULT:
+        case SKEIN_TOK_RETURN:
+        case SKEIN_TOK_YIELD:
+        case SKEIN_TOK_DEFER:
+        case SKEIN_TOK_WAIT:
+        case SKEIN_TOK_LAUNCH:
+        case SKEIN_TOK_AWAIT:
+            return true;
+        default:
+            return false;
+    }
+}
+
 static void note_contextual_in_name(const char *text, int len) {
     contextual_in_separator =
         token_is_in_name(text, len) &&
@@ -364,6 +427,28 @@ static void note_function_signature_token(int tok) {
         note_for_name_token();                                      \
         YYRET(macro_tok);                                           \
     } while (0)
+
+static int make_name_token(const char *text, int len);
+
+/* Keep a contextual keyword's spelling usable as an ordinary identifier. */
+static int contextual_name_token() {
+    int tok = make_name_token(yytext, yyleng);
+    if (tok == 0)
+        return 0;
+    note_contextual_declaration_name(yytext, yyleng);
+    note_contextual_in_name(yytext, yyleng);
+    note_for_name_token();
+    return tok;
+}
+
+/* Emit a task keyword only where an expression may start; otherwise keep the
+ * spelling as an ordinary identifier.  The caller owns YYRET so the token
+ * reaches yylex rather than just this helper. */
+static int contextual_task_token(int keyword) {
+    if (expression_start_token(last_token))
+        return keyword;
+    return contextual_name_token();
+}
 
 #define YY_USER_ACTION do {                                              \
     diag_scan_token(yytext, yyleng);                                     \
@@ -815,8 +900,7 @@ static bool reserved_name(const char *text, int len) {
         "struct",   "extern",   "enum",     "impl",     "proto",
         "ref",      "weak",
         "switch",   "match",    "case",     "default",  "let",
-        "const",    "func",     "yield",    "launch",   "wait",
-        "defer",
+        "const",    "func",     "yield",    "defer",
         "return",   "break",    "continue", "fail",     "is",
         "goto",     "on",       "error",    "recover",  "pass",
         "as",       "null",     "true",     "false",
@@ -894,6 +978,7 @@ UTF8_4 [\xF0-\xF4][\x80-\xBF]{3}
 UTF8_SEQ ({UTF8_2}|{UTF8_3}|{UTF8_4})
 
 UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
+TASK_KEYWORD_NEXT ([A-Za-z_]|{UTF8_SEQ}|\(|\[|\{|[0-9]|\"|\')
 
 %%
 
@@ -1240,9 +1325,27 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
     YYRET(SKEIN_TOK_FUNC);
 }
 "yield" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_YIELD); }
-"launch" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_LAUNCH); }
+"launch"/"!" { MACRO_CALLEE_NAME(); }
+"launch"/[ \t]*{TASK_KEYWORD_NEXT} {
+    MEMBER_NAME_AFTER_DOT();
+    YYRET(contextual_task_token(SKEIN_TOK_LAUNCH));
+}
+"launch" { MEMBER_NAME_AFTER_DOT(); YYRET(contextual_name_token()); }
 "wait"/"!" { MACRO_CALLEE_NAME(); }
-"wait" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_WAIT); }
+"wait"/[ \t]*{TASK_KEYWORD_NEXT} {
+    MEMBER_NAME_AFTER_DOT();
+    YYRET(contextual_task_token(SKEIN_TOK_WAIT));
+}
+"wait" { MEMBER_NAME_AFTER_DOT(); YYRET(contextual_name_token()); }
+"await"/"!" { MACRO_CALLEE_NAME(); }
+"await"/[ \t]*{TASK_KEYWORD_NEXT} {
+    MEMBER_NAME_AFTER_DOT();
+    YYRET(contextual_task_token(SKEIN_TOK_AWAIT));
+}
+"await" {
+    MEMBER_NAME_AFTER_DOT();
+    YYRET(contextual_name_token());
+}
 "defer" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_DEFER); }
 "include" {
     MEMBER_NAME_AFTER_DOT();

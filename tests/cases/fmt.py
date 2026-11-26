@@ -214,6 +214,7 @@ def run_cases():
         "fail! b;\n"
         "let t=launch f();\n"
         "println(str(wait! t));\n"
+        "let v=await f();\n"
     )
     macro_expected = (
         "import std;\n"
@@ -225,6 +226,7 @@ def run_cases():
         "fail! b;\n"
         "let t = launch f();\n"
         "println(str(wait! t));\n"
+        "let v = await f();\n"
     )
     macro_path = write_temp(macro_source)
     try:

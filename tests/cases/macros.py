@@ -137,6 +137,11 @@ def run_cases():
         stdout_all=["42", "42", "42"],
     )
     check(
+        "await! is a macro callee, not the contextual keyword",
+        'await!(1);\n',
+        stderr="macro await is not a known built-in macro",
+    )
+    check(
         "control macro rejects block",
         'import std;\nfail! { println(1); };\n',
         stderr="does not accept a block",

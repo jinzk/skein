@@ -33,6 +33,7 @@ const char *keyword_detail(const std::string &word) {
         {"goto", "jump to a label"},
         {"yield", "yield"},           {"defer", "defer"},
         {"launch", "launch"},         {"wait", "wait for a task"},
+        {"await", "launch and wait"},
         {"try", "exception handling"},
         {"on", "exception handler"},  {"error", "exception handling"},
         {"recover", "exception handling"}, {"fail", "failure"},

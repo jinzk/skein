@@ -42,10 +42,9 @@ as
 `def` 已不再使用，匿名/命名函数统一使用 `func`。
 
 `wait` 的规范写法是内置宏 `wait!`（`wait!(t)` 或 `wait! t`，展开为 `t.wait()`）；
-旧关键字形式暂时保留兼容。规划中的任务语法调整：`launch` 与新增的 `await`
-改为表达式起始 contextual keyword。`launch f()` 启动 task，`await f()` 等价
-`wait launch f()`。详见任务章节；在 M11 落地前，当前实现仍使用保留字
-`launch` / `wait`。
+旧关键字形式暂时保留兼容。`launch`、`await` 与旧 `wait` 都是表达式起始
+contextual keyword，不是全局保留字：`launch f()` 启动 task，`await f()` 等价
+`wait launch f()`。详见任务章节。
 
 协议类型声明关键字为 `proto`，属于全局保留字（`proto Drawable`）；`protocol`
 不再是关键字。泛型约束列表里的 `proto` 与 `type` 一样是 contextual 标记，只在
@@ -1208,8 +1207,9 @@ struct Handler {
   `wait!` 不接受超时参数；需要超时请写 `t.wait(ms)` 或
   `std.task.wait(t, ms)`。`launch await f()` 会被拒绝。
 
-  `launch` / `await` 在表达式起始位置识别：语句开头，`=`、`return`、`yield`、
-  `(`、`[`、`{`、`,`、`:` 和二元运算符之后。`.` 之后仍是普通名字。示例：
+  `launch` / `wait` / `await` 在表达式起始位置识别：语句开头，`=`、`return`、
+  `yield`、`(`、`[`、`{`、`,`、`:` 和二元运算符之后。`.` 之后仍是普通名字，
+  也可以声明同名变量（调用时用 `(await)(...)` 消除歧义）。示例：
 
   ```text
   d = await f();
@@ -1220,7 +1220,7 @@ struct Handler {
   `await(f())` 是前缀形式，不是调用名为 `await` 的函数；要调用同名变量写
   `(await)(f())`。postfix 优先级高于前缀：`await f().xxx` 等价于
   `await (f().xxx)`；先 await 再取字段写 `(await f()).xxx`。
-  `await f() on error(e) { ... }` 与当前 `wait launch f() on error(...)` 等价，
+  `await f() on error(e) { ... }` 与 `wait launch f() on error(...)` 等价，
   handler 覆盖 task 内失败；`launch f() on error(...)` 仍只覆盖启动调用并告警。
 - 部分 `std.net` / `std.io` / `std.http` / `std.http2` / `std.websocket` 的 `*_task` builtin 返回 `task[...]`，例如 `std.http.get_task` 返回 `task[dict[string, any]]`；旧 `*_async` 名称已移除；其余未覆盖的异步 builtin 仍可能退化为 `any`；
 - 提供不可构造的静态 userdata 类型 `socket`、`listener`、`websocket`、`stream`；网络、I/O 和文件接口会返回这些类型，`socket` 可传给接受 `stream` 的接口；

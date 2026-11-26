@@ -2402,9 +2402,8 @@ std.fs.close(h);
 
 ### launch、await 与 `wait!`
 
-> 规划中的任务语法：`wait` 改为内置宏 `wait!`，`launch` / `await` 改为表达式
-> 起始 contextual keyword。下面使用目标拼写；在 M11 落地前，当前实现仍使用
-> 保留字 `launch` / `wait`，`await` 尚未启用。
+`wait` 的规范写法是内置宏 `wait!`，但旧 `wait` 形式仍暂时兼容；`launch` /
+`wait` / `await` 都是表达式起始 contextual keyword，不是全局保留字。
 
 `launch f()` 创建新 task 并立即返回 `task[T]`；`wait!(t)` 等价于 `t.wait()`；
 `await f()` 等价于 `wait launch f()`，启动调用并立即等待：
@@ -2425,8 +2424,8 @@ print(value + same);
 
 规则：
 
-- `launch` / `await` 在表达式起始位置识别：语句开头，`=`、`return`、`yield`、
-  `(`、`[`、`{`、`,`、`:` 和二元运算符之后；`.` 之后仍是普通名字。例如：
+- `launch` / `wait` / `await` 在表达式起始位置识别：语句开头，`=`、`return`、
+  `yield`、`(`、`[`、`{`、`,`、`:` 和二元运算符之后；`.` 之后仍是普通名字。例如：
 
   ```skein
   d = await f();
@@ -2439,7 +2438,7 @@ print(value + same);
 - `launch` 与 `await` 作用于其后的完整调用链，且 postfix 优先级更高：
   `launch make().get()` 启动 `make().get()`，`await f().xxx` 是
   `await (f().xxx)`；先 await 再取字段写 `(await f()).xxx`；
-- `await f() on error(e) { ... }` 与当前 `wait launch f() on error(...)` 等价，
+- `await f() on error(e) { ... }` 与 `wait launch f() on error(...)` 等价，
   handler 覆盖 task 内失败；`launch f() on error(...)` 仍只覆盖启动调用并告警；
 - `wait!` 不接受超时参数；需要超时请写 `t.wait(ms)` 或
   `std.task.wait(t, ms)`；

@@ -1201,6 +1201,64 @@ static bool is_known_generic_function(struct ast *expr) {
  * generic type application it is really an enum variant with no fields.
  * The decision is made here so ordinary `xs[0].field` stays member access.
  */
+/* Shared by `launch e` and `await e`.  `on error` binds tighter than these
+ * prefixes, so the inner call is marked while the handler stays outside. */
+static struct ast *new_launch_expr(struct ast *value) {
+    struct ast *target = value;
+    if (target && target->nodetype == 'o' &&
+        ((struct on_error_node *)target)->call)
+        target = ((struct on_error_node *)target)->call;
+    if (!target || target->nodetype != 'C') {
+        yyerror("launch expects a call expression");
+        treefree(value);
+        return NULL;
+    }
+    if (((struct ufncall *)target)->wait_sugar) {
+        diag_set_location(target->line, target->column);
+        yyerror("launch cannot be applied to a wait expression; "
+                "use wait (launch f()) or (launch f()).wait()");
+        treefree(value);
+        return NULL;
+    }
+    ((struct ufncall *)target)->launch = 1;
+    return value;
+}
+
+/* A postfix chain such as `f().field` is still launched from its call, but the
+ * whole chain must finish inside the fiber before `await` waits for it. */
+static bool postfix_chain_has_call(struct ast *node) {
+    while (node && (node->nodetype == 'j' || node->nodetype == 'G'))
+        node = node->l;
+    return node && node->nodetype == 'C';
+}
+
+static struct ast *new_await_expr(struct ast *value) {
+    struct ast *target = value;
+    if (target && target->nodetype == 'o' &&
+        ((struct on_error_node *)target)->call)
+        target = ((struct on_error_node *)target)->call;
+
+    if (!postfix_chain_has_call(target)) {
+        struct ast *invalid = new_launch_expr(value);
+        return invalid ? new_wait_call(invalid) : NULL;
+    }
+
+    if (target && target->nodetype != 'C') {
+        push_func_location(target->line, target->column);
+        start_function();
+        struct ast *body = newfunc(NULL, NULL, newret(target), false,
+                                   finish_function());
+        struct ast *call = newcall(body, NULL);
+        if (target == value)
+            value = call;
+        else
+            ((struct on_error_node *)value)->call = call;
+    }
+
+    struct ast *launched = new_launch_expr(value);
+    return launched ? new_wait_call(launched) : NULL;
+}
+
 static struct ast *new_member_or_enum_literal(struct ast *base, char *field) {
     if (base && base->nodetype == 'G') {
         struct index_node *index = (struct index_node *)base;
@@ -1252,6 +1310,7 @@ static struct ast *new_member_or_enum_literal(struct ast *base, char *field) {
 %token YIELD "yield" DEFER "defer"
 %token LAUNCH "launch"
 %token WAIT "wait"
+%token AWAIT "await"
 %token STRUCT "struct" IMPL "impl" PROTOCOL "proto" ENUM "enum"
 %token TYPE_MARK PROTO_MARK
 %token REF "ref" WEAK "weak" QUESTION_DOT "?."
@@ -2300,30 +2359,10 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
                                            { $$ = newmatch($2, $4); }
     | WAIT exp %prec UMINUS                { $$ = new_wait_call($2); }
     | LAUNCH exp %prec UMINUS {
-        struct ast *target = $2;
-        /*
-         * `on error` binds tighter than `launch`; `launch f() on error(...)`
-         * reaches here as a handler wrapping the call.  Keep the handler and
-         * mark its inner call as launched so `wait` can move the handler
-         * outside the wait later.
-         */
-        if (target && target->nodetype == 'o' &&
-            ((struct on_error_node *)target)->call)
-            target = ((struct on_error_node *)target)->call;
-        if (!target || target->nodetype != 'C') {
-            yyerror("launch expects a call expression");
-            treefree($2);
-            $$ = NULL;
-        } else if (((struct ufncall *)target)->wait_sugar) {
-            diag_set_location(target->line, target->column);
-            yyerror("launch cannot be applied to a wait expression; "
-                    "use wait (launch f()) or (launch f()).wait()");
-            treefree($2);
-            $$ = NULL;
-        } else {
-            ((struct ufncall *)target)->launch = 1;
-            $$ = $2;
-        }
+        $$ = new_launch_expr($2);
+      }
+    | AWAIT exp %prec UMINUS {
+        $$ = new_await_expr($2);
       }
     | YIELD exp %prec '?'                  { note_yield(); $$ = newyield($2); }
     | YIELD %prec '?'                      { note_yield(); $$ = newyield(newnullast()); }

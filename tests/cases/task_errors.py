@@ -1044,12 +1044,14 @@ def run_cases():
           'func f(): int { return 1; }\n'
           'let v = wait f();\n',
           stderr="wait expects a task, got int")
-    check("wait is a reserved word",
-          'let wait = 1;\n',
-          stderr="syntax error")
-    check("wait cannot name a function",
-          'func wait() { return 1; }\n',
-          stderr="syntax error")
+    check("wait is no longer reserved",
+          'let wait = 1;\n'
+          'println(wait);\n',
+          stdout="1")
+    check("wait may name a function",
+          'func wait() { return 1; }\n'
+          'println((wait)());\n',
+          stdout="1")
     check("launch rejects wait expression",
           'func f() { return 1; }\n'
           'let t = launch wait f();\n',

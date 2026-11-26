@@ -29,4 +29,10 @@ ts_test("generic callback", func() {
   ts_eq(apply("a", func(x) { return x + "b"; }), "ab");
 });
 
+ts_test("generic explicit type arguments", func() {
+  ts_eq(identity[int](1), 1);
+  ts_eq(identity[string]("a"), "a");
+  ts_eq(choose[int, string](1, "x"), 1);
+});
+
 ts_finish();

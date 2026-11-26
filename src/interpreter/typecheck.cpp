@@ -11,6 +11,7 @@
 #include "scopestack.h"
 #include "static_type.h"
 #include "structtype.h"
+#include "type_text_parser.h"
 #include "valuetype.h"
 
 #include <cstdio>
@@ -28,6 +29,9 @@ using namespace detail;
 namespace {
 
 Mode g_mode = Mode::Warn;
+
+thread_local std::unordered_map<std::string, std::vector<std::string>>
+    g_generic_function_params;
 
 std::string generator_identity(const struct funcdef *def) {
     std::string key = diag_current_package_name();
@@ -77,6 +81,8 @@ struct Checker : public BuiltinContext {
     std::string source;
     std::string package;
     std::unordered_map<std::string, FunctionSig> functions;
+    std::unordered_map<std::string, std::vector<std::string>>
+        generic_functions;
     std::unordered_map<std::string, StaticTypeInfo> static_types;
     std::vector<const TypeNode *> return_types;
     std::vector<std::vector<const TypeNode *>> yield_types;
@@ -1445,6 +1451,103 @@ struct Checker : public BuiltinContext {
         return true;
     }
 
+    bool check_explicit_generic_call(
+        struct ufncall *call, struct index_node *bracket,
+        const std::vector<struct ast *> &args, Env &env,
+        const TypeNode *&result) {
+        std::string name;
+        if (!flatten_path(bracket->l, name) ||
+            name.find('.') != std::string::npos) {
+            report_error(bracket->line, bracket->column,
+                         "explicit generic instantiation requires a "
+                         "function name");
+            return false;
+        }
+        auto generic = g_generic_function_params.find(name);
+        if (generic == g_generic_function_params.end()) {
+            auto local = generic_functions.find(name);
+            if (local != generic_functions.end())
+                generic = g_generic_function_params.emplace(
+                    name, local->second).first;
+        }
+        FunctionSig sig;
+        bool have_signature = false;
+        auto function = functions.find(name);
+        if (function != functions.end()) {
+            sig = function->second;
+            have_signature = true;
+        } else {
+            struct symbol *sym = lookupsym(name.c_str());
+            if (sym && sym->val && sym->val->type == T_func) {
+                struct func_value_t *fn = (struct func_value_t *)sym->val;
+                if (fn->def && fn->def->code) {
+                    sig = signature_from_symlist(fn->def->code->sl);
+                    sig.result = fn->def->code->ret_type
+                                     ? type_from_constraint(
+                                           fn->def->code->ret_type.get())
+                                     : type_any();
+                    sig.is_generator = fn->def->code->is_generator;
+                    have_signature = true;
+                }
+            }
+        }
+        if (generic == g_generic_function_params.end() || !have_signature) {
+            report_error(bracket->line, bracket->column,
+                         "explicit type arguments require a generic function");
+            return false;
+        }
+
+        std::string text = diag_source_text(
+            bracket->span.start_line, bracket->span.start_column + 1,
+            bracket->span.end_line, bracket->span.end_column);
+        std::vector<struct type_constraint *> constraints;
+        std::string parse_error;
+        if (!parse_type_list_text(text, source.c_str(), constraints,
+                                  parse_error, true)) {
+            report_error(bracket->line, bracket->column,
+                         parse_error.empty()
+                             ? "invalid explicit type arguments"
+                             : parse_error.c_str());
+            for (struct type_constraint *constraint : constraints)
+                free_type_constraint(constraint);
+            return false;
+        }
+        if (constraints.size() != generic->second.size()) {
+            std::string message =
+                "function " + name + " expects " +
+                std::to_string(generic->second.size()) +
+                " type argument(s), got " +
+                std::to_string(constraints.size());
+            report_error(bracket->line, bracket->column, message.c_str());
+            for (struct type_constraint *constraint : constraints)
+                free_type_constraint(constraint);
+            return false;
+        }
+
+        TypeBindings bindings;
+        for (std::size_t i = 0; i < constraints.size(); ++i) {
+            bindings[generic->second[i]] =
+                type_from_constraint(constraints[i]);
+            free_type_constraint(constraints[i]);
+        }
+
+        for (const TypeNode *&param : sig.params)
+            param = instantiate_type(param, bindings);
+        if (sig.result)
+            sig.result = instantiate_type(sig.result, bindings);
+        if (sig.rest)
+            sig.rest = instantiate_type(sig.rest, bindings);
+        if (!check_call_args(sig, args, env, true))
+            return false;
+        result = signature_result_type(sig);
+
+        /* Type arguments are erased; the runtime call targets the function
+         * directly once the semantic phase has validated them. */
+        call->callee = bracket->l;
+        bracket->l = NULL;
+        return true;
+    }
+
     bool check_call(struct ast *expr, const TypeNode *expected, Env &env,
                     const TypeNode *&result) {
         struct ufncall *call = (struct ufncall *)expr;
@@ -1462,6 +1565,15 @@ struct Checker : public BuiltinContext {
                 spread = true;
                 break;
             }
+        }
+
+        if (!spread && call->callee &&
+            call->callee->nodetype == 'G') {
+            struct index_node *bracket =
+                (struct index_node *)call->callee;
+            if (bracket->generic_candidate)
+                return check_explicit_generic_call(
+                    call, bracket, args, env, result);
         }
 
         int direct_builtin = -1;
@@ -2588,8 +2700,21 @@ struct Checker : public BuiltinContext {
         sig.result = def->ret_type ? type_from_constraint(def->ret_type)
                                    : type_any();
         sig.is_generator = def->is_generator;
-        if (def->name)
+        if (def->name) {
             functions[def->name] = sig;
+            if (def->generic_params) {
+                std::vector<std::string> params;
+                for (struct generic_param *param = def->generic_params;
+                     param; param = param->next) {
+                    if (param->name)
+                        params.push_back(param->name);
+                }
+                if (!params.empty()) {
+                    generic_functions[def->name] = params;
+                    g_generic_function_params[def->name] = params;
+                }
+            }
+        }
 
         if (def->ret_type &&
             !check_type_contracts(type_from_constraint(def->ret_type),

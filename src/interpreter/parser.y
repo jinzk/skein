@@ -1156,6 +1156,14 @@ static void note_generic_decl(struct ast *decl) {
         g_generic_decl_names.insert(name);
 }
 
+static struct ast *bracket_args_list(struct ast *args) {
+    if (!args)
+        return NULL;
+    if (args->nodetype == 'L')
+        return newlist(args->l, bracket_args_list(args->r));
+    return newlist(args, NULL);
+}
+
 static bool is_known_generic_name(struct ast *expr) {
     if (!expr || expr->nodetype != 'N')
         return false;
@@ -2225,6 +2233,12 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
     | exp SHL_ASSIGN exp                  { $$ = newcompound($1, 's', $3); }
     | exp SHR_ASSIGN exp                  { $$ = newcompound($1, 'r', $3); }
     | exp '(' explist ')'      { $$ = new_call_with_placeholders($1, $3); }
+    | exp '[' exp ',' explist ']'         {
+        $$ = newindex($1, bracket_args_list(newast('L', $3, $5)),
+                      @2.first_line, @2.first_column,
+                      @6.first_line, @6.first_column,
+                      is_known_generic_name($1));
+      }
     | exp '[' exp ']'                     {
         $$ = newindex($1, $3,
                       @2.first_line, @2.first_column,

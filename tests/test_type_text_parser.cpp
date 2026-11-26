@@ -27,10 +27,12 @@ static void free_types(std::vector<struct type_constraint *> &types) {
     types.clear();
 }
 
-static void check(const char *text, const char *expected) {
+static void check(const char *text, const char *expected,
+                  bool allow_named_generic = false) {
     std::vector<struct type_constraint *> types;
     std::string error;
-    bool ok = parse_type_list_text(text, "test.skein", types, error);
+    bool ok = parse_type_list_text(text, "test.skein", types, error,
+                                   allow_named_generic);
     if (!ok) {
         std::fprintf(stderr, "FAIL: parse %s: %s\n", text, error.c_str());
         ++failures;
@@ -79,6 +81,7 @@ int main() {
     check("list[int]", "list[int]");
     check("dict[string, list[int]]", "dict[string, list[int]]");
     check("list[int]?", "list[int]?");
+    check("Box[int]?", "Box[int]?", true);
     check("ref Foo", "ref Foo");
     check("weak Foo", "weak Foo");
     check("(int, string) -> bool", "(int, string) -> bool");

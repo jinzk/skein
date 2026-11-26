@@ -677,6 +677,28 @@ struct type_constraint *type_apply_generic_list(
     return base;
 }
 
+struct type_constraint *type_apply_named_generic(
+    struct type_constraint *base,
+    const std::vector<struct type_constraint *> &args) {
+    if (!base) {
+        for (struct type_constraint *arg : args)
+            free_type_constraint(arg);
+        return NULL;
+    }
+    std::vector<const TypeNode *> type_args;
+    type_args.reserve(args.size());
+    for (struct type_constraint *arg : args)
+        type_args.push_back(type_from_constraint(arg));
+    for (struct type_constraint *arg : args)
+        free_type_constraint(arg);
+    const TypeNode *node = intern_type(
+        TYPE_NAMED, base->name ? base->name : "",
+        base->source ? base->source : "", base->nullable, type_args);
+    base->display = node->display.c_str();
+    attach_type_detail(base, node);
+    return base;
+}
+
 struct type_constraint *type_apply_function(
     const std::vector<struct type_constraint *> &params,
     struct type_constraint *result) {

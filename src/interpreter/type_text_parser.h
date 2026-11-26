@@ -17,7 +17,8 @@ namespace typecheck {
  */
 bool parse_type_list_text(const std::string &text, const char *source,
                           std::vector<struct type_constraint *> &out,
-                          std::string &error);
+                          std::string &error,
+                          bool allow_named_generic = false);
 
 } // namespace typecheck
 } // namespace skein

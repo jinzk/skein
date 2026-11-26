@@ -15,8 +15,11 @@ namespace {
 
 class TypeTextParser {
 public:
-    TypeTextParser(std::string_view text, const char *source)
-        : text_(text), source_(source ? source : "") {}
+    TypeTextParser(std::string_view text, const char *source,
+                   bool allow_named_generic)
+        : text_(text),
+          source_(source ? source : ""),
+          allow_named_generic_(allow_named_generic) {}
 
     bool parse_list(std::vector<struct type_constraint *> &out,
                     std::string &error) {
@@ -247,7 +250,10 @@ private:
                 return fail("expected ',' or ']' in type arguments");
             }
         }
-        out = type_apply_generic_list(out, args);
+        if (allow_named_generic_ && out->kind == TYPE_NAMED)
+            out = type_apply_named_generic(out, args);
+        else
+            out = type_apply_generic_list(out, args);
         return true;
     }
 
@@ -278,6 +284,7 @@ private:
 
     std::string_view text_;
     const char *source_;
+    bool allow_named_generic_ = false;
     std::size_t pos_ = 0;
     std::size_t error_pos_ = 0;
     std::string error_;
@@ -287,8 +294,8 @@ private:
 
 bool parse_type_list_text(const std::string &text, const char *source,
                           std::vector<struct type_constraint *> &out,
-                          std::string &error) {
-    TypeTextParser parser(text, source);
+                          std::string &error, bool allow_named_generic) {
+    TypeTextParser parser(text, source, allow_named_generic);
     return parser.parse_list(out, error);
 }
 

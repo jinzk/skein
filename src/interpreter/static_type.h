@@ -75,6 +75,11 @@ struct type_constraint *type_apply_generic(struct type_constraint *base,
 struct type_constraint *type_apply_generic_list(
     struct type_constraint *base,
     const std::vector<struct type_constraint *> &args);
+/* Apply type arguments to a named user type.  Unlike the builtin container
+ * path this has no known arity; the generic type model validates it later. */
+struct type_constraint *type_apply_named_generic(
+    struct type_constraint *base,
+    const std::vector<struct type_constraint *> &args);
 struct type_constraint *type_apply_prefix(
     enum type_constraint_kind kind, struct type_constraint *inner);
 struct type_constraint *type_apply_function(

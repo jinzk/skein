@@ -128,6 +128,8 @@ std.result.capture(func() { statements })
 第一批不包含：
 
 - 用户自定义 `macro` 声明；
+- `list!` / `dict!` / `try!`：已决定不实现；列表和字典直接使用普通字面量，
+  错误捕获使用 `std.result.capture` 或 `on error`；
 - `type` / `pattern` / `module` / `operator` 片段；
 - 宏递归；
 - 一等宏值；

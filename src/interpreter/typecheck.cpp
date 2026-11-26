@@ -41,6 +41,7 @@ struct GenericFunctionMeta {
     std::string name;
     std::vector<std::string> params;
     std::vector<GenericConstraintMeta> constraints;
+    std::vector<const TypeNode *> defaults;
 };
 
 thread_local std::unordered_map<std::string, GenericFunctionMeta>
@@ -49,6 +50,7 @@ thread_local std::unordered_map<std::string, GenericFunctionMeta>
 struct GenericTypeMeta {
     std::vector<std::string> params;
     std::vector<GenericConstraintMeta> constraints;
+    std::vector<const TypeNode *> defaults;
     ConstTypeMap fields;
     std::unordered_map<std::string, ConstTypeMap> variants;
 };
@@ -1185,6 +1187,53 @@ struct Checker : public BuiltinContext {
         return true;
     }
 
+    bool collect_generic_param_meta(
+        struct generic_param *params, std::vector<std::string> &names,
+        std::vector<GenericConstraintMeta> &constraints,
+        std::vector<const TypeNode *> &defaults, int line, int column) {
+        std::unordered_set<std::string> seen;
+        bool saw_default = false;
+        for (struct generic_param *param = params; param;
+             param = param->next) {
+            if (!param->name || !*param->name)
+                continue;
+            if (!seen.insert(param->name).second) {
+                std::string message =
+                    std::string("generic type parameter repeated ") +
+                    param->name;
+                report_error(line, column, message.c_str());
+                return false;
+            }
+            const TypeNode *default_type =
+                param->default_type
+                    ? type_from_constraint(param->default_type)
+                    : nullptr;
+            if (default_type)
+                saw_default = true;
+            else if (saw_default) {
+                report_error(line, column,
+                             "default type parameters must be trailing");
+                return false;
+            }
+            GenericConstraintMeta meta =
+                generic_constraint_meta(param->constraint);
+            if (default_type &&
+                !type_satisfies_generic_constraint(default_type, meta)) {
+                std::string message =
+                    std::string("default type ") +
+                    type_display(default_type) +
+                    " does not satisfy the constraint for " +
+                    param->name;
+                report_error(line, column, message.c_str());
+                return false;
+            }
+            names.push_back(param->name);
+            constraints.push_back(std::move(meta));
+            defaults.push_back(default_type);
+        }
+        return true;
+    }
+
     const std::vector<GenericConstraintMeta> *generic_constraints_for(
         const char *source, const char *name) {
         std::string key = static_type_key(source, name);
@@ -1680,6 +1729,14 @@ struct Checker : public BuiltinContext {
         }
 
         if (generic_meta) {
+            for (std::size_t i = 0; i < generic_meta->params.size(); ++i) {
+                const std::string &param = generic_meta->params[i];
+                if (bindings.find(param) != bindings.end())
+                    continue;
+                if (i < generic_meta->defaults.size() &&
+                    generic_meta->defaults[i])
+                    bindings[param] = generic_meta->defaults[i];
+            }
             for (std::size_t i = 0; i < generic_meta->params.size(); ++i) {
                 auto binding = bindings.find(generic_meta->params[i]);
                 if (binding == bindings.end() ||
@@ -2904,6 +2961,7 @@ struct Checker : public BuiltinContext {
         StaticTypeInfo *info = find_static_info(literal_type);
         ConstTypeMap *static_fields = NULL;
         const std::vector<std::string> *generic_params = NULL;
+        const std::vector<const TypeNode *> *generic_defaults = NULL;
         if (info) {
             if (info->is_enum && variant_name) {
                 auto it = info->variants.find(variant_name);
@@ -2912,8 +2970,10 @@ struct Checker : public BuiltinContext {
             } else if (!info->is_enum) {
                 static_fields = &info->fields;
             }
-            if (!info->generic_params.empty())
+            if (!info->generic_params.empty()) {
                 generic_params = &info->generic_params;
+                generic_defaults = &info->generic_defaults;
+            }
         }
         if (!static_fields || !generic_params) {
             auto meta = g_generic_type_meta.find(
@@ -2929,8 +2989,10 @@ struct Checker : public BuiltinContext {
                         static_fields = &meta->second.fields;
                     }
                 }
-                if (!meta->second.params.empty())
+                if (!meta->second.params.empty()) {
                     generic_params = &meta->second.params;
+                    generic_defaults = &meta->second.defaults;
+                }
             }
         }
 
@@ -3057,10 +3119,18 @@ struct Checker : public BuiltinContext {
             if (explicit_bindings) {
                 args = explicit_args;
             } else {
-                for (const std::string &param : *generic_params) {
+                for (std::size_t i = 0; i < generic_params->size(); ++i) {
+                    const std::string &param = (*generic_params)[i];
                     auto it = bindings.find(param);
-                    args.push_back(it == bindings.end() ? type_any()
-                                                        : it->second);
+                    if (it != bindings.end()) {
+                        args.push_back(it->second);
+                    } else if (generic_defaults &&
+                               i < generic_defaults->size() &&
+                               (*generic_defaults)[i]) {
+                        args.push_back((*generic_defaults)[i]);
+                    } else {
+                        args.push_back(type_any());
+                    }
                 }
             }
             if (!check_generic_type_arguments(literal_type, args,
@@ -3155,14 +3225,11 @@ struct Checker : public BuiltinContext {
             if (def->generic_params) {
                 GenericFunctionMeta meta;
                 meta.name = def->name;
-                for (struct generic_param *param = def->generic_params;
-                     param; param = param->next) {
-                    if (param->name) {
-                        meta.params.push_back(param->name);
-                        meta.constraints.push_back(
-                            generic_constraint_meta(param->constraint));
-                    }
-                }
+                if (!collect_generic_param_meta(
+                        def->generic_params, meta.params,
+                        meta.constraints, meta.defaults, def->line,
+                        def->column))
+                    return false;
                 if (!meta.params.empty()) {
                     generic_functions[def->name] = meta;
                     g_generic_function_params[def->name] = meta;
@@ -3314,15 +3381,14 @@ struct Checker : public BuiltinContext {
             static_type_key(decl->source, decl->name)];
         info.is_enum = false;
         info.generic_params.clear();
+        info.generic_defaults.clear();
         std::vector<GenericConstraintMeta> struct_constraints;
-        for (struct generic_param *param = decl->generic_params;
-             param; param = param->next) {
-            if (param->name) {
-                info.generic_params.push_back(param->name);
-                struct_constraints.push_back(
-                    generic_constraint_meta(param->constraint));
-            }
-        }
+        std::vector<const TypeNode *> struct_defaults;
+        if (!collect_generic_param_meta(
+                decl->generic_params, info.generic_params,
+                struct_constraints, struct_defaults, decl->line,
+                decl->column))
+            return false;
         for (struct struct_member *member = decl->members; member;
              member = member->next) {
             if (member->name && member->type && !member->func) {
@@ -3340,8 +3406,10 @@ struct Checker : public BuiltinContext {
         }
         GenericTypeMeta &meta =
             g_generic_type_meta[static_type_key(decl->source, decl->name)];
+        info.generic_defaults = struct_defaults;
         meta.params = info.generic_params;
         meta.constraints = struct_constraints;
+        meta.defaults = std::move(struct_defaults);
         meta.fields = info.fields;
         for (struct struct_member *member = decl->members; member;
              member = member->next) {
@@ -3367,15 +3435,14 @@ struct Checker : public BuiltinContext {
             static_type_key(decl->source, decl->name)];
         info.is_enum = true;
         info.generic_params.clear();
+        info.generic_defaults.clear();
         std::vector<GenericConstraintMeta> enum_constraints;
-        for (struct generic_param *param = decl->generic_params;
-             param; param = param->next) {
-            if (param->name) {
-                info.generic_params.push_back(param->name);
-                enum_constraints.push_back(
-                    generic_constraint_meta(param->constraint));
-            }
-        }
+        std::vector<const TypeNode *> enum_defaults;
+        if (!collect_generic_param_meta(
+                decl->generic_params, info.generic_params,
+                enum_constraints, enum_defaults, decl->line,
+                decl->column))
+            return false;
         for (struct enum_variant *variant = decl->variants; variant;
              variant = variant->next) {
             auto &fields = info.variants[variant->name
@@ -3395,8 +3462,10 @@ struct Checker : public BuiltinContext {
         }
         GenericTypeMeta &meta =
             g_generic_type_meta[static_type_key(decl->source, decl->name)];
+        info.generic_defaults = enum_defaults;
         meta.params = info.generic_params;
         meta.constraints = enum_constraints;
+        meta.defaults = std::move(enum_defaults);
         meta.variants = info.variants;
         for (struct enum_variant *variant = decl->variants; variant;
              variant = variant->next) {

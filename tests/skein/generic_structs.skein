@@ -54,8 +54,15 @@ struct Holder[T any] {
   inner: Box[T]?;
 }
 
+struct DefaultMarker[T = int] {
+}
+
 func unwrap_int(x: Box[int]): int {
   return x.value;
+}
+
+func use_default_marker(x: DefaultMarker[int]): int {
+  return 1;
 }
 
 ts_test("generic struct inference", func() {
@@ -124,6 +131,10 @@ ts_test("generic struct recursive and nested", func() {
   ts_eq(m.next.value, 1);
   let h = Holder[string] { inner: Box[string] { value: "b" } };
   ts_eq(h.inner.value, "b");
+});
+
+ts_test("generic default type parameter", func() {
+  ts_eq(use_default_marker(DefaultMarker {}), 1);
 });
 
 ts_finish();

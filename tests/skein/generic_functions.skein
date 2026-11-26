@@ -25,6 +25,10 @@ func marked_hash[T type hashable](x: T): T {
   return x;
 }
 
+func make_list[T = int](): list[T] {
+  return [];
+}
+
 ts_test("generic identity", func() {
   ts_eq(identity(1), 1);
   ts_eq(identity("a"), "a");
@@ -66,6 +70,11 @@ ts_test("generic function value", func() {
   let h = choose[int, string];
   ts_eq(h(1, "b"), 1);
   ts_eq(apply(2, identity[int]), 2);
+});
+
+ts_test("generic function default type parameter", func() {
+  let xs: list[int] = make_list();
+  ts_eq(len(xs), 0);
 });
 
 ts_finish();

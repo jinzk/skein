@@ -264,6 +264,14 @@ def run_cases():
           "let a = need(StringKey {});\n",
           stderr="type error: type argument StringKey does not satisfy generic constraint for need")
 
+    check("generic default type must be trailing",
+          "struct Bad[T = int, U any] { }\n",
+          stderr="type error: default type parameters must be trailing")
+
+    check("generic default type must satisfy constraint",
+          "struct Bad[T int | string = bool] { }\n",
+          stderr="type error: default type bool does not satisfy the constraint for T")
+
     check("generic proto marker constraint",
           "protocol Drawable { func draw(self); }\n"
           "struct Box[T proto Drawable] { value: T; }\n"

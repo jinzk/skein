@@ -1242,6 +1242,7 @@ struct generic_constraint *newgenericconstraint(
         std::exit(0);
     }
     constraint->kind = kind;
+    constraint->category = GENERIC_CONSTRAINT_UNSPECIFIED;
     constraint->items = new_generic_constraint_item(type);
     return constraint;
 }

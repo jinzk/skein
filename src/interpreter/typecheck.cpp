@@ -32,6 +32,8 @@ Mode g_mode = Mode::Warn;
 
 struct GenericConstraintMeta {
     enum generic_constraint_kind kind = GENERIC_CONSTRAINT_SINGLE;
+    enum generic_constraint_category category =
+        GENERIC_CONSTRAINT_UNSPECIFIED;
     std::vector<const TypeNode *> items;
 };
 
@@ -1056,6 +1058,7 @@ struct Checker : public BuiltinContext {
         if (!constraint)
             return meta;
         meta.kind = constraint->kind;
+        meta.category = constraint->category;
         for (struct generic_constraint_item *item = constraint->items;
              item; item = item->next) {
             if (item->type)
@@ -1088,36 +1091,28 @@ struct Checker : public BuiltinContext {
         };
 
         if (constraint.kind == GENERIC_CONSTRAINT_OR) {
+            if (constraint.category == GENERIC_CONSTRAINT_PROTOCOL)
+                return false;
             for (const TypeNode *item : constraint.items) {
-                if (type_equal(arg, item))
+                if (!item)
+                    continue;
+                if (item->kind == TYPE_ANY)
                     return true;
-                if (item && item->kind == TYPE_ANY)
+                if (item->kind == TYPE_NAMED && item->name == "hashable")
+                    return false;
+                structtype_lookup_result protocol;
+                if (protocol_lookup(item, protocol))
+                    return false;
+                if (type_equal(arg, item))
                     return true;
             }
             return false;
         }
 
-        if (constraint.kind == GENERIC_CONSTRAINT_SINGLE &&
-            constraint.items.size() == 1) {
-            const TypeNode *item = constraint.items[0];
-            if (item->kind == TYPE_ANY)
-                return true;
-            if (item->kind == TYPE_NAMED && item->name == "hashable")
-                return is_hashable(arg);
-            if (item->kind == TYPE_NAMED) {
-                structtype_lookup_result protocol;
-                if (protocol_lookup(item, protocol)) {
-                    const type_def *actual = actual_type(arg);
-                    return actual &&
-                           structtype_satisfies_protocol(actual,
-                                                         protocol.protocol);
-                }
-            }
-            return type_equal(arg, item);
-        }
-
         for (const TypeNode *item : constraint.items) {
             if (!item)
+                continue;
+            if (item->kind == TYPE_ANY)
                 continue;
             if (item->kind == TYPE_NAMED && item->name == "hashable") {
                 if (!is_hashable(arg))
@@ -1125,11 +1120,17 @@ struct Checker : public BuiltinContext {
                 continue;
             }
             structtype_lookup_result protocol;
-            if (!protocol_lookup(item, protocol))
+            if (protocol_lookup(item, protocol)) {
+                const type_def *actual = actual_type(arg);
+                if (!actual ||
+                    !structtype_satisfies_protocol(actual,
+                                                   protocol.protocol))
+                    return false;
+                continue;
+            }
+            if (constraint.category == GENERIC_CONSTRAINT_PROTOCOL)
                 return false;
-            const type_def *actual = actual_type(arg);
-            if (!actual ||
-                !structtype_satisfies_protocol(actual, protocol.protocol))
+            if (!type_equal(arg, item))
                 return false;
         }
         return true;

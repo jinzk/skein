@@ -17,6 +17,30 @@ struct Limited[T int | string] {
   value: T;
 }
 
+protocol Drawable {
+  func draw(self);
+}
+
+struct DrawableImpl {
+  func draw(self) { }
+}
+
+struct MarkedSet[T type int | string] {
+  value: T;
+}
+
+struct MarkedHash[T type hashable] {
+  value: T;
+}
+
+struct MarkedProto[T proto Drawable] {
+  value: T;
+}
+
+struct MarkedCombo[T type hashable & Drawable] {
+  value: T;
+}
+
 func unwrap_int(x: Box[int]): int {
   return x.value;
 }
@@ -53,6 +77,17 @@ ts_test("generic struct constraint", func() {
   ts_eq(a.value, 4);
   let b = Limited[string] { value: "c" };
   ts_eq(b.value, "c");
+});
+
+ts_test("generic struct explicit markers", func() {
+  let a = MarkedSet[int] { value: 5 };
+  ts_eq(a.value, 5);
+  let b = MarkedHash[string] { value: "h" };
+  ts_eq(b.value, "h");
+  let c = MarkedProto[DrawableImpl] { value: DrawableImpl {} };
+  c.value.draw();
+  let d = MarkedCombo[DrawableImpl] { value: DrawableImpl {} };
+  d.value.draw();
 });
 
 ts_test("generic struct multiple parameters", func() {

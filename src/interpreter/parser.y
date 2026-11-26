@@ -1212,6 +1212,7 @@ static bool is_known_generic_name(struct ast *expr) {
 %token LAUNCH "launch"
 %token WAIT "wait"
 %token STRUCT "struct" IMPL "impl" PROTOCOL "protocol" ENUM "enum"
+%token TYPE_MARK PROTO_MARK
 %token REF "ref" WEAK "weak" QUESTION_DOT "?."
 %token EXTERN "extern"
 %token SWITCH "switch" CASE "case" DEFAULT "default" ARROW "=>"
@@ -1752,6 +1753,20 @@ generic_param: NAME generic_constraint        {
         $$ = (struct ast *)newgenericparam(
             $1, (struct generic_constraint *)$2);
       }
+    | NAME TYPE_MARK generic_constraint  {
+        struct generic_constraint *constraint =
+            (struct generic_constraint *)$3;
+        if (constraint)
+            constraint->category = GENERIC_CONSTRAINT_TYPE;
+        $$ = (struct ast *)newgenericparam($1, constraint);
+      }
+    | NAME PROTO_MARK generic_constraint {
+        struct generic_constraint *constraint =
+            (struct generic_constraint *)$3;
+        if (constraint)
+            constraint->category = GENERIC_CONSTRAINT_PROTOCOL;
+        $$ = (struct ast *)newgenericparam($1, constraint);
+      }
     | NAME '=' type                      {
         $$ = (struct ast *)newgenericparam($1, NULL);
         ((struct generic_param *)$$)->default_type = $3;
@@ -1760,6 +1775,22 @@ generic_param: NAME generic_constraint        {
         $$ = (struct ast *)newgenericparam(
             $1, (struct generic_constraint *)$2);
         ((struct generic_param *)$$)->default_type = $4;
+      }
+    | NAME TYPE_MARK generic_constraint '=' type {
+        struct generic_constraint *constraint =
+            (struct generic_constraint *)$3;
+        if (constraint)
+            constraint->category = GENERIC_CONSTRAINT_TYPE;
+        $$ = (struct ast *)newgenericparam($1, constraint);
+        ((struct generic_param *)$$)->default_type = $5;
+      }
+    | NAME PROTO_MARK generic_constraint '=' type {
+        struct generic_constraint *constraint =
+            (struct generic_constraint *)$3;
+        if (constraint)
+            constraint->category = GENERIC_CONSTRAINT_PROTOCOL;
+        $$ = (struct ast *)newgenericparam($1, constraint);
+        ((struct generic_param *)$$)->default_type = $5;
       }
     ;
 

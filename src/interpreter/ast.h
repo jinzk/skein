@@ -399,6 +399,12 @@ enum generic_constraint_kind {
     GENERIC_CONSTRAINT_OR,
 };
 
+enum generic_constraint_category {
+    GENERIC_CONSTRAINT_UNSPECIFIED,
+    GENERIC_CONSTRAINT_TYPE,
+    GENERIC_CONSTRAINT_PROTOCOL,
+};
+
 struct generic_constraint_item {
     struct type_constraint *type;
     struct generic_constraint_item *next;
@@ -406,6 +412,7 @@ struct generic_constraint_item {
 
 struct generic_constraint {
     enum generic_constraint_kind kind;
+    enum generic_constraint_category category;
     struct generic_constraint_item *items;
 };
 

@@ -144,6 +144,7 @@ static bool pending_match_paren = false;
 static int pending_match_indent = 0;
 static int pending_decl_kind = 0;
 static bool pending_decl_skip = false;
+static int generic_param_depth = 0;
 static std::vector<int> do_stack;
 
 /*
@@ -989,8 +990,25 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
     }
     YYRET(tok);
 }
-"[" { indent_count++; YYRET('['); }
-"]" { if (indent_count > 0) indent_count--; YYRET(']'); }
+"[" {
+    if (generic_param_depth > 0) {
+        generic_param_depth++;
+    } else if (last_token == SKEIN_TOK_NAME &&
+               (prev_token == SKEIN_TOK_STRUCT ||
+                prev_token == SKEIN_TOK_ENUM ||
+                prev_token == SKEIN_TOK_FUNC ||
+                prev_token == SKEIN_TOK_PROTOCOL)) {
+        generic_param_depth = 1;
+    }
+    indent_count++;
+    YYRET('[');
+}
+"]" {
+    if (generic_param_depth > 0)
+        generic_param_depth--;
+    if (indent_count > 0) indent_count--;
+    YYRET(']');
+}
 "(" {
     if (pending_match_paren) {
         header_stack.push_back(
@@ -1239,6 +1257,26 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
     YYRET(SKEIN_TOK_LABEL);
 }
 
+"type" {
+    MEMBER_NAME_AFTER_DOT();
+    if (generic_param_depth > 0 && last_token == SKEIN_TOK_NAME)
+        YYRET(SKEIN_TOK_TYPE_MARK);
+    int tok = make_name_token(yytext, yyleng);
+    if (tok == 0)
+        return 0;
+    note_for_name_token();
+    YYRET(tok);
+}
+"proto" {
+    MEMBER_NAME_AFTER_DOT();
+    if (generic_param_depth > 0 && last_token == SKEIN_TOK_NAME)
+        YYRET(SKEIN_TOK_PROTO_MARK);
+    int tok = make_name_token(yytext, yyleng);
+    if (tok == 0)
+        return 0;
+    note_for_name_token();
+    YYRET(tok);
+}
 {ASCII_NAME} {
     int tok = make_name_token(yytext, yyleng);
     if (tok == 0)
@@ -1476,6 +1514,7 @@ static void reset_scanner_common() {
     pending_match_indent = 0;
     pending_decl_kind = 0;
     pending_decl_skip = false;
+    generic_param_depth = 0;
     do_stack.clear();
     brace_stack.clear();
     reset_for_header_state();
@@ -1545,6 +1584,7 @@ struct scanner_checkpoint {
     int pending_match_indent;
     int pending_decl_kind;
     bool pending_decl_skip;
+    int generic_param_depth;
     std::vector<int> do_indents;
     std::vector<int> func_signature_indents;
     std::vector<brace_frame> braces;
@@ -1595,6 +1635,7 @@ scanner_checkpoint *scanner_checkpoint_save() {
     checkpoint->pending_match_indent = pending_match_indent;
     checkpoint->pending_decl_kind = pending_decl_kind;
     checkpoint->pending_decl_skip = pending_decl_skip;
+    checkpoint->generic_param_depth = generic_param_depth;
     checkpoint->do_indents = do_stack;
     checkpoint->func_signature_indents = func_signature_indents;
     checkpoint->braces = brace_stack;
@@ -1649,6 +1690,7 @@ void scanner_checkpoint_restore(scanner_checkpoint *checkpoint) {
     pending_match_indent = checkpoint->pending_match_indent;
     pending_decl_kind = checkpoint->pending_decl_kind;
     pending_decl_skip = checkpoint->pending_decl_skip;
+    generic_param_depth = checkpoint->generic_param_depth;
     do_stack = checkpoint->do_indents;
     func_signature_indents = checkpoint->func_signature_indents;
     brace_stack = checkpoint->braces;

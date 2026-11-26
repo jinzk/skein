@@ -3132,11 +3132,38 @@ std.iter.collect(std.iter.map(gen(), func(x) -> x * 10))
 
 `map` / `filter` / `take` / `drop` / `enumerate` 返回惰性生成器，可以继续用 `std.generator.*` 操作；`collect` 会立即消费输入并返回 list。`take` 提前结束时会在底层是生成器时调用 `close`。
 
+容器提供显式惰性迭代器；它们返回 generator，不改变原容器的 eager 方法：
+
+```text
+std.list.iter(xs)          // generator[T]
+std.dict.iter(d)           // generator[pair[K, V]]
+std.dict.iter_keys(d)      // generator[K]
+std.dict.iter_values(d)    // generator[V]
+std.dict.iter_items(d)     // generator[pair[K, V]]
+std.set.iter(s)
+std.deque.iter(q)
+std.heap.iter(h)
+
+std.iter.elements(xs)      // 通用元素迭代
+std.iter.keys(d)
+std.iter.values(d)
+std.iter.items(d)
+```
+
+`keys` / `values` / `items` 仍返回 eager list；`iter_*` 版本返回惰性 generator，适合和
+`std.iter.take` / `map` / `filter` 组合。`for` 直接消费这些 generator：
+
+```text
+for k in std.dict.iter_keys(d) { ... }
+for (k, v) in std.dict.iter(d) { ... }
+```
+
 当前提供的函数：
 
 ```text
 std.list.new
 std.list.len
+std.list.iter
 std.list.slice
 std.list.contains
 std.list.index
@@ -3172,6 +3199,10 @@ std.iter.drop
 std.iter.enumerate
 std.iter.collect
 std.iter.for_each
+std.iter.elements
+std.iter.keys
+std.iter.values
+std.iter.items
 
 std.dict.new
 std.dict.len
@@ -3180,6 +3211,10 @@ std.dict.has
 std.dict.keys
 std.dict.values
 std.dict.items
+std.dict.iter
+std.dict.iter_keys
+std.dict.iter_values
+std.dict.iter_items
 std.dict.delete
 std.dict.merge
 std.dict.index_by
@@ -3193,6 +3228,7 @@ std.struct.encode
 
 std.deque.new
 std.deque.from_list
+std.deque.iter
 std.deque.size
 std.deque.push_front
 std.deque.push_back
@@ -3204,6 +3240,7 @@ std.deque.to_list
 
 std.heap.new
 std.heap.from_list
+std.heap.iter
 std.heap.size
 std.heap.peek
 std.heap.push
@@ -3212,6 +3249,7 @@ std.heap.to_list
 
 std.set.new
 std.set.from_list
+std.set.iter
 std.set.add
 std.set.remove
 std.set.has

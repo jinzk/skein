@@ -152,6 +152,36 @@ bool check_builtin(BuiltinContext &context, const std::string &path,
         return true;
     }
 
+    if (path == "std.iter.elements") {
+        const TypeNode *element = type_any();
+        if (!args.empty())
+            element = context.infer_iterable_element(args[0], false, env);
+        result = type_container(TYPE_GENERATOR, {element, type_any()});
+        return true;
+    }
+
+    if (path == "std.iter.keys" || path == "std.iter.values" ||
+        path == "std.iter.items") {
+        const TypeNode *iterable =
+            args.empty() ? type_any() : context.infer(args[0], env);
+        const TypeNode *key = type_any();
+        const TypeNode *value = type_any();
+        if (iterable && iterable->kind == TYPE_DICT) {
+            if (iterable->args.size() > 0)
+                key = iterable->args[0];
+            if (iterable->args.size() > 1)
+                value = iterable->args[1];
+        }
+        const TypeNode *element =
+            path == "std.iter.keys"
+                ? key
+                : (path == "std.iter.values"
+                       ? value
+                       : type_container(TYPE_PAIR, {key, value}));
+        result = type_container(TYPE_GENERATOR, {element, type_any()});
+        return true;
+    }
+
     if (path == "std.iter.map" || path == "std.iter.filter") {
         bool is_map = path == "std.iter.map";
         const TypeNode *element = type_any();
@@ -295,6 +325,11 @@ bool check_builtin(BuiltinContext &context, const std::string &path,
 
         if (name == "len") {
             result = type_builtin(TYPE_INT);
+            return true;
+        }
+        if (name == "iter") {
+            result = type_container(TYPE_GENERATOR,
+                                    {input_element, type_any()});
             return true;
         }
         if (name == "append") {
@@ -527,6 +562,22 @@ bool check_builtin(BuiltinContext &context, const std::string &path,
                 {type_container(TYPE_PAIR, {key, value})});
             return true;
         }
+        if (name == "iter" || name == "iter_items") {
+            result = type_container(
+                TYPE_GENERATOR,
+                {type_container(TYPE_PAIR, {key, value}), type_any()});
+            return true;
+        }
+        if (name == "iter_keys") {
+            result = type_container(TYPE_GENERATOR,
+                                    {key, type_any()});
+            return true;
+        }
+        if (name == "iter_values") {
+            result = type_container(TYPE_GENERATOR,
+                                    {value, type_any()});
+            return true;
+        }
         if (name == "get") {
             if (!check_arg(1, key, true))
                 return true;
@@ -611,6 +662,11 @@ bool check_builtin(BuiltinContext &context, const std::string &path,
             result = type_container(TYPE_LIST, {element});
             return true;
         }
+        if (name == "iter") {
+            result = type_container(TYPE_GENERATOR,
+                                    {element, type_any()});
+            return true;
+        }
         if (name == "size") {
             result = type_builtin(TYPE_INT);
             return true;
@@ -673,6 +729,11 @@ bool check_builtin(BuiltinContext &context, const std::string &path,
             result = type_container(TYPE_LIST, {element});
             return true;
         }
+        if (name == "iter") {
+            result = type_container(TYPE_GENERATOR,
+                                    {element, type_any()});
+            return true;
+        }
         if (name == "size") {
             result = type_builtin(TYPE_INT);
             return true;
@@ -722,6 +783,11 @@ bool check_builtin(BuiltinContext &context, const std::string &path,
         }
         if (name == "to_list") {
             result = type_container(TYPE_LIST, {element});
+            return true;
+        }
+        if (name == "iter") {
+            result = type_container(TYPE_GENERATOR,
+                                    {element, type_any()});
             return true;
         }
         if (name == "size") {
@@ -831,6 +897,8 @@ const TypeNode *builtin_polymorphic_type(const std::string &path) {
         return poly_builtin({any_type()}, list_t, 1);
     if (path == "std.list.len")
         return poly_builtin({list_t}, integer_type);
+    if (path == "std.list.iter")
+        return poly_builtin({list_t}, poly_generator(T));
     if (path == "std.list.slice")
         return poly_builtin({list_t, integer_type, integer_type}, list_t,
                             1);
@@ -892,6 +960,16 @@ const TypeNode *builtin_polymorphic_type(const std::string &path) {
     if (path == "std.iter.filter")
         return poly_builtin({list_t, poly_callback({T}, bool_type)},
                             any_type());
+    if (path == "std.iter.elements")
+        return poly_builtin({any_type()}, poly_generator(T));
+    if (path == "std.iter.keys")
+        return poly_builtin({dict_kv}, poly_generator(K));
+    if (path == "std.iter.values")
+        return poly_builtin({dict_kv}, poly_generator(V));
+    if (path == "std.iter.items")
+        return poly_builtin(
+            {dict_kv},
+            poly_generator(type_container(TYPE_PAIR, {K, V})));
     if (path == "std.iter.for_each")
         return poly_builtin({any_type(), any_type()},
                             type_builtin(TYPE_NULL));
@@ -1086,6 +1164,14 @@ const TypeNode *builtin_polymorphic_type(const std::string &path) {
         return poly_builtin(
             {dict_kv},
             poly_list(type_container(TYPE_PAIR, {K, V})));
+    if (path == "std.dict.iter" || path == "std.dict.iter_items")
+        return poly_builtin(
+            {dict_kv},
+            poly_generator(type_container(TYPE_PAIR, {K, V})));
+    if (path == "std.dict.iter_keys")
+        return poly_builtin({dict_kv}, poly_generator(K));
+    if (path == "std.dict.iter_values")
+        return poly_builtin({dict_kv}, poly_generator(V));
     if (path == "std.dict.delete")
         return poly_builtin({dict_kv, K}, dict_kv);
     if (path == "std.dict.merge")
@@ -1102,6 +1188,8 @@ const TypeNode *builtin_polymorphic_type(const std::string &path) {
         return poly_builtin({set_t, T}, bool_type);
     if (path == "std.set.size")
         return poly_builtin({set_t}, integer_type);
+    if (path == "std.set.iter")
+        return poly_builtin({set_t}, poly_generator(T));
     if (path == "std.set.values")
         return poly_builtin({set_t}, poly_list(T));
     if (path == "std.set.union" || path == "std.set.intersect" ||
@@ -1114,6 +1202,8 @@ const TypeNode *builtin_polymorphic_type(const std::string &path) {
         return poly_builtin({list_t}, deque_t);
     if (path == "std.deque.size")
         return poly_builtin({deque_t}, integer_type);
+    if (path == "std.deque.iter")
+        return poly_builtin({deque_t}, poly_generator(T));
     if (path == "std.deque.push_front" || path == "std.deque.push_back")
         return poly_builtin({deque_t, T}, deque_t);
     if (path == "std.deque.peek_front" ||
@@ -1129,6 +1219,8 @@ const TypeNode *builtin_polymorphic_type(const std::string &path) {
             {list_t, poly_callback({T, T}, bool_type)}, heap_t);
     if (path == "std.heap.size")
         return poly_builtin({heap_t}, integer_type);
+    if (path == "std.heap.iter")
+        return poly_builtin({heap_t}, poly_generator(T));
     if (path == "std.heap.push")
         return poly_builtin({heap_t, T}, heap_t);
     if (path == "std.heap.peek" || path == "std.heap.pop")

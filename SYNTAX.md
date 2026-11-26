@@ -1510,6 +1510,7 @@ for (a, b) in pairs() {
 - 单变量形式：`for (let NAME in exp)` 或 `for NAME in exp`；
 - 双变量形式：`for (let NAME1, NAME2 in exp)` 或 `for NAME1, NAME2 in exp`，只支持 dict；
 - pair 解构形式：`for (NAME1, NAME2) in exp { ... }`，对每个元素做 pair/tuple 解构，支持 list、generator 等单值迭代；元素静态类型必须是 pair 或 tuple；
+- 显式惰性迭代使用 `std.list.iter(xs)`、`std.dict.iter_keys(d)`、`std.dict.iter_values(d)`、`std.dict.iter_items(d)` 或 `std.dict.iter(d)`；这些返回 generator，可直接用于 `for` 或 `std.iter.*`；
 - 省略形式中的循环变量是块级新变量，会遮蔽外层同名变量，循环结束后外层变量不变；
 - 省略形式的循环体必须是 `{ ... }`，不支持单条语句；
 - 操作数以 dict 字面量开头时可以省略括号，例如 `for k in {"a": 1}`；

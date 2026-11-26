@@ -357,6 +357,97 @@ struct value_t *iter_for_each(const std::vector<struct value_t *> &args) {
     return newnull();
 }
 
+struct value_t *iter_elements_body(
+    const std::vector<struct value_t *> &values) {
+    iter_source source(values[0]);
+    struct value_t *item = NULL;
+    while (source.next(item)) {
+        if (!yield_owned(item))
+            return NULL;
+    }
+    if (source.failed)
+        return NULL;
+    return newnull();
+}
+
+struct value_t *iter_keys_body(const std::vector<struct value_t *> &values) {
+    if (values[0] && values[0]->type == T_dict) {
+        struct dict_value_t *dict = (struct dict_value_t *)values[0];
+        std::vector<struct value_t *> keys;
+        keys.reserve(dict->payload->items.size());
+        for (auto &entry : dict->payload->items)
+            keys.push_back(dupval(entry.first));
+        for (std::size_t i = 0; i < keys.size(); ++i) {
+            if (!yield_owned(keys[i])) {
+                for (std::size_t j = i + 1; j < keys.size(); ++j)
+                    freeval(keys[j]);
+                return NULL;
+            }
+        }
+        return newnull();
+    }
+    iter_source source(values[0]);
+    struct value_t *item = NULL;
+    while (source.next(item)) {
+        if (!yield_owned(item))
+            return NULL;
+    }
+    if (source.failed)
+        return NULL;
+    return newnull();
+}
+
+struct value_t *iter_values_body(
+    const std::vector<struct value_t *> &values) {
+    if (!values[0] || values[0]->type != T_dict) {
+        yyerror("std.iter.values expects a dict, got %s",
+                values[0] ? typename_of(values[0]) : "null");
+        return NULL;
+    }
+    struct dict_value_t *dict = (struct dict_value_t *)values[0];
+    std::vector<struct value_t *> items;
+    items.reserve(dict->payload->items.size());
+    for (auto &entry : dict->payload->items)
+        items.push_back(dupval(entry.second));
+    for (std::size_t i = 0; i < items.size(); ++i) {
+        if (!yield_owned(items[i])) {
+            for (std::size_t j = i + 1; j < items.size(); ++j)
+                freeval(items[j]);
+            return NULL;
+        }
+    }
+    return newnull();
+}
+
+struct value_t *iter_items_body(
+    const std::vector<struct value_t *> &values) {
+    if (!values[0] || values[0]->type != T_dict) {
+        yyerror("std.iter.items expects a dict, got %s",
+                values[0] ? typename_of(values[0]) : "null");
+        return NULL;
+    }
+    struct dict_value_t *dict = (struct dict_value_t *)values[0];
+    std::vector<std::pair<struct value_t *, struct value_t *>> entries;
+    entries.reserve(dict->payload->items.size());
+    for (auto &entry : dict->payload->items)
+        entries.push_back(std::make_pair(dupval(entry.first),
+                                         dupval(entry.second)));
+    for (std::size_t i = 0; i < entries.size(); ++i) {
+        struct list_value_t *pair = newtupleval();
+        pair->payload->items.push_back(entries[i].first);
+        pair->payload->items.push_back(entries[i].second);
+        if (!yield_owned((struct value_t *)pair)) {
+            freeval((struct value_t *)pair);
+            for (std::size_t j = i + 1; j < entries.size(); ++j) {
+                freeval(entries[j].first);
+                freeval(entries[j].second);
+            }
+            return NULL;
+        }
+    }
+    return newnull();
+}
+
 } // namespace
 
 struct value_t *call_iter_builtin(
@@ -419,6 +510,30 @@ struct value_t *call_iter_builtin(
                 return NULL;
             }
             return iter_for_each(args);
+        case B_iter_elements:
+            if (args.size() != 1) {
+                yyerror("std.iter.elements expects 1 argument");
+                return NULL;
+            }
+            return lazy_iter(args, iter_elements_body);
+        case B_iter_keys:
+            if (args.size() != 1) {
+                yyerror("std.iter.keys expects 1 argument");
+                return NULL;
+            }
+            return lazy_iter(args, iter_keys_body);
+        case B_iter_values:
+            if (args.size() != 1) {
+                yyerror("std.iter.values expects 1 argument");
+                return NULL;
+            }
+            return lazy_iter(args, iter_values_body);
+        case B_iter_items:
+            if (args.size() != 1) {
+                yyerror("std.iter.items expects 1 argument");
+                return NULL;
+            }
+            return lazy_iter(args, iter_items_body);
         default:
             yyerror("unknown std.iter function");
             return NULL;

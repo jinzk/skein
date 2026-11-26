@@ -35,6 +35,7 @@ def run_cases():
     run_skein("generic_protocols.skein")
     run_skein("generic_meta.skein")
     run_skein("generic_serde.skein")
+    run_skein("iterator_methods.skein")
     run_skein("language_core_traits.skein")
     run_skein("language_core_refs.skein")
     run_skein("language_core_headers.skein")

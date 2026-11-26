@@ -34,6 +34,7 @@ value_t *build_namespace_impl() {
     value_t *list_module = builtin_module({
         {"new", B_list},
         {"len", B_len},
+        {"iter", B_iter_elements},
         {"slice", B_list_slice},
         {"contains", B_list_contains},
         {"index", B_list_index},
@@ -71,6 +72,10 @@ value_t *build_namespace_impl() {
         {"enumerate", B_iter_enumerate},
         {"collect", B_iter_collect},
         {"for_each", B_iter_for_each},
+        {"elements", B_iter_elements},
+        {"keys", B_iter_keys},
+        {"values", B_iter_values},
+        {"items", B_iter_items},
     });
     value_t *dict_module = builtin_module({
         {"new", B_dict},
@@ -80,6 +85,10 @@ value_t *build_namespace_impl() {
         {"keys", B_dict_keys},
         {"values", B_dict_values},
         {"items", B_dict_items},
+        {"iter", B_iter_items},
+        {"iter_keys", B_iter_keys},
+        {"iter_values", B_iter_values},
+        {"iter_items", B_iter_items},
         {"delete", B_dict_delete},
         {"merge", B_dict_merge},
         {"index_by", B_dict_index_by},
@@ -484,6 +493,7 @@ value_t *build_namespace_impl() {
         builtin_module({
             {"new", B_deque_new},
             {"from_list", B_deque_from_list},
+            {"iter", B_iter_elements},
             {"size", B_deque_size},
             {"push_front", B_deque_push_front},
             {"push_back", B_deque_push_back},
@@ -498,6 +508,7 @@ value_t *build_namespace_impl() {
         builtin_module({
             {"new", B_heap_new},
             {"from_list", B_heap_from_list},
+            {"iter", B_iter_elements},
             {"size", B_heap_size},
             {"peek", B_heap_peek},
             {"push", B_heap_push},
@@ -509,6 +520,7 @@ value_t *build_namespace_impl() {
         builtin_module({
             {"new", B_set_new},
             {"from_list", B_set_from_list},
+            {"iter", B_iter_elements},
             {"add", B_set_add},
             {"remove", B_set_remove},
             {"has", B_set_has},

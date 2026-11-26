@@ -1,0 +1,54 @@
+import std;
+include "_support.skein";
+
+ts_test("list iterator", func() {
+  let xs: list[int] = [1, 2, 3];
+  let out = [];
+  for x in std.list.iter(xs) {
+    out = std.list.append(out, x);
+  }
+  ts_eq(out, [1, 2, 3]);
+  ts_eq(std.iter.collect(std.iter.take(std.list.iter(xs), 2)), [1, 2]);
+});
+
+ts_test("dict iterator keys", func() {
+  let d: dict[string, int] = {"a": 1, "b": 2};
+  ts_eq(std.iter.collect(std.dict.iter_keys(d)), ["a", "b"]);
+});
+
+ts_test("dict iterator values", func() {
+  let d: dict[string, int] = {"a": 1, "b": 2};
+  ts_eq(std.iter.collect(std.dict.iter_values(d)), [1, 2]);
+});
+
+ts_test("dict iterator entries", func() {
+  let d: dict[string, int] = {"a": 1, "b": 2};
+  let out = [];
+  for (k, v) in std.dict.iter(d) {
+    out = std.list.append(out, k + "=" + str(v));
+  }
+  ts_eq(out, ["a=1", "b=2"]);
+
+  let entries = std.iter.collect(std.dict.iter_items(d));
+  ts_eq(entries[0][0], "a");
+  ts_eq(entries[0][1], 1);
+});
+
+ts_test("std.iter container functions", func() {
+  let d: dict[string, int] = {"a": 1};
+  ts_eq(std.iter.collect(std.iter.elements([1, 2])), [1, 2]);
+  ts_eq(std.iter.collect(std.iter.keys(d)), ["a"]);
+  ts_eq(std.iter.collect(std.iter.values(d)), [1]);
+  ts_eq(std.iter.collect(std.iter.items(d))[0][0], "a");
+});
+
+ts_test("other container iterators", func() {
+  ts_eq(std.iter.collect(std.set.iter(std.set.from_list([1, 2]))), [1, 2]);
+  ts_eq(std.iter.collect(std.deque.iter(
+           std.deque.from_list([1, 2]))), [1, 2]);
+  ts_eq(std.iter.collect(std.heap.iter(
+           std.heap.from_list([2, 1], func(a, b) { return a < b; }))),
+        [1, 2]);
+});
+
+ts_finish();

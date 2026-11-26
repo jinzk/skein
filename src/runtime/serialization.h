@@ -8,10 +8,17 @@ struct value_t *enum_decode_value(struct value_t *value);
 struct value_t *enum_decode_value_ex(struct value_t *value,
                                      struct enum_def *expected,
                                      bool defaults);
+struct value_t *enum_decode_typed_value(struct value_t *value,
+                                        struct value_t *type_value,
+                                        bool defaults);
 struct value_t *struct_decode_value(struct value_t *value,
                                     struct value_t *type_value);
 struct value_t *struct_decode_value_ex(struct value_t *value,
                                        struct value_t *type_value,
                                        bool defaults);
+struct value_t *struct_encode_value(struct value_t *value,
+                                    struct value_t *type_value);
+struct value_t *enum_encode_value(struct value_t *value,
+                                  struct value_t *type_value);
 
 #endif

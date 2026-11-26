@@ -1497,6 +1497,7 @@ bool read_type_metadata(reader &in,
                                        type.package.c_str(),
                                        type.module.c_str(),
                                        type.name.c_str(), type.exported,
+                                       {}, {},
                                        variants, nullptr, declare_error)) {
                     error = declare_error.empty()
                                 ? "cannot register thread payload enum type"
@@ -1542,7 +1543,8 @@ bool read_type_metadata(reader &in,
                                          type.package.c_str(),
                                          type.module.c_str(),
                                          type.name.c_str(),
-                                         type.exported, fields, nullptr,
+                                         type.exported, {}, {},
+                                         fields, nullptr,
                                          declare_error)) {
                     error = declare_error.empty()
                                 ? "cannot register thread payload struct type"

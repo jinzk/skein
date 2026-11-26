@@ -3,14 +3,19 @@
 #include "runtime_context.h"
 #include "structtype.h"
 #include "symbol.h"
+#include "type_descriptor.h"
 #include "unicode.h"
 #include "valuetype.h"
 
 #include <cstring>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
+
+using type_bindings =
+    std::unordered_map<std::string, type_descriptor_ptr>;
 
 static struct value_t *dict_lookup_value(struct dict_value_t *dict,
                                          const char *key) {
@@ -31,13 +36,19 @@ static struct value_t *decode_nested_value(struct value_t *value, int depth,
 static struct value_t *decode_enum_object(struct value_t *value, int depth,
                                           const std::string &path,
                                           struct enum_def *expected,
-                                          bool defaults);
+                                          bool defaults,
+                                          const type_bindings *bindings);
 static struct value_t *decode_struct_object(struct value_t *value,
                                             struct_def *def, int depth,
                                             const std::string &path,
-                                            bool defaults);
+                                            bool defaults,
+                                            const type_bindings *bindings);
 static struct value_t *decode_value_for_type(
     struct value_t *value, const struct type_constraint *type, int depth,
+    const std::string &path, bool defaults,
+    const type_bindings *bindings);
+static struct value_t *decode_value_for_descriptor(
+    struct value_t *value, const type_descriptor &desc, int depth,
     const std::string &path, bool defaults);
 static struct value_t *eval_field_default(const field_def &field,
                                           const char *owner,
@@ -105,7 +116,8 @@ static struct value_t *decode_nested_value(struct value_t *value, int depth,
     if (value->type == T_dict) {
         struct dict_value_t *dict = (struct dict_value_t *)value;
         if (dict_lookup_value(dict, "$enum"))
-            return decode_enum_object(value, depth, path, NULL, defaults);
+            return decode_enum_object(value, depth, path, NULL, defaults,
+                                      nullptr);
         struct dict_value_t *out = newdictval();
         for (auto &entry : dict->payload->items) {
             struct value_t *key = dupval(entry.first);
@@ -144,7 +156,8 @@ static struct value_t *decode_nested_value(struct value_t *value, int depth,
 static struct value_t *decode_enum_object(struct value_t *value, int depth,
                                           const std::string &path,
                                           struct enum_def *expected,
-                                          bool defaults) {
+                                          bool defaults,
+                                          const type_bindings *bindings) {
     if (!value || value->type != T_dict) {
         yyerror("std.enum.decode expects an enum object");
         return NULL;
@@ -275,7 +288,8 @@ static struct value_t *decode_enum_object(struct value_t *value, int depth,
             return NULL;
         }
         struct value_t *decoded = decode_value_for_type(
-            field_value, &field.type, depth + 1, field_path, defaults);
+            field_value, &field.type, depth + 1, field_path, defaults,
+            bindings);
         if (!decoded)
             return NULL;
         payload->fields[i] = decoded;
@@ -332,9 +346,17 @@ static enum_def *find_named_enum(const struct type_constraint *type) {
 
 static struct value_t *decode_value_for_type(
     struct value_t *value, const struct type_constraint *type, int depth,
-    const std::string &path, bool defaults) {
+    const std::string &path, bool defaults,
+    const type_bindings *bindings) {
     if (!value)
         return NULL;
+
+    if (bindings && type && type->kind == TYPE_VAR && type->name) {
+        auto binding = bindings->find(type->name);
+        if (binding != bindings->end())
+            return decode_value_for_descriptor(value, *binding->second,
+                                               depth, path, defaults);
+    }
 
     if (type && type->kind == TYPE_CHAR) {
         if (value->type == T_char)
@@ -379,7 +401,7 @@ static struct value_t *decode_value_for_type(
             struct dict_value_t *dict = (struct dict_value_t *)value;
             if (!dict_lookup_value(dict, "$enum"))
                 return decode_struct_object(value, sdef, depth, path,
-                                            defaults);
+                                            defaults, bindings);
         }
         struct value_t *decoded = decode_nested_value(value, depth, path,
                                                       defaults);
@@ -398,7 +420,7 @@ static struct value_t *decode_value_for_type(
             struct dict_value_t *dict = (struct dict_value_t *)value;
             if (dict_lookup_value(dict, "$enum"))
                 return decode_enum_object(value, depth, path, edef,
-                                          defaults);
+                                          defaults, bindings);
         }
         struct value_t *decoded = decode_nested_value(value, depth, path,
                                                       defaults);
@@ -425,7 +447,8 @@ static struct value_t *decode_value_for_type(
 static struct value_t *decode_struct_object(struct value_t *value,
                                             struct_def *def, int depth,
                                             const std::string &path,
-                                            bool defaults) {
+                                            bool defaults,
+                                            const type_bindings *bindings) {
     if (!def) {
         yyerror("invalid struct type");
         return NULL;
@@ -479,7 +502,8 @@ static struct value_t *decode_struct_object(struct value_t *value,
             return NULL;
         }
         struct value_t *decoded = decode_value_for_type(
-            field_value, &field.type, depth + 1, field_path, defaults);
+            field_value, &field.type, depth + 1, field_path, defaults,
+            bindings);
         if (!decoded)
             return NULL;
         payload->fields[i] = decoded;
@@ -488,10 +512,383 @@ static struct value_t *decode_struct_object(struct value_t *value,
     return newstructval(def, payload);
 }
 
+static bool make_type_bindings(const type_descriptor &desc,
+                               const std::vector<std::string> &params,
+                               const std::vector<std::string> &defaults,
+                               type_bindings &bindings,
+                               std::string &error) {
+    bindings.clear();
+    if (!desc.args.empty()) {
+        if (desc.args.size() != params.size()) {
+            error = "type " + desc.name + " expects " +
+                    std::to_string(params.size()) +
+                    " type argument(s), got " +
+                    std::to_string(desc.args.size());
+            return false;
+        }
+        for (std::size_t i = 0; i < params.size(); ++i)
+            bindings[params[i]] = desc.args[i];
+        return true;
+    }
+    if (params.empty())
+        return true;
+    if (defaults.size() != params.size()) {
+        error = "generic type " + desc.name + " requires " +
+                std::to_string(params.size()) + " type argument(s)";
+        return false;
+    }
+    for (std::size_t i = 0; i < params.size(); ++i) {
+        if (defaults[i].empty()) {
+            error = "generic type " + desc.name + " requires " +
+                    std::to_string(params.size()) + " type argument(s)";
+            return false;
+        }
+        type_descriptor_ptr default_desc =
+            std::make_shared<type_descriptor>();
+        if (!parse_type_descriptor(defaults[i], *default_desc, error)) {
+            error = "invalid default type argument for " + params[i] +
+                    ": " + error;
+            return false;
+        }
+        bindings[params[i]] = std::move(default_desc);
+    }
+    return true;
+}
+
+static struct type_constraint descriptor_constraint(
+    const type_descriptor &desc) {
+    struct type_constraint constraint;
+    constraint.kind = TYPE_INVALID;
+    constraint.name = NULL;
+    constraint.source = NULL;
+    constraint.nullable = desc.nullable;
+    constraint.arity = 0;
+    constraint.display = NULL;
+    constraint.detail = NULL;
+    enum type_constraint_kind kind;
+    if (type_constraint_kind_for_builtin_name(desc.name.c_str(), kind)) {
+        constraint.kind = kind;
+        return constraint;
+    }
+    constraint.kind = TYPE_NAMED;
+    constraint.name = desc.name.c_str();
+    constraint.source = desc.package.c_str();
+    return constraint;
+}
+
+static struct value_t *decode_value_for_descriptor(
+    struct value_t *value, const type_descriptor &desc, int depth,
+    const std::string &path, bool defaults) {
+    if (!value)
+        return NULL;
+    if (desc.nullable && value->type == T_null)
+        return dupval(value);
+    if (desc.name == "any")
+        return decode_nested_value(value, depth, path, defaults);
+
+    if (desc.name == "list" || desc.name == "deque" ||
+        desc.name == "heap" || desc.name == "set") {
+        struct type_constraint outer = descriptor_constraint(desc);
+        if (!type_constraint_matches(&outer, value)) {
+            yyerror("%s expects %s, got %s", decode_path_label(path),
+                    type_descriptor_display(desc).c_str(),
+                    typename_of(value));
+            return NULL;
+        }
+        if (desc.name == "list" && value->type == T_list) {
+            struct list_value_t *list = (struct list_value_t *)value;
+            struct list_value_t *out =
+                list->payload && list->payload->frozen ? newtupleval()
+                                                       : newlistval();
+            for (struct value_t *item : list->payload->items) {
+                struct value_t *decoded =
+                    !desc.args.empty()
+                        ? decode_value_for_descriptor(item, *desc.args[0],
+                                                       depth + 1, path,
+                                                       defaults)
+                        : decode_nested_value(item, depth + 1, path,
+                                              defaults);
+                if (!decoded) {
+                    freeval((struct value_t *)out);
+                    return NULL;
+                }
+                out->payload->items.push_back(decoded);
+            }
+            return (struct value_t *)out;
+        }
+        return decode_nested_value(value, depth, path, defaults);
+    }
+
+    if (desc.name == "dict") {
+        struct type_constraint outer = descriptor_constraint(desc);
+        if (!type_constraint_matches(&outer, value)) {
+            yyerror("%s expects dict, got %s", decode_path_label(path),
+                    typename_of(value));
+            return NULL;
+        }
+        struct dict_value_t *dict = (struct dict_value_t *)value;
+        struct dict_value_t *out = newdictval();
+        for (auto &entry : dict->payload->items) {
+            struct value_t *key =
+                desc.args.size() > 0
+                    ? decode_value_for_descriptor(entry.first, *desc.args[0],
+                                                   depth + 1, path, defaults)
+                    : decode_nested_value(entry.first, depth + 1, path,
+                                          defaults);
+            struct value_t *item =
+                desc.args.size() > 1
+                    ? decode_value_for_descriptor(entry.second, *desc.args[1],
+                                                   depth + 1, path, defaults)
+                    : decode_nested_value(entry.second, depth + 1, path,
+                                          defaults);
+            if (!key || !item) {
+                freeval(key);
+                freeval(item);
+                freeval((struct value_t *)out);
+                return NULL;
+            }
+            out->payload->items.push_back(std::make_pair(key, item));
+        }
+        return (struct value_t *)out;
+    }
+
+    if (desc.name == "pair" || desc.name == "tuple") {
+        if (value->type != T_list) {
+            yyerror("%s expects %s, got %s", decode_path_label(path),
+                    desc.name.c_str(), typename_of(value));
+            return NULL;
+        }
+        struct list_value_t *list = (struct list_value_t *)value;
+        if (!list->payload || !list->payload->frozen ||
+            list->payload->items.size() != desc.args.size()) {
+            yyerror("%s expects %s with %d member(s)",
+                    decode_path_label(path), desc.name.c_str(),
+                    (int)desc.args.size());
+            return NULL;
+        }
+        struct list_value_t *out = newtupleval();
+        for (std::size_t i = 0; i < desc.args.size(); ++i) {
+            struct value_t *decoded = decode_value_for_descriptor(
+                list->payload->items[i], *desc.args[i], depth + 1, path,
+                defaults);
+            if (!decoded) {
+                freeval((struct value_t *)out);
+                return NULL;
+            }
+            out->payload->items.push_back(decoded);
+        }
+        return (struct value_t *)out;
+    }
+
+    enum type_constraint_kind kind;
+    if (type_constraint_kind_for_builtin_name(desc.name.c_str(), kind)) {
+        struct type_constraint constraint = descriptor_constraint(desc);
+        return decode_value_for_type(value, &constraint, depth, path,
+                                     defaults, nullptr);
+    }
+
+    struct_def *sdef = structtype_find_struct_by_name(
+        desc.package.empty() ? NULL : desc.package.c_str(),
+        desc.name.c_str());
+    if (sdef) {
+        type_bindings nested;
+        std::string binding_error;
+        if (!make_type_bindings(desc, sdef->generic_params,
+                                sdef->generic_defaults, nested,
+                                binding_error)) {
+            yyerror("%s: %s", decode_path_label(path),
+                    binding_error.c_str());
+            return NULL;
+        }
+        if (value->type == T_dict) {
+            struct dict_value_t *dict = (struct dict_value_t *)value;
+            if (!dict_lookup_value(dict, "$enum"))
+                return decode_struct_object(value, sdef, depth, path,
+                                            defaults, &nested);
+        }
+        struct value_t *decoded = decode_nested_value(value, depth, path,
+                                                      defaults);
+        if (decoded && !named_type_matches(desc.package.c_str(),
+                                           desc.name.c_str(), decoded)) {
+            yyerror("%s expects %s, got %s", decode_path_label(path),
+                    type_descriptor_display(desc).c_str(),
+                    typename_of(decoded));
+            freeval(decoded);
+            return NULL;
+        }
+        return decoded;
+    }
+
+    enum_def *edef = structtype_find_enum_by_name(
+        desc.package.empty() ? NULL : desc.package.c_str(),
+        desc.name.c_str());
+    if (edef) {
+        type_bindings nested;
+        std::string binding_error;
+        if (!make_type_bindings(desc, edef->generic_params,
+                                edef->generic_defaults, nested,
+                                binding_error)) {
+            yyerror("%s: %s", decode_path_label(path),
+                    binding_error.c_str());
+            return NULL;
+        }
+        if (value->type == T_dict) {
+            struct dict_value_t *dict = (struct dict_value_t *)value;
+            if (dict_lookup_value(dict, "$enum"))
+                return decode_enum_object(value, depth, path, edef,
+                                          defaults, &nested);
+        }
+        struct value_t *decoded = decode_nested_value(value, depth, path,
+                                                      defaults);
+        if (decoded && !named_type_matches(desc.package.c_str(),
+                                           desc.name.c_str(), decoded)) {
+            yyerror("%s expects %s, got %s", decode_path_label(path),
+                    type_descriptor_display(desc).c_str(),
+                    typename_of(decoded));
+            freeval(decoded);
+            return NULL;
+        }
+        return decoded;
+    }
+
+    yyerror("%s expects %s, got %s", decode_path_label(path),
+            type_descriptor_display(desc).c_str(), typename_of(value));
+    return NULL;
+}
+
+static struct value_t *make_typed_envelope(struct value_t *type_value,
+                                           struct value_t *payload) {
+    struct dict_value_t *env = newdictval();
+    env->payload->items.push_back(std::make_pair(
+        newstrval("$version"), newintval(1)));
+    env->payload->items.push_back(std::make_pair(
+        newstrval("$type"), dupval(type_value)));
+    env->payload->items.push_back(std::make_pair(
+        newstrval("payload"), dupval(payload)));
+    return (struct value_t *)env;
+}
+
+struct value_t *struct_encode_value(struct value_t *value,
+                                    struct value_t *type_value) {
+    if (!type_value || type_value->type != T_string) {
+        yyerror("std.struct.encode expects a type name string");
+        return NULL;
+    }
+    if (!value || value->type != T_struct) {
+        yyerror("std.struct.encode expects a struct value");
+        return NULL;
+    }
+    std::string type_name = ((struct string_value_t *)type_value)->value;
+    for (std::size_t pos = 0;
+         (pos = type_name.find("::", pos)) != std::string::npos;)
+        type_name.replace(pos, 2, ".");
+    type_descriptor desc;
+    std::string error;
+    if (!parse_type_descriptor(type_name, desc, error)) {
+        yyerror("std.struct.encode: %s", error.c_str());
+        return NULL;
+    }
+    struct_def *def = structtype_find_struct_by_name(
+        desc.package.empty() ? NULL : desc.package.c_str(),
+        desc.name.c_str());
+    if (!def) {
+        yyerror("unknown or ambiguous struct type %s", desc.name.c_str());
+        return NULL;
+    }
+    type_bindings bindings;
+    if (!make_type_bindings(desc, def->generic_params,
+                            def->generic_defaults, bindings, error)) {
+        yyerror("std.struct.encode: %s", error.c_str());
+        return NULL;
+    }
+    const struct struct_value_t *sv =
+        (const struct struct_value_t *)value;
+    if (sv->def != def) {
+        yyerror("std.struct.encode value is %s, not %s",
+                sv->def ? sv->def->name.c_str() : "invalid",
+                def->name.c_str());
+        return NULL;
+    }
+    return make_typed_envelope(type_value, value);
+}
+
+struct value_t *enum_encode_value(struct value_t *value,
+                                  struct value_t *type_value) {
+    if (!type_value || type_value->type != T_string) {
+        yyerror("std.enum.encode expects a type name string");
+        return NULL;
+    }
+    if (!value || value->type != T_enum) {
+        yyerror("std.enum.encode expects an enum value");
+        return NULL;
+    }
+    std::string type_name = ((struct string_value_t *)type_value)->value;
+    for (std::size_t pos = 0;
+         (pos = type_name.find("::", pos)) != std::string::npos;)
+        type_name.replace(pos, 2, ".");
+    type_descriptor desc;
+    std::string error;
+    if (!parse_type_descriptor(type_name, desc, error)) {
+        yyerror("std.enum.encode: %s", error.c_str());
+        return NULL;
+    }
+    enum_def *def = structtype_find_enum_by_name(
+        desc.package.empty() ? NULL : desc.package.c_str(),
+        desc.name.c_str());
+    if (!def) {
+        yyerror("unknown or ambiguous enum type %s", desc.name.c_str());
+        return NULL;
+    }
+    type_bindings bindings;
+    if (!make_type_bindings(desc, def->generic_params,
+                            def->generic_defaults, bindings, error)) {
+        yyerror("std.enum.encode: %s", error.c_str());
+        return NULL;
+    }
+    const struct enum_value_t *ev = (const struct enum_value_t *)value;
+    if (ev->def != def) {
+        yyerror("std.enum.encode value is %s, not %s",
+                ev->def ? ev->def->name.c_str() : "invalid",
+                def->name.c_str());
+        return NULL;
+    }
+    return make_typed_envelope(type_value, value);
+}
+
 static struct value_t *struct_decode(struct value_t *value,
                                      struct value_t *type_value,
                                      bool defaults) {
-    if (!value || value->type != T_dict) {
+    if (value && value->type == T_dict) {
+        struct dict_value_t *dict = (struct dict_value_t *)value;
+        struct value_t *env_type = dict_lookup_value(dict, "$type");
+        struct value_t *env_payload = dict_lookup_value(dict, "payload");
+        struct value_t *env_version = dict_lookup_value(dict, "$version");
+        if (env_version &&
+            (env_version->type != T_int ||
+             ((struct int_value_t *)env_version)->value != 1)) {
+            yyerror("std.struct.decode unsupported envelope version");
+            return NULL;
+        }
+        if (env_type && env_type->type == T_string && env_payload) {
+            if (type_value && type_value->type == T_string) {
+                const char *explicit_type =
+                    ((struct string_value_t *)type_value)->value;
+                const char *encoded_type =
+                    ((struct string_value_t *)env_type)->value;
+                if (std::strcmp(explicit_type, encoded_type) != 0) {
+                    yyerror("std.struct.decode type %s does not match "
+                            "envelope type %s",
+                            explicit_type, encoded_type);
+                    return NULL;
+                }
+            } else {
+                type_value = env_type;
+            }
+            value = env_payload;
+        }
+    }
+    if (!value ||
+        (value->type != T_dict && value->type != T_struct)) {
         yyerror("std.struct.decode expects an object");
         return NULL;
     }
@@ -501,22 +898,44 @@ static struct value_t *struct_decode(struct value_t *value,
     }
 
     std::string type_name = ((struct string_value_t *)type_value)->value;
-    std::string package_name;
-    std::string base_name;
-    if (split_type_name(type_name, package_name, base_name)) {
-        type_name = std::move(base_name);
-    } else {
-        package_name.clear();
+    for (std::size_t pos = 0;
+         (pos = type_name.find("::", pos)) != std::string::npos;)
+        type_name.replace(pos, 2, ".");
+    type_descriptor desc;
+    std::string descriptor_error;
+    if (!parse_type_descriptor(type_name, desc, descriptor_error)) {
+        yyerror("std.struct.decode: %s", descriptor_error.c_str());
+        return NULL;
     }
 
     struct_def *def = structtype_find_struct_by_name(
-        package_name.empty() ? NULL : package_name.c_str(),
-        type_name.c_str());
+        desc.package.empty() ? NULL : desc.package.c_str(),
+        desc.name.c_str());
     if (!def) {
-        yyerror("unknown or ambiguous struct type %s", type_name.c_str());
+        yyerror("unknown or ambiguous struct type %s", desc.name.c_str());
         return NULL;
     }
-    return decode_struct_object(value, def, 0, def->name, defaults);
+
+    type_bindings bindings;
+    if (!make_type_bindings(desc, def->generic_params,
+                            def->generic_defaults, bindings,
+                            descriptor_error)) {
+        yyerror("std.struct.decode: %s", descriptor_error.c_str());
+        return NULL;
+    }
+    if (value && value->type == T_struct) {
+        const struct struct_value_t *sv =
+            (const struct struct_value_t *)value;
+        if (sv->def != def) {
+            yyerror("std.struct.decode value is %s, not %s",
+                    sv->def ? sv->def->name.c_str() : "invalid",
+                    def->name.c_str());
+            return NULL;
+        }
+        return dupval(value);
+    }
+    return decode_struct_object(value, def, 0, def->name, defaults,
+                                &bindings);
 }
 
 struct value_t *enum_decode_value(struct value_t *value) {
@@ -526,7 +945,82 @@ struct value_t *enum_decode_value(struct value_t *value) {
 struct value_t *enum_decode_value_ex(struct value_t *value,
                                      struct enum_def *expected,
                                      bool defaults) {
-    return decode_enum_object(value, 0, "", expected, defaults);
+    if (!expected && value && value->type == T_dict) {
+        struct dict_value_t *dict = (struct dict_value_t *)value;
+        struct value_t *env_type = dict_lookup_value(dict, "$type");
+        struct value_t *env_payload = dict_lookup_value(dict, "payload");
+        if (env_type && env_type->type == T_string && env_payload)
+            return enum_decode_typed_value(env_payload, env_type, defaults);
+    }
+    return decode_enum_object(value, 0, "", expected, defaults, nullptr);
+}
+
+struct value_t *enum_decode_typed_value(struct value_t *value,
+                                        struct value_t *type_value,
+                                        bool defaults) {
+    if (!type_value || type_value->type != T_string) {
+        yyerror("std.enum.decode expects a type name string");
+        return NULL;
+    }
+    if (value && value->type == T_dict) {
+        struct dict_value_t *dict = (struct dict_value_t *)value;
+        struct value_t *env_type = dict_lookup_value(dict, "$type");
+        struct value_t *env_payload = dict_lookup_value(dict, "payload");
+        struct value_t *env_version = dict_lookup_value(dict, "$version");
+        if (env_version &&
+            (env_version->type != T_int ||
+             ((struct int_value_t *)env_version)->value != 1)) {
+            yyerror("std.enum.decode unsupported envelope version");
+            return NULL;
+        }
+        if (env_type && env_type->type == T_string && env_payload) {
+            const char *explicit_type =
+                ((struct string_value_t *)type_value)->value;
+            const char *encoded_type =
+                ((struct string_value_t *)env_type)->value;
+            if (std::strcmp(explicit_type, encoded_type) != 0) {
+                yyerror("std.enum.decode type %s does not match envelope "
+                        "type %s",
+                        explicit_type, encoded_type);
+                return NULL;
+            }
+            value = env_payload;
+        }
+    }
+    std::string type_name = ((struct string_value_t *)type_value)->value;
+    for (std::size_t pos = 0;
+         (pos = type_name.find("::", pos)) != std::string::npos;)
+        type_name.replace(pos, 2, ".");
+    type_descriptor desc;
+    std::string error;
+    if (!parse_type_descriptor(type_name, desc, error)) {
+        yyerror("std.enum.decode: %s", error.c_str());
+        return NULL;
+    }
+    enum_def *def = structtype_find_enum_by_name(
+        desc.package.empty() ? NULL : desc.package.c_str(),
+        desc.name.c_str());
+    if (!def) {
+        yyerror("unknown or ambiguous enum type %s", desc.name.c_str());
+        return NULL;
+    }
+    type_bindings bindings;
+    if (!make_type_bindings(desc, def->generic_params,
+                            def->generic_defaults, bindings, error)) {
+        yyerror("std.enum.decode: %s", error.c_str());
+        return NULL;
+    }
+    if (value && value->type == T_enum) {
+        const struct enum_value_t *ev = (const struct enum_value_t *)value;
+        if (ev->def != def) {
+            yyerror("std.enum.decode value is %s, not %s",
+                    ev->def ? ev->def->name.c_str() : "invalid",
+                    def->name.c_str());
+            return NULL;
+        }
+        return dupval(value);
+    }
+    return decode_enum_object(value, 0, "", def, defaults, &bindings);
 }
 
 struct value_t *struct_decode_value(struct value_t *value,

@@ -232,6 +232,7 @@ add_library(skein_runtime STATIC
   src/runtime/refvalue.cpp
   src/runtime/serialization.cpp
   src/runtime/typeinfo.cpp
+  src/runtime/type_descriptor.cpp
   src/runtime/json.cpp
   src/runtime/format.cpp
   src/runtime/encoding.cpp

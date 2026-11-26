@@ -14,6 +14,9 @@ const char *meta_builtin_name(int functype) {
         case B_meta_protocols: return "std.meta.protocols";
         case B_meta_implements: return "std.meta.implements";
         case B_meta_has_type: return "std.meta.has_type";
+        case B_meta_generic_info: return "std.meta.generic_info";
+        case B_meta_type_args: return "std.meta.type_args";
+        case B_meta_type_params: return "std.meta.type_params";
         default: return "std.meta";
     }
 }
@@ -61,6 +64,15 @@ struct value_t *call_meta_builtin(
         case B_meta_has_type:
             return typeinfo_has_type(importer_source.c_str(),
                                      importer_module.c_str(), args[0]);
+        case B_meta_generic_info:
+            return typeinfo_generic_info(importer_source.c_str(),
+                                         importer_module.c_str(), args[0]);
+        case B_meta_type_args:
+            return typeinfo_type_args(importer_source.c_str(),
+                                      importer_module.c_str(), args[0]);
+        case B_meta_type_params:
+            return typeinfo_type_params(importer_source.c_str(),
+                                        importer_module.c_str(), args[0]);
         default:
             yyerror("unknown std.meta function");
             return NULL;

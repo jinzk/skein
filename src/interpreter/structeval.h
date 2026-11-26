@@ -57,12 +57,16 @@ struct value_t *build_enum_value(
 
 bool declare_struct_meta(
     const char *source, const char *package, const char *module, const char *name,
-    bool exported, const std::vector<field_meta> &fields,
+    bool exported, const std::vector<std::string> &generic_params,
+    const std::vector<std::string> &generic_defaults,
+    const std::vector<field_meta> &fields,
     const std::shared_ptr<struct scope_t> &closure, std::string &error);
 
 bool declare_enum_meta(
     const char *source, const char *package, const char *module, const char *name,
-    bool exported, const std::vector<variant_meta> &variants,
+    bool exported, const std::vector<std::string> &generic_params,
+    const std::vector<std::string> &generic_defaults,
+    const std::vector<variant_meta> &variants,
     const std::shared_ptr<struct scope_t> &closure, std::string &error);
 
 struct protocol_param_meta {

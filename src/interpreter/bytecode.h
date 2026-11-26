@@ -323,6 +323,8 @@ struct StructDeclMeta {
     std::string module;
     std::string name;
     bool exported = false;
+    std::vector<std::string> generic_params;
+    std::vector<std::string> generic_defaults;
     std::vector<DeclFieldMeta> fields;
 };
 
@@ -336,6 +338,8 @@ struct EnumDeclMeta {
     std::string module;
     std::string name;
     bool exported = false;
+    std::vector<std::string> generic_params;
+    std::vector<std::string> generic_defaults;
     std::vector<EnumVariantMeta> variants;
 };
 

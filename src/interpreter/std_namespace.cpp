@@ -454,17 +454,22 @@ value_t *build_namespace_impl() {
             {"protocols", B_meta_protocols},
             {"implements", B_meta_implements},
             {"has_type", B_meta_has_type},
+            {"generic_info", B_meta_generic_info},
+            {"type_args", B_meta_type_args},
+            {"type_params", B_meta_type_params},
         })));
     root->payload->items.push_back(std::make_pair(
         newstrval("enum"),
         builtin_module({
             {"decode", B_enum_decode},
+            {"encode", B_enum_encode},
             {"tag", B_enum_tag},
         })));
     root->payload->items.push_back(std::make_pair(
         newstrval("struct"),
         builtin_module({
             {"decode", B_struct_decode},
+            {"encode", B_struct_encode},
         })));
     root->payload->items.push_back(std::make_pair(
         newstrval("deque"),

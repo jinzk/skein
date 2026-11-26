@@ -1,6 +1,6 @@
 # 用户自定义泛型：设计与开发计划
 
-状态：**核心泛型与泛型 protocol 已实现；`std.meta` 和序列化仍待完成**。
+状态：**泛型核心、泛型 protocol、`std.meta` 泛型入口和 JSON 序列化已实现**。
 
 本文记录用户自定义泛型的最终语法、语义决议、实现阶段和测试要求。当前已实现：
 
@@ -13,10 +13,13 @@
 - 泛型 protocol 的结构式匹配、类型参数推断、默认方法和 `[T Keyed[int]]` 约束；
 - 默认类型参数的声明、尾部/约束校验和推断缺失时的补全；
 - 裸 `Box` 类型注解按默认类型实参补全；
+- `std.meta.generic_info` / `type_args` / `type_params`；
+- `std.struct.decode` / `std.enum.decode` 接受泛型类型描述符；
+- `std.struct.encode` / `std.enum.encode` 和 JSON envelope；
 - 泛型 struct 递归和嵌套泛型字段；
 - VM / JIT 类型擦除路径。
 
-尚未完成：`std.meta` 泛型入口、泛型序列化。
+尚未完成：二进制泛型序列化格式、跨进程二进制 envelope 和对应的版本迁移。
 实现完成前，`SYNTAX.md` 和 `docs/tutorial.md` 暂不宣称全部能力已可用。
 
 ## 1. 目标
@@ -356,22 +359,23 @@ struct Node[T any] {
 
 ### 4.8 `std.meta`
 
-编译器保存泛型实例化类型信息，运行时值不携带类型参数。
+编译器保存泛型声明信息，运行时值不携带类型参数。
 
-建议 API：
+API：
 
 ```skein
-std.meta.generic_info(value)
-std.meta.type_args(value)
+std.meta.generic_info("Box[int]")
+std.meta.type_args("Box[int]")
+std.meta.type_params("Box[int]")
 ```
 
 行为：
 
-- 只接受静态类型已知的实例化；
-- `Box[int]` 返回 `args: [int]`；
-- `Box[any]` 返回 `args: [any]`；
-- `Box` 有默认值时等价于 `Box[any]`；
-- `Box[T]` 中 `T` 未具体化、`any` 值返回 `null` 或报错；
+- 泛型信息通过显式类型描述符查询；
+- `Box[int]` 返回 `args: ["int"]`；
+- `Box[any]` 返回 `args: ["any"]`；
+- `Box` 有默认值时返回默认实参并标记 `defaulted: true`；
+- 直接传运行时值时 `type_args` 返回 `null`，因为类型实参已擦除；
 - `std.meta.type_info(value)` 仍只返回外层 `Box`；
 - 不提供从任意运行时值反推类型参数的 API。
 
@@ -379,10 +383,18 @@ std.meta.type_args(value)
 
 - 只支持已实例化的泛型类型；
 - 普通 payload 不保存类型实参；
-- 反序列化必须提供目标类型或 type descriptor；
-- 自描述数据使用外层 envelope；
-- 二进制格式包含版本、类型名和递归类型参数描述；
-- 跨线程/进程默认依赖静态 schema，动态消息使用 envelope。
+- `std.struct.decode` / `std.enum.decode` 接受泛型类型描述符；
+- 反序列化按类型实参递归校验字段和容器元素；
+- 自描述数据使用 JSON envelope：
+
+  ```json
+  {"$version": 1, "$type": "Box[int]", "payload": {"value": 1}}
+  ```
+
+- `std.struct.encode` / `std.enum.encode` 生成 envelope；
+- `std.struct.decode` / `std.enum.decode` 无显式类型时读取 `$type`；
+- 跨线程/进程默认依赖静态 schema，动态消息使用 envelope；
+- 二进制泛型格式仍待实现。
 
 ## 5. 开发阶段
 

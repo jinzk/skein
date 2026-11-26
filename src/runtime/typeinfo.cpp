@@ -2,6 +2,7 @@
 
 #include "structtype.h"
 #include "symbol.h"
+#include "type_descriptor.h"
 #include "valuetype.h"
 
 #include <algorithm>
@@ -73,6 +74,58 @@ bool type_def_visible(const char *importer_source,
     return false;
 }
 
+resolve_status resolve_type_name_text(const char *importer_source,
+                                      const char *importer_package,
+                                      const std::string &text,
+                                      resolved_type &out,
+                                      std::string &error) {
+    out = resolved_type();
+    error.clear();
+    const char *canonical =
+        type_constraint_canonical_builtin_name(text.c_str());
+    if (canonical) {
+        out.kind = RESOLVED_BUILTIN;
+        out.builtin_name = canonical;
+        out.input_name = canonical;
+        return RESOLVE_FOUND;
+    }
+
+    structtype_lookup_result lookup;
+    enum structtype_lookup_status status = structtype_lookup_type(
+        importer_source, importer_package, text.c_str(), lookup, error);
+    switch (status) {
+        case STRUCTTYPE_LOOKUP_FOUND:
+            break;
+        case STRUCTTYPE_LOOKUP_NOT_FOUND:
+            return RESOLVE_NOT_FOUND;
+        case STRUCTTYPE_LOOKUP_NOT_VISIBLE:
+            return RESOLVE_NOT_VISIBLE;
+        case STRUCTTYPE_LOOKUP_AMBIGUOUS:
+        case STRUCTTYPE_LOOKUP_ERROR:
+            return RESOLVE_ERROR;
+    }
+
+    out.input_name = text;
+    switch (lookup.kind) {
+        case STRUCTTYPE_LOOKUP_STRUCT:
+            out.kind = RESOLVED_STRUCT;
+            out.structure = lookup.structure;
+            break;
+        case STRUCTTYPE_LOOKUP_ENUM:
+            out.kind = RESOLVED_ENUM;
+            out.enumeration = lookup.enumeration;
+            break;
+        case STRUCTTYPE_LOOKUP_PROTOCOL:
+            out.kind = RESOLVED_PROTOCOL;
+            out.protocol = lookup.protocol;
+            break;
+        default:
+            error = "invalid type " + text;
+            return RESOLVE_ERROR;
+    }
+    return RESOLVE_FOUND;
+}
+
 resolve_status resolve_type_arg(const char *importer_source,
                                 const char *importer_package,
                                 struct value_t *arg, resolved_type &out,
@@ -133,49 +186,8 @@ resolve_status resolve_type_arg(const char *importer_source,
     }
 
     std::string text = ((const string_value_t *)arg)->value;
-    const char *canonical =
-        type_constraint_canonical_builtin_name(text.c_str());
-    if (canonical) {
-        out.kind = RESOLVED_BUILTIN;
-        out.builtin_name = canonical;
-        out.input_name = canonical;
-        return RESOLVE_FOUND;
-    }
-
-    structtype_lookup_result lookup;
-    enum structtype_lookup_status status = structtype_lookup_type(
-        importer_source, importer_package, text.c_str(), lookup, error);
-    switch (status) {
-        case STRUCTTYPE_LOOKUP_FOUND:
-            break;
-        case STRUCTTYPE_LOOKUP_NOT_FOUND:
-            return RESOLVE_NOT_FOUND;
-        case STRUCTTYPE_LOOKUP_NOT_VISIBLE:
-            return RESOLVE_NOT_VISIBLE;
-        case STRUCTTYPE_LOOKUP_AMBIGUOUS:
-        case STRUCTTYPE_LOOKUP_ERROR:
-            return RESOLVE_ERROR;
-    }
-
-    out.input_name = text;
-    switch (lookup.kind) {
-        case STRUCTTYPE_LOOKUP_STRUCT:
-            out.kind = RESOLVED_STRUCT;
-            out.structure = lookup.structure;
-            break;
-        case STRUCTTYPE_LOOKUP_ENUM:
-            out.kind = RESOLVED_ENUM;
-            out.enumeration = lookup.enumeration;
-            break;
-        case STRUCTTYPE_LOOKUP_PROTOCOL:
-            out.kind = RESOLVED_PROTOCOL;
-            out.protocol = lookup.protocol;
-            break;
-        default:
-            error = "invalid type " + text;
-            return RESOLVE_ERROR;
-    }
-    return RESOLVE_FOUND;
+    return resolve_type_name_text(importer_source, importer_package, text,
+                                  out, error);
 }
 
 resolve_status resolve_protocol_arg(const char *importer_source,
@@ -443,6 +455,33 @@ const type_def *as_type_def(const resolved_type &type) {
     return NULL;
 }
 
+const std::vector<std::string> *generic_params_of(
+    const resolved_type &type) {
+    if (type.kind == RESOLVED_STRUCT)
+        return &type.structure->generic_params;
+    if (type.kind == RESOLVED_ENUM)
+        return &type.enumeration->generic_params;
+    if (type.kind == RESOLVED_PROTOCOL)
+        return &type.protocol->generic_params;
+    return NULL;
+}
+
+const std::vector<std::string> *generic_defaults_of(
+    const resolved_type &type) {
+    if (type.kind == RESOLVED_STRUCT)
+        return &type.structure->generic_defaults;
+    if (type.kind == RESOLVED_ENUM)
+        return &type.enumeration->generic_defaults;
+    return NULL;
+}
+
+struct value_t *string_list_of(const std::vector<std::string> &items) {
+    struct list_value_t *list = newlistval();
+    for (const std::string &item : items)
+        list_add(list, newstrval(item.c_str()));
+    return (struct value_t *)list;
+}
+
 bool report_resolve_error(resolve_status status, const std::string &error) {
     if (status == RESOLVE_FOUND)
         return true;
@@ -583,4 +622,196 @@ struct value_t *typeinfo_has_type(const char *importer_source,
         return newboolval(false);
     yyerror("%s", error.c_str());
     return NULL;
+}
+
+namespace {
+
+bool descriptor_from_string_arg(struct value_t *arg, type_descriptor &desc,
+                                std::string &text, std::string &error) {
+    if (!arg || arg->type != T_string) {
+        error = "expected a type descriptor string";
+        return false;
+    }
+    text = ((struct string_value_t *)arg)->value;
+    if (!parse_type_descriptor(text, desc, error)) {
+        error = "invalid type descriptor: " + error;
+        return false;
+    }
+    return true;
+}
+
+std::string descriptor_base_text(const type_descriptor &desc) {
+    if (desc.package.empty())
+        return desc.name;
+    return desc.package + "." + desc.name;
+}
+
+bool descriptor_default_args(const resolved_type &type,
+                             std::vector<std::string> &args) {
+    const std::vector<std::string> *params = generic_params_of(type);
+    const std::vector<std::string> *defaults = generic_defaults_of(type);
+    if (!params || params->empty() || !defaults ||
+        defaults->size() != params->size())
+        return false;
+    for (const std::string &value : *defaults) {
+        if (value.empty())
+            return false;
+    }
+    args = *defaults;
+    return true;
+}
+
+} // namespace
+
+struct value_t *typeinfo_generic_info(const char *importer_source,
+                                      const char *importer_package,
+                                      struct value_t *type_arg) {
+    type_descriptor desc;
+    std::string text;
+    std::string error;
+    if (!descriptor_from_string_arg(type_arg, desc, text, error)) {
+        yyerror("std.meta.generic_info: %s", error.c_str());
+        return NULL;
+    }
+
+    resolved_type type;
+    std::string base = descriptor_base_text(desc);
+    if (!report_resolve_error(
+            resolve_type_name_text(importer_source, importer_package, base,
+                                   type, error),
+            error))
+        return NULL;
+
+    const std::vector<std::string> *params = generic_params_of(type);
+    static const std::vector<std::string> empty_params;
+    if (!params)
+        params = &empty_params;
+
+    std::vector<std::string> args;
+    bool defaulted = false;
+    if (!desc.args.empty()) {
+        if (desc.args.size() != params->size()) {
+            yyerror("type %s expects %d type argument(s), got %d",
+                    desc.name.c_str(), (int)params->size(),
+                    (int)desc.args.size());
+            return NULL;
+        }
+        for (const type_descriptor_ptr &arg : desc.args)
+            args.push_back(type_descriptor_display(*arg));
+    } else {
+        defaulted = descriptor_default_args(type, args);
+    }
+
+    const char *kind = "builtin";
+    std::string package;
+    std::string module;
+    std::string source;
+    bool exported = false;
+    if (type.kind == RESOLVED_STRUCT) {
+        kind = "struct";
+        package = type.structure->package;
+        module = type.structure->module;
+        source = type.structure->source;
+        exported = type.structure->exported;
+    } else if (type.kind == RESOLVED_ENUM) {
+        kind = "enum";
+        package = type.enumeration->package;
+        module = type.enumeration->module;
+        source = type.enumeration->source;
+        exported = type.enumeration->exported;
+    } else if (type.kind == RESOLVED_PROTOCOL) {
+        kind = "protocol";
+        package = type.protocol->package;
+        module = type.protocol->module;
+        source = type.protocol->source;
+        exported = type.protocol->exported;
+    }
+
+    bool instantiated = args.size() == params->size();
+    struct dict_value_t *dict = newdictval();
+    dict_add(dict, "type", newstrval(text.c_str()));
+    dict_add(dict, "name", newstrval(desc.name.c_str()));
+    dict_add(dict, "kind", newstrval(kind));
+    dict_add(dict, "package", newstrval(package.c_str()));
+    dict_add(dict, "module", newstrval(module.c_str()));
+    dict_add(dict, "source", newstrval(source.c_str()));
+    dict_add(dict, "exported", newboolval(exported));
+    dict_add(dict, "params", string_list_of(*params));
+    dict_add(dict, "args", string_list_of(args));
+    dict_add(dict, "instantiated", newboolval(instantiated));
+    dict_add(dict, "defaulted", newboolval(defaulted));
+    return (struct value_t *)dict;
+}
+
+struct value_t *typeinfo_type_args(const char *importer_source,
+                                   const char *importer_package,
+                                   struct value_t *type_arg) {
+    if (!type_arg || type_arg->type != T_string)
+        return newnull();
+    type_descriptor desc;
+    std::string text;
+    std::string error;
+    if (!descriptor_from_string_arg(type_arg, desc, text, error)) {
+        yyerror("std.meta.type_args: %s", error.c_str());
+        return NULL;
+    }
+
+    resolved_type type;
+    std::string base = descriptor_base_text(desc);
+    if (!report_resolve_error(
+            resolve_type_name_text(importer_source, importer_package, base,
+                                   type, error),
+            error))
+        return NULL;
+
+    const std::vector<std::string> *params = generic_params_of(type);
+    static const std::vector<std::string> empty_params;
+    if (!params)
+        params = &empty_params;
+
+    std::vector<std::string> args;
+    if (!desc.args.empty()) {
+        if (desc.args.size() != params->size()) {
+            yyerror("type %s expects %d type argument(s), got %d",
+                    desc.name.c_str(), (int)params->size(),
+                    (int)desc.args.size());
+            return NULL;
+        }
+        for (const type_descriptor_ptr &arg : desc.args)
+            args.push_back(type_descriptor_display(*arg));
+    } else if (!params->empty() && !descriptor_default_args(type, args)) {
+        return newnull();
+    }
+
+    return string_list_of(args);
+}
+
+struct value_t *typeinfo_type_params(const char *importer_source,
+                                     const char *importer_package,
+                                     struct value_t *type_arg) {
+    resolved_type type;
+    std::string error;
+    if (type_arg && type_arg->type == T_string) {
+        type_descriptor desc;
+        std::string text;
+        if (!descriptor_from_string_arg(type_arg, desc, text, error)) {
+            yyerror("std.meta.type_params: %s", error.c_str());
+            return NULL;
+        }
+        std::string base = descriptor_base_text(desc);
+        if (!report_resolve_error(
+                resolve_type_name_text(importer_source, importer_package,
+                                       base, type, error),
+                error))
+            return NULL;
+    } else if (!report_resolve_error(
+                   resolve_type_arg(importer_source, importer_package,
+                                    type_arg, type, error),
+                   error)) {
+        return NULL;
+    }
+
+    const std::vector<std::string> *params = generic_params_of(type);
+    static const std::vector<std::string> empty_params;
+    return string_list_of(params ? *params : empty_params);
 }

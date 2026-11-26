@@ -642,8 +642,9 @@ public:
                         meta.source.c_str(),
                         diag_current_package_name().c_str(),
                         meta.module.c_str(),
-                        meta.name.c_str(), meta.exported, fields,
-                        closure, error))
+                        meta.name.c_str(), meta.exported,
+                        meta.generic_params, meta.generic_defaults,
+                        fields, closure, error))
                     return OpResult::Abort;
                 push(newnull());
                 return OpResult::Continue;
@@ -681,8 +682,9 @@ public:
                         meta.source.c_str(),
                         diag_current_package_name().c_str(),
                         meta.module.c_str(),
-                        meta.name.c_str(), meta.exported, variants,
-                        closure, error))
+                        meta.name.c_str(), meta.exported,
+                        meta.generic_params, meta.generic_defaults,
+                        variants, closure, error))
                     return OpResult::Abort;
                 push(newnull());
                 return OpResult::Continue;

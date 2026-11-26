@@ -626,6 +626,18 @@ bool structtype_prepare_struct(const char *source, const char *package,
     return true;
 }
 
+void structtype_set_generic_params(
+    type_def *def, std::vector<std::string> params,
+    std::vector<std::string> defaults) {
+    std::lock_guard<std::recursive_mutex> lock(type_registry_mutex);
+    if (!def)
+        return;
+    def->generic_params = std::move(params);
+    def->generic_defaults = std::move(defaults);
+    if (def->generic_defaults.size() != def->generic_params.size())
+        def->generic_defaults.resize(def->generic_params.size());
+}
+
 bool structtype_finalize_struct(struct_def *def,
                                 std::vector<field_def> fields,
                                 std::string &error) {

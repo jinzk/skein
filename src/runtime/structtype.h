@@ -60,6 +60,10 @@ struct type_def {
     std::unordered_map<std::string, std::shared_ptr<function_def>> methods;
     /* Method names explicitly declared by `impl Type`, not injected defaults. */
     std::unordered_set<std::string> explicit_methods;
+    /* Generic declaration metadata; type arguments are erased at runtime. */
+    std::vector<std::string> generic_params;
+    /* Default type argument descriptors, parallel to generic_params. */
+    std::vector<std::string> generic_defaults;
     /*
      * Method names supplied by a protocol default rather than an impl, mapped
      * to the protocol that supplied them (for conflict detection).
@@ -183,6 +187,9 @@ bool structtype_create_struct(const char *source, const char *package,
 bool structtype_prepare_struct(const char *source, const char *package,
                                const char *module, const char *name, bool exported,
                                struct_def *&out, std::string &error);
+void structtype_set_generic_params(
+    type_def *def, std::vector<std::string> params,
+    std::vector<std::string> defaults);
 bool structtype_finalize_struct(struct_def *def,
                                 std::vector<field_def> fields,
                                 std::string &error);

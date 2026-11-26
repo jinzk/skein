@@ -2321,9 +2321,35 @@ struct Point { x: int; y: int; }
 let p = std.struct.decode({"x": 1, "y": 2}, "Point");
 ```
 
+泛型类型使用显式类型描述符：
+
+```text
+struct Box[T any] { value: T; }
+let a = std.struct.decode({"value": 1}, "Box[int]");
+let b = std.struct.decode({"value": [1, 2]}, "Box[list[int]]");
+```
+
+类型描述符复用普通类型语法。裸泛型类型在参数都有默认值时使用默认实参；
+没有完整实参时报错。反序列化按实参递归校验字段和容器元素。
+
 `options` 支持 `{"defaults": true}`：缺失且有默认值的字段在声明包作用域中求值。
 `std.enum.decode(value[, type_name][, options])` 同样支持默认值；可选类型名用于
-校验 tag 或消除跨包同名歧义。
+校验 tag 或消除跨包同名歧义。泛型 enum 同样接受 `"Option[int]"` 描述符。
+
+动态消息可使用自描述 envelope：
+
+```text
+let env = std.struct.encode(box, "Box[int]");
+// {"$version": 1, "$type": "Box[int]", "payload": {...}}
+
+let box = std.struct.decode(env);
+let box = std.struct.decode(std.json.parse(std.json.stringify(env)));
+
+let env = std.enum.encode(option, "Option[int]");
+let option = std.enum.decode(env);
+```
+
+普通 payload 不保存类型实参；只有 envelope 的 `$type` 字段携带类型描述符。
 
 `std.enum.tag(value)` 返回 `module.Enum.Variant` 规范字符串，丢弃载荷，可直接作 dict key：
 
@@ -2373,6 +2399,19 @@ print(std.meta.has_type("int"));      // true
 `source` 是源文件路径。
 `std.meta` 不返回值默认值，只提供 `has_default` 标记。字段信息的 `nullable`
 对 `T?` 和包含 `null` 的 `union` 都为 `true`，两者显示为同一个可空类型。
+
+泛型类型通过显式类型描述符查询：
+
+```text
+std.meta.generic_info("Box[int]")   // 参数名、实参、是否实例化
+std.meta.type_args("Box[int]")      // ["int"]
+std.meta.type_params("Box[int]")    // ["T"]
+std.meta.type_args("Box")           // 有默认实参时返回默认值
+std.meta.type_args(box_value)       // null；运行时值不携带类型实参
+```
+
+类型描述符复用普通类型语法，例如 `"Box[int]"`、`"Option[list[string]]"`。
+泛型信息属于类型层；运行时值仍然完全擦除类型实参，因此不能从值反推类型实参。
 
 `std.lru` 是内嵌 Skein 源码包（`lib/std/lru.skein`），需要 `import std.lru;`：
 
@@ -3083,9 +3122,11 @@ std.dict.merge
 std.dict.index_by
 
 std.enum.decode
+std.enum.encode
 std.enum.tag
 
 std.struct.decode
+std.struct.encode
 
 std.deque.new
 std.deque.from_list
@@ -3251,6 +3292,9 @@ std.meta.methods
 std.meta.protocols
 std.meta.implements
 std.meta.has_type
+std.meta.generic_info
+std.meta.type_args
+std.meta.type_params
 
 std.native
 std.native.load

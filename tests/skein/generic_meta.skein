@@ -1,0 +1,52 @@
+import std;
+import std.meta;
+include "_support.skein";
+
+struct Box[T = any] {
+  value: T;
+}
+
+enum Option[T = any] {
+  None;
+  Some { value: T; }
+}
+
+ts_test("generic meta struct", func() {
+  let info = std.meta.generic_info("Box[int]");
+  ts_eq(info["kind"], "struct");
+  ts_eq(info["name"], "Box");
+  ts_eq(info["params"], ["T"]);
+  ts_eq(info["args"], ["int"]);
+  ts_eq(info["instantiated"], true);
+  ts_eq(info["defaulted"], false);
+});
+
+ts_test("generic meta enum", func() {
+  let info = std.meta.generic_info("Option[string]");
+  ts_eq(info["kind"], "enum");
+  ts_eq(info["name"], "Option");
+  ts_eq(info["args"], ["string"]);
+  ts_eq(std.meta.type_args("Option[string]"), ["string"]);
+});
+
+ts_test("generic meta defaults", func() {
+  let info = std.meta.generic_info("Box");
+  ts_eq(info["args"], ["any"]);
+  ts_eq(info["instantiated"], true);
+  ts_eq(info["defaulted"], true);
+  ts_eq(std.meta.type_args("Box"), ["any"]);
+});
+
+ts_test("generic meta non-generic", func() {
+  ts_eq(std.meta.type_params("int"), []);
+  ts_eq(std.meta.type_args("int"), []);
+  ts_eq(std.meta.generic_info("int")["kind"], "builtin");
+});
+
+ts_test("generic meta value has no runtime args", func() {
+  let b: Box[int] = Box { value: 1 };
+  ts_eq(std.meta.type_args(b), null);
+  ts_eq(std.meta.type_params(b), ["T"]);
+});
+
+ts_finish();

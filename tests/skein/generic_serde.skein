@@ -1,0 +1,72 @@
+import std;
+include "_support.skein";
+
+struct SerdeBox[T any] {
+  value: T;
+}
+
+struct SerdeInner[T any] {
+  value: T;
+}
+
+struct SerdeNested[T = any] {
+  value: T;
+}
+
+enum SerdeOption[T any] {
+  None;
+  Some { value: T; }
+}
+
+ts_test("generic struct decode descriptor", func() {
+  let a = std.struct.decode({"value": 1}, "SerdeBox[int]");
+  ts_eq(a.value, 1);
+  let b = std.struct.decode({"value": "x"}, "SerdeBox[string]");
+  ts_eq(b.value, "x");
+});
+
+ts_test("generic struct decode nested arguments", func() {
+  let a = std.struct.decode({"value": [1, 2]}, "SerdeBox[list[int]]");
+  ts_eq(a.value[1], 2);
+  let b = std.struct.decode({"value": {"value": 3}},
+                            "SerdeBox[SerdeInner[int]]");
+  ts_eq(b.value.value, 3);
+});
+
+ts_test("generic struct decode defaults", func() {
+  let a = std.struct.decode({"value": 4}, "SerdeNested");
+  ts_eq(a.value, 4);
+});
+
+ts_test("generic enum decode descriptor", func() {
+  let a = std.enum.decode(
+    {"$enum": "SerdeOption.Some", "payload": {"value": 5}},
+    "SerdeOption[int]");
+  ts_eq(a.value, 5);
+});
+
+ts_test("generic struct envelope", func() {
+  let a: SerdeBox[int] = SerdeBox { value: 6 };
+  let env = std.struct.encode(a, "SerdeBox[int]");
+  ts_eq(env["$type"], "SerdeBox[int]");
+  let decoded = std.struct.decode(env);
+  ts_eq(decoded.value, 6);
+
+  let text = std.json.stringify(env);
+  let parsed = std.struct.decode(std.json.parse(text));
+  ts_eq(parsed.value, 6);
+});
+
+ts_test("generic enum envelope", func() {
+  let a: SerdeOption[int] = SerdeOption.Some { value: 7 };
+  let env = std.enum.encode(a, "SerdeOption[int]");
+  ts_eq(env["$type"], "SerdeOption[int]");
+  let decoded = std.enum.decode(env);
+  ts_eq(decoded.value, 7);
+
+  let text = std.json.stringify(env);
+  let parsed = std.enum.decode(std.json.parse(text));
+  ts_eq(parsed.value, 7);
+});
+
+ts_finish();

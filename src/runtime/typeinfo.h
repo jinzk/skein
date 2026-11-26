@@ -32,5 +32,14 @@ struct value_t *typeinfo_implements(const char *importer_source,
 struct value_t *typeinfo_has_type(const char *importer_source,
                                   const char *importer_module,
                                   struct value_t *type_arg);
+struct value_t *typeinfo_generic_info(const char *importer_source,
+                                      const char *importer_module,
+                                      struct value_t *type_arg);
+struct value_t *typeinfo_type_args(const char *importer_source,
+                                   const char *importer_module,
+                                   struct value_t *type_arg);
+struct value_t *typeinfo_type_params(const char *importer_source,
+                                     const char *importer_module,
+                                     struct value_t *type_arg);
 
 #endif

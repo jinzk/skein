@@ -287,44 +287,24 @@ static bool parse_decode_options(const char *function_name,
     return true;
 }
 
-static enum_def *resolve_enum_type_hint(const char *text) {
-    if (!text || !*text) {
-        yyerror("std.enum.decode expects a non-empty type name");
-        return NULL;
-    }
-    std::string type_name(text);
-    std::string package_name;
-    split_type_hint_name(type_name, package_name);
-    enum_def *def = structtype_find_enum_by_name(
-        package_name.empty() ? NULL : package_name.c_str(),
-        type_name.c_str());
-    if (!def) {
-        yyerror("unknown or ambiguous enum type %s", type_name.c_str());
-        return NULL;
-    }
-    return def;
-}
-
 static struct value_t *struct_decode_builtin(
     const std::vector<struct value_t *> &args) {
     bool defaults = false;
     if (args.size() == 3 &&
         !parse_decode_options("std.struct.decode", args[2], defaults))
         return NULL;
-    return struct_decode_value_ex(args[0], args[1], defaults);
+    struct value_t *type_arg = args.size() > 1 ? args[1] : NULL;
+    return struct_decode_value_ex(args[0], type_arg, defaults);
 }
 
 static struct value_t *enum_decode_builtin(
     const std::vector<struct value_t *> &args) {
-    enum_def *expected = NULL;
     bool defaults = false;
+    bool typed = false;
 
     if (args.size() >= 2 && args[1]->type != T_null) {
         if (args[1]->type == T_string) {
-            expected = resolve_enum_type_hint(
-                ((struct string_value_t *)args[1])->value);
-            if (!expected)
-                return NULL;
+            typed = true;
         } else if (args[1]->type == T_dict) {
             if (args.size() != 2) {
                 yyerror("std.enum.decode expects a type name before options");
@@ -347,7 +327,9 @@ static struct value_t *enum_decode_builtin(
             return NULL;
     }
 
-    return enum_decode_value_ex(args[0], expected, defaults);
+    if (typed)
+        return enum_decode_typed_value(args[0], args[1], defaults);
+    return enum_decode_value_ex(args[0], NULL, defaults);
 }
 
 
@@ -572,7 +554,7 @@ struct value_t *call_builtin(int functype,
         return call_slice_builtin(args);
     if (functype >= B_ref_set && functype <= B_ref_wrap)
         return call_ref_builtin(functype, args);
-    if (functype >= B_meta_type_info && functype <= B_meta_has_type)
+    if (functype >= B_meta_type_info && functype <= B_meta_type_params)
         return call_meta_builtin(functype, args);
     if (functype >= B_fn_compose && functype <= B_fn_always)
         return call_fn_builtin(functype, args);
@@ -970,8 +952,17 @@ struct value_t *call_builtin(int functype,
             return NULL;
         }
     } else if (functype == B_struct_decode) {
-        if (args.size() < 2 || args.size() > 3) {
-            yyerror("std.struct.decode expects 2 or 3 arguments, got %d",
+        if (args.empty() || args.size() > 3) {
+            yyerror("std.struct.decode expects 1 to 3 arguments, got %d",
+                    (int)args.size());
+            return NULL;
+        }
+    } else if (functype == B_struct_encode ||
+               functype == B_enum_encode) {
+        if (args.size() != 2) {
+            yyerror("%s expects 2 arguments, got %d",
+                    functype == B_struct_encode ? "std.struct.encode"
+                                                : "std.enum.encode",
                     (int)args.size());
             return NULL;
         }
@@ -1164,6 +1155,12 @@ struct value_t *call_builtin(int functype,
             break;
         case B_struct_decode:
             ret = struct_decode_builtin(args);
+            break;
+        case B_struct_encode:
+            ret = struct_encode_value(args[0], args[1]);
+            break;
+        case B_enum_encode:
+            ret = enum_encode_value(args[0], args[1]);
             break;
 
         case B_len:

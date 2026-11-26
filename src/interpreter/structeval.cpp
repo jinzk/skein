@@ -34,6 +34,21 @@ struct type_constraint copy_type_constraint(
     return *type;
 }
 
+static void collect_ast_generic_meta(
+    struct generic_param *params, std::vector<std::string> &names,
+    std::vector<std::string> &defaults) {
+    for (struct generic_param *param = params; param;
+         param = param->next) {
+        if (!param->name || !*param->name)
+            continue;
+        names.push_back(param->name);
+        defaults.push_back(
+            param->default_type
+                ? type_constraint_name(param->default_type)
+                : std::string());
+    }
+}
+
 static std::shared_ptr<function_def> field_default_from_code(
     const std::shared_ptr<function_code> &code,
     const std::shared_ptr<scope_t> &closure) {
@@ -224,6 +239,14 @@ void eval_struct_decl(struct struct_node *s) {
         yyerror("%s", error.c_str());
         return;
     }
+    {
+        std::vector<std::string> generic_params;
+        std::vector<std::string> generic_defaults;
+        collect_ast_generic_meta(s->generic_params, generic_params,
+                                 generic_defaults);
+        structtype_set_generic_params(def, generic_params,
+                                      generic_defaults);
+    }
 
     std::vector<std::string> forbidden;
     forbidden.push_back("self");
@@ -397,7 +420,10 @@ void eval_protocol_decl(struct protocol_node *t) {
 
 bool declare_struct_meta(
     const char *source, const char *package, const char *module,
-    const char *name, bool exported, const std::vector<field_meta> &fields,
+    const char *name, bool exported,
+    const std::vector<std::string> &generic_params,
+    const std::vector<std::string> &generic_defaults,
+    const std::vector<field_meta> &fields,
     const std::shared_ptr<scope_t> &closure, std::string &error) {
     struct_def *def = NULL;
     if (!structtype_prepare_struct(source, package, module, name, exported, def,
@@ -405,6 +431,7 @@ bool declare_struct_meta(
         yyerror("%s", error.c_str());
         return false;
     }
+    structtype_set_generic_params(def, generic_params, generic_defaults);
 
     std::vector<field_def> declared_fields;
     for (const auto &field : fields) {
@@ -438,7 +465,10 @@ bool declare_struct_meta(
 
 bool declare_enum_meta(
     const char *source, const char *package, const char *module,
-    const char *name, bool exported, const std::vector<variant_meta> &variants,
+    const char *name, bool exported,
+    const std::vector<std::string> &generic_params,
+    const std::vector<std::string> &generic_defaults,
+    const std::vector<variant_meta> &variants,
     const std::shared_ptr<scope_t> &closure, std::string &error) {
     enum_def *def = NULL;
     if (!structtype_prepare_enum(source, package, module, name, exported, def,
@@ -446,6 +476,7 @@ bool declare_enum_meta(
         yyerror("%s", error.c_str());
         return false;
     }
+    structtype_set_generic_params(def, generic_params, generic_defaults);
 
     std::vector<variant_def> declared_variants;
     for (const auto &variant : variants) {
@@ -1022,6 +1053,14 @@ void eval_enum_decl(struct enum_node *e) {
             e->exported != 0, def, error)) {
         yyerror("%s", error.c_str());
         return;
+    }
+    {
+        std::vector<std::string> generic_params;
+        std::vector<std::string> generic_defaults;
+        collect_ast_generic_meta(e->generic_params, generic_params,
+                                 generic_defaults);
+        structtype_set_generic_params(def, generic_params,
+                                      generic_defaults);
     }
 
     std::vector<std::string> forbidden;

@@ -684,12 +684,29 @@ struct Compiler {
         return static_cast<uint32_t>(proto.index_read_ic.size() - 1);
     }
 
+    void fill_generic_meta(struct generic_param *params,
+                           std::vector<std::string> &names,
+                           std::vector<std::string> &defaults) {
+        for (struct generic_param *param = params; param;
+             param = param->next) {
+            if (!param->name || !*param->name)
+                continue;
+            names.push_back(param->name);
+            defaults.push_back(
+                param->default_type
+                    ? type_constraint_name(param->default_type)
+                    : std::string());
+        }
+    }
+
     uint32_t add_struct_decl(struct struct_node *node) {
         skein::bc::StructDeclMeta meta;
         meta.source = node->source ? node->source : "";
         meta.module = node->module ? node->module : "";
         meta.name = node->name ? node->name : "";
         meta.exported = node->exported != 0;
+        fill_generic_meta(node->generic_params, meta.generic_params,
+                          meta.generic_defaults);
         std::vector<std::string> forbidden;
         forbidden.push_back("self");
         for (struct struct_member *member = node->members; member;
@@ -730,6 +747,8 @@ struct Compiler {
         meta.module = node->module ? node->module : "";
         meta.name = node->name ? node->name : "";
         meta.exported = node->exported != 0;
+        fill_generic_meta(node->generic_params, meta.generic_params,
+                          meta.generic_defaults);
         std::vector<std::string> forbidden;
         forbidden.push_back("self");
         for (struct enum_variant *variant = node->variants; variant;

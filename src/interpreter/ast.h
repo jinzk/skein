@@ -50,6 +50,9 @@ constexpr int NODE_FUNCTION_BODY = 0x142;
 constexpr int NODE_OPTIONAL_CHAIN = 0x150;
 constexpr int NODE_REF_TARGET = 0x151;
 constexpr int NODE_BRACKET_APPLY = 0x152;
+/* Deferred macro call stored inside a user macro template body.  It is
+ * expanded before typechecking and never reaches the runtime. */
+constexpr int NODE_USER_MACRO_CALL = 0x160;
 constexpr int BRACKET_SUFFIX_NONE = 0;
 constexpr int BRACKET_SUFFIX_CALL = 1;
 constexpr int BRACKET_SUFFIX_STRUCT = 2;
@@ -90,6 +93,16 @@ struct index_node {
     struct source_span span;
     bool generic_candidate;
     bool generic_function_value;
+};
+
+struct user_macro_call_node {
+    int nodetype;
+    int line;
+    int column;
+    struct ast *callee;
+    struct ast *args;
+    struct ast *block;
+    int generator;
 };
 
 struct fnret {
@@ -756,6 +769,9 @@ struct ast *newindex(struct ast *container, struct ast *index,
                      int start_line, int start_column, int end_line,
                      int end_column, bool generic_candidate = false,
                      bool generic_function_value = false);
+struct ast *new_user_macro_call(struct ast *callee, struct ast *args,
+                                struct ast *block, int line, int column,
+                                bool generator);
 struct ast *newenumdecl(char *name, char *source,
                         struct generic_param *generic_params,
                         struct enum_variant *variants,

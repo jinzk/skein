@@ -22,6 +22,7 @@
 #include "gc.h"
 #include "eval.h"
 #include "macros.h"
+#include "user_macros.h"
 #include "package.h"
 #include "modfile.h"
 #include "vm.h"
@@ -177,6 +178,77 @@ static bool name_is(const char *name, const char *word) {
 static void expect_contextual_keyword(const char *name, const char *word) {
     if (!name_is(name, word))
         yyerror("expected '%s'", word);
+}
+
+static std::vector<struct user_macro_param> g_macro_params;
+static char *g_macro_name = NULL;
+static int g_macro_decl_line = 0;
+static int g_macro_decl_column = 0;
+
+bool macro_param_is_block(const char *name) {
+    if (!name)
+        return false;
+    for (const auto &param : g_macro_params)
+        if (param.kind == user_macro_param_kind::block &&
+            param.name == name)
+            return true;
+    return false;
+}
+
+static void begin_macro_decl(char *name, int line, int column) {
+    g_macro_params.clear();
+    g_macro_name = name;
+    g_macro_decl_line = line;
+    g_macro_decl_column = column;
+}
+
+static void add_macro_param(char *name, char *fragment, bool variadic,
+                            int line, int column) {
+    if (!name || !fragment)
+        return;
+    bool valid = true;
+    user_macro_param param;
+    param.name = name;
+    param.line = line;
+    param.column = column;
+    if (name_is(fragment, "expr")) {
+        param.kind = variadic ? user_macro_param_kind::expr_list
+                              : user_macro_param_kind::expr;
+    } else if (name_is(fragment, "ident")) {
+        if (variadic)
+            valid = false;
+        param.kind = user_macro_param_kind::ident;
+    } else if (name_is(fragment, "block")) {
+        if (variadic)
+            valid = false;
+        param.kind = user_macro_param_kind::block;
+    } else {
+        valid = false;
+        param.kind = user_macro_param_kind::expr;
+    }
+    if (!valid) {
+        if (variadic)
+            yyerror("only expr parameters support '...'");
+        else
+            yyerror("unknown macro fragment '%s'", fragment);
+    } else {
+        g_macro_params.push_back(param);
+    }
+    std::free(name);
+    std::free(fragment);
+}
+
+static void finish_macro_decl(struct ast *body) {
+    user_macros_set_template_mode(false);
+    if (g_macro_name) {
+        user_macro_define(g_macro_name, g_macro_params, body,
+                          g_macro_decl_line, g_macro_decl_column);
+        std::free(g_macro_name);
+        g_macro_name = NULL;
+    } else {
+        treefree(body);
+    }
+    g_macro_params.clear();
 }
 
 static void validate_import_selections(const struct import_selection *list) {
@@ -1310,6 +1382,7 @@ static struct ast *new_member_or_enum_literal(struct ast *base, char *field) {
 %token WAIT "wait"
 %token AWAIT "await"
 %token STRUCT "struct" IMPL "impl" PROTOCOL "proto" ENUM "enum"
+%token MACRO "macro"
 %token TYPE_MARK PROTO_MARK
 %token REF "ref" WEAK "weak" QUESTION_DOT "?."
 %token EXTERN "extern"
@@ -1321,6 +1394,8 @@ static struct ast *new_member_or_enum_literal(struct ast *base, char *field) {
 %token <str> LABEL "label"
 %token COLONCOLON "::"
 %token MACRO_BANG "macro invocation bang"
+%token <str> MACRO_ARG_EXPAND "macro argument expansion"
+%token <str> MACRO_BLOCK_STMT "macro block fragment statement"
 %token PLUS_ASSIGN "+=" MINUS_ASSIGN "-=" MUL_ASSIGN "*=" DIV_ASSIGN "/="
 %token MOD_ASSIGN "%=" AND_ASSIGN "&=" OR_ASSIGN "|=" XOR_ASSIGN "^="
 %token SHL_ASSIGN "<<=" SHR_ASSIGN ">>="
@@ -1379,7 +1454,7 @@ static struct ast *new_member_or_enum_literal(struct ast *base, char *field) {
 %type <a> enum_decl enum_variants enum_variant variant_fields variant_field
 %type <a> generic_params generic_param_list generic_param
 %type <a> generic_constraint generic_constraint_and generic_constraint_or
-%type <a> func_decl
+%type <a> func_decl macro_decl
 %type <a> impl_methods protocol_methods protocol_method method_decl method_member
 %type <a> decorators decorator decorator_expr
 %type <a> struct_fields struct_field
@@ -1407,6 +1482,47 @@ static struct ast *new_member_or_enum_literal(struct ast *base, char *field) {
 
 %start program
 %%
+
+macro_param: NAME ':' NAME {
+        add_macro_param($1, $3, false, @1.first_line, @1.first_column);
+      }
+    | NAME ':' NAME ELLIPSIS {
+        add_macro_param($1, $3, true, @1.first_line, @1.first_column);
+      }
+    ;
+
+macro_params: %empty
+    | macro_param
+    | macro_param ',' macro_params
+    ;
+
+macro_template_start: %empty {
+        user_macros_set_template_mode(true);
+        push_func_location(@$.first_line, @$.first_column);
+        ++g_include_function_depth;
+        start_function();
+      }
+    ;
+
+macro_template_end: %empty {
+        (void)finish_function();
+      }
+    ;
+
+macro_decl_start: MACRO NAME {
+        begin_macro_decl($2, @2.first_line, @2.first_column);
+      }
+    ;
+
+macro_decl: macro_decl_start '(' macro_params ')' '{' macro_template_start macro_template_end EMPTY_BLOCK_CLOSE {
+        $$ = NULL;
+        finish_macro_decl(NULL);
+      }
+    | macro_decl_start '(' macro_params ')' '{' macro_template_start list macro_template_end '}' {
+        $$ = NULL;
+        finish_macro_decl($7);
+      }
+    ;
 
 func_decl: funcstart NAME generic_params '(' symlist ')' func_ret_opt '{' EMPTY_BLOCK_CLOSE
                                            {
@@ -1519,6 +1635,7 @@ stmt: IF HEADER_LPAREN exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, 
                                                  $6); }
     | DEFER exp ';'                       { $$ = newdefer($2); }
     | func_decl
+    | macro_decl
     | decorators func_decl                { $$ = lower_function_decorators($1, (struct funcdef *)$2); }
     | export_kw LET NAME '=' exp ';'         { $$ = newvar($3, $5, true); }
     | export_kw LET NAME ':' type '=' exp ';' {
@@ -2247,6 +2364,7 @@ gotostart: GOTO {
     ;
 
 scope: stmt                               { $$ = $1; }
+     | MACRO_BLOCK_STMT                   { $$ = newref($1); }
      | line ';'                           { $$ = $1; }
      | ';'                                { $$ = newscope(NULL); }
      | '{' EMPTY_BLOCK_CLOSE              { $$ = newscope(NULL); }
@@ -2431,63 +2549,63 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
     | exp SHR_ASSIGN exp                  { $$ = newcompound($1, 'r', $3); }
     | exp '(' explist ')'      { $$ = new_call_with_placeholders($1, $3); }
     | exp MACRO_BANG '(' explist ')' %prec PRIMARY {
-        $$ = expand_builtin_macro($1, $4, NULL,
+        $$ = expand_macro($1, $4, NULL,
                                   @2.first_line, @2.first_column, false);
       }
     | exp MACRO_BANG '(' explist ')' '{' macro_block_start EMPTY_BLOCK_CLOSE %prec PRIMARY {
         bool generator = finish_function();
-        $$ = expand_builtin_macro($1, $4, newscope(NULL),
+        $$ = expand_macro($1, $4, newscope(NULL),
                                   @2.first_line, @2.first_column, generator);
       }
     | exp MACRO_BANG '(' explist ')' '{' macro_block_start list '}' %prec PRIMARY {
         bool generator = finish_function();
-        $$ = expand_builtin_macro($1, $4, newscope($8),
+        $$ = expand_macro($1, $4, newscope($8),
                                   @2.first_line, @2.first_column, generator);
       }
     | exp MACRO_BANG '{' macro_block_start EMPTY_BLOCK_CLOSE %prec PRIMARY {
         bool generator = finish_function();
-        $$ = expand_builtin_macro($1, NULL, newscope(NULL),
+        $$ = expand_macro($1, NULL, newscope(NULL),
                                   @2.first_line, @2.first_column, generator);
       }
     | exp MACRO_BANG '{' macro_block_start list '}' %prec PRIMARY {
         bool generator = finish_function();
-        $$ = expand_builtin_macro($1, NULL, newscope($5),
+        $$ = expand_macro($1, NULL, newscope($5),
                                   @2.first_line, @2.first_column, generator);
       }
     | exp MACRO_BANG %prec PRIMARY {
-        $$ = expand_builtin_macro($1, NULL, NULL,
+        $$ = expand_macro($1, NULL, NULL,
                                   @2.first_line, @2.first_column, false);
       }
     | exp MACRO_BANG NAME %prec PRIMARY {
-        $$ = expand_builtin_macro($1, newref($3), NULL,
+        $$ = expand_macro($1, newref($3), NULL,
                                   @2.first_line, @2.first_column, false);
       }
     /* `error` is reserved, so bare `error!` needs its own callee node. */
     | ERROR MACRO_BANG '(' explist ')' %prec PRIMARY {
-        $$ = expand_builtin_macro(newref(copy_text("error")), $4, NULL,
+        $$ = expand_macro(newref(copy_text("error")), $4, NULL,
                                   @2.first_line, @2.first_column, false);
       }
     | ERROR MACRO_BANG '(' explist ')' '{' macro_block_start EMPTY_BLOCK_CLOSE %prec PRIMARY {
         bool generator = finish_function();
-        $$ = expand_builtin_macro(newref(copy_text("error")), $4,
+        $$ = expand_macro(newref(copy_text("error")), $4,
                                   newscope(NULL), @2.first_line,
                                   @2.first_column, generator);
       }
     | ERROR MACRO_BANG '(' explist ')' '{' macro_block_start list '}' %prec PRIMARY {
         bool generator = finish_function();
-        $$ = expand_builtin_macro(newref(copy_text("error")), $4,
+        $$ = expand_macro(newref(copy_text("error")), $4,
                                   newscope($8), @2.first_line,
                                   @2.first_column, generator);
       }
     | ERROR MACRO_BANG '{' macro_block_start EMPTY_BLOCK_CLOSE %prec PRIMARY {
         bool generator = finish_function();
-        $$ = expand_builtin_macro(newref(copy_text("error")), NULL,
+        $$ = expand_macro(newref(copy_text("error")), NULL,
                                   newscope(NULL), @2.first_line,
                                   @2.first_column, generator);
       }
     | ERROR MACRO_BANG '{' macro_block_start list '}' %prec PRIMARY {
         bool generator = finish_function();
-        $$ = expand_builtin_macro(newref(copy_text("error")), NULL,
+        $$ = expand_macro(newref(copy_text("error")), NULL,
                                   newscope($5), @2.first_line,
                                   @2.first_column, generator);
       }
@@ -2917,6 +3035,7 @@ explist: %empty                            { $$ = NULL; }
 arg: exp                                   { $$ = $1; }
     | ELLIPSIS exp                         { $$ = newspread($2); }
     | PLACEHOLDER                          { $$ = newref(copy_text($1)); free($1); }
+    | MACRO_ARG_EXPAND                     { $$ = newref($1); }
     ;
 
 param: NAME {
@@ -3164,6 +3283,13 @@ void parser_begin_nested_parse() {
     yychar = SKEIN_TOK_YYEMPTY;
     yynerrs = 0;
     block_contexts.clear();
+    user_macros_push();
+    user_macros_reset();
+    user_macros_set_template_mode(false);
+}
+
+void parser_end_nested_parse() {
+    user_macros_pop();
 }
 
 int yyreport_syntax_error(const yypcontext_t *ctx) {

@@ -1564,6 +1564,24 @@ struct ast *newindex(struct ast *container, struct ast *index,
     return (struct ast *)a;
 }
 
+struct ast *new_user_macro_call(struct ast *callee, struct ast *args,
+                                struct ast *block, int line, int column,
+                                bool generator) {
+    struct user_macro_call_node *a = (struct user_macro_call_node *)
+        ast_node_alloc(sizeof(struct user_macro_call_node));
+    if (!a) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    a->nodetype = NODE_USER_MACRO_CALL;
+    set_loc(a, line, column);
+    a->callee = callee;
+    a->args = args;
+    a->block = block;
+    a->generator = generator ? 1 : 0;
+    return (struct ast *)a;
+}
+
 struct ast *newoptionalchain(struct ast *base, char *name) {
     struct optional_chain_node *a =
         (struct optional_chain_node *)
@@ -1769,6 +1787,14 @@ void treefree(struct ast *a) {
             struct bracket_apply_node *b = (struct bracket_apply_node *)a;
             treefree(b->base);
             treefree(b->suffix_value);
+            break;
+        }
+        case NODE_USER_MACRO_CALL: {
+            struct user_macro_call_node *call =
+                (struct user_macro_call_node *)a;
+            treefree(call->callee);
+            treefree(call->args);
+            treefree(call->block);
             break;
         }
         case 'M':

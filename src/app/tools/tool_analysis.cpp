@@ -31,6 +31,7 @@
 #include "task.h"
 #include "typecheck.h"
 #include "typecheck_state.h"
+#include "user_macros.h"
 #include "vm.h"
 
 extern FILE *yyin;
@@ -146,6 +147,8 @@ analysis_result analyze_source_text(const std::string &source,
     set_active_eval_context(&context);
     initscope();
     reset_scanner_state_memory(source.data(), source.size());
+    user_macros_reset();
+    user_macros_set_template_mode(false);
 
     diag_collect_begin(options.suppress_text);
     {

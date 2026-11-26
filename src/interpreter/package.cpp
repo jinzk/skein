@@ -62,6 +62,7 @@ extern int yychar;
 extern YYSTYPE yylval;
 extern int yynerrs;
 void parser_begin_nested_parse();
+void parser_end_nested_parse();
 extern thread_local bool g_include_collect;
 extern thread_local bool g_include_invalid;
 extern thread_local std::vector<struct ast *> g_include_statements;
@@ -1655,6 +1656,7 @@ bool evaluate_include_source_impl(const char *path, std::string &error) {
         path_to_utf8(path_from_utf8(canonical).parent_path()));
 
     int status = yyparse();
+    parser_end_nested_parse();
     g_include_collect = false;
 
     bool ok = status == 0 && !g_include_invalid &&
@@ -1748,6 +1750,7 @@ bool parse_package_source(const std::string &source_text,
     load_stack.push_back(context);
 
     int status = yyparse();
+    parser_end_nested_parse();
     result = load_stack.back().result;
     load_stack.pop_back();
 
@@ -1813,6 +1816,7 @@ bool parse_worker_source_impl(const std::string &path, std::string &error) {
     diag_set_package_name("worker");
 
     int status = yyparse();
+    parser_end_nested_parse();
 
     scanner_checkpoint_restore(scan_cp);
     yyin = saved_yyin;

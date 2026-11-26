@@ -37,6 +37,7 @@
 #include "task.h"
 #include "thread_channel.h"
 #include "typecheck.h"
+#include "user_macros.h"
 #include "vm.h"
 #include "watch.h"
 
@@ -464,6 +465,7 @@ int main(int argc, char **argv) {
     int status = 0;
     for (;;) {
         g_interrupted = 0;
+        user_macros_reset();
         status = yyparse();
 
         if (!g_interrupted || g_stdin_eof)

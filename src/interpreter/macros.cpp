@@ -433,6 +433,7 @@ struct ast *expand_builtin_macro(struct ast *callee, struct ast *args,
     if (name == "std.task.wait")
         return wait_macro(args, block, arg_count, line, column);
 
-    return fail_expansion(name.c_str(), "is not a known built-in macro", NULL,
+    return fail_expansion(name.c_str(),
+                          "is not a known built-in or user-defined macro", NULL,
                           args, block);
 }

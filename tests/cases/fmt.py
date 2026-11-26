@@ -245,3 +245,33 @@ def run_cases():
         )
     finally:
         os.unlink(macro_path)
+
+    user_macro_source = (
+        "macro twice(x:expr){return #x*2;}\n"
+        "macro call_all(f:expr,args:expr...){return #f(#args...);}\n"
+        "macro scoped(n:ident,b:block){let #n=1;#b}\n"
+        "println(str(twice!(3)));\n"
+    )
+    user_macro_expected = (
+        "macro twice(x: expr) { return #x * 2; }\n"
+        "macro call_all(f: expr, args: expr...) { return #f(#args...); }\n"
+        "macro scoped(n: ident, b: block) { let #n = 1; #b}\n"
+        "println(str(twice!(3)));\n"
+    )
+    user_macro_path = write_temp(user_macro_source)
+    try:
+        formatted = run_fmt(user_macro_path)
+        assert formatted.returncode == 0, decode(formatted.stderr)
+        assert decode(formatted.stdout) == user_macro_expected, decode(
+            formatted.stdout
+        )
+
+        second = run_fmt("-", stdin=formatted.stdout)
+        assert second.returncode == 0, decode(second.stderr)
+        assert second.stdout == formatted.stdout, (
+            "fmt must be idempotent for user macros\n"
+            f"first:\n{decode(formatted.stdout)}\n"
+            f"second:\n{decode(second.stdout)}"
+        )
+    finally:
+        os.unlink(user_macro_path)

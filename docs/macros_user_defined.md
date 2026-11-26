@@ -1,6 +1,6 @@
-# 用户自定义宏设计（提案）
+# 用户自定义宏设计（设计方案）
 
-- 状态：P1 / P2 / P3.1 已完成；P4 用户自定义宏待实施
+- 状态：P1 / P2 / P3.1 / P4 同文件 v1 已完成；跨包宏待实施
 - 关联：[`docs/macros.md`](macros.md)、[`docs/roadmap.md`](roadmap.md)
 - 建议里程碑：M11，不回写已完成的 M10
 - 拟改动：`src/interpreter/tokens.l`、`src/interpreter/parser.y`、新增
@@ -352,9 +352,9 @@ wrap!(2) {
 | --- | --- | --- |
 | P0（已完成） | 低风险 contextual：`in` / `export` / `import` / `package` / `include`；`module` 仅 manifest | 基线不动 |
 | P1（已完成） | `protocol` → `proto` 实现落地；值/类型的 selective import | 已消除文档漂移；selective import 是宏 import 的前置 |
-| P2 | 普通内置函数默认 import；内置宏默认绑定与 `fail!` / `recover!` / `pass!` / `wait!`；`list` / `dict` 默认 import | 一次性移除大量保留名，并为宏表和类型构造器统一打底 |
-| P3 | `launch` / `await` 表达式起始 contextual | 依赖 `wait!`；保住“启动并立即等待”的写法，退出 `wait` 保留字 |
-| P4 | 用户宏 v1（最小 → 完整 → 跨包） | 复用 P2 建立的 MacroTable 与调用简写；属于功能增量 |
+| P2（已完成） | 普通内置函数默认 import；内置宏默认绑定与 `fail!` / `recover!` / `pass!` / `wait!`；`list` / `dict` 默认 import | 一次性移除大量保留名，并为宏表和类型构造器统一打底 |
+| P3（已完成） | `launch` / `await` 表达式起始 contextual | 依赖 `wait!`；保住“启动并立即等待”的写法，退出 `wait` 保留字 |
+| P4（同文件 v1 已完成） | 用户宏 v1：`expr` / `ident` / 尾部 `expr...` / 尾部 `block` | 复用 P2 建立的宏分发路径与调用简写；跨包阶段单独推进 |
 | P5 | `on` / `error`、`as`、`ref` / `weak`、`is` | 高风险 contextual，冲突面大，必须各自独立 |
 
 具体顺序：
@@ -383,26 +383,25 @@ wrap!(2) {
    `=` / `return` / `yield` / `(` / `[` / `{` / `,` / `:` 和二元运算符之后；`.`
    之后仍是普通名字；`await(f())` 是前缀形式，同名变量写 `(await)(f())`；
    postfix 优先级高于前缀。`await f() on error(...)` 沿用当前 handler 语义。
-7. **P4.1**：`macro` 声明语法、签名校验、宏表、未知宏诊断；先只支持一个 `expr`
-   片段的模板展开与 hygiene 基础设施。
-8. **P4.2**：补齐 `ident`、一个尾部 `expr...`、一个尾部 `block` 与块函数上下文；
-   完整测试矩阵。
-9. **P4.3**：`export macro` 与 `import {name!} from pkg;`；跨包 hygiene、循环
-   检测和完整测试矩阵。
-10. **P5.1**：`on` / `error` 评估 handler-scoped contextual；`error!` 改为普通
+7. **P4（已完成）**：`macro` 声明语法、签名校验、同文件宏表、未知宏诊断，以及
+   `expr` / `ident` / 尾部 `expr...` / 尾部 `block` 四种片段的完整 v1 展开；
+   hygiene、块函数上下文、嵌套调用与递归禁止均已落地。
+8. **P4.2（后续）**：`export macro` 与 `import {name!} from pkg;`；跨包 hygiene、
+   循环检测和完整测试矩阵。
+9. **P5.1**：`on` / `error` 评估 handler-scoped contextual；`error!` 改为普通
     `NAME MACRO_BANG` 路径，`type error` 走类型命名空间，`.error` 仍是普通字段；
    保留 `%prec ON`，补齐 handler body / defer / 默认参数诊断。
-11. **P5.2**：`as` contextual，独立步骤。
-12. **P5.3**：`ref` contextual，独立步骤。
-13. **P5.4**：`weak` contextual，独立步骤。
-14. **P5.5**：`is` contextual，独立步骤。
+10. **P5.2**：`as` contextual，独立步骤。
+11. **P5.3**：`ref` contextual，独立步骤。
+12. **P5.4**：`weak` contextual，独立步骤。
+13. **P5.5**：`is` contextual，独立步骤。
 
 每个阶段都要保持第一批宏与全量测试全绿；用户宏不得改变第一批宏的行为；每阶段
 运行 `tools/check_docs_sync.py` 与 `git diff --check`。
 
-## 11. 待确认的默认决策
+## 11. 已确认的默认决策
 
-以下为提案默认值，实现前需要明确批准：
+以下决策已确认，作为实现约束：
 
 1. 使用 `#参数名` 作为模板占位符标记；
 2. `macro` 作为新保留关键字；

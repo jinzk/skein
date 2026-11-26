@@ -35,6 +35,7 @@
 #include "repl.h"
 #include "unicode.h"
 #include "unicode_ident.h"
+#include "user_macros.h"
 
 int indent_count = 0;
 
@@ -855,6 +856,36 @@ static int make_placeholder_token() {
     return SKEIN_TOK_PLACEHOLDER;
 }
 
+/* Encode `#name` as an ordinary NAME with a prefix that cannot be written in
+ * source.  Every grammar slot that accepts an identifier then accepts a macro
+ * placeholder without needing a parallel grammar rule. */
+static int make_macro_param_token(const char *prefix, int suffix_len) {
+    int tok = make_name_token(yytext + 1, yyleng - suffix_len);
+    if (tok == 0)
+        return 0;
+    const std::size_t prefix_len = std::strlen(prefix);
+    const std::size_t name_len = std::strlen(yylval.str);
+    char *raw = (char *)std::malloc(prefix_len + name_len + 1);
+    if (!raw) {
+        std::free(yylval.str);
+        yyerror("out of space");
+        return 0;
+    }
+    std::memcpy(raw, prefix, prefix_len);
+    std::memcpy(raw + prefix_len, yylval.str, name_len + 1);
+    std::free(yylval.str);
+    yylval.str = raw;
+    return tok;
+}
+
+static int make_macro_param_token() {
+    return make_macro_param_token(USER_MACRO_PARAM_PREFIX, 1);
+}
+
+static int make_macro_expand_token() {
+    return make_macro_param_token(USER_MACRO_EXPAND_PREFIX, 4);
+}
+
 /*
  * Decide whether an opening brace introduces a block body.  Only syntactic
  * positions that always require a body are treated as blocks; everything else
@@ -900,7 +931,7 @@ static bool reserved_name(const char *text, int len) {
         "struct",   "extern",   "enum",     "impl",     "proto",
         "ref",      "weak",
         "switch",   "match",    "case",     "default",  "let",
-        "const",    "func",     "yield",    "defer",
+        "const",    "func",     "yield",    "defer",    "macro",
         "return",   "break",    "continue", "fail",     "is",
         "goto",     "on",       "error",    "recover",  "pass",
         "as",       "null",     "true",     "false",
@@ -1069,6 +1100,40 @@ TASK_KEYWORD_NEXT ([A-Za-z_]|{UTF8_SEQ}|\(|\[|\{|[0-9]|\"|\')
     int tok = make_placeholder_token();
     if (tok == 0)
         return 0;
+    YYRET(tok);
+}
+
+"#"{ASCII_NAME}"..." {
+    int tok = make_macro_expand_token();
+    if (tok == 0)
+        return 0;
+    YYRET(SKEIN_TOK_MACRO_ARG_EXPAND);
+}
+
+"#"{UNICODE_NAME}"..." {
+    int tok = make_macro_expand_token();
+    if (tok == 0)
+        return 0;
+    YYRET(SKEIN_TOK_MACRO_ARG_EXPAND);
+}
+
+"#"{ASCII_NAME} {
+    int tok = make_macro_param_token();
+    if (tok == 0)
+        return 0;
+    note_for_name_token();
+    if (macro_param_is_block(yytext + 1))
+        tok = SKEIN_TOK_MACRO_BLOCK_STMT;
+    YYRET(tok);
+}
+
+"#"{UNICODE_NAME} {
+    int tok = make_macro_param_token();
+    if (tok == 0)
+        return 0;
+    note_for_name_token();
+    if (macro_param_is_block(yytext + 1))
+        tok = SKEIN_TOK_MACRO_BLOCK_STMT;
     YYRET(tok);
 }
 
@@ -1323,6 +1388,13 @@ TASK_KEYWORD_NEXT ([A-Za-z_]|{UTF8_SEQ}|\(|\[|\{|[0-9]|\"|\')
         func_signature_indents.back() < indent_count)
         func_signature_indents.push_back(indent_count);
     YYRET(SKEIN_TOK_FUNC);
+}
+"macro" { MEMBER_NAME_AFTER_DOT();
+    if (last_token != '.') {
+        pending_decl_kind = SKEIN_TOK_MACRO;
+        pending_decl_skip = true;
+    }
+    YYRET(SKEIN_TOK_MACRO);
 }
 "yield" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_YIELD); }
 "launch"/"!" { MACRO_CALLEE_NAME(); }

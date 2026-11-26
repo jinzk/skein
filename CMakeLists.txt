@@ -372,6 +372,7 @@ add_library(skein_interpreter STATIC
   src/interpreter/ast.cpp
   src/interpreter/decorators.cpp
   src/interpreter/macros.cpp
+  src/interpreter/user_macros.cpp
   src/interpreter/compiler.cpp
   src/interpreter/ast_analysis.cpp
   src/interpreter/formatter.cpp

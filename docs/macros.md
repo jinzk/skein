@@ -1,8 +1,10 @@
 # Skein 宏（第一批：内置语法宏）
 
-- 状态：第一批已完成；用户自定义宏暂不纳入
+- 状态：第一批内置宏已完成；用户自定义宏 v1 已落地（见
+  [`docs/macros_user_defined.md`](macros_user_defined.md)）
 - 相关模块：`std.assert`、`std.log`、`std.result`
-- 实现位置：`src/interpreter/macros.cpp`、`src/interpreter/parser.y`
+- 实现位置：`src/interpreter/macros.cpp`、`src/interpreter/user_macros.cpp`、
+  `src/interpreter/parser.y`
 
 ## 1. 目标
 

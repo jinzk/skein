@@ -68,7 +68,7 @@ def run_cases():
     check(
         "unknown macro",
         "import std;\nfoo!(1);\n",
-        stderr="is not a known built-in macro",
+        stderr="is not a known built-in or user-defined macro",
     )
     check(
         "macro wrong arity",
@@ -140,7 +140,7 @@ def run_cases():
     check(
         "await! is a macro callee, not the contextual keyword",
         'await!(1);\n',
-        stderr="macro await is not a known built-in macro",
+        stderr="macro await is not a known built-in or user-defined macro",
     )
     check(
         "control macro rejects block",
@@ -156,4 +156,143 @@ def run_cases():
         "wait macro requires one argument",
         'import std;\nwait!();\n',
         stderr="expects 1 expression argument",
+    )
+
+    # User-defined macros (P4 v1).
+    check(
+        "user macro expr fragment",
+        'macro twice(x: expr) { return #x * 2; }\n'
+        'func test(): int { return twice!(1 + 2); }\n'
+        'println(str(test()));\n',
+        stdout="6",
+    )
+    check(
+        "user macro ident and block fragments",
+        'macro set_name(name: ident, value: expr, body: block) {\n'
+        '  let #name = #value;\n'
+        '  #body\n'
+        '  return #name;\n'
+        '}\n'
+        'func test(): int {\n'
+        '  let outer = 100;\n'
+        '  return set_name!(v, 1 + 2) { println(str(outer)); };\n'
+        '}\n'
+        'println(str(test()));\n',
+        stdout="100\n3",
+    )
+    check(
+        "user macro expr list fragment",
+        'func add3(a: int, b: int, c: int): int { return a + b + c; }\n'
+        'macro call_all(f: expr, args: expr...) { return #f(#args...); }\n'
+        'func test(): int { return call_all!(add3, 1, 2, 3); }\n'
+        'println(str(test()));\n',
+        stdout="6",
+    )
+    check(
+        "user macro nested call",
+        'macro inc(x: expr) { #x + 1; }\n'
+        'macro twice(x: expr) { inc!(#x) * 2; }\n'
+        'func test(): int { return twice!(5); }\n'
+        'println(str(test()));\n',
+        stdout="12",
+    )
+    check(
+        "user macro hygiene",
+        'macro wrap(value: expr, body: block) {\n'
+        '  let tmp = #value;\n'
+        '  #body\n'
+        '  return tmp;\n'
+        '}\n'
+        'func test(): int {\n'
+        '  let tmp = 100;\n'
+        '  return wrap!(2) { println(str(tmp)); };\n'
+        '}\n'
+        'println(str(test()));\n',
+        stdout="100\n2",
+    )
+    check(
+        "user macro shadows builtin bare name but not canonical path",
+        'import std;\n'
+        'macro info(x: expr) { return #x + 100; }\n'
+        'func bare(): int { return info!(1); }\n'
+        'func canonical(): int {\n'
+        '  std.log.set_level("trace");\n'
+        '  std.log.info!("canonical");\n'
+        '  return 7;\n'
+        '}\n'
+        'println(str(bare()));\n'
+        'println(str(canonical()));\n',
+        stdout="101\n7",
+        stderr=" INFO  canonical",
+    )
+    check(
+        "user macro must be declared before use",
+        'func test(): int { return later!(1); }\n'
+        'macro later(x: expr) { return #x; }\n',
+        stderr="is not a known built-in or user-defined macro",
+    )
+    check(
+        "duplicate user macro",
+        'macro m(x: expr) { return #x; }\n'
+        'macro m(x: expr) { return #x; }\n',
+        stderr="duplicate macro definition",
+    )
+    check(
+        "unknown user macro placeholder",
+        'macro m(x: expr) { return #y; }\n',
+        stderr="unknown macro placeholder",
+    )
+    check(
+        "user macro unknown fragment kind",
+        'macro m(x: type) { return 1; }\n',
+        stderr="unknown macro fragment 'type'",
+    )
+    check(
+        "user macro block fragment must be last",
+        'macro m(b: block, x: expr) { #b return #x; }\n',
+        stderr="block fragment must be the last parameter",
+    )
+    check(
+        "user macro expr list must be last",
+        'macro m(xs: expr..., y: expr) { return #y; }\n',
+        stderr="expr... fragment must be the last parameter",
+    )
+    check(
+        "recursive user macro",
+        'macro bad(x: expr) { return bad!(#x); }\n'
+        'println(str(bad!(1)));\n',
+        stderr="recursive user macro calls are not allowed",
+    )
+    check(
+        "mutually recursive user macros",
+        'macro a(x: expr) { return b!(#x); }\n'
+        'macro b(x: expr) { return a!(#x); }\n'
+        'println(str(a!(1)));\n',
+        stderr="recursive user macro calls are not allowed",
+    )
+    check(
+        "user macro wrong arity",
+        'macro one(x: expr) { return #x; }\n'
+        'println(str(one!(1, 2)));\n',
+        stderr="macro expects a different number of arguments",
+    )
+    check(
+        "user macro missing block",
+        'macro with_block(b: block) { #b }\n'
+        'with_block!();\n',
+        stderr="macro expects a block argument",
+    )
+    check(
+        "user macro zero arguments",
+        'macro forty_two() { 42; }\n'
+        'println(str(forty_two!()));\n'
+        'println(str(forty_two!));\n',
+        stdout="42\n42",
+    )
+    check(
+        "user macro shorthand single name",
+        'macro plus_one(x: expr) { #x + 1; }\n'
+        'let x = 5;\n'
+        'println(str(plus_one! x));\n',
+        stdout="6",
     )

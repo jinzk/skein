@@ -1,6 +1,7 @@
 #include "diagnostics.h"
 #include "parser.hpp"
 #include "repl.h"
+#include "user_macros.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -28,7 +29,8 @@ std::vector<token> lex_source(const std::string &source) {
         token current;
         current.kind = kind;
         if (kind == SKEIN_TOK_NAME || kind == SKEIN_TOK_LABEL ||
-            kind == SKEIN_TOK_XSTRING || kind == SKEIN_TOK_PLACEHOLDER) {
+            kind == SKEIN_TOK_XSTRING || kind == SKEIN_TOK_PLACEHOLDER ||
+            kind == SKEIN_TOK_MACRO_ARG_EXPAND) {
             if (yylval.str)
                 current.text = yylval.str;
             std::free(yylval.str);
@@ -220,6 +222,22 @@ void check_contextual_task_keywords() {
             "wait member name must stay an identifier");
 }
 
+void check_user_macro_tokens() {
+    std::vector<token> tokens = lex_source(
+        "macro twice(x: expr) { return #x * 2; }\n"
+        "call!(#args...);\n");
+    require(count_kind(tokens, SKEIN_TOK_MACRO) == 1,
+            "macro keyword was not tokenized");
+    require(has_text(tokens, SKEIN_TOK_NAME,
+                     USER_MACRO_PARAM_PREFIX "x"),
+            "expr placeholder was not encoded as a parameter name");
+    require(count_kind(tokens, SKEIN_TOK_MACRO_ARG_EXPAND) == 1,
+            "expr... placeholder was not tokenized");
+    require(has_text(tokens, SKEIN_TOK_MACRO_ARG_EXPAND,
+                     USER_MACRO_EXPAND_PREFIX "args"),
+            "expr... placeholder name mismatch");
+}
+
 } // namespace
 
 int main() {
@@ -239,6 +257,7 @@ int main() {
     check_label_body_block();
     check_switch_arm_label();
     check_contextual_task_keywords();
+    check_user_macro_tokens();
 
     std::printf("lexer_test: ok\n");
     return 0;

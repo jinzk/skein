@@ -1180,6 +1180,31 @@ static bool is_known_generic_name(struct ast *expr) {
     const struct symref *ref = (const struct symref *)expr;
     return ref->name && g_generic_decl_names.count(ref->name) != 0;
 }
+
+/*
+ * `Option[int].None` is parsed as member access, but when the receiver is a
+ * generic type application it is really an enum variant with no fields.
+ * The decision is made here so ordinary `xs[0].field` stays member access.
+ */
+static struct ast *new_member_or_enum_literal(struct ast *base, char *field) {
+    if (base && base->nodetype == 'G') {
+        struct index_node *index = (struct index_node *)base;
+        if (index->generic_candidate && index->l &&
+            index->l->nodetype == 'N') {
+            const char *name = ((struct symref *)index->l)->name;
+            struct ast *lit = newenumlit(
+                copy_text(name ? name : ""),
+                copy_text(diag_current_source_name().c_str()), field, NULL,
+                NULL);
+            ((struct enum_lit_node *)lit)->has_type_args = true;
+            ((struct enum_lit_node *)lit)->type_args_span = index->span;
+            return lit;
+        }
+    }
+    struct ast *member = newast('j', base, newstr(field));
+    free(field);
+    return member;
+}
 %}
 
 %locations
@@ -1893,6 +1918,7 @@ decorator_expr: NAME                     { $$ = newref($1); }
     | decorator_expr '(' explist ')'     { $$ = newcall($1, $3); }
     | decorator_expr '[' exp ']'         { $$ = newast('G', $1, $3); }
     | decorator_expr '.' fieldname       { $$ = newast('j', $1, newstr($3)); free($3); }
+    | decorator_expr '.' NAME            { $$ = newast('j', $1, newstr($3)); free($3); }
     | '(' exp ')'                        { $$ = $2; }
     ;
 
@@ -2005,8 +2031,7 @@ importpath: NAME                          { $$ = $1; }
       }
     ;
 
-fieldname: NAME                           { $$ = $1; }
-    | YIELD                                { $$ = copy_text("yield"); }
+fieldname: YIELD                              { $$ = copy_text("yield"); }
     | MATCH                                { $$ = copy_text("match"); }
     | ENUM                                 { $$ = copy_text("enum"); }
     | STRUCT                               { $$ = copy_text("struct"); }
@@ -2302,8 +2327,10 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
         $$ = newslice($1, NULL, NULL, $4);
       }
     | exp '.' fieldname                   { $$ = newast('j', $1, newstr($3)); free($3); }
+    | exp '.' NAME                        { $$ = new_member_or_enum_literal($1, $3); }
     | exp '.' '*'                         { $$ = newast(NODE_REF_TARGET, $1, NULL); }
     | exp QUESTION_DOT fieldname          { $$ = newoptionalchain($1, $3); free($3); }
+    | exp QUESTION_DOT NAME               { $$ = newoptionalchain($1, $3); free($3); }
     | '[' valuelist ']'                   { $$ = $2; }
     | '{' EMPTY_DICT_CLOSE                { $$ = newdict(NULL, NULL, NULL); }
     | '{' pairlist '}'                    { $$ = $2; }
@@ -2375,8 +2402,8 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
         $$ = newast('j', newref($1), newstr($3));
         free($3);
       }
-    | NAME '.' '*' {
-        $$ = newast(NODE_REF_TARGET, newref($1), NULL);
+    | NAME '.' NAME {
+        $$ = new_member_or_enum_literal(newref($1), $3);
       }
     | NAME '.' NAME '{' struct_fields '}' {
         $$ = newenumlit($1,
@@ -2387,6 +2414,53 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
         $$ = newenumlit($1,
                         copy_text(diag_current_source_name().c_str()),
                         $3, NULL, NULL);
+      }
+    | NAME '.' '*' {
+        $$ = newast(NODE_REF_TARGET, newref($1), NULL);
+      }
+    | exp '.' NAME '{' struct_fields '}' {
+        const char *type_name = "";
+        struct source_span type_span = {};
+        bool has_type_args = false;
+        if ($1 && $1->nodetype == 'G') {
+            struct index_node *index = (struct index_node *)$1;
+            if (index->l && index->l->nodetype == 'N' &&
+                ((struct symref *)index->l)->name) {
+                type_name = ((struct symref *)index->l)->name;
+                type_span = index->span;
+            }
+            has_type_args = true;
+        } else if ($1 && $1->nodetype == 'N' &&
+                   ((struct symref *)$1)->name) {
+            type_name = ((struct symref *)$1)->name;
+        }
+        $$ = newenumlit(copy_text(type_name),
+                        copy_text(diag_current_source_name().c_str()),
+                        $3, NULL, (struct struct_init *)$5);
+        ((struct enum_lit_node *)$$)->has_type_args = has_type_args;
+        ((struct enum_lit_node *)$$)->type_args_span = type_span;
+      }
+    | exp '.' NAME '{' EMPTY_DICT_CLOSE {
+        const char *type_name = "";
+        struct source_span type_span = {};
+        bool has_type_args = false;
+        if ($1 && $1->nodetype == 'G') {
+            struct index_node *index = (struct index_node *)$1;
+            if (index->l && index->l->nodetype == 'N' &&
+                ((struct symref *)index->l)->name) {
+                type_name = ((struct symref *)index->l)->name;
+                type_span = index->span;
+            }
+            has_type_args = true;
+        } else if ($1 && $1->nodetype == 'N' &&
+                   ((struct symref *)$1)->name) {
+            type_name = ((struct symref *)$1)->name;
+        }
+        $$ = newenumlit(copy_text(type_name),
+                        copy_text(diag_current_source_name().c_str()),
+                        $3, NULL, NULL);
+        ((struct enum_lit_node *)$$)->has_type_args = has_type_args;
+        ((struct enum_lit_node *)$$)->type_args_span = type_span;
       }
     | funcstart '(' symlist ')' func_ret_opt '{' EMPTY_BLOCK_CLOSE
                                            { $$ = newfunc(NULL, $3, NULL, false, finish_function(), $5); }

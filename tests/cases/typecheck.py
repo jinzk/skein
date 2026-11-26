@@ -225,6 +225,11 @@ def run_cases():
           "let b = pick(true);\n",
           stderr="type error: type argument bool does not satisfy generic constraint for pick")
 
+    check("generic enum explicit literal field type",
+          "enum Option[T any] { None; Some { value: T; } }\n"
+          "let a = Option[string].Some { value: 1 };\n",
+          stderr="type error: expected string, got int")
+
     check("dict builtin key contract",
           "import std;\n"
           "struct Bad { xs: list[int]; }\n"

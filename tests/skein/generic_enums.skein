@@ -45,4 +45,17 @@ ts_test("generic enum pattern", func() {
   ts_eq(out, "z");
 });
 
+ts_test("generic enum explicit literal", func() {
+  let a = Option[int].Some { value: 4 };
+  ts_eq(a.value, 4);
+  let b = Option[string].Some { value: "w" };
+  ts_eq(b.value, "w");
+  let n = Option[int].None;
+  let out = match (n) {
+    case Option.Some { value } => value;
+    case Option.None => 0;
+  };
+  ts_eq(out, 0);
+});
+
 ts_finish();

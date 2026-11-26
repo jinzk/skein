@@ -1225,6 +1225,7 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
            (yytext[name_len - 1] == ' ' || yytext[name_len - 1] == '\t'))
         --name_len;
     if (!label_allowed(yytext, name_len)) {
+        diag_scan_rewind(yytext, yyleng);
         yyless(0);
         BEGIN(LABEL_RESCAN);
         int tok = yylex();
@@ -1245,6 +1246,7 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
            (yytext[name_len - 1] == ' ' || yytext[name_len - 1] == '\t'))
         --name_len;
     if (!label_allowed(yytext, name_len)) {
+        diag_scan_rewind(yytext, yyleng);
         yyless(0);
         BEGIN(LABEL_RESCAN);
         int tok = yylex();

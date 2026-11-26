@@ -337,6 +337,13 @@ const TypeNode *type_named(const char *source, const char *name,
                        std::vector<const TypeNode *>());
 }
 
+const TypeNode *type_named_generic(
+    const char *source, const char *name,
+    const std::vector<const TypeNode *> &args, bool nullable) {
+    return intern_type(TYPE_NAMED, name ? name : "",
+                       source ? source : "", nullable, args);
+}
+
 const TypeNode *type_variable(const char *name) {
     return intern_type(TYPE_VAR, name ? name : "", std::string(), false,
                        std::vector<const TypeNode *>());

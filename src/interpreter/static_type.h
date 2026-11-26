@@ -37,6 +37,9 @@ const TypeNode *type_builtin(enum type_constraint_kind kind,
                              bool nullable = false);
 const TypeNode *type_named(const char *source, const char *name,
                            bool nullable = false);
+const TypeNode *type_named_generic(
+    const char *source, const char *name,
+    const std::vector<const TypeNode *> &args, bool nullable = false);
 const TypeNode *type_variable(const char *name);
 const TypeNode *type_container(enum type_constraint_kind kind,
                                const std::vector<const TypeNode *> &args,

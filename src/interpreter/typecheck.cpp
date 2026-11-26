@@ -33,6 +33,14 @@ Mode g_mode = Mode::Warn;
 thread_local std::unordered_map<std::string, std::vector<std::string>>
     g_generic_function_params;
 
+struct GenericTypeMeta {
+    std::vector<std::string> params;
+    ConstTypeMap fields;
+};
+
+thread_local std::unordered_map<std::string, GenericTypeMeta>
+    g_generic_type_meta;
+
 std::string generator_identity(const struct funcdef *def) {
     std::string key = diag_current_package_name();
     key += '|';
@@ -84,6 +92,8 @@ struct Checker : public BuiltinContext {
     std::unordered_map<std::string, std::vector<std::string>>
         generic_functions;
     std::unordered_map<std::string, StaticTypeInfo> static_types;
+    std::unordered_map<const struct ast *, std::vector<const TypeNode *>>
+        generic_literal_args;
     std::vector<const TypeNode *> return_types;
     std::vector<std::vector<const TypeNode *>> yield_types;
     std::vector<const TypeNode *> generator_send_types;
@@ -1001,10 +1011,31 @@ struct Checker : public BuiltinContext {
     const TypeNode *static_field_type(const TypeNode *type,
                                       const char *field) {
         StaticTypeInfo *info = find_static_info(type);
-        if (!info)
+        const ConstTypeMap *fields = NULL;
+        const std::vector<std::string> *params = NULL;
+        if (info) {
+            fields = &info->fields;
+            params = &info->generic_params;
+        } else if (type && type->kind == TYPE_NAMED) {
+            auto meta = g_generic_type_meta.find(
+                static_type_key(type->source.c_str(), type->name.c_str()));
+            if (meta != g_generic_type_meta.end()) {
+                fields = &meta->second.fields;
+                params = &meta->second.params;
+            }
+        }
+        if (!fields)
             return type_any();
-        auto it = info->fields.find(field ? field : "");
-        return it == info->fields.end() ? type_any() : it->second;
+        auto it = fields->find(field ? field : "");
+        if (it == fields->end())
+            return type_any();
+        if (!params || params->empty() || !type ||
+            type->args.size() != params->size())
+            return it->second;
+        TypeBindings bindings;
+        for (std::size_t i = 0; i < params->size(); ++i)
+            bindings[(*params)[i]] = type->args[i];
+        return instantiate_type(it->second, bindings);
     }
 
     struct funcdef *static_method(const TypeNode *type, const char *name) {
@@ -2595,6 +2626,7 @@ struct Checker : public BuiltinContext {
         const TypeNode *literal_type = type_named(source, name);
         StaticTypeInfo *info = find_static_info(literal_type);
         ConstTypeMap *static_fields = NULL;
+        const std::vector<std::string> *generic_params = NULL;
         if (info) {
             if (info->is_enum && variant_name) {
                 auto it = info->variants.find(variant_name);
@@ -2603,7 +2635,47 @@ struct Checker : public BuiltinContext {
             } else if (!info->is_enum) {
                 static_fields = &info->fields;
             }
+            if (!info->generic_params.empty())
+                generic_params = &info->generic_params;
         }
+        if (!static_fields || !generic_params) {
+            auto meta = g_generic_type_meta.find(
+                static_type_key(source, name));
+            if (meta != g_generic_type_meta.end()) {
+                if (!static_fields && !meta->second.fields.empty())
+                    static_fields = &meta->second.fields;
+                if (!meta->second.params.empty())
+                    generic_params = &meta->second.params;
+            }
+        }
+
+        const bool generic_literal =
+            generic_params && !generic_params->empty();
+        TypeBindings bindings;
+        auto check_initializer = [&](struct ast *value,
+                                     const TypeNode *expected) -> bool {
+            if (!value)
+                return true;
+            if (!expected) {
+                infer(value, env);
+                return true;
+            }
+            const TypeNode *actual = infer(value, env);
+            if (generic_literal && type_contains_vars(expected)) {
+                if (!bind_type(actual, expected, bindings)) {
+                    char message[512];
+                    std::snprintf(
+                        message, sizeof(message), "expected %s, got %s",
+                        type_display(instantiate_type(expected, bindings)),
+                        type_display(actual));
+                    report_error(value->line, value->column, message);
+                    return false;
+                }
+                expected = instantiate_type(expected, bindings);
+            }
+            return check_expr(value, expected, env, false,
+                              needs_static_check(expected));
+        };
 
         for (struct struct_init *init = fields; init; init = init->next) {
             if (!init->name) {
@@ -2624,24 +2696,31 @@ struct Checker : public BuiltinContext {
                         &variant->fields[(size_t)it->second].type;
             }
             if (field_type) {
-                const TypeNode *expected =
-                    type_from_constraint(field_type);
-                if (!check_expr(init->value, expected, env, false,
-                                needs_static_check(expected)))
+                if (!check_initializer(
+                        init->value, type_from_constraint(field_type)))
                     return false;
                 continue;
             }
             if (static_fields) {
                 auto it = static_fields->find(init->name);
                 if (it != static_fields->end()) {
-                    if (!check_expr(init->value, it->second, env, false,
-                                    needs_static_check(it->second)))
+                    if (!check_initializer(init->value, it->second))
                         return false;
                     continue;
                 }
             }
             if (init->value)
                 infer(init->value, env);
+        }
+
+        if (generic_literal) {
+            std::vector<const TypeNode *> args;
+            for (const std::string &name : *generic_params) {
+                auto it = bindings.find(name);
+                args.push_back(it == bindings.end() ? type_any()
+                                                    : it->second);
+            }
+            generic_literal_args[expr] = args;
         }
         return true;
     }
@@ -2651,6 +2730,36 @@ struct Checker : public BuiltinContext {
             return true;
 
         bool ok = true;
+        if (type->kind == TYPE_NAMED && !type->args.empty()) {
+            std::string key =
+                static_type_key(type->source.c_str(), type->name.c_str());
+            const std::vector<std::string> *params = NULL;
+            auto it = static_types.find(key);
+            if (it != static_types.end())
+                params = &it->second.generic_params;
+            else {
+                auto meta = g_generic_type_meta.find(key);
+                if (meta != g_generic_type_meta.end())
+                    params = &meta->second.params;
+            }
+            if (params) {
+                if (params->empty()) {
+                    std::string message =
+                        std::string("type ") + type->name +
+                        " does not accept type arguments";
+                    report_error(line, column, message.c_str());
+                    ok = false;
+                } else if (type->args.size() != params->size()) {
+                    std::string message =
+                        std::string("type ") + type->name + " expects " +
+                        std::to_string(params->size()) +
+                        " type argument(s), got " +
+                        std::to_string(type->args.size());
+                    report_error(line, column, message.c_str());
+                    ok = false;
+                }
+            }
+        }
         if (type->kind == TYPE_DICT && !type->args.empty()) {
             const TypeNode *key = type->args[0];
             if (key_contract(key) == KeyContract::No) {
@@ -2854,14 +2963,17 @@ struct Checker : public BuiltinContext {
     }
 
     bool check_struct_decl(struct struct_node *decl, Env &env) {
-        if (!reject_generic_params(decl->generic_params, decl->line,
-                                   decl->column))
-            return false;
         const TypeNode *self_type =
             type_named(decl->source, decl->name);
         StaticTypeInfo &info = static_types[
             static_type_key(decl->source, decl->name)];
         info.is_enum = false;
+        info.generic_params.clear();
+        for (struct generic_param *param = decl->generic_params;
+             param; param = param->next) {
+            if (param->name)
+                info.generic_params.push_back(param->name);
+        }
         for (struct struct_member *member = decl->members; member;
              member = member->next) {
             if (member->name && member->type && !member->func) {
@@ -2877,6 +2989,10 @@ struct Checker : public BuiltinContext {
                 info.methods[member->name] =
                     (struct funcdef *)member->func;
         }
+        GenericTypeMeta &meta =
+            g_generic_type_meta[static_type_key(decl->source, decl->name)];
+        meta.params = info.generic_params;
+        meta.fields = info.fields;
         for (struct struct_member *member = decl->members; member;
              member = member->next) {
             if (member->func && member->func->nodetype == 'Z') {
@@ -3547,6 +3663,10 @@ struct Checker : public BuiltinContext {
                     (struct struct_lit_node *)expr;
                 check_struct_literal(expr, env);
                 const TypeNode *named = type_named(lit->source, lit->name);
+                auto inferred = generic_literal_args.find(expr);
+                if (inferred != generic_literal_args.end())
+                    named = type_named_generic(lit->source, lit->name,
+                                               inferred->second);
                 if (lit->is_ref)
                     return type_container(TYPE_REF, {named});
                 return named;

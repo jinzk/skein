@@ -1,0 +1,35 @@
+import std;
+include "_support.skein";
+
+struct Box[T any] {
+  value: T;
+}
+
+struct Pair[A any, B any] {
+  first: A;
+  second: B;
+}
+
+func unwrap_int(x: Box[int]): int {
+  return x.value;
+}
+
+ts_test("generic struct inference", func() {
+  let a = Box { value: 1 };
+  ts_eq(a.value, 1);
+  let b = Box { value: "x" };
+  ts_eq(b.value, "x");
+});
+
+ts_test("generic struct annotation", func() {
+  let a: Box[int] = Box { value: 2 };
+  ts_eq(unwrap_int(a), 2);
+});
+
+ts_test("generic struct multiple parameters", func() {
+  let p: Pair[int, string] = Pair { first: 1, second: "a" };
+  ts_eq(p.first, 1);
+  ts_eq(p.second, "a");
+});
+
+ts_finish();

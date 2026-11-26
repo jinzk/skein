@@ -216,6 +216,8 @@ bool needs_static_check(const TypeNode *type) {
     if (type->kind == TYPE_SOCKET || type->kind == TYPE_LISTENER ||
         type->kind == TYPE_WEBSOCKET || type->kind == TYPE_STREAM)
         return true;
+    if (type->kind == TYPE_NAMED && !type->args.empty())
+        return true;
     if (has_concrete_container_arg(type))
         return true;
     if (type_is_function_signature(type)) {
@@ -835,8 +837,15 @@ MatchResult match_type(const TypeNode *actual, const TypeNode *expected) {
         if (structtype_named_types_equal(actual->source.c_str(),
                                          actual->name.c_str(),
                                          expected->source.c_str(),
-                                         expected->name.c_str()))
+                                         expected->name.c_str())) {
+            if (actual->args.size() != expected->args.size())
+                return MatchResult::Mismatch;
+            for (std::size_t i = 0; i < actual->args.size(); ++i) {
+                if (!type_equal(actual->args[i], expected->args[i]))
+                    return MatchResult::Mismatch;
+            }
             return MatchResult::Ok;
+        }
         structtype_lookup_result expected_lookup;
         if (lookup_named_type(expected, expected_lookup) &&
             expected_lookup.protocol) {

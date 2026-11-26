@@ -933,6 +933,14 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
 static struct type_constraint *make_generic_type(struct type_constraint *base,
                                                  struct type_constraint *arg1,
                                                  struct type_constraint *arg2) {
+    if (base && base->kind == TYPE_NAMED) {
+        std::vector<struct type_constraint *> args;
+        if (arg1)
+            args.push_back(arg1);
+        if (arg2)
+            args.push_back(arg2);
+        return skein::typecheck::type_apply_named_generic(base, args);
+    }
     return skein::typecheck::type_apply_generic(base, arg1, arg2);
 }
 
@@ -984,7 +992,9 @@ static struct type_constraint *make_generic_type_list(
     for (struct parsed_type_list *item = list; item; item = item->next)
         args.push_back(item->type);
     struct type_constraint *type =
-        skein::typecheck::type_apply_generic_list(base, args);
+        base && base->kind == TYPE_NAMED
+            ? skein::typecheck::type_apply_named_generic(base, args)
+            : skein::typecheck::type_apply_generic_list(base, args);
     /* type_apply_generic_list takes ownership of the constraint nodes. */
     while (list) {
         struct parsed_type_list *next = list->next;

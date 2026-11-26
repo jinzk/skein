@@ -30,6 +30,7 @@ def run_cases():
     run_skein("language_core_defaults.skein")
     run_skein("language_core_functions.skein")
     run_skein("generic_functions.skein")
+    run_skein("generic_structs.skein")
     run_skein("language_core_traits.skein")
     run_skein("language_core_refs.skein")
     run_skein("language_core_headers.skein")

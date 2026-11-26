@@ -5,6 +5,7 @@
 
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 struct funcdef;
 struct function_code;
@@ -25,6 +26,7 @@ using ConstTypeMap = std::unordered_map<std::string, const TypeNode *>;
 
 struct StaticTypeInfo {
     bool is_enum = false;
+    std::vector<std::string> generic_params;
     ConstTypeMap fields;
     std::unordered_map<
         std::string,

@@ -2109,6 +2109,10 @@ struct Compiler {
                 return;
 
             case 'G': {
+                if (((struct index_node *)node)->generic_function_value) {
+                    compile(node->l);
+                    return;
+                }
                 /*
                  * `name[key]` with a compile-time key avoids reloading and
                  * duplicating both the container and the key on every

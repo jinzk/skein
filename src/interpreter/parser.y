@@ -1102,6 +1102,7 @@ static struct type_constraint *runtime_type_or_error(
 }
 
 static std::unordered_set<std::string> g_generic_decl_names;
+static std::unordered_set<std::string> g_generic_function_names;
 static std::vector<std::unordered_set<std::string>> g_generic_type_scopes;
 
 static void push_generic_scope(struct generic_param *params) {
@@ -1157,6 +1158,8 @@ static void note_generic_decl(struct ast *decl) {
             struct funcdef *node = (struct funcdef *)decl;
             name = node->name;
             generic = node->generic_params != NULL;
+            if (generic && name && *name)
+                g_generic_function_names.insert(name);
             break;
         }
         default:
@@ -1179,6 +1182,13 @@ static bool is_known_generic_name(struct ast *expr) {
         return false;
     const struct symref *ref = (const struct symref *)expr;
     return ref->name && g_generic_decl_names.count(ref->name) != 0;
+}
+
+static bool is_known_generic_function(struct ast *expr) {
+    if (!expr || expr->nodetype != 'N')
+        return false;
+    const struct symref *ref = (const struct symref *)expr;
+    return ref->name && g_generic_function_names.count(ref->name) != 0;
 }
 
 /*
@@ -2303,13 +2313,15 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
         $$ = newindex($1, bracket_args_list(newast('L', $3, $5)),
                       @2.first_line, @2.first_column,
                       @6.first_line, @6.first_column,
-                      is_known_generic_name($1));
+                      is_known_generic_name($1),
+                      is_known_generic_function($1));
       }
     | exp '[' exp ']'                     {
         $$ = newindex($1, $3,
                       @2.first_line, @2.first_column,
                       @4.first_line, @4.first_column,
-                      is_known_generic_name($1));
+                      is_known_generic_name($1),
+                      is_known_generic_function($1));
       }
     | exp '[' slice_bound ':' slice_bound ']' {
         $$ = newslice($1, $3, $5, NULL);
@@ -2347,8 +2359,8 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
                           NULL, NULL);
         ((struct struct_lit_node *)$$)->has_type_args = true;
         ((struct struct_lit_node *)$$)->type_args_span =
-            { @1.first_line, @1.first_column, @1.first_line,
-              @1.first_column };
+            { @2.first_line, @2.first_column, @4.first_line,
+              @4.first_column };
       }
     | exp '[' exp ']' '{' struct_fields '}' {
         $$ = newstructlit($1->nodetype == 'N'
@@ -2358,8 +2370,8 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
                           NULL, (struct struct_init *)$6);
         ((struct struct_lit_node *)$$)->has_type_args = true;
         ((struct struct_lit_node *)$$)->type_args_span =
-            { @1.first_line, @1.first_column, @1.first_line,
-              @1.first_column };
+            { @2.first_line, @2.first_column, @4.first_line,
+              @4.first_column };
       }
     | exp '[' exp ',' explist ']' '{' empty_body {
         $$ = newstructlit($1->nodetype == 'N'
@@ -2369,8 +2381,8 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
                           NULL, NULL);
         ((struct struct_lit_node *)$$)->has_type_args = true;
         ((struct struct_lit_node *)$$)->type_args_span =
-            { @1.first_line, @1.first_column, @1.first_line,
-              @1.first_column };
+            { @2.first_line, @2.first_column, @6.first_line,
+              @6.first_column };
       }
     | exp '[' exp ',' explist ']' '{' struct_fields '}' {
         $$ = newstructlit($1->nodetype == 'N'
@@ -2380,8 +2392,8 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
                           NULL, (struct struct_init *)$8);
         ((struct struct_lit_node *)$$)->has_type_args = true;
         ((struct struct_lit_node *)$$)->type_args_span =
-            { @1.first_line, @1.first_column, @1.first_line,
-              @1.first_column };
+            { @2.first_line, @2.first_column, @6.first_line,
+              @6.first_column };
       }
     | NAME '{' struct_fields '}'          {
         $$ = newstructlit($1,

@@ -2891,26 +2891,11 @@ struct Checker : public BuiltinContext {
                 report_error(expr->line, expr->column, message.c_str());
                 return false;
             }
-            std::string remainder = diag_source_text(
-                type_args_span.start_line, type_args_span.start_column,
+            std::string text = diag_source_text(
                 type_args_span.start_line,
-                type_args_span.start_column + 512);
-            std::size_t open = remainder.find('[');
-            std::string text;
-            if (open != std::string::npos) {
-                int depth = 0;
-                for (std::size_t i = open; i < remainder.size(); ++i) {
-                    if (remainder[i] == '[')
-                        ++depth;
-                    else if (remainder[i] == ']') {
-                        --depth;
-                        if (depth == 0) {
-                            text = remainder.substr(open + 1, i - open - 1);
-                            break;
-                        }
-                    }
-                }
-            }
+                type_args_span.start_column + 1,
+                type_args_span.end_line,
+                type_args_span.end_column);
             std::vector<struct type_constraint *> constraints;
             std::string parse_error;
             if (!parse_type_list_text(text, source, constraints,
@@ -3803,6 +3788,86 @@ struct Checker : public BuiltinContext {
                     {key ? key : type_any(), value ? value : type_any()});
             }
             case 'G': {
+                struct index_node *index = (struct index_node *)expr;
+                if (index->generic_function_value) {
+                    std::string name;
+                    if (!flatten_path(index->l, name) ||
+                        name.find('.') != std::string::npos) {
+                        report_error(expr->line, expr->column,
+                                     "explicit generic instantiation "
+                                     "requires a function name");
+                        return type_any();
+                    }
+                    auto generic = g_generic_function_params.find(name);
+                    if (generic == g_generic_function_params.end()) {
+                        auto local = generic_functions.find(name);
+                        if (local != generic_functions.end())
+                            generic = g_generic_function_params
+                                          .emplace(name, local->second)
+                                          .first;
+                    }
+                    const TypeNode *callee = infer(index->l, env);
+                    if (generic == g_generic_function_params.end() ||
+                        !type_is_function_signature(callee)) {
+                        report_error(expr->line, expr->column,
+                                     "explicit type arguments require a "
+                                     "generic function");
+                        return type_any();
+                    }
+                    std::string text = diag_source_text(
+                        index->span.start_line,
+                        index->span.start_column + 1,
+                        index->span.end_line, index->span.end_column);
+                    std::vector<struct type_constraint *> constraints;
+                    std::string parse_error;
+                    if (!parse_type_list_text(text, source.c_str(),
+                                              constraints, parse_error,
+                                              true)) {
+                        report_error(
+                            expr->line, expr->column,
+                            parse_error.empty()
+                                ? "invalid explicit type arguments"
+                                : parse_error.c_str());
+                        for (struct type_constraint *constraint :
+                             constraints)
+                            free_type_constraint(constraint);
+                        return type_any();
+                    }
+                    if (constraints.size() !=
+                        generic->second.params.size()) {
+                        std::string message =
+                            "function " + name + " expects " +
+                            std::to_string(generic->second.params.size()) +
+                            " type argument(s), got " +
+                            std::to_string(constraints.size());
+                        report_error(expr->line, expr->column,
+                                     message.c_str());
+                        for (struct type_constraint *constraint :
+                             constraints)
+                            free_type_constraint(constraint);
+                        return type_any();
+                    }
+                    TypeBindings bindings;
+                    for (std::size_t i = 0; i < constraints.size(); ++i) {
+                        const TypeNode *arg =
+                            type_from_constraint(constraints[i]);
+                        bindings[generic->second.params[i]] = arg;
+                        free_type_constraint(constraints[i]);
+                        if (i < generic->second.constraints.size() &&
+                            !type_satisfies_generic_constraint(
+                                arg, generic->second.constraints[i])) {
+                            std::string message =
+                                std::string("type argument ") +
+                                type_display(arg) +
+                                " does not satisfy generic constraint "
+                                "for " + name;
+                            report_error(expr->line, expr->column,
+                                         message.c_str());
+                            return type_any();
+                        }
+                    }
+                    return instantiate_type(callee, bindings);
+                }
                 const TypeNode *base = infer(expr->l, env);
                 infer(expr->r, env);
                 if (base->kind == TYPE_PAIR ||

@@ -1635,6 +1635,10 @@ struct value_t *eval(struct ast *a) {
         }
 
         case 'G': {
+            if (((struct index_node *)a)->generic_function_value) {
+                ret = eval(a->l);
+                break;
+            }
             struct value_t *fast = NULL;
             if (read_index_chain(a, fast)) {
                 ret = fast;

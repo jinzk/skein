@@ -60,4 +60,12 @@ ts_test("generic function explicit markers", func() {
   ts_eq(marked_hash[string]("a"), "a");
 });
 
+ts_test("generic function value", func() {
+  let g = identity[string];
+  ts_eq(g("a"), "a");
+  let h = choose[int, string];
+  ts_eq(h(1, "b"), 1);
+  ts_eq(apply(2, identity[int]), 2);
+});
+
 ts_finish();

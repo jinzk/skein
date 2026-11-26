@@ -225,6 +225,11 @@ def run_cases():
           "let b = pick(true);\n",
           stderr="type error: type argument bool does not satisfy generic constraint for pick")
 
+    check("generic function value constraint",
+          "func pick[T int | string](x: T): T { return x; }\n"
+          "let g = pick[bool];\n",
+          stderr="type error: type argument bool does not satisfy generic constraint for pick")
+
     check("generic enum explicit literal field type",
           "enum Option[T any] { None; Some { value: T; } }\n"
           "let a = Option[string].Some { value: 1 };\n",

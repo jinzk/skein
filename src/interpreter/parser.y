@@ -169,6 +169,16 @@ static void finish_do_while_block() {
     forward_do_returns(returns);
 }
 
+/* Contextual keywords are ordinary NAME tokens checked by grammar position. */
+static bool name_is(const char *name, const char *word) {
+    return name && std::strcmp(name, word) == 0;
+}
+
+static void expect_contextual_keyword(const char *name, const char *word) {
+    if (!name_is(name, word))
+        yyerror("expected '%s'", word);
+}
+
 static char *join_import_path(const char *left, const char *right) {
     size_t left_len = std::strlen(left);
     size_t right_len = std::strlen(right);
@@ -1263,7 +1273,7 @@ static struct ast *new_member_or_enum_literal(struct ast *base, char *field) {
 %token MOD_ASSIGN "%=" AND_ASSIGN "&=" OR_ASSIGN "|=" XOR_ASSIGN "^="
 %token SHL_ASSIGN "<<=" SHR_ASSIGN ">>="
 %token NULLVAL "null" TRUE "true" FALSE "false"
-%token IMPORT "import" PACKAGE "package" EXPORT "export" IN "in" AS "as"
+%token IMPORT "import" PACKAGE "package" AS "as"
 %token INCLUDE "include"%token LOGAND "&&" LOGOR "||" SHL "<<" SHR ">>"
 %token INC "++" DEC "--"
 %token ELLIPSIS "..."
@@ -1365,21 +1375,21 @@ func_decl: funcstart NAME generic_params '(' symlist ')' func_ret_opt '{' EMPTY_
             (struct generic_param *)$3;
         pop_generic_scope();
       }
-    | EXPORT funcstart NAME generic_params '(' symlist ')' func_ret_opt '{' EMPTY_BLOCK_CLOSE
+    | export_kw funcstart NAME generic_params '(' symlist ')' func_ret_opt '{' EMPTY_BLOCK_CLOSE
                                            {
         $$ = newfunc($3, $6, NULL, true, finish_function(), $8);
         ((struct funcdef *)$$)->generic_params =
             (struct generic_param *)$4;
         pop_generic_scope();
       }
-    | EXPORT funcstart NAME generic_params '(' symlist ')' func_ret_opt '{' list '}'
+    | export_kw funcstart NAME generic_params '(' symlist ')' func_ret_opt '{' list '}'
                                            {
         $$ = newfunc($3, $6, $10, true, finish_function(), $8);
         ((struct funcdef *)$$)->generic_params =
             (struct generic_param *)$4;
         pop_generic_scope();
       }
-    | EXPORT funcstart NAME generic_params '(' symlist ')' func_ret_opt RARROW exp ';'
+    | export_kw funcstart NAME generic_params '(' symlist ')' func_ret_opt RARROW exp ';'
                                            {
         $$ = newfunc($3, $6, newret($10), true, finish_function(), $8);
         ((struct funcdef *)$$)->generic_params =
@@ -1425,50 +1435,51 @@ stmt: IF HEADER_LPAREN exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, 
                                            { $$ = newfor($2, $4, $6, newscope(NULL)); }
     | FOR forinit ';' forcond ';' forend BODY_LBRACE list '}'
                                            { $$ = newfor($2, $4, $6, newscope($8)); }
-    | FOR HEADER_LPAREN LET NAME IN exp ')' scope   { $$ = newforin($4, NULL, $6, $8); }
-    | FOR HEADER_LPAREN LET NAME ',' NAME IN exp ')' scope
+    | FOR HEADER_LPAREN LET NAME for_in exp ')' scope
+                                           { $$ = newforin($4, NULL, $6, $8); }
+    | FOR HEADER_LPAREN LET NAME ',' NAME for_in exp ')' scope
                                            { $$ = newforin($4, $6, $8, $10); }
-    | FOR NAME IN exp BODY_LBRACE EMPTY_BLOCK_CLOSE
+    | FOR NAME for_in exp BODY_LBRACE EMPTY_BLOCK_CLOSE
                                            { $$ = newforin($2, NULL, $4, newscope(NULL)); }
-    | FOR NAME IN exp BODY_LBRACE list '}'
+    | FOR NAME for_in exp BODY_LBRACE list '}'
                                            { $$ = newforin($2, NULL, $4, newscope($6)); }
-    | FOR NAME ',' NAME IN exp BODY_LBRACE EMPTY_BLOCK_CLOSE
+    | FOR NAME ',' NAME for_in exp BODY_LBRACE EMPTY_BLOCK_CLOSE
                                            { $$ = newforin($2, $4, $6, newscope(NULL)); }
-    | FOR NAME ',' NAME IN exp BODY_LBRACE list '}'
+    | FOR NAME ',' NAME for_in exp BODY_LBRACE list '}'
                                            { $$ = newforin($2, $4, $6, newscope($8)); }
     | DEFER exp ';'                       { $$ = newdefer($2); }
     | func_decl
     | decorators func_decl                { $$ = lower_function_decorators($1, (struct funcdef *)$2); }
-    | EXPORT LET NAME '=' exp ';'         { $$ = newvar($3, $5, true); }
-    | EXPORT LET NAME ':' type '=' exp ';' {
+    | export_kw LET NAME '=' exp ';'         { $$ = newvar($3, $5, true); }
+    | export_kw LET NAME ':' type '=' exp ';' {
         $$ = newvar($3, $7, true, false, $5);
       }
-    | EXPORT LET NAME ':' type ';'        { $$ = newvar($3, NULL, true, false, $5); }
-    | EXPORT CONST NAME '=' exp ';'       { $$ = newvar($3, $5, true, true); }
-    | EXPORT CONST NAME ':' type '=' exp ';' {
+    | export_kw LET NAME ':' type ';'        { $$ = newvar($3, NULL, true, false, $5); }
+    | export_kw CONST NAME '=' exp ';'       { $$ = newvar($3, $5, true, true); }
+    | export_kw CONST NAME ':' type '=' exp ';' {
         $$ = newvar($3, $7, true, true, $5);
       }
-    | EXPORT NAME '=' exp ';'             { $$ = newvar($2, $4, true); }
-    | EXPORT STRUCT NAME generic_params '{' empty_body  {
+    | export_kw NAME '=' exp ';'             { $$ = newvar($2, $4, true); }
+    | export_kw STRUCT NAME generic_params '{' empty_body  {
         $$ = lower_struct_inline_methods(newstructdecl(
             $3, copy_text(diag_current_source_name().c_str()),
             (struct generic_param *)$4, NULL, true));
         pop_generic_scope();
       }
-    | EXPORT STRUCT NAME generic_params '{' struct_members '}' {
+    | export_kw STRUCT NAME generic_params '{' struct_members '}' {
         $$ = lower_struct_inline_methods(newstructdecl(
             $3, copy_text(diag_current_source_name().c_str()),
             (struct generic_param *)$4,
             (struct struct_member *)$6, true));
         pop_generic_scope();
       }
-    | EXPORT ENUM NAME generic_params '{' empty_body    {
+    | export_kw ENUM NAME generic_params '{' empty_body    {
         $$ = newenumdecl($3,
                          copy_text(diag_current_source_name().c_str()),
                          (struct generic_param *)$4, NULL, true);
         pop_generic_scope();
       }
-    | EXPORT ENUM NAME generic_params '{' enum_variants '}' {
+    | export_kw ENUM NAME generic_params '{' enum_variants '}' {
         $$ = newenumdecl($3,
                          copy_text(diag_current_source_name().c_str()),
                          (struct generic_param *)$4,
@@ -2016,6 +2027,20 @@ struct_fields: struct_field              { $$ = $1; }
 
 struct_field: NAME ':' exp               { $$ = newstructinit($1, $3); }
     | ELLIPSIS exp                       { $$ = newstructinit(NULL, $2); }
+    ;
+
+/* `in` is contextual: it is only a separator in a for-loop variable list. */
+for_in: NAME {
+        expect_contextual_keyword($1, "in");
+        free($1);
+      }
+    ;
+
+/* `export` is contextual: only a declaration-leading NAME is the modifier. */
+export_kw: NAME {
+        expect_contextual_keyword($1, "export");
+        free($1);
+      }
     ;
 
 importref: importpath                     { $$ = $1; }

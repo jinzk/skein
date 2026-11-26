@@ -5,6 +5,8 @@
 - 建议里程碑：M11，不回写已完成的 M10
 - 拟改动：`src/interpreter/tokens.l`、`src/interpreter/parser.y`、新增
   `src/interpreter/user_macros.{h,cpp}`，以及 formatter / lint / LSP 配套
+- 跨包前提：先为值/类型增加 selective import
+  `import {name} from pkg;`，宏复用同一形式并加 `!`
 
 ## 1. 结论摘要
 
@@ -17,6 +19,8 @@ typecheck 前展开**。它不应变成编译期任意执行，也不应触碰�
 - 只支持 `expr`、`ident`、一个尾部 `expr...`、一个尾部 `block`；
 - 宏调用保持现有 `name!(...)` / `name! { ... }` / `name!(...) { ... }` 形式；
 - 只在**同一文件、声明先于使用**的范围内可见；
+- 跨包阶段先用 `import {retry, Point} from util;` 给值/类型增加 selective
+  import，宏写作 `import {retry!} from util;`；`from` 是 contextual keyword；
 - 禁止递归、跨模块宏、泛型语法生成、类型内省、一等宏值和核心控制流重写。
 
 > 泛型负责类型抽象；宏负责语法抽象。这条边界在用户自定义宏中继续成立。
@@ -89,6 +93,40 @@ call_all!(add, 1, 2, 3);
 
 `!` 仍然必须紧贴宏名；普通调用、泛型下标、一元 `!` 和 `!(expr)` 不受影响。
 
+### 3.4 跨包导入（后续阶段）
+
+v1 只做文件内可见性。跨包阶段不引入独立的 `use` 关键字，而是先给值/类型
+增加 selective import，再让宏复用同一形式：
+
+```text
+import {retry} from util;
+import {retry as r} from util;
+import {Point, parse as parse_point} from util;
+
+import {parse} from .jsonutil;
+import {parse} from ..common;
+import {parse} from @top.jsonutil;
+import {parse} from "github.com/acme/util/json";
+```
+
+宏导入把 `!` 放在被导入的宏名上；alias 继承宏属性，alias 本身仍是普通标识符：
+
+```text
+import {retry!} from util;
+import {retry! as r} from util;   // 调用时写 r!(...)
+```
+
+导出方使用 `export macro` 发布到包的宏导出表；该表与值/类型命名空间分离，
+因此 `func retry` 与 `macro retry` 可以共存。`import {retry} from util;` 只导入
+值命名空间中的 `retry`，`import {retry!} from util;` 只导入宏命名空间中的
+`retry`，互不影响。selective import 不会绑定 `util` 包本身；如需写
+`util.retry(...)`，仍要另外写 `import util;`。
+
+`from` 必须是 **contextual keyword**，不是全局保留字。当前 `from` 已被普通
+标识符大量使用，例如 `std.path.relative(from, to)` 和 `std.graph` 的 `from`
+字段。parser 只在 `import { ... }` 之后、`importref` 之前把拼写为 `from` 的
+`NAME` token 当作分隔符；其他位置保持普通标识符。
+
 ## 4. 展开模型
 
 ### 4.1 解析期宏表
@@ -115,7 +153,9 @@ v1 只支持同文件、声明先于使用：
 - import / export 宏、包级宏、跨模块宏都明确不支持；
 - 内置宏名不能被用户宏覆盖。
 
-未来若要支持跨模块，需要先定义包的宏导出、展开顺序和依赖图，不纳入本提案。
+跨包阶段按第 3.4 节推进：先实现值的 selective import，再支持
+`export macro` 与 `import {name!} from pkg;`。宏依赖图必须无环，且只读取
+导出宏的源码模板，不执行包代码；这部分不纳入 v1。
 
 ### 4.3 模板 AST
 
@@ -172,7 +212,8 @@ wrap!(2) {
 - `shape` 类型、protocol 字段或鸭子类型；
 - 运算符宏；
 - 专用宏 opcode；
-- 跨模块宏可见性；
+- v1 跨模块宏可见性；后续按第 3.4 节的 selective import 设计；
+- 把 `from` 设为全局保留字；它只作为 selective import 的 contextual keyword；
 - 改变装饰器语义：装饰器继续是 `@expr` 普通高阶函数。
 
 特别注意：typechecker 目前仍有若干站点从原始源码文本恢复泛型实参。v1 模板
@@ -193,11 +234,15 @@ wrap!(2) {
 - 自递归 / 未注册宏调用；
 - 模板中出现泛型语法；
 - 无参数宏收到表达式参数，或需要参数的宏缺少参数；
-- 块片段中的控制流位置错误。
+- 块片段中的控制流位置错误；
+- selective import 缺少 `from` 或路径非法；
+- selective import 的名字未导出、重复或 alias 冲突；
+- `import {name!} from pkg;` 找不到对应宏导出。
 
 ## 8. 工具链
 
-- **formatter**：无损往返 `macro` 声明、`#param` 占位符、`expr...` 和宏调用；
+- **formatter**：无损往返 `macro` 声明、`#param` 占位符、`expr...`、宏调用和
+  selective import；
 - **lint**：报告未使用参数、未知宏、模板中的非法占位符；
 - **LSP**：宏名补全、签名 hover、调用点/定义点跳转；v1 不做跨文件 rename；
 - **snippets**：可选添加 `macro` 声明模板；
@@ -213,7 +258,9 @@ wrap!(2) {
 - 声明前调用、未知宏、递归宏；
 - 模板中的非法占位符和非法片段位置；
 - 表达式上下文中的展开结果；
-- 块片段中的 `return` / `yield` / `do` 语义。
+- 块片段中的 `return` / `yield` / `do` 语义；
+- selective import 的值/类型/宏形式、alias、`from` contextual keyword；
+- `import {retry} from util;` 与 `import {retry!} from util;` 命名空间隔离。
 
 ### 9.2 hygiene / 运行时
 
@@ -227,16 +274,27 @@ wrap!(2) {
 
 - `skein fmt` 幂等；
 - lint 诊断位置；
-- LSP completion / hover / definition；
+- LSP completion / hover / definition，包含 selective import；
 - 文档同步与 boundary 检查。
 
 ## 10. 分阶段落地
 
+实施顺序遵循“先低风险、后中风险”：低风险 contextual keyword 和 selective
+import 先做；中风险关键字在宏实现完成后再分独立步骤处理。
+
 1. **Phase 0**：本 ADR 评审并确认第 11 节的待定项。
-2. **Phase 1**：`macro` 声明语法、签名校验、宏表、未知宏诊断；不生成运行时代码。
-3. **Phase 2**：只支持一个 `expr` 片段的模板展开与 hygiene 基础设施。
-4. **Phase 3**：补齐 `ident`、`expr...`、`block` 与块函数上下文。
-5. **Phase 4**：formatter / lint / LSP、文档、完整测试矩阵。
+2. **Phase 1**：contextual keyword 基础设施；先把低风险的 `in`、`export`、
+   `package`、`import`、`include` 改为 contextual keyword；`module` 在
+   `.skein` 源码中本来就不是保留字。
+3. **Phase 2**：值的 selective import `import {name} from pkg;`，`from` 从一开
+   始就是 contextual keyword；配套 formatter / lint / LSP、文档与测试。
+4. **Phase 3**：`macro` 声明语法、签名校验、宏表、未知宏诊断；先只支持一个
+   `expr` 片段的模板展开与 hygiene 基础设施。
+5. **Phase 4**：补齐 `ident`、`expr...`、`block` 与块函数上下文；完整测试矩阵。
+6. **Phase 5**：`export macro` 与 `import {name!} from pkg;`，跨包 hygiene、
+   循环检测和完整测试矩阵。
+7. **Phase 6+**：中风险关键字（`as`、`ref` / `weak`、`launch` / `wait`、`is`）
+   按独立步骤处理，均排在宏实现完成之后。
 
 每个阶段都要保持旧的内置宏测试全绿；用户宏不得改变第一批宏的行为。
 
@@ -249,4 +307,11 @@ wrap!(2) {
 3. v1 只支持同文件、声明先于使用；
 4. 禁止递归和跨模块宏；
 5. 禁止用户宏覆盖内置宏名；
-6. 用户宏作为 M11，不回写已完成的 M10。
+6. 用户宏作为 M11，不回写已完成的 M10；
+7. 跨包 selective import 采用 `import {name} from pkg;`，宏写作
+   `import {name!} from pkg;`；
+8. `from` 只作为 selective import 的 contextual keyword，不设为全局保留字；
+9. 先做低风险 contextual keyword / selective import，再实现宏；`as`、`ref` /
+   `weak`、`launch` / `wait`、`is` 等中风险关键字在宏实现之后分独立步骤处理；
+10. `in`、`export`、`package`、`import`、`include` 同属低风险 contextual
+   keyword，在 Phase 1 处理；`module` 仅用于 manifest，不占 `.skein` 保留字。

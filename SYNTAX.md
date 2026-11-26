@@ -36,7 +36,7 @@ return break continue goto
 fail on error recover pass
 is
 null true false
-package import export as
+as
 ```
 
 `def` 已不再使用，匿名/命名函数统一使用 `func`。
@@ -1433,6 +1433,8 @@ for key, value in {"a": 1, "b": 2} {
 - 操作数以 dict 字面量开头时可以省略括号，例如 `for k in {"a": 1}`；
 - 操作数本身以 struct / 函数 / match 等复合字面量结尾时仍要加括号，例如
   `for p in (Point { x: 1 })`；
+- `in` 是 contextual keyword，只在循环变量列表后作分隔符；其他位置仍是普通
+  标识符，例如 `let in = 1;`；
 - 省略形式在顶层要求 `{` 和头部同一行，规则与 `if` / `while` 相同；
 - list 单变量遍历元素；需要下标时用 `range(len(list))` 或 C 风格 `for`；
 - deque / heap / set 单变量遍历元素（heap 按层序，set 按插入顺序）；双变量形式仍只支持 dict；
@@ -2589,6 +2591,8 @@ export NAME = expr;
 
 `export NAME = expr` 等价于导出可变的 `let` 绑定。
 导出类型后，其他包可以用 `包名.类型名` 作为类型标注或 `is` 的右操作数。
+`export` 是 contextual keyword，只在声明开头作导出修饰符；其他位置仍是普通
+标识符，例如 `let export = 1;`。
 
 ## 6. 包和导入
 
@@ -2619,6 +2623,8 @@ package cc {
 - 没有 `export` 的定义是包私有；
 - 包块是独立作用域；导出值在加载时写入命名空间，导出函数保留包闭包；
 - 包块本身不需要分号。
+- `package` 是 contextual keyword，只在语句开头作包声明；其他位置仍是普通
+  标识符，例如 `let package = 1;`。
 
 ### 6.2 import
 
@@ -2652,6 +2658,10 @@ import @top.pkg;        // 项目根目录
 - 别名必须是普通标识符；`as` 是保留字；
 - import 语句需要分号；
 - 包名绑定到当前作用域。
+- `import` 是 contextual keyword，只在语句开头作导入声明；其他位置仍是普通
+  标识符，例如 `let import = 1;`；
+- `include` 同样是 contextual keyword，只在语句开头作声明包含；其他位置仍是
+  普通标识符，例如 `let include = 1;`。
 
 ### 6.2.1 外部包（第三方 module）
 
@@ -2735,6 +2745,8 @@ module math {
 ```
 
 - `module` 名必须匹配目录名；
+- `module` 只作为 `module.skein` manifest 的结构关键字；在 `.skein` 源码中不是
+  保留字，可作为普通标识符；
 - package 名必须匹配文件名（只写叶子名）；
 - `export <path>.<symbol> [as alias]` 扁平化导出符号；
 - `export package <path> [as alias]` 导出 package namespace；

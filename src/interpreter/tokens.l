@@ -109,8 +109,23 @@ static void reset_for_header_state() {
     for_operand_started = false;
 }
 
+/*
+ * `in` is a contextual keyword: only the NAME right after a for-loop
+ * variable list is the separator.  A member name such as `obj.in` stays an
+ * ordinary identifier.
+ */
+static bool contextual_in_separator = false;
+
+/*
+ * Keep the package-declaration shape visible to brace classification after
+ * `package` becomes an ordinary NAME token.
+ */
+static bool contextual_package_name = false;
+static bool last_token_package_name = false;
+static bool prev_token_package_name = false;
+
 static void note_for_header_token(int tok) {
-    if (for_body_pending && tok != SKEIN_TOK_IN && tok != SKEIN_TOK_EOL)
+    if (for_body_pending && tok != SKEIN_TOK_EOL && !contextual_in_separator)
         for_operand_started = true;
 }
 
@@ -137,6 +152,50 @@ static bool pending_header_skip = false;
 static bool c_for_pending = false;
 static int c_for_indent = 0;
 static bool pending_for_skip = false;
+
+static bool token_is_in_name(const char *text, int len) {
+    return len == 2 && std::memcmp(text, "in", 2) == 0;
+}
+
+static bool token_is_package_name(const char *text, int len) {
+    return len == 7 && std::memcmp(text, "package", 7) == 0;
+}
+
+static void note_contextual_declaration_name(const char *text, int len) {
+    contextual_package_name =
+        last_token != '.' && token_is_package_name(text, len);
+}
+
+/* Statement-leading `import` / `package` stay keywords; elsewhere they are
+ * ordinary identifiers. */
+static bool statement_start_token(int tok) {
+    switch (tok) {
+        case 0:
+        case ';':
+        case '{':
+        case '}':
+        case SKEIN_TOK_EOL:
+        case SKEIN_TOK_BODY_LBRACE:
+        case SKEIN_TOK_EMPTY_BLOCK_CLOSE:
+        case SKEIN_TOK_EMPTY_DICT_CLOSE:
+        case SKEIN_TOK_LABEL:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static void note_contextual_in_name(const char *text, int len) {
+    contextual_in_separator =
+        token_is_in_name(text, len) &&
+        (for_header == FOR_HEADER_ONE || for_header == FOR_HEADER_TWO);
+    if (!contextual_in_separator)
+        return;
+    for_body_pending = true;
+    for_operand_started = false;
+    for_body_indent = indent_count;
+    c_for_pending = false;
+}
 static bool pending_for_paren = false;
 static bool pending_do_while_skip = false;
 static bool pending_do_while_paren = false;
@@ -270,7 +329,7 @@ static void note_function_signature_token(int tok) {
     }
 }
 
-#define YYRET(tok) do { int yyret_tok = (tok); note_for_header_token(yyret_tok); note_header_context_token(yyret_tok); note_function_signature_token(yyret_tok); note_token(yyret_tok); if (yyret_tok != SKEIN_TOK_EOL) { prev_token_line = last_token_line; last_token_line = g_token_line; last_token_end_column = yylloc.last_column; } prev_token = last_token; last_token = yyret_tok; line_has_token = (yyret_tok != SKEIN_TOK_EOL); if (yyret_tok == SKEIN_TOK_RARROW) lambda_brace_pending = true; else if (yyret_tok != SKEIN_TOK_EOL && yyret_tok != '{' && yyret_tok != SKEIN_TOK_BODY_LBRACE) lambda_brace_pending = false; return yyret_tok; } while (0)
+#define YYRET(tok) do { int yyret_tok = (tok); note_for_header_token(yyret_tok); note_header_context_token(yyret_tok); note_function_signature_token(yyret_tok); note_token(yyret_tok); if (yyret_tok != SKEIN_TOK_EOL) { prev_token_line = last_token_line; last_token_line = g_token_line; last_token_end_column = yylloc.last_column; } prev_token = last_token; last_token = yyret_tok; line_has_token = (yyret_tok != SKEIN_TOK_EOL); if (yyret_tok == SKEIN_TOK_RARROW) lambda_brace_pending = true; else if (yyret_tok != SKEIN_TOK_EOL && yyret_tok != '{' && yyret_tok != SKEIN_TOK_BODY_LBRACE) lambda_brace_pending = false; prev_token_package_name = last_token_package_name; last_token_package_name = contextual_package_name; contextual_package_name = false; contextual_in_separator = false; return yyret_tok; } while (0)
 
 
 /* After '.', keywords and builtin names are ordinary member names. */
@@ -702,7 +761,7 @@ static bool brace_starts_block() {
     if (!func_signature_indents.empty() &&
         func_signature_indents.back() == indent_count)
         return true;
-    if (last_token == SKEIN_TOK_NAME && prev_token == SKEIN_TOK_PACKAGE)
+    if (last_token == SKEIN_TOK_NAME && prev_token_package_name)
         return true;
     if (declaration_header || extern_header)
         return true;
@@ -736,10 +795,10 @@ static bool reserved_name(const char *text, int len) {
         "ref",      "weak",
         "switch",   "match",    "case",     "default",  "let",
         "const",    "func",     "yield",    "launch",   "wait",
-        "defer",    "package",  "import",   "include",  "export",
+        "defer",
         "return",   "break",    "continue", "fail",     "is",
         "goto",     "on",       "error",    "recover",  "pass",
-        "in",       "as",       "null",     "true",     "false",
+        "as",       "null",     "true",     "false",
         "len",      "range",    "print",    "println",  "input",
         "list",     "dict",     "int",      "float",    "bool",
         "str",      "char",     "byte",     "kind_of",  "type_name",
@@ -928,7 +987,7 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
         brace_stack.back().empty = false;
     bool declaration_body =
         declaration_header || extern_header ||
-        (last_token == SKEIN_TOK_NAME && prev_token == SKEIN_TOK_PACKAGE);
+        (last_token == SKEIN_TOK_NAME && prev_token_package_name);
     bool function_body =
         !func_signature_indents.empty() &&
         func_signature_indents.back() == indent_count;
@@ -1170,10 +1229,16 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 "launch" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_LAUNCH); }
 "wait" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_WAIT); }
 "defer" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_DEFER); }
-"package" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_PACKAGE); }
-"import" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_IMPORT); }
-"include" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_INCLUDE); }
-"export" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_EXPORT); }
+"include" {
+    MEMBER_NAME_AFTER_DOT();
+    if (statement_start_token(last_token))
+        YYRET(SKEIN_TOK_INCLUDE);
+    int tok = make_name_token(yytext, yyleng);
+    if (tok == 0)
+        return 0;
+    note_for_name_token();
+    YYRET(tok);
+}
 "return" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_RETURN); }
 "break" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_BREAK); }
 "continue" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_CONTINUE); }
@@ -1184,15 +1249,26 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 "error" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_ERROR); }
 "recover" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_RECOVER); }
 "pass" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_PASS); }
-"in" { MEMBER_NAME_AFTER_DOT();
-    if (for_header == FOR_HEADER_ONE || for_header == FOR_HEADER_TWO) {
-        for_body_pending = true;
-        for_operand_started = false;
-        for_body_indent = indent_count;
-        c_for_pending = false;
-    }
-    for_header = FOR_HEADER_NONE;
-    YYRET(SKEIN_TOK_IN);
+"package" {
+    MEMBER_NAME_AFTER_DOT();
+    note_contextual_declaration_name(yytext, yyleng);
+    if (statement_start_token(last_token))
+        YYRET(SKEIN_TOK_PACKAGE);
+    int tok = make_name_token(yytext, yyleng);
+    if (tok == 0)
+        return 0;
+    note_for_name_token();
+    YYRET(tok);
+}
+"import" {
+    MEMBER_NAME_AFTER_DOT();
+    if (statement_start_token(last_token))
+        YYRET(SKEIN_TOK_IMPORT);
+    int tok = make_name_token(yytext, yyleng);
+    if (tok == 0)
+        return 0;
+    note_for_name_token();
+    YYRET(tok);
 }
 "as" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_AS); }
 "null" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_NULLVAL); }
@@ -1298,6 +1374,8 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
     int tok = make_name_token(yytext, yyleng);
     if (tok == 0)
         return 0;
+    note_contextual_declaration_name(yytext, yyleng);
+    note_contextual_in_name(yytext, yyleng);
     note_for_name_token();
     YYRET(tok);
 }

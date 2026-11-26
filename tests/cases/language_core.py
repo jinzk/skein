@@ -50,6 +50,28 @@ def run_cases():
         stdout="1\n2\n",
     )
     check(
+        "in is a contextual keyword",
+        "let in = 7;\n"
+        "println(in);\n"
+        "for in in [1, 2] { println(in); }\n",
+        stdout="7\n1\n2\n",
+    )
+    check(
+        "export is a contextual keyword",
+        "let export = 7;\n"
+        "println(export);\n",
+        stdout="7\n",
+    )
+    check(
+        "package, import, module, and include are contextual identifiers",
+        "let import = 7;\n"
+        "let package = 8;\n"
+        "let module = 9;\n"
+        "let include = 10;\n"
+        "println(import + package + module + include);\n",
+        stdout="34\n",
+    )
+    check(
         "operators golden output",
         "1 && 2\n"
         "0 ? 2 : 3\n",

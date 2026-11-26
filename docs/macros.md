@@ -70,6 +70,7 @@ name! x     // 单个 NAME 参数
 | `recover!` | `std.error.recover!` |
 | `pass!` | `std.error.pass!` |
 | `wait!` | `std.task.wait!` |
+| `iter!` | `std.utils.iter!` |
 
 `std.assert.that!` / `std.assert.schema!` 本身就是规范路径，没有裸名别名。
 
@@ -175,6 +176,30 @@ let w = wait!(t);
 
 零参数写法 `fail!` / `recover!` / `pass!` 与单 NAME 写法 `recover! value`
 均可用；其他表达式必须放在括号内。旧关键字形式暂时保留作为兼容别名。
+
+### 3.6 迭代器宏
+
+```text
+iter!(xs)
+```
+
+展开为：
+
+```text
+xs.iter()
+```
+
+要求：
+
+- 恰好一个表达式参数；
+- 不接受 block；
+- 不接受 spread；
+- 等价于对接收者调用内置容器方法 `iter()`，因此接收者需要有具体容器静态类型。
+
+```text
+for x in iter!([1, 2, 3]) { ... }
+for (k, v) in iter!({"a": 1}) { ... }
+```
 
 ## 4. 边界
 

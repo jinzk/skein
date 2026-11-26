@@ -7,6 +7,7 @@ from harness import check, run, run_skein
 def run_cases():
     run_skein("macros_assert.skein")
     run_skein("macros_capture.skein")
+    run_skein("macros_iter.skein")
 
     proc = run(
         "import std;\n"

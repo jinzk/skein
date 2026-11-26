@@ -1,0 +1,27 @@
+import std;
+include "_support.skein";
+
+ts_test("iter macro list", func() {
+  let xs: list[int] = [1, 2, 3];
+  let out = [];
+  for x in iter!(xs) {
+    out = std.list.append(out, x);
+  }
+  ts_eq(out, [1, 2, 3]);
+});
+
+ts_test("iter macro dict entries", func() {
+  let d: dict[string, int] = {"a": 1, "b": 2};
+  let out = [];
+  for (k, v) in iter!(d) {
+    out = std.list.append(out, k + "=" + str(v));
+  }
+  ts_eq(out, ["a=1", "b=2"]);
+});
+
+ts_test("iter macro canonical path", func() {
+  let xs: list[int] = [4, 5];
+  ts_eq(std.iter.collect(std.utils.iter!(xs)), [4, 5]);
+});
+
+ts_finish();

@@ -158,6 +158,7 @@ std::string canonical_macro_name(const std::string &name) {
         {"recover", "std.error.recover"},
         {"pass", "std.error.pass"},
         {"wait", "std.task.wait"},
+        {"iter", "std.utils.iter"},
     };
     for (const auto &entry : aliases) {
         if (name == entry.alias)
@@ -278,6 +279,24 @@ struct ast *expand_builtin_macro(struct ast *callee, struct ast *args,
         collect_args(args, ignored);
         return ignored.size();
     }();
+
+    if (name == "std.utils.iter") {
+        if (block)
+            return fail_expansion(name.c_str(), "does not accept a block",
+                                  NULL, args, block);
+        if (arg_count != 1)
+            return fail_expansion(name.c_str(),
+                                  "expects exactly 1 expression argument",
+                                  NULL, args, block);
+        std::vector<struct ast *> values = take_args(args);
+        if (any_spread(values)) {
+            free_values(values);
+            return fail_expansion(name.c_str(),
+                                  "does not accept spread arguments", NULL,
+                                  NULL, NULL);
+        }
+        return member_call(values[0], "iter", NULL, line, column);
+    }
 
     if (name == "std.assert.that") {
         if (block)

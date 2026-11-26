@@ -209,6 +209,35 @@ def run_cases():
           "let b = pick[bool](true);\n",
           stderr="type error: type argument bool does not satisfy generic constraint for pick")
 
+    check("explicit generic parse error keeps bracket position",
+           "func identity[T any](x: T): T { return x; }\n"
+           "let y = identity[int | string](1);\n",
+           stderr="2:17: type error: expected ',' or end of type list")
+
+    check("multiline explicit generic call",
+           "func identity[T any](x: T): T { return x; }\n"
+           "let y = identity[\n"
+           "  int\n"
+           "](3);\n"
+           "println(str(y));\n",
+           stdout="3")
+
+    check("multiline explicit generic function value",
+           "func identity[T any](x: T): T { return x; }\n"
+           "let g = identity[\n"
+           "  int\n"
+           "];\n"
+           "println(str(g(4)));\n",
+           stdout="4")
+
+    check("multiline explicit generic struct literal",
+           "struct Box[T any] { value: T; }\n"
+           "let b = Box[\n"
+           "  int\n"
+           "] { value: 5 };\n"
+           "println(str(b.value));\n",
+           stdout="5")
+
     check("generic type marker union constraint",
           "struct Box[T type int | string] { value: T; }\n"
           "let b = Box[bool] { value: true };\n",

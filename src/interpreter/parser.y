@@ -29,6 +29,7 @@
 #include "static_type.h"
 #include "stdio_stream.h"
 #include "typecheck.h"
+#include "type_text_parser.h"
 
 extern int yylex();
 extern int yyparse();
@@ -1326,6 +1327,62 @@ static bool is_known_generic_function(struct ast *expr) {
     return ref->name && g_generic_function_names.count(ref->name) != 0;
 }
 
+/* Parse explicit type arguments once, while the source span is still live,
+ * and let the AST own the resulting constraints.  Typechecking must never go
+ * back to the original source text: macro expansion clones AST nodes, and the
+ * clone's source span need not correspond to the generated syntax. */
+static struct generic_type_arg *capture_generic_type_args(
+    int start_line, int start_column, int end_line, int end_column,
+    char **error_out) {
+    std::string text = diag_source_text(
+        start_line, start_column + 1, end_line, end_column);
+    std::vector<struct type_constraint *> constraints;
+    std::string error;
+
+    /* Keep any diagnostics emitted while building the constraints anchored to
+     * the opening bracket, matching the old typecheck-time reports. */
+    int saved_line = g_token_line;
+    int saved_column = g_token_column;
+    g_token_line = start_line;
+    g_token_column = start_column;
+    skein::typecheck::parse_type_list_text(
+        text, diag_current_source_name().c_str(), constraints, error, true);
+    g_token_line = saved_line;
+    g_token_column = saved_column;
+
+    struct generic_type_arg *args = NULL;
+    for (struct type_constraint *constraint : constraints)
+        args = append_generictypearg(args, newgenerictypearg(constraint));
+    *error_out = error.empty() ? NULL : copy_text(error.c_str());
+    return args;
+}
+
+static struct ast *new_index_with_generic_args(
+    struct ast *container, struct ast *index, int start_line,
+    int start_column, int end_line, int end_column, bool generic_candidate,
+    bool generic_function_value) {
+    struct ast *result =
+        newindex(container, index, start_line, start_column, end_line,
+                 end_column, generic_candidate, generic_function_value);
+    struct index_node *node = (struct index_node *)result;
+    if (generic_candidate || generic_function_value)
+        node->type_args = capture_generic_type_args(
+            start_line, start_column, end_line, end_column,
+            &node->type_args_error);
+    return result;
+}
+
+static void attach_struct_lit_generic_args(
+    struct ast *lit, int start_line, int start_column, int end_line,
+    int end_column) {
+    struct struct_lit_node *node = (struct struct_lit_node *)lit;
+    node->has_type_args = true;
+    node->type_args_span = {start_line, start_column, end_line, end_column};
+    node->type_args = capture_generic_type_args(
+        start_line, start_column, end_line, end_column,
+        &node->type_args_error);
+}
+
 /*
  * `Option[int].None` is parsed as member access, but when the receiver is a
  * generic type application it is really an enum variant with no fields.
@@ -1399,8 +1456,14 @@ static struct ast *new_member_or_enum_literal(struct ast *base, char *field) {
                 copy_text(name ? name : ""),
                 copy_text(diag_current_source_name().c_str()), field, NULL,
                 NULL);
-            ((struct enum_lit_node *)lit)->has_type_args = true;
-            ((struct enum_lit_node *)lit)->type_args_span = index->span;
+            struct enum_lit_node *node = (struct enum_lit_node *)lit;
+            node->has_type_args = true;
+            node->type_args_span = index->span;
+            node->type_args = index->type_args;
+            node->type_args_error = index->type_args_error;
+            index->type_args = NULL;
+            index->type_args_error = NULL;
+            treefree(base);
             return lit;
         }
     }
@@ -2667,14 +2730,15 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
                                   @2.first_line, @2.first_column, false);
       }
     | exp '[' exp ',' explist ']'         {
-        $$ = newindex($1, bracket_args_list(newast('L', $3, $5)),
+        $$ = new_index_with_generic_args(
+                      $1, bracket_args_list(newast('L', $3, $5)),
                       @2.first_line, @2.first_column,
                       @6.first_line, @6.first_column,
                       is_known_generic_name($1),
                       is_known_generic_function($1));
       }
     | exp '[' exp ']'                     {
-        $$ = newindex($1, $3,
+        $$ = new_index_with_generic_args($1, $3,
                       @2.first_line, @2.first_column,
                       @4.first_line, @4.first_column,
                       is_known_generic_name($1),
@@ -2715,10 +2779,9 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
                               : copy_text(""),
                           copy_text(diag_current_source_name().c_str()),
                           NULL, NULL);
-        ((struct struct_lit_node *)$$)->has_type_args = true;
-        ((struct struct_lit_node *)$$)->type_args_span =
-            { @2.first_line, @2.first_column, @4.first_line,
-              @4.first_column };
+        attach_struct_lit_generic_args(
+            $$, @2.first_line, @2.first_column, @4.first_line,
+            @4.first_column);
       }
     | exp '[' exp ']' '{' struct_fields '}' {
         treefree($3);
@@ -2727,10 +2790,9 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
                               : copy_text(""),
                           copy_text(diag_current_source_name().c_str()),
                           NULL, (struct struct_init *)$6);
-        ((struct struct_lit_node *)$$)->has_type_args = true;
-        ((struct struct_lit_node *)$$)->type_args_span =
-            { @2.first_line, @2.first_column, @4.first_line,
-              @4.first_column };
+        attach_struct_lit_generic_args(
+            $$, @2.first_line, @2.first_column, @4.first_line,
+            @4.first_column);
       }
     | exp '[' exp ',' explist ']' '{' empty_body {
         treefree($3);
@@ -2740,10 +2802,9 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
                               : copy_text(""),
                           copy_text(diag_current_source_name().c_str()),
                           NULL, NULL);
-        ((struct struct_lit_node *)$$)->has_type_args = true;
-        ((struct struct_lit_node *)$$)->type_args_span =
-            { @2.first_line, @2.first_column, @6.first_line,
-              @6.first_column };
+        attach_struct_lit_generic_args(
+            $$, @2.first_line, @2.first_column, @6.first_line,
+            @6.first_column);
       }
     | exp '[' exp ',' explist ']' '{' struct_fields '}' {
         treefree($3);
@@ -2753,10 +2814,9 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
                               : copy_text(""),
                           copy_text(diag_current_source_name().c_str()),
                           NULL, (struct struct_init *)$8);
-        ((struct struct_lit_node *)$$)->has_type_args = true;
-        ((struct struct_lit_node *)$$)->type_args_span =
-            { @2.first_line, @2.first_column, @6.first_line,
-              @6.first_column };
+        attach_struct_lit_generic_args(
+            $$, @2.first_line, @2.first_column, @6.first_line,
+            @6.first_column);
       }
     | NAME '{' struct_fields '}'          {
         $$ = newstructlit($1,
@@ -2796,7 +2856,8 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
     | exp '.' NAME '{' struct_fields '}' {
         const char *type_name = "";
         struct source_span type_span = {};
-        bool has_type_args = false;
+        struct generic_type_arg *generic_args = NULL;
+        char *generic_error = NULL;
         if ($1 && $1->nodetype == 'G') {
             struct index_node *index = (struct index_node *)$1;
             if (index->l && index->l->nodetype == 'N' &&
@@ -2804,7 +2865,10 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
                 type_name = ((struct symref *)index->l)->name;
                 type_span = index->span;
             }
-            has_type_args = true;
+            generic_args = index->type_args;
+            generic_error = index->type_args_error;
+            index->type_args = NULL;
+            index->type_args_error = NULL;
         } else if ($1 && $1->nodetype == 'N' &&
                    ((struct symref *)$1)->name) {
             type_name = ((struct symref *)$1)->name;
@@ -2812,13 +2876,18 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
         $$ = newenumlit(copy_text(type_name),
                         copy_text(diag_current_source_name().c_str()),
                         $3, NULL, (struct struct_init *)$5);
-        ((struct enum_lit_node *)$$)->has_type_args = has_type_args;
-        ((struct enum_lit_node *)$$)->type_args_span = type_span;
+        struct enum_lit_node *node = (struct enum_lit_node *)$$;
+        node->has_type_args = $1 && $1->nodetype == 'G';
+        node->type_args_span = type_span;
+        node->type_args = generic_args;
+        node->type_args_error = generic_error;
+        treefree($1);
       }
     | exp '.' NAME '{' EMPTY_DICT_CLOSE {
         const char *type_name = "";
         struct source_span type_span = {};
-        bool has_type_args = false;
+        struct generic_type_arg *generic_args = NULL;
+        char *generic_error = NULL;
         if ($1 && $1->nodetype == 'G') {
             struct index_node *index = (struct index_node *)$1;
             if (index->l && index->l->nodetype == 'N' &&
@@ -2826,7 +2895,10 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
                 type_name = ((struct symref *)index->l)->name;
                 type_span = index->span;
             }
-            has_type_args = true;
+            generic_args = index->type_args;
+            generic_error = index->type_args_error;
+            index->type_args = NULL;
+            index->type_args_error = NULL;
         } else if ($1 && $1->nodetype == 'N' &&
                    ((struct symref *)$1)->name) {
             type_name = ((struct symref *)$1)->name;
@@ -2834,8 +2906,12 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
         $$ = newenumlit(copy_text(type_name),
                         copy_text(diag_current_source_name().c_str()),
                         $3, NULL, NULL);
-        ((struct enum_lit_node *)$$)->has_type_args = has_type_args;
-        ((struct enum_lit_node *)$$)->type_args_span = type_span;
+        struct enum_lit_node *node = (struct enum_lit_node *)$$;
+        node->has_type_args = $1 && $1->nodetype == 'G';
+        node->type_args_span = type_span;
+        node->type_args = generic_args;
+        node->type_args_error = generic_error;
+        treefree($1);
       }
     | funcstart '(' symlist ')' func_ret_opt '{' EMPTY_BLOCK_CLOSE
                                            { $$ = newfunc(NULL, $3, NULL, false, finish_function(), $5); }

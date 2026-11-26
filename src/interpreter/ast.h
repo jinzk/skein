@@ -4,6 +4,8 @@
 #include "builtin_ids.h"
 #include "valuetype.h"
 
+struct generic_type_arg;
+
 extern int yylineno;
 void yyerror(const char *s,...);
 
@@ -93,6 +95,10 @@ struct index_node {
     struct source_span span;
     bool generic_candidate;
     bool generic_function_value;
+    /* Generic type arguments are parsed once by the parser and owned here so
+     * typechecking never has to recover them from the original source text. */
+    struct generic_type_arg *type_args;
+    char *type_args_error;
 };
 
 struct user_macro_call_node {
@@ -521,6 +527,7 @@ struct struct_lit_node {
     struct generic_type_arg *type_args;
     bool has_type_args;
     struct source_span type_args_span;
+    char *type_args_error;
     struct struct_init *fields;
     bool is_ref;
 };
@@ -556,6 +563,7 @@ struct enum_lit_node {
     struct generic_type_arg *type_args;
     bool has_type_args;
     struct source_span type_args_span;
+    char *type_args_error;
     struct struct_init *fields;
 };
 

@@ -287,8 +287,9 @@ wrap!(2) {
 - 把 `from` 设为全局保留字；它只作为 selective import 的 contextual keyword；
 - 改变装饰器语义：装饰器继续是 `@expr` 普通高阶函数。
 
-特别注意：typechecker 目前仍有若干站点从原始源码文本恢复泛型实参。v1 模板
-必须禁止生成泛型语法，否则展开后源码位置与类型实参不再对应。
+显式泛型实参已由 parser 一次解析并保存在 AST 节点上（roadmap G1），typechecker
+不再回读原始源码文本。v1 模板仍禁止生成泛型语法：现有用户宏片段只支持
+`expr` / `ident` / `expr...` / `block`，受限 `type` 片段属于后续 G2。
 
 ## 7. 诊断
 

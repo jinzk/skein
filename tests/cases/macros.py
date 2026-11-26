@@ -171,6 +171,17 @@ def run_cases():
         stdout="6",
     )
     check(
+        "user macro preserves generic type arguments in expr fragment",
+        'func identity[T any](x: T): T { return x; }\n'
+        'macro keep(x: expr) { #x; }\n'
+        'func test(): int {\n'
+        '  let g = keep!(identity[int]);\n'
+        '  return g(7);\n'
+        '}\n'
+        'println(str(test()));\n',
+        stdout="7",
+    )
+    check(
         "user macro ident and block fragments",
         'macro set_name(name: ident, value: expr, body: block) {\n'
         '  let #name = #value;\n'

@@ -1568,6 +1568,8 @@ struct ast *newindex(struct ast *container, struct ast *index,
     a->span.end_column = end_column;
     a->generic_candidate = generic_candidate;
     a->generic_function_value = generic_function_value;
+    a->type_args = NULL;
+    a->type_args_error = NULL;
     return (struct ast *)a;
 }
 
@@ -1621,6 +1623,7 @@ struct ast *newstructlit(char *name, char *source,
     a->type_args = type_args;
     a->has_type_args = false;
     a->type_args_span = {};
+    a->type_args_error = NULL;
     a->fields = fields;
     a->is_ref = is_ref;
     return (struct ast *)a;
@@ -1689,6 +1692,7 @@ struct ast *newenumlit(char *name, char *source, char *variant,
     a->type_args = type_args;
     a->has_type_args = false;
     a->type_args_span = {};
+    a->type_args_error = NULL;
     a->fields = fields;
     return (struct ast *)a;
 }
@@ -1775,7 +1779,6 @@ void treefree(struct ast *a) {
         case 'Q':
         case 's':
         case 'r':
-        case 'G':
         case 'j':
         case '1':
         case '2':
@@ -1790,6 +1793,14 @@ void treefree(struct ast *a) {
             treefree(a->r);
             treefree(a->l);
             break;
+        case 'G': {
+            struct index_node *index = (struct index_node *)a;
+            free_generic_type_args(index->type_args);
+            std::free(index->type_args_error);
+            treefree(index->r);
+            treefree(index->l);
+            break;
+        }
         case NODE_BRACKET_APPLY: {
             struct bracket_apply_node *b = (struct bracket_apply_node *)a;
             treefree(b->base);
@@ -2051,6 +2062,7 @@ void treefree(struct ast *a) {
         case 'y': {
             struct struct_lit_node *s = (struct struct_lit_node *)a;
             free_generic_type_args(s->type_args);
+            std::free(s->type_args_error);
             treefree((struct ast *)s->fields);
             std::free(s->name);
             std::free(s->source);
@@ -2162,6 +2174,7 @@ void treefree(struct ast *a) {
             std::free(e->source);
             std::free(e->variant);
             free_generic_type_args(e->type_args);
+            std::free(e->type_args_error);
             treefree((struct ast *)e->fields);
             break;
         }

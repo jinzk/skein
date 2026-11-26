@@ -11,7 +11,6 @@
 #include "scopestack.h"
 #include "static_type.h"
 #include "structtype.h"
-#include "type_text_parser.h"
 #include "valuetype.h"
 
 #include <cstdio>
@@ -30,6 +29,16 @@ using namespace detail;
 namespace {
 
 Mode g_mode = Mode::Warn;
+
+/* The returned constraints remain owned by the AST node; callers must not
+ * free them. */
+std::vector<struct type_constraint *> generic_type_arg_constraints(
+    const struct generic_type_arg *args) {
+    std::vector<struct type_constraint *> constraints;
+    for (const struct generic_type_arg *arg = args; arg; arg = arg->next)
+        constraints.push_back(arg->type);
+    return constraints;
+}
 
 struct GenericConstraintMeta {
     enum generic_constraint_kind kind = GENERIC_CONSTRAINT_SINGLE;
@@ -2027,21 +2036,13 @@ struct Checker : public BuiltinContext {
             return false;
         }
 
-        std::string text = diag_source_text(
-            bracket->span.start_line, bracket->span.start_column + 1,
-            bracket->span.end_line, bracket->span.end_column);
-        std::vector<struct type_constraint *> constraints;
-        std::string parse_error;
-        if (!parse_type_list_text(text, source.c_str(), constraints,
-                                  parse_error, true)) {
+        if (bracket->type_args_error) {
             report_error(bracket->line, bracket->column,
-                         parse_error.empty()
-                             ? "invalid explicit type arguments"
-                             : parse_error.c_str());
-            for (struct type_constraint *constraint : constraints)
-                free_type_constraint(constraint);
+                         bracket->type_args_error);
             return false;
         }
+        std::vector<struct type_constraint *> constraints =
+            generic_type_arg_constraints(bracket->type_args);
         if (constraints.size() != generic->second.params.size()) {
             std::string message =
                 "function " + name + " expects " +
@@ -2049,8 +2050,6 @@ struct Checker : public BuiltinContext {
                 " type argument(s), got " +
                 std::to_string(constraints.size());
             report_error(bracket->line, bracket->column, message.c_str());
-            for (struct type_constraint *constraint : constraints)
-                free_type_constraint(constraint);
             return false;
         }
 
@@ -2058,7 +2057,6 @@ struct Checker : public BuiltinContext {
         for (std::size_t i = 0; i < constraints.size(); ++i) {
             const TypeNode *arg = type_from_constraint(constraints[i]);
             bindings[generic->second.params[i]] = arg;
-            free_type_constraint(constraints[i]);
             if (!check_type_argument_is_type(arg, bracket->line,
                                              bracket->column))
                 return false;
@@ -3186,7 +3184,8 @@ struct Checker : public BuiltinContext {
         struct variant_def *variant = nullptr;
         const char *variant_name = nullptr;
         bool has_type_args = false;
-        struct source_span type_args_span = {};
+        struct generic_type_arg *type_args = nullptr;
+        char *type_args_error = nullptr;
 
         if (expr->nodetype == 'y') {
             struct struct_lit_node *lit =
@@ -3195,7 +3194,8 @@ struct Checker : public BuiltinContext {
             source = lit->source;
             fields = lit->fields;
             has_type_args = lit->has_type_args;
-            type_args_span = lit->type_args_span;
+            type_args = lit->type_args;
+            type_args_error = lit->type_args_error;
             def = structtype_find_struct(source, name);
         } else if (expr->nodetype == '?') {
             struct enum_lit_node *lit = (struct enum_lit_node *)expr;
@@ -3204,7 +3204,8 @@ struct Checker : public BuiltinContext {
             fields = lit->fields;
             variant_name = lit->variant;
             has_type_args = lit->has_type_args;
-            type_args_span = lit->type_args_span;
+            type_args = lit->type_args;
+            type_args_error = lit->type_args_error;
             edef = structtype_find_enum(source, name);
             if (edef && lit->variant) {
                 auto it = edef->variant_index.find(lit->variant);
@@ -3265,22 +3266,12 @@ struct Checker : public BuiltinContext {
                 report_error(expr->line, expr->column, message.c_str());
                 return false;
             }
-            std::string text = diag_source_text(
-                type_args_span.start_line,
-                type_args_span.start_column + 1,
-                type_args_span.end_line,
-                type_args_span.end_column);
-            std::vector<struct type_constraint *> constraints;
-            std::string parse_error;
-            if (!parse_type_list_text(text, source, constraints,
-                                      parse_error, true)) {
-                report_error(expr->line, expr->column,
-                             parse_error.empty() ? "invalid type arguments"
-                                                 : parse_error.c_str());
-                for (struct type_constraint *constraint : constraints)
-                    free_type_constraint(constraint);
+            if (type_args_error) {
+                report_error(expr->line, expr->column, type_args_error);
                 return false;
             }
+            std::vector<struct type_constraint *> constraints =
+                generic_type_arg_constraints(type_args);
             if (constraints.size() != generic_params->size()) {
                 std::string message =
                     std::string("type ") + (name ? name : "invalid") +
@@ -3288,8 +3279,6 @@ struct Checker : public BuiltinContext {
                     " type argument(s), got " +
                     std::to_string(constraints.size());
                 report_error(expr->line, expr->column, message.c_str());
-                for (struct type_constraint *constraint : constraints)
-                    free_type_constraint(constraint);
                 return false;
             }
             for (std::size_t i = 0; i < constraints.size(); ++i) {
@@ -3299,7 +3288,6 @@ struct Checker : public BuiltinContext {
                     return false;
                 explicit_args.push_back(arg);
                 bindings[(*generic_params)[i]] = arg;
-                free_type_constraint(constraints[i]);
             }
             explicit_bindings = true;
         }
@@ -4294,25 +4282,13 @@ struct Checker : public BuiltinContext {
                                      "generic function");
                         return type_any();
                     }
-                    std::string text = diag_source_text(
-                        index->span.start_line,
-                        index->span.start_column + 1,
-                        index->span.end_line, index->span.end_column);
-                    std::vector<struct type_constraint *> constraints;
-                    std::string parse_error;
-                    if (!parse_type_list_text(text, source.c_str(),
-                                              constraints, parse_error,
-                                              true)) {
-                        report_error(
-                            expr->line, expr->column,
-                            parse_error.empty()
-                                ? "invalid explicit type arguments"
-                                : parse_error.c_str());
-                        for (struct type_constraint *constraint :
-                             constraints)
-                            free_type_constraint(constraint);
+                    if (index->type_args_error) {
+                        report_error(expr->line, expr->column,
+                                     index->type_args_error);
                         return type_any();
                     }
+                    std::vector<struct type_constraint *> constraints =
+                        generic_type_arg_constraints(index->type_args);
                     if (constraints.size() !=
                         generic->second.params.size()) {
                         std::string message =
@@ -4322,9 +4298,6 @@ struct Checker : public BuiltinContext {
                             std::to_string(constraints.size());
                         report_error(expr->line, expr->column,
                                      message.c_str());
-                        for (struct type_constraint *constraint :
-                             constraints)
-                            free_type_constraint(constraint);
                         return type_any();
                     }
                     TypeBindings bindings;
@@ -4332,7 +4305,6 @@ struct Checker : public BuiltinContext {
                         const TypeNode *arg =
                             type_from_constraint(constraints[i]);
                         bindings[generic->second.params[i]] = arg;
-                        free_type_constraint(constraints[i]);
                         if (!check_type_argument_is_type(
                                 arg, expr->line, expr->column))
                             return type_any();

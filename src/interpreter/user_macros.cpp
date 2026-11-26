@@ -132,6 +132,21 @@ struct type_constraint *dup_type(const struct type_constraint *type) {
     return copy;
 }
 
+struct generic_type_arg *dup_generic_type_args(
+    const struct generic_type_arg *args) {
+    struct generic_type_arg *head = NULL;
+    struct generic_type_arg *tail = NULL;
+    for (const struct generic_type_arg *arg = args; arg; arg = arg->next) {
+        struct generic_type_arg *copy = newgenerictypearg(dup_type(arg->type));
+        if (tail)
+            tail->next = copy;
+        else
+            head = copy;
+        tail = copy;
+    }
+    return head;
+}
+
 void report_at(int line, int column, const char *message,
                const char *detail = NULL) {
     diag_set_location(line > 0 ? line : 0, column > 0 ? column : 0);
@@ -404,10 +419,15 @@ struct ast *clone_node(const struct ast *node, expansion_state &state,
         case 'n':
             return clone_control((const struct control_stmt *)node, state);
         case 'G': {
-            struct index_node *copy = copy_node(
-                (const struct index_node *)node);
+            const struct index_node *source =
+                (const struct index_node *)node;
+            struct index_node *copy = copy_node(source);
             copy->l = clone_node(node->l, state, clone_context::expr);
             copy->r = clone_node(node->r, state, clone_context::expr);
+            copy->type_args = dup_generic_type_args(source->type_args);
+            copy->type_args_error = source->type_args_error
+                                        ? copy_string(source->type_args_error)
+                                        : NULL;
             return (struct ast *)copy;
         }
         case NODE_BRACKET_APPLY: {

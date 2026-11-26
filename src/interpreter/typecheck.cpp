@@ -1038,6 +1038,28 @@ struct Checker : public BuiltinContext {
         return instantiate_type(it->second, bindings);
     }
 
+    bool generic_bindings_for(const TypeNode *type,
+                              TypeBindings &bindings) {
+        if (!type || type->kind != TYPE_NAMED || type->args.empty())
+            return false;
+        const std::vector<std::string> *params = NULL;
+        StaticTypeInfo *info = find_static_info(type);
+        if (info && !info->generic_params.empty())
+            params = &info->generic_params;
+        else {
+            auto meta = g_generic_type_meta.find(
+                static_type_key(type->source.c_str(), type->name.c_str()));
+            if (meta != g_generic_type_meta.end() &&
+                !meta->second.params.empty())
+                params = &meta->second.params;
+        }
+        if (!params || params->size() != type->args.size())
+            return false;
+        for (std::size_t i = 0; i < params->size(); ++i)
+            bindings[(*params)[i]] = type->args[i];
+        return true;
+    }
+
     struct funcdef *static_method(const TypeNode *type, const char *name) {
         StaticTypeInfo *info = find_static_info(type);
         if (!info)
@@ -1097,6 +1119,19 @@ struct Checker : public BuiltinContext {
                     FunctionSig sig =
                         method_signature_from_code(method->code.get());
                     adjust_generator_result(sig, NULL, method->code.get());
+                    TypeBindings bindings;
+                    if (generic_bindings_for(base_type, bindings)) {
+                        for (const TypeNode *&param : sig.params)
+                            param = instantiate_type(param, bindings);
+                        if (sig.result)
+                            sig.result =
+                                instantiate_type(sig.result, bindings);
+                        if (sig.generator_send)
+                            sig.generator_send = instantiate_type(
+                                sig.generator_send, bindings);
+                        if (sig.rest)
+                            sig.rest = instantiate_type(sig.rest, bindings);
+                    }
                     return function_type_from_sig(sig);
                 }
             }

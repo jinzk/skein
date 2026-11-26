@@ -3,6 +3,9 @@ include "_support.skein";
 
 struct Box[T any] {
   value: T;
+  func get(self): T {
+    return self.value;
+  }
 }
 
 struct Pair[A any, B any] {
@@ -24,6 +27,14 @@ ts_test("generic struct inference", func() {
 ts_test("generic struct annotation", func() {
   let a: Box[int] = Box { value: 2 };
   ts_eq(unwrap_int(a), 2);
+  let n: int = a.get();
+  ts_eq(n, 2);
+});
+
+ts_test("generic struct method return type", func() {
+  let s: Box[string] = Box { value: "a" };
+  let text: string = s.get();
+  ts_eq(text + "b", "ab");
 });
 
 ts_test("generic struct multiple parameters", func() {

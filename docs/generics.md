@@ -1,9 +1,20 @@
 # 用户自定义泛型：设计与开发计划
 
-状态：**设计已确认，尚未实现**。
+状态：**核心泛型已实现；泛型 protocol、meta、序列化仍待完成**。
 
-本文记录用户自定义泛型的最终语法、语义决议、实现阶段和测试要求。实现完成前，
-`SYNTAX.md` 和 `docs/tutorial.md` 仍将用户自定义泛型列为未支持能力。
+本文记录用户自定义泛型的最终语法、语义决议、实现阶段和测试要求。当前已实现：
+
+- 泛型 `struct` / `enum` / 自由函数声明；
+- `Box[int]`、`Option[int]` 类型注解；
+- `Box[int] { ... }`、`Option[int].Some { ... }`、`Option[int].None`；
+- 泛型函数调用推断、`f[int](...)` 和 `let g = f[int]`；
+- `|` 类型集合、`&` protocol/`hashable` 组和约束检查；
+- `type` / `proto` 约束标记；
+- 泛型 struct 递归和嵌套泛型字段；
+- VM / JIT 类型擦除路径。
+
+尚未完成：泛型 protocol、默认类型参数的完整补全、`std.meta` 泛型入口、
+泛型序列化。实现完成前，`SYNTAX.md` 和 `docs/tutorial.md` 暂不宣称全部能力已可用。
 
 ## 1. 目标
 
@@ -68,6 +79,20 @@ impl Box {
 [T int | string | Box[int]]
 ```
 
+推荐在需要明确约束类别时使用每个参数自己的 `type` / `proto` 标记：
+
+```skein
+[K type int | string]
+[V proto Drawable]
+[T proto hashable & Drawable]
+[K type int | string, V proto Drawable]
+```
+
+- `type` 表示后面的约束是具体类型集合或单一具体类型；
+- `proto` 表示后面的约束是 protocol / 内置约束组；
+- 不同参数可以使用不同标记；
+- 不写标记的旧形式继续兼容。
+
 不使用：
 
 ```skein
@@ -101,6 +126,9 @@ struct Box[T = any] {
 ProtocolGroup := Protocol ('&' Protocol)*
 TypeUnion     := ConcreteType ('|' ConcreteType)*
 ```
+
+`type` 标记用于 `TypeUnion`，`proto` 标记用于 `ProtocolGroup`；
+不写标记时由编译器根据名字和已有声明推断。`hashable` 可出现在 `&` 组中。
 
 `ProtocolGroup`：
 

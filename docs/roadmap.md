@@ -36,7 +36,7 @@
 | JIT / VM 与 GC（M4） | 优化冻结 | moving GC 与 AOT / 字节码缓存均已确认不做；已完成记录见第 3 节 |
 | 长尾能力与体验（M5） | 按需 | 旧编码、HTTP/2 CONNECT、REPL / LSP 体验、LevelDB / RocksDB |
 | 对象抽象 / `protocol` / `ref` / Channel 模型（M8） | 功能已完成 | Channel 端点对、结构化 `protocol`、struct 内联方法、`_` 包私有成员，以及 `ref` / `weak` / GC / channel payload 拒绝已落地；文档同步完成，仅剩 Windows x64 MinGW/MSVC CI 发布门槛 |
-| 用户自定义泛型（M9） | 待实现 | 设计已冻结，按 `generics.md` 分阶段实现；不特化、不支持泛型方法、运行时类型参数擦除 |
+| 用户自定义泛型（M9） | 核心完成 | 泛型 struct/enum/函数、显式实例化、约束、递归、VM/JIT 擦除已完成；剩泛型 protocol、`std.meta` 泛型入口和序列化 |
 | `std.cache`（M7）/ `std.kv` | 已完成 | 维护；Valkey 独立 CI 服务可按需补 |
 | FFI 平台 CI / fuzz | 按需 | Windows x64（MinGW/MSVC）进入正式发布；32 位 / ARM 与 fuzz 按需，见 `architecture.md` |
 

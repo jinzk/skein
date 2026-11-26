@@ -1456,6 +1456,30 @@ struct ast *append_protocol_method(struct ast *head, struct ast *method) {
     return head;
 }
 
+struct ast *newbracketapply(struct ast *base, int start_line,
+                            int start_column, int end_line,
+                            int end_column, int suffix,
+                            struct ast *suffix_value) {
+    struct bracket_apply_node *a =
+        (struct bracket_apply_node *)
+            ast_node_alloc(sizeof(struct bracket_apply_node));
+    if (!a) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    a->nodetype = NODE_BRACKET_APPLY;
+    set_loc(a, base ? base->line : start_line,
+            base ? base->column : start_column);
+    a->base = base;
+    a->span.start_line = start_line;
+    a->span.start_column = start_column;
+    a->span.end_line = end_line;
+    a->span.end_column = end_column;
+    a->suffix = suffix;
+    a->suffix_value = suffix_value;
+    return (struct ast *)a;
+}
+
 struct ast *newoptionalchain(struct ast *base, char *name) {
     struct optional_chain_node *a =
         (struct optional_chain_node *)
@@ -1653,6 +1677,12 @@ void treefree(struct ast *a) {
             treefree(a->r);
             treefree(a->l);
             break;
+        case NODE_BRACKET_APPLY: {
+            struct bracket_apply_node *b = (struct bracket_apply_node *)a;
+            treefree(b->base);
+            treefree(b->suffix_value);
+            break;
+        }
         case 'M':
         case '!':
         case '~':

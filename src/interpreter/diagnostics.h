@@ -33,6 +33,12 @@ void diag_scan_rewind(const char *text, int length);
 /* Remember a physical source line for snippets. */
 void diag_record_line(int line, std::string_view text);
 
+/* Return source text between two 1-based line/column positions.  The end
+ * position is exclusive.  Returns an empty string when the range is not
+ * recorded. */
+std::string diag_source_text(int start_line, int start_column,
+                             int end_line, int end_column);
+
 /* Runtime location handling. */
 void diag_set_location(int line, int column);
 int diag_current_line();

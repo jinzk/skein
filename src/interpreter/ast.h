@@ -49,6 +49,11 @@ constexpr int NODE_GOTO = 0x140;
 constexpr int NODE_FUNCTION_BODY = 0x142;
 constexpr int NODE_OPTIONAL_CHAIN = 0x150;
 constexpr int NODE_REF_TARGET = 0x151;
+constexpr int NODE_BRACKET_APPLY = 0x152;
+constexpr int BRACKET_SUFFIX_NONE = 0;
+constexpr int BRACKET_SUFFIX_CALL = 1;
+constexpr int BRACKET_SUFFIX_STRUCT = 2;
+constexpr int BRACKET_SUFFIX_ENUM = 3;
 
 
 struct ast {
@@ -57,6 +62,23 @@ struct ast {
     int column;
     struct ast *l;
     struct ast *r;
+};
+
+struct source_span {
+    int start_line;
+    int start_column;
+    int end_line;
+    int end_column;
+};
+
+struct bracket_apply_node {
+    int nodetype;
+    int line;
+    int column;
+    struct ast *base;
+    struct source_span span;
+    int suffix;
+    struct ast *suffix_value;
 };
 
 struct fnret {
@@ -690,6 +712,10 @@ struct ast *newstructlit(char *name, char *source,
                          struct struct_init *fields,
                          bool is_ref = false);
 struct ast *newoptionalchain(struct ast *base, char *name);
+struct ast *newbracketapply(struct ast *base, int start_line,
+                            int start_column, int end_line,
+                            int end_column, int suffix,
+                            struct ast *suffix_value);
 struct ast *newenumdecl(char *name, char *source,
                         struct generic_param *generic_params,
                         struct enum_variant *variants,

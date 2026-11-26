@@ -147,6 +147,50 @@ static void diagnostic_offsets(int line, int column, std::size_t &byte_offset,
     byte_offset = pos;
 }
 
+std::string diag_source_text(int start_line, int start_column,
+                             int end_line, int end_column) {
+    if (start_line <= 0 || end_line < start_line ||
+        (std::size_t)start_line > source_lines.size())
+        return std::string();
+    if ((std::size_t)end_line > source_lines.size())
+        end_line = (int)source_lines.size();
+    if (start_line == end_line) {
+        std::size_t start = 0;
+        std::size_t end = 0;
+        std::size_t ignored = 0;
+        diagnostic_offsets(start_line, start_column, start, ignored);
+        diagnostic_offsets(end_line, end_column, end, ignored);
+        const std::string &text = source_lines[(std::size_t)start_line - 1];
+        if (start > text.size())
+            start = text.size();
+        if (end > text.size())
+            end = text.size();
+        if (end < start)
+            end = start;
+        return text.substr(start, end - start);
+    }
+
+    std::string out;
+    std::size_t start = 0;
+    std::size_t ignored = 0;
+    diagnostic_offsets(start_line, start_column, start, ignored);
+    const std::string &first = source_lines[(std::size_t)start_line - 1];
+    if (start < first.size())
+        out.append(first.data() + start, first.size() - start);
+    for (int line = start_line + 1; line < end_line; ++line) {
+        out.push_back('\n');
+        out.append(source_lines[(std::size_t)line - 1]);
+    }
+    std::size_t end = 0;
+    diagnostic_offsets(end_line, end_column, end, ignored);
+    const std::string &last = source_lines[(std::size_t)end_line - 1];
+    if (end > last.size())
+        end = last.size();
+    out.push_back('\n');
+    out.append(last.data(), end);
+    return out;
+}
+
 void diag_set_location(int line, int column) {
     g_error_line = line;
     g_error_column = column;

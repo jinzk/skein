@@ -6,6 +6,10 @@
 #include <string>
 #include <vector>
 
+/* False for syntax-only tools (for example formatter validation) that must
+ * not resolve or load imported packages. */
+extern thread_local bool g_resolve_imported_macros;
+
 /* Names written as `#name` in a template body are encoded as ordinary NAME
  * tokens with this non-lexable prefix.  This lets every existing grammar slot
  * that accepts an identifier accept a placeholder without duplicating rules. */
@@ -40,6 +44,16 @@ void user_macros_reset();
 void user_macros_push();
 void user_macros_pop();
 void user_macros_set_template_mode(bool enabled);
+
+/* Cross-package macro exports.  The export key is the canonical source path
+ * of the package being parsed; it is set only for the nested parse that reads
+ * exported templates, never for ordinary evaluation. */
+void user_macros_set_export_key(const char *key);
+std::string user_macros_export_key();
+void user_macros_clear_exports();
+bool user_macros_has_exports(const char *key);
+bool user_macro_import_exported(const char *key, const char *name,
+                                const char *alias, int line, int column);
 
 /* Implemented by the parser, which owns the parameter list of the macro
  * declaration currently being parsed.  The lexer uses it to distinguish a

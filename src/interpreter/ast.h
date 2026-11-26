@@ -570,6 +570,9 @@ struct package_node {
 struct import_selection {
     char *name;
     char *alias;
+    /* Macro selections are bound at parse time and never reach value/type
+     * import paths or bytecode. */
+    bool is_macro;
     struct import_selection *next;
 };
 
@@ -701,6 +704,7 @@ struct ast *newdefer(struct ast *value);
 struct ast *newpackage(char *name, struct ast *body);
 struct ast *newimport(char *path, char *alias);
 struct import_selection *newimport_selection(char *name, char *alias);
+struct import_selection *newmacroimport_selection(char *name, char *alias);
 struct import_selection *append_import_selection(struct import_selection *head,
                                                  struct import_selection *tail);
 void free_import_selections(struct import_selection *selection);

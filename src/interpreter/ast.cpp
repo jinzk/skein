@@ -991,7 +991,14 @@ struct import_selection *newimport_selection(char *name, char *alias) {
     }
     selection->name = name;
     selection->alias = alias;
+    selection->is_macro = false;
     selection->next = NULL;
+    return selection;
+}
+
+struct import_selection *newmacroimport_selection(char *name, char *alias) {
+    struct import_selection *selection = newimport_selection(name, alias);
+    selection->is_macro = true;
     return selection;
 }
 

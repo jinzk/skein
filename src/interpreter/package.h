@@ -51,6 +51,12 @@ bool evaluate_include_source(const char *path, std::string &error);
  * This never downloads or evaluates the module. */
 bool package_validate_external_import(const char *path, std::string &error);
 
+/* Parse a package's source in macro-only mode to populate the exported user
+ * macro table.  No package code is evaluated.  `key_out` receives the stable
+ * export key used for later macro imports. */
+bool package_load_exported_macros(const char *path, const char *base_dir,
+                                  std::string *key_out, std::string &error);
+
 /* Resolve the package-cache key used by package_import for a transferable
  * import.  Returns false for native modules and std submodules, which do not
  * use the package cache. */

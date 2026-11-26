@@ -120,10 +120,10 @@ name!(recover!())
 `(foo!(x)).y`；`foo! [1, 2]` 解析为 `(foo!())[1, 2]`（裸列表参数不支持）；
 `foo! { ... }` 始终是 block，不能当 dict。
 
-### 3.4 跨包导入（值/类型已实现，宏待实现）
+### 3.4 跨包导入（值/类型与宏均已实现）
 
-值/类型的 selective import 已落地；跨包宏导入仍属后续阶段。跨包阶段不引入
-独立的 `use` 关键字，而是复用同一形式：
+值/类型与宏的 selective import 都已落地。跨包阶段不引入独立的 `use` 关键字，
+而是复用同一形式：
 
 ```text
 import {retry} from util;
@@ -148,6 +148,15 @@ import {retry! as r} from util;   // 调用时写 r!(...)
 值命名空间中的 `retry`，`import {retry!} from util;` 只导入宏命名空间中的
 `retry`，互不影响。selective import 不会绑定 `util` 包本身；如需写
 `util.retry(...)`，仍要另外写 `import util;`。
+
+实现上，宏 import 在语法分析阶段绑定：解析到 `import {name!} from pkg;` 时会以
+**parse-only** 方式读取被导入包的源码，只收集 `export macro` 模板，不执行任何
+包代码、不构建值命名空间。导出模板会携带定义点可见的宏表快照，因此模板内部
+调用的辅助宏（包括该包自己导入的宏）会随之迁移；宏依赖图必须无环，跨包循环
+导入会被拒绝。宏选择项不会进入值/类型绑定或 bytecode。syntax-only 工具
+（`skein fmt` 的语法校验）不做包解析，因此不会因找不到包而误报。
+当前支持普通包、相对包、项目根包与内嵌标准库包；引号形式的外部 module 宏导入
+明确报错，后续再与 manifest 一起扩展。
 
 `from` 必须是 **contextual keyword**，不是全局保留字。当前 `from` 已被普通
 标识符大量使用，例如 `std.path.relative(from, to)` 和 `std.graph` 的 `from`
@@ -204,18 +213,17 @@ Parser 维护一个 `MacroTable`，键为宏名，值为已验证的 `MacroTempl
 
 ### 4.2 可见性
 
-v1 只支持同文件、声明先于使用：
+同文件 v1 与跨包阶段都遵守声明先于使用：
 
-- 宏声明之后的代码可以调用；
-- 声明之前的代码不能调用；
-- import / export 宏、包级宏、跨模块宏都明确不支持；
-- 同文件用户宏可以遮蔽内置宏裸名（以第 3.5 节为准）；规范路径仍解析到内置
-  宏，不受遮蔽影响；
-- 同文件重复定义同一宏名仍报错。
+- 宏声明之后的代码可以调用；声明之前的代码不能调用；
+- 跨包宏通过 `export macro` / `import {name!} from pkg;` 按第 3.4 节显式导入；
+- 同文件用户宏与显式导入宏可以遮蔽内置宏裸名（以第 3.5 节为准）；规范路径仍
+  解析到内置宏，不受遮蔽影响；本地绑定优先于显式导入；
+- 同文件重复定义同一宏名仍报错；同一选择列表里同名的 `foo` 与 `foo!` 属于
+  不同命名空间，不冲突。
 
-跨包阶段按第 3.4 节推进：值/类型的 selective import 已完成，下一步再支持
-`export macro` 与 `import {name!} from pkg;`。宏依赖图必须无环，且只读取
-导出宏的源码模板，不执行包代码；这部分不纳入 v1。
+跨包宏依赖图必须无环，且只读取导出宏的源码模板，不执行包代码；check-only
+工具同样只在语法层校验宏调用，不执行被导入的包。
 
 ### 4.3 模板 AST
 
@@ -354,7 +362,7 @@ wrap!(2) {
 | P1（已完成） | `protocol` → `proto` 实现落地；值/类型的 selective import | 已消除文档漂移；selective import 是宏 import 的前置 |
 | P2（已完成） | 普通内置函数默认 import；内置宏默认绑定与 `fail!` / `recover!` / `pass!` / `wait!`；`list` / `dict` 默认 import | 一次性移除大量保留名，并为宏表和类型构造器统一打底 |
 | P3（已完成） | `launch` / `await` 表达式起始 contextual | 依赖 `wait!`；保住“启动并立即等待”的写法，退出 `wait` 保留字 |
-| P4（同文件 v1 已完成） | 用户宏 v1：`expr` / `ident` / 尾部 `expr...` / 尾部 `block` | 复用 P2 建立的宏分发路径与调用简写；跨包阶段单独推进 |
+| P4（已完成） | 用户宏 v1：`expr` / `ident` / 尾部 `expr...` / 尾部 `block`；跨包 `export macro` / `import {name!}` | 复用 P2 建立的宏分发路径与调用简写；宏依赖图保持无环 |
 | P5 | `on` / `error`、`as`、`ref` / `weak`、`is` | 高风险 contextual，冲突面大，必须各自独立 |
 
 具体顺序：
@@ -386,8 +394,9 @@ wrap!(2) {
 7. **P4（已完成）**：`macro` 声明语法、签名校验、同文件宏表、未知宏诊断，以及
    `expr` / `ident` / 尾部 `expr...` / 尾部 `block` 四种片段的完整 v1 展开；
    hygiene、块函数上下文、嵌套调用与递归禁止均已落地。
-8. **P4.3（后续）**：`export macro` 与 `import {name!} from pkg;`；跨包 hygiene、
-   循环检测和完整测试矩阵。
+8. **P4.3（已完成）**：`export macro` 与 `import {name!} from pkg;`（含 alias）、
+   宏与值/类型命名空间的隔离、定义点宏表快照、跨包 hygiene、循环检测、
+   parse-only 包读取和完整测试矩阵；引号形式的外部 module 宏导入暂不支持。
 9. **P5.1**：`on` / `error` 评估 handler-scoped contextual；`error!` 改为普通
     `NAME MACRO_BANG` 路径，`type error` 走类型命名空间，`.error` 仍是普通字段；
    保留 `%prec ON`，补齐 handler body / defer / 默认参数诊断。

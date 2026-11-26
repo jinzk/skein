@@ -2,6 +2,7 @@
 
 #include "ast.h"
 #include "builtin_ids.h"
+#include "user_macros.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -433,6 +434,12 @@ struct ast *expand_builtin_macro(struct ast *callee, struct ast *args,
     if (name == "std.task.wait")
         return wait_macro(args, block, arg_count, line, column);
 
+    /* Syntax-only tools skip macro resolution, so an imported macro is not
+     * bound yet.  Keep the call as a deferred node instead of reporting a
+     * false unknown-macro diagnostic. */
+    if (!g_resolve_imported_macros)
+        return new_user_macro_call(newref(copy_text(name.c_str())), args,
+                                   block, line, column, is_generator);
     return fail_expansion(name.c_str(),
                           "is not a known built-in or user-defined macro", NULL,
                           args, block);

@@ -4,6 +4,7 @@
 #include "macros.h"
 #include "structeval.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -11,6 +12,8 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+
+thread_local bool g_resolve_imported_macros = true;
 
 namespace {
 
@@ -20,10 +23,26 @@ constexpr std::size_t kExpandPrefixLen = sizeof(USER_MACRO_EXPAND_PREFIX) - 1;
 struct macro_entry {
     std::string name;
     user_macro_template body;
+    /* Imported bindings are lower priority than same-file definitions. */
+    bool imported = false;
+};
+
+/* An exported template carries the macro table visible at its definition
+ * point.  Calls inside an exported template resolve against that snapshot
+ * when the template is imported, so helpers from the defining package (and
+ * macros that package imported itself) travel with the export. */
+struct exported_macro_entry {
+    user_macro_template body;
+    std::vector<user_macro_template> env;
 };
 
 thread_local std::vector<macro_entry> g_macros;
 thread_local std::vector<std::vector<macro_entry>> g_saved_macros;
+thread_local std::unordered_map<std::string,
+                                std::unordered_map<std::string,
+                                                   exported_macro_entry>>
+    g_exported_macros;
+thread_local std::string g_export_key;
 thread_local bool g_template_mode = false;
 thread_local int g_next_expansion_id = 1;
 thread_local int g_expansion_depth = 0;
@@ -1220,6 +1239,27 @@ bool macro_reaches(macro_entry *entry, const std::string &target,
     return false;
 }
 
+/* `self` can differ from entry->name for imported macros: a template keeps
+ * the defining package's names while the local binding uses an alias. */
+bool check_macro_cycle(const macro_entry &entry, const std::string &self,
+                       int line, int column) {
+    std::vector<std::string> calls;
+    collect_macro_calls(entry.body.body, calls);
+    std::unordered_set<std::string> visited;
+    for (const std::string &call : calls) {
+        if (call == entry.name)
+            continue;
+        if (call == self ||
+            macro_reaches(find_macro(call.c_str()), entry.name, visited) ||
+            macro_reaches(find_macro(call.c_str()), self, visited)) {
+            report_at(line, column,
+                      "recursive user macro calls are not allowed");
+            return false;
+        }
+    }
+    return true;
+}
+
 bool is_bare_name(const struct ast *callee, std::string *name) {
     if (!callee || callee->nodetype != 'N')
         return false;
@@ -1434,6 +1474,67 @@ void user_macros_set_template_mode(bool enabled) {
     g_template_mode = enabled;
 }
 
+void user_macros_set_export_key(const char *key) {
+    g_export_key = key ? key : "";
+}
+
+std::string user_macros_export_key() {
+    return g_export_key;
+}
+
+void user_macros_clear_exports() {
+    g_exported_macros.clear();
+    g_export_key.clear();
+}
+
+bool user_macros_has_exports(const char *key) {
+    return key && g_exported_macros.count(key) != 0;
+}
+
+bool user_macro_import_exported(const char *key, const char *name,
+                                const char *alias, int line, int column) {
+    if (!key || !name)
+        return false;
+    auto package = g_exported_macros.find(key);
+    if (package == g_exported_macros.end()) {
+        report_at(line, column, "package has no macro exports", key);
+        return false;
+    }
+    auto found = package->second.find(name);
+    if (found == package->second.end()) {
+        report_at(line, column, "macro not exported by package", name);
+        return false;
+    }
+
+    const exported_macro_entry &exported = found->second;
+    /* Helpers visible at the definition point travel with the template.  A
+     * macro already bound locally keeps its binding (local > imported). */
+    for (const user_macro_template &helper : exported.env) {
+        if (find_macro(helper.name.c_str()))
+            continue;
+        macro_entry entry;
+        entry.name = helper.name;
+        entry.body = helper;
+        entry.imported = true;
+        if (!check_macro_cycle(entry, helper.name, line, column))
+            return false;
+        g_macros.push_back(std::move(entry));
+    }
+
+    const char *binding = alias && *alias ? alias : name;
+    if (find_macro(binding))
+        return true;
+    macro_entry imported;
+    imported.name = binding;
+    imported.body = exported.body;
+    imported.imported = true;
+    if (!check_macro_cycle(imported, binding, line, column))
+        return false;
+    imported.body.name = binding;
+    g_macros.push_back(std::move(imported));
+    return true;
+}
+
 bool user_macro_define(const char *name,
                        const std::vector<user_macro_param> &params,
                        struct ast *body, int line, int column) {
@@ -1442,7 +1543,8 @@ bool user_macro_define(const char *name,
         treefree(body);
         return false;
     }
-    if (find_macro(name)) {
+    macro_entry *existing = find_macro(name);
+    if (existing && !existing->imported) {
         report_at(line, column, "duplicate macro definition", name);
         treefree(body);
         return false;
@@ -1527,10 +1629,27 @@ bool user_macro_define(const char *name,
         }
     }
 
+    /* A same-file definition overrides any imported binding of the same name. */
+    g_macros.erase(std::remove_if(g_macros.begin(), g_macros.end(),
+                                  [&](const macro_entry &candidate) {
+                                      return candidate.imported &&
+                                             candidate.name == name;
+                                  }),
+                   g_macros.end());
     macro_entry entry;
     entry.name = name;
-    entry.body = std::move(macro);
+    entry.body = macro;
     g_macros.push_back(std::move(entry));
+
+    if (!g_export_key.empty()) {
+        exported_macro_entry exported;
+        exported.body = std::move(macro);
+        for (const macro_entry &visible : g_macros) {
+            if (visible.name != name)
+                exported.env.push_back(visible.body);
+        }
+        g_exported_macros[g_export_key][name] = std::move(exported);
+    }
     return true;
 }
 

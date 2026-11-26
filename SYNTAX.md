@@ -839,6 +839,9 @@ capture! { statements }
 内置宏裸名（`info!` / `capture!` / `fail!` / `wait!` 等）也按默认 import 处理：
 它们是解析期别名，规范路径为 `std.log.*!`、`std.result.capture!`、`std.error.*!`、
 `std.task.wait!`、`std.assert.*!`；规范路径始终可以显式调用，用户宏只遮蔽裸名。
+用户宏可用 `export macro name(params) { ... }` 导出，再用
+`import {name! [as alias]} from pkg;` 跨包导入；宏导入在解析期绑定，只读取导出
+模板、不执行包代码，且与值/类型选择项互不冲突。
 
 ## 5. 语句
 
@@ -2786,6 +2789,8 @@ import {Point, make} from @top.shapes;  // 值和导出类型都可选择
 import {parse} from .jsonutil;
 import {parse} from ..common;
 import {parse} from "github.com/acme/util/json";
+import {retry!} from util;              // 只导入宏 retry
+import {retry! as r} from util;        // 宏别名 r，调用时写 r!(...)
 ```
 
 - `import aa.bb.cc;` 绑定最后一个包名 `cc`；
@@ -2810,6 +2815,12 @@ import {parse} from "github.com/acme/util/json";
   `pkg` 本身；需要 `pkg.name` 写法时仍要另写 `import pkg;`。
 - 选择项可以写 `name as alias`；alias 是普通标识符，不能重复。
 - 选择列表至少一项；重复名字、重复 alias、找不到导出名都会报错。
+- `import {name!} from pkg;` 只导入该包用 `export macro` 发布的宏，可写
+  `name! as alias` 后用 `alias!(...)` 调用。宏选择项不进入值/类型绑定或 bytecode，
+  与同名的值选择项互不冲突；同一选择列表里 `name` 与 `name!` 不重复。
+- 宏导入在解析期以 parse-only 方式读取包源码，不执行包代码；包内辅助宏随导出模板
+  迁移，循环宏依赖会报错。外部 module 的引号路径暂不支持宏导入。syntax-only 工具
+  不会执行或解析宏导入包。
 - `from` 只在 `import { ... }` 之后、`importref` 之前是 contextual keyword；
   其他位置仍是普通标识符或字段名，例如 `let from = 7;`、
   `std.path.relative(from, to)`。

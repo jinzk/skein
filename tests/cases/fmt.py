@@ -275,3 +275,31 @@ def run_cases():
         )
     finally:
         os.unlink(user_macro_path)
+
+    macro_import_source = (
+        "export macro twice(x:expr){#x*2;}\n"
+        "import {twice! as t} from util;\n"
+        "func f(){return t!(1);}\n"
+    )
+    macro_import_expected = (
+        "export macro twice(x: expr) { #x * 2; }\n"
+        "import {twice! as t} from util;\n"
+        "func f() { return t!(1); }\n"
+    )
+    macro_import_path = write_temp(macro_import_source)
+    try:
+        formatted = run_fmt(macro_import_path)
+        assert formatted.returncode == 0, decode(formatted.stderr)
+        assert decode(formatted.stdout) == macro_import_expected, decode(
+            formatted.stdout
+        )
+
+        second = run_fmt("-", stdin=formatted.stdout)
+        assert second.returncode == 0, decode(second.stderr)
+        assert second.stdout == formatted.stdout, (
+            "fmt must be idempotent for exported/imported macros\n"
+            f"first:\n{decode(formatted.stdout)}\n"
+            f"second:\n{decode(second.stdout)}"
+        )
+    finally:
+        os.unlink(macro_import_path)

@@ -360,6 +360,7 @@ std::string read_ident(const std::string &text, std::size_t &pos) {
 struct selective_import_binding {
     std::string alias;
     std::string target;
+    bool is_macro = false;
 };
 
 /* Find the '}' matching the '{' at `open`; returns text.size() when
@@ -425,6 +426,12 @@ collect_selective_imports(const std::string &text) {
                             continue;
                         }
                         item = skip_space(text, item);
+                        bool is_macro = false;
+                        if (item < close && text[item] == '!') {
+                            is_macro = true;
+                            ++item;
+                            item = skip_space(text, item);
+                        }
                         std::string alias = name;
                         if (text.compare(item, 2, "as") == 0 &&
                             (item + 2 == text.size() ||
@@ -435,7 +442,7 @@ collect_selective_imports(const std::string &text) {
                             if (!read.empty())
                                 alias = read;
                         }
-                        current.push_back({alias, name});
+                        current.push_back({alias, name, is_macro});
                         while (item < close && text[item] != ',')
                             ++item;
                         if (item < close)
@@ -986,7 +993,7 @@ private:
          * placeholder binding recorded by the checker. */
         for (const selective_import_binding &binding :
              collect_selective_imports(document.text)) {
-            if (binding.alias != word)
+            if (binding.is_macro || binding.alias != word)
                 continue;
             auto std_it = std_index_.find(binding.target);
             if (std_it != std_index_.end())
@@ -1053,6 +1060,8 @@ private:
             completion::add_keywords(candidates);
             for (const selective_import_binding &binding :
                  collect_selective_imports(document->text)) {
+                if (binding.is_macro)
+                    continue;
                 std::string detail = "selective import";
                 auto std_it = std_index_.find(binding.target);
                 if (std_it != std_index_.end())
@@ -1303,7 +1312,7 @@ private:
         if (qualifier.empty()) {
             for (const selective_import_binding &binding :
                  collect_selective_imports(document->text)) {
-                if (binding.alias != word)
+                if (binding.is_macro || binding.alias != word)
                     continue;
                 for (const index_entry &entry : index_.lookup(binding.target)) {
                     const lsp_position start{entry.line, entry.character};

@@ -466,6 +466,7 @@ int main(int argc, char **argv) {
     for (;;) {
         g_interrupted = 0;
         user_macros_reset();
+        user_macros_clear_exports();
         status = yyparse();
 
         if (!g_interrupted || g_stdin_eof)

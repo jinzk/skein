@@ -14,6 +14,9 @@ struct analysis_options {
     skein::typecheck::Mode typecheck_mode = skein::typecheck::Mode::Warn;
     bool keep_going = true;
     bool suppress_text = false;
+    /* Syntax-only callers can disable imported macro resolution so they never
+     * touch package files. */
+    bool resolve_macros = true;
 };
 
 struct analysis_symbol {

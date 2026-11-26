@@ -22,6 +22,7 @@
 #include "symbol.h"
 #include "typecheck.h"
 #include "unicode_ident.h"
+#include "user_macros.h"
 #include "valuetype.h"
 
 #include "std_fsm_source.inc"
@@ -64,6 +65,7 @@ extern int yynerrs;
 void parser_begin_nested_parse();
 void parser_end_nested_parse();
 extern thread_local bool g_include_collect;
+extern thread_local bool g_macro_only_parse;
 extern thread_local bool g_include_invalid;
 extern thread_local std::vector<struct ast *> g_include_statements;
 extern thread_local int g_include_function_depth;
@@ -1775,6 +1777,158 @@ bool parse_package_source(const std::string &source_text,
     return true;
 }
 
+thread_local std::vector<std::string> macro_loading_keys;
+
+/* Parse a package purely to collect `export macro` templates.  Unlike
+ * parse_package_source, no statement is evaluated and no namespace is built. */
+bool parse_package_macros(const std::string &source_text,
+                          const std::string &source_name,
+                          const std::string &package_name,
+                          const std::string &module_name,
+                          const std::string &base_dir, const std::string &key,
+                          std::string &error) {
+    skein::typecheck::suppress_scope typecheck_scope(true);
+    std::lock_guard<std::recursive_timed_mutex> parse_gate(
+        package_parse_gate());
+    std::lock_guard<std::recursive_mutex> parse_lock(parser_mutex());
+    parser_lock_depth_guard depth_guard;
+
+    int saved_char = yychar;
+    YYSTYPE saved_lval = yylval;
+    int saved_errs = yynerrs;
+    FILE *saved_yyin = yyin;
+    int saved_indent = indent_count;
+    scanner_checkpoint *scan_cp = scanner_checkpoint_save();
+    diag_source_checkpoint diag_cp;
+    diag_save_source(diag_cp);
+
+    bool saved_interactive = g_interactive;
+    bool saved_invalid = g_statement_invalid;
+    bool saved_macro_only = g_macro_only_parse;
+    bool saved_include_collect = g_include_collect;
+    int saved_include_depth = g_include_function_depth;
+    int saved_runtime_errors = active_eval_context().runtime_error_count;
+    int errors_before = diag_error_count();
+    std::string saved_import_base = import_base;
+    std::string saved_export_key = user_macros_export_key();
+
+    macro_loading_keys.push_back(key);
+    g_macro_only_parse = true;
+    g_include_collect = false;
+    g_include_function_depth = 0;
+    g_interactive = false;
+    g_statement_invalid = false;
+    if (!base_dir.empty() && base_dir != import_base)
+        import_base = normalize_dir(base_dir);
+    ++g_package_loading;
+    parser_begin_nested_parse();
+    user_macros_set_export_key(key.c_str());
+    indent_count = 0;
+    reset_scanner_state_memory(source_text.data(), source_text.size());
+    diag_start_source();
+    diag_set_source_name(source_name);
+    diag_set_package_name(package_name);
+    diag_set_module_name(module_name);
+
+    int status = yyparse();
+
+    user_macros_set_export_key(saved_export_key.empty()
+                                   ? NULL
+                                   : saved_export_key.c_str());
+    parser_end_nested_parse();
+    --g_package_loading;
+    macro_loading_keys.pop_back();
+    g_macro_only_parse = saved_macro_only;
+    g_include_collect = saved_include_collect;
+    g_include_function_depth = saved_include_depth;
+    indent_count = saved_indent;
+    yyin = saved_yyin;
+    import_base = saved_import_base;
+    g_interactive = saved_interactive;
+    g_statement_invalid = saved_invalid;
+    active_eval_context().runtime_error_count = saved_runtime_errors;
+    scanner_checkpoint_restore(scan_cp);
+    diag_restore_source(diag_cp);
+    restore_parser_globals(saved_char, saved_lval, saved_errs);
+
+    if (status != 0 || diag_error_count() != errors_before) {
+        if (error.empty())
+            error = "failed to parse macro exports from " + source_name;
+        return false;
+    }
+    return true;
+}
+
+bool resolve_macro_export_source(const char *path, const char *base_dir,
+                                 std::string &source, std::string &source_name,
+                                 std::string &key, std::string &package_name,
+                                 std::string &module_name,
+                                 std::string &error) {
+    if (!path || !*path) {
+        error = "empty macro import path";
+        return false;
+    }
+    if (path[0] == '\x02') {
+        error = "macro import from external modules is not supported";
+        return false;
+    }
+    import_spec spec;
+    if (!parse_import_spec(path, spec, error))
+        return false;
+
+    if (spec.kind == IMPORT_ABSOLUTE) {
+        if (const char *embedded = find_embedded_source(spec.dotted)) {
+            key = "builtin:" + spec.dotted;
+            source = embedded;
+            source_name = "<" + spec.dotted + ">";
+            package_name = spec.dotted;
+            module_name.clear();
+            return true;
+        }
+    }
+
+    fs::path base;
+    if (spec.kind == IMPORT_PROJECT) {
+        base = ensure_project_root();
+    } else if (spec.kind == IMPORT_RELATIVE) {
+        std::string lexical_base =
+            (base_dir && *base_dir) ? base_dir : import_base;
+        if (lexical_base.empty()) {
+            error = "no base directory for relative macro import";
+            return false;
+        }
+        base = path_from_utf8(lexical_base);
+        for (int i = 0; i < spec.up_levels; ++i) {
+            fs::path parent = base.parent_path();
+            if (parent.empty() || parent == base) {
+                error = "relative macro import escapes filesystem root";
+                return false;
+            }
+            base = parent;
+        }
+        if (!relative_import_allowed(base, error))
+            return false;
+    } else {
+        base = main_directory;
+    }
+
+    resolved_package resolved;
+    if (!resolve_package_at(base, spec.dotted, resolved, error))
+        return false;
+    if (!finalize_package_identity(resolved, error))
+        return false;
+
+    key = resolved.key;
+    source_name = path_to_utf8(resolved.file);
+    package_name = resolved.package;
+    module_name = resolved.module;
+    if (!load_source_file(source_name, source_encoding_get(), source, error)) {
+        error = "cannot load macro package " + source_name + ": " + error;
+        return false;
+    }
+    return true;
+}
+
 bool parse_worker_source_impl(const std::string &path, std::string &error) {
     std::unique_lock<std::recursive_timed_mutex> parse_gate(
         package_parse_gate(), std::defer_lock);
@@ -1884,6 +2038,31 @@ value_t *import_embedded_package(const std::string &dotted,
 }
 
 } // namespace
+
+bool package_load_exported_macros(const char *path, const char *base_dir,
+                                  std::string *key_out, std::string &error) {
+    std::string source;
+    std::string source_name;
+    std::string key;
+    std::string package_name;
+    std::string module_name;
+    if (!resolve_macro_export_source(path, base_dir, source, source_name, key,
+                                     package_name, module_name, error))
+        return false;
+    if (key_out)
+        *key_out = key;
+    if (std::find(macro_loading_keys.begin(), macro_loading_keys.end(), key) !=
+        macro_loading_keys.end()) {
+        error = "cyclic macro import: " + key;
+        return false;
+    }
+    if (user_macros_has_exports(key.c_str()))
+        return true;
+    if (!parse_package_macros(source, source_name, package_name, module_name,
+                              base_dir ? base_dir : "", key, error))
+        return false;
+    return true;
+}
 
 bool package_validate_external_import(const char *path, std::string &error) {
     if (!path || path[0] != '\x02')

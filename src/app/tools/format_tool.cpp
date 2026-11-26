@@ -115,6 +115,7 @@ bool validate_source(const std::string &formatted, const std::string &path,
     analysis.typecheck_mode = skein::typecheck::Mode::Off;
     analysis.keep_going = true;
     analysis.suppress_text = true;
+    analysis.resolve_macros = false;
 
     analysis_result result = analyze_source_text(formatted, analysis);
     if (result.error_count == 0)

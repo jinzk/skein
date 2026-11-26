@@ -148,7 +148,10 @@ analysis_result analyze_source_text(const std::string &source,
     initscope();
     reset_scanner_state_memory(source.data(), source.size());
     user_macros_reset();
+    user_macros_clear_exports();
     user_macros_set_template_mode(false);
+    const bool saved_resolve_macros = g_resolve_imported_macros;
+    g_resolve_imported_macros = options.resolve_macros;
 
     diag_collect_begin(options.suppress_text);
     {
@@ -156,6 +159,7 @@ analysis_result analyze_source_text(const std::string &source,
         yyparse();
     }
     result.diagnostics = diag_collect_end();
+    g_resolve_imported_macros = saved_resolve_macros;
     result.error_count = diag_error_count() > 0 ? 1 : 0;
     collect_visible_symbols(options.source_name, context.scopes,
                             result.symbols);

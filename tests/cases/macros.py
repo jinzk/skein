@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """Tests for built-in AST macros."""
 
-from harness import check, run, run_skein
+import os
+import subprocess
+import tempfile
+
+from harness import BIN, check, run, run_file, run_skein
 
 
 def run_cases():
@@ -296,3 +300,139 @@ def run_cases():
         'println(str(plus_one! x));\n',
         stdout="6",
     )
+
+    # Cross-package user macros (P4.3).
+    with tempfile.TemporaryDirectory() as tmp:
+        def write(rel, text):
+            path = os.path.join(tmp, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8", newline="\n") as handle:
+                handle.write(text)
+            return path
+
+        def run_main(source):
+            return run_file(write("main.skein", source))
+
+        write("util.skein",
+              'println("UTIL RAN");\n'
+              'package util {\n'
+              '  export func twice() { return 7; }\n'
+              '  export macro twice(x: expr) { #x * 2; }\n'
+              '  macro scale(x: expr) { #x * 3; }\n'
+              '  export macro triple(x: expr) { scale!(#x); }\n'
+              '  export macro wrap2(value: expr, body: block) {\n'
+              '    let tmp = #value;\n'
+              '    #body\n'
+              '    return tmp;\n'
+              '  }\n'
+              '}\n')
+
+        proc = run_main(
+            'import {twice, twice! as t} from util;\n'
+            'func test(): int { return t!(21) + twice(); }\n'
+            'println(str(test()));\n')
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout.splitlines() == ["UTIL RAN", "49"], proc.stdout
+
+        proc = run_main(
+            'import {triple!} from util;\n'
+            'func test(): int { return triple!(7); }\n'
+            'println(str(test()));\n')
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout.splitlines() == ["21"], proc.stdout
+
+        proc = run_main(
+            'import {wrap2!} from util;\n'
+            'func test(): int {\n'
+            '  let tmp = 100;\n'
+            '  return wrap2!(1 + 2) { tmp = 999; };\n'
+            '}\n'
+            'println(str(test()));\n')
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout.splitlines() == ["3"], proc.stdout
+
+        write("helpers.skein",
+              'package helpers {\n'
+              '  export macro scale(x: expr) { #x * 3; }\n'
+              '}\n')
+        write("chain.skein",
+              'package chain {\n'
+              '  import {scale!} from helpers;\n'
+              '  export macro six(x: expr) { scale!(#x) * 2; }\n'
+              '}\n')
+        proc = run_main(
+            'import {six!} from chain;\n'
+            'func test(): int { return six!(7); }\n'
+            'println(str(test()));\n')
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout.splitlines() == ["42"], proc.stdout
+
+        proc = run_main('import {missing!} from util;\nprintln(1);\n')
+        assert proc.returncode != 0, proc.stdout
+        assert "macro not exported by package: missing" in proc.stderr, \
+            proc.stderr
+
+        write("a.skein",
+              'package a {\n'
+              '  import {bm!} from b;\n'
+              '  export macro am(x: expr) { bm!(#x); }\n'
+              '}\n')
+        write("b.skein",
+              'package b {\n'
+              '  import {am!} from a;\n'
+              '  export macro bm(x: expr) { am!(#x); }\n'
+              '}\n')
+        proc = run_main('import {am!} from a;\nprintln(1);\n')
+        assert proc.returncode != 0, proc.stdout
+        assert "cyclic macro import" in proc.stderr, proc.stderr
+
+        write("a2.skein",
+              'package a2 {\n'
+              '  export macro am(x: expr) { #x; }\n'
+              '  import {bm!} from b2;\n'
+              '}\n')
+        write("b2.skein",
+              'package b2 {\n'
+              '  import {am!} from a2;\n'
+              '  export macro bm(x: expr) { am!(#x); }\n'
+              '}\n')
+        proc = run_main('import {am!} from a2;\nprintln(1);\n')
+        assert proc.returncode != 0, proc.stdout
+        assert "cyclic macro import" in proc.stderr, proc.stderr
+
+        proc = run_main(
+            'import {twice!} from util;\n'
+            'macro twice(x: expr) { #x * 3; }\n'
+            'func test(): int { return twice!(7); }\n'
+            'println(str(test()));\n')
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout.splitlines() == ["21"], proc.stdout
+
+        proc = run_main(
+            'import {twice!, twice! as twice} from util;\nprintln(1);\n')
+        assert proc.returncode != 0, proc.stdout
+        assert "duplicate import alias" in proc.stderr, proc.stderr
+
+        write("shadow.skein",
+              'package shadow {\n'
+              '  export macro info(x: expr) { #x + 1; }\n'
+              '}\n')
+        proc = run_main(
+            'import std;\n'
+            'std.log.set_level("error");\n'
+            'import {info!} from shadow;\n'
+            'println(str(info!(1)));\n'
+            'std.log.info!("bad");\n')
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout.splitlines() == ["2"], proc.stdout
+        assert proc.stderr == "", proc.stderr
+
+        main_path = write(
+            "lint_main.skein",
+            'import {twice!} from util;\n'
+            'func test(): int { return twice!(21); }\n')
+        proc = subprocess.run(
+            [BIN, "lint", main_path],
+            capture_output=True, text=True, encoding="utf-8", timeout=30)
+        assert proc.returncode == 0, proc.stderr
+        assert "UTIL RAN" not in proc.stdout + proc.stderr, proc.stderr

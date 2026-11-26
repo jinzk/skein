@@ -37,6 +37,7 @@ extern int yyparse();
 extern void skein_lexer_finish_do_expression();
 
 thread_local bool g_include_collect = false;
+thread_local bool g_macro_only_parse = false;
 thread_local bool g_include_invalid = false;
 thread_local std::vector<struct ast *> g_include_statements;
 thread_local int g_include_function_depth = 0;
@@ -251,16 +252,75 @@ static void finish_macro_decl(struct ast *body) {
     g_macro_params.clear();
 }
 
+static std::string import_selection_key(bool is_macro, const char *name) {
+    return std::string(is_macro ? "macro:" : "value:") + (name ? name : "");
+}
+
 static void validate_import_selections(const struct import_selection *list) {
     std::unordered_set<std::string> names;
     std::unordered_set<std::string> aliases;
     for (const struct import_selection *sel = list; sel; sel = sel->next) {
-        if (!names.insert(sel->name ? sel->name : "").second)
+        const std::string name =
+            import_selection_key(sel->is_macro, sel->name);
+        if (!names.insert(name).second)
             yyerror("duplicate import name: %s", sel->name ? sel->name : "");
         const char *alias = sel->alias ? sel->alias : sel->name;
-        if (!aliases.insert(alias ? alias : "").second)
+        const std::string binding = import_selection_key(sel->is_macro, alias);
+        if (!aliases.insert(binding).second)
             yyerror("duplicate import alias: %s", alias ? alias : "");
     }
+}
+
+/* Macro calls are expanded in grammar actions, so macro bindings must be
+ * installed while parsing, before later statements are reduced. */
+static void bind_imported_macros(char *path,
+                                 const struct import_selection *list,
+                                 int line, int column) {
+    if (!g_resolve_imported_macros)
+        return;
+    bool loaded = false;
+    std::string key;
+    for (const struct import_selection *sel = list; sel; sel = sel->next) {
+        if (!sel->is_macro)
+            continue;
+        if (!loaded) {
+            std::string error;
+            const std::string base = package_current_import_base();
+            if (!package_load_exported_macros(path, base.c_str(), &key,
+                                              error)) {
+                yyerror("macro import: %s", error.c_str());
+                return;
+            }
+            loaded = true;
+        }
+        const char *alias = sel->alias ? sel->alias : sel->name;
+        user_macro_import_exported(key.c_str(), sel->name, alias, line,
+                                   column);
+    }
+}
+
+/* Macro selections never become value/type bindings or bytecode. */
+static struct import_selection *
+filter_value_selections(struct import_selection *list) {
+    struct import_selection *head = NULL;
+    struct import_selection *tail = NULL;
+    while (list) {
+        struct import_selection *next = list->next;
+        if (list->is_macro) {
+            std::free(list->name);
+            std::free(list->alias);
+            std::free(list);
+        } else {
+            list->next = NULL;
+            if (head)
+                tail->next = list;
+            else
+                head = list;
+            tail = list;
+        }
+        list = next;
+    }
+    return head;
 }
 
 static char *join_import_path(const char *left, const char *right) {
@@ -1514,11 +1574,18 @@ macro_decl_start: MACRO NAME {
       }
     ;
 
-macro_decl: macro_decl_start '(' macro_params ')' '{' macro_template_start macro_template_end EMPTY_BLOCK_CLOSE {
+export_macro_decl_start: export_kw MACRO NAME {
+        begin_macro_decl($3, @3.first_line, @3.first_column);
+      }
+    ;
+
+macro_decl_head: macro_decl_start | export_macro_decl_start ;
+
+macro_decl: macro_decl_head '(' macro_params ')' '{' macro_template_start macro_template_end EMPTY_BLOCK_CLOSE {
         $$ = NULL;
         finish_macro_decl(NULL);
       }
-    | macro_decl_start '(' macro_params ')' '{' macro_template_start list macro_template_end '}' {
+    | macro_decl_head '(' macro_params ')' '{' macro_template_start list macro_template_end '}' {
         $$ = NULL;
         finish_macro_decl($7);
       }
@@ -1693,12 +1760,26 @@ stmt: IF HEADER_LPAREN exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, 
       }
     | IMPORT '{' import_names '}' from_kw importref ';' {
         validate_import_selections($3);
-        $$ = newimport_select($6, NULL, $3);
+        bind_imported_macros($6, $3, @1.first_line, @1.first_column);
+        struct import_selection *values = filter_value_selections($3);
+        if (values) {
+            $$ = newimport_select($6, NULL, values);
+        } else {
+            std::free($6);
+            $$ = NULL;
+        }
       }
     | IMPORT '{' import_names '}' from_kw XSTRING ';' {
         validate_import_selections($3);
         char *path = make_external_import_path($6);
-        $$ = newimport_select(path, NULL, $3);
+        bind_imported_macros(path, $3, @1.first_line, @1.first_column);
+        struct import_selection *values = filter_value_selections($3);
+        if (values) {
+            $$ = newimport_select(path, NULL, values);
+        } else {
+            std::free(path);
+            $$ = NULL;
+        }
       }
     | IMPORT '{' EMPTY_DICT_CLOSE from_kw importref ';' {
         std::free($5);
@@ -2261,6 +2342,12 @@ import_name: NAME {
       }
     | NAME AS NAME {
         $$ = newimport_selection($1, $3);
+      }
+    | NAME MACRO_BANG {
+        $$ = newmacroimport_selection($1, NULL);
+      }
+    | NAME MACRO_BANG AS NAME {
+        $$ = newmacroimport_selection($1, $4);
       }
     ;
 
@@ -3178,26 +3265,28 @@ top_statement: top_expression EOL {
                 YYABORT;
         } else {
 
-        note_generic_decl($1);
-        if (!g_statement_invalid && $1 &&
-            !skein::typecheck::check_statement($1))
-            g_statement_invalid = true;
+        if (!g_macro_only_parse) {
+            note_generic_decl($1);
+            if (!g_statement_invalid && $1 &&
+                !skein::typecheck::check_statement($1))
+                g_statement_invalid = true;
 
-        if (g_check_only && $1 &&
-            skein::ast_analysis::ast_is_external_import($1)) {
-            const struct import_node *import =
-                (const struct import_node *)$1;
-            std::string import_error;
-            if (!package_validate_external_import(import->path,
-                                                  import_error)) {
-                diag_set_location($1->line, $1->column);
-                yyerror("%s", import_error.c_str());
+            if (g_check_only && $1 &&
+                skein::ast_analysis::ast_is_external_import($1)) {
+                const struct import_node *import =
+                    (const struct import_node *)$1;
+                std::string import_error;
+                if (!package_validate_external_import(import->path,
+                                                      import_error)) {
+                    diag_set_location($1->line, $1->column);
+                    yyerror("%s", import_error.c_str());
+                }
             }
         }
 
         bool invalid = g_statement_invalid;
         g_statement_invalid = false;
-        bool skip_eval = invalid || sys_exit_requested() ||
+        bool skip_eval = g_macro_only_parse || invalid || sys_exit_requested() ||
                          (!g_interactive && g_script_stop) ||
                          (g_check_only &&
                           (!skein::ast_analysis::ast_is_declaration($1) ||

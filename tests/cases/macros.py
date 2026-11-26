@@ -230,6 +230,39 @@ def run_cases():
         stderr=" INFO  canonical",
     )
     check(
+        "P5.1 error! uses the ordinary macro path and can be shadowed",
+        'import std;\n'
+        'macro error(x: expr) { #x + 100; }\n'
+        'func bare(): int { return error!(1); }\n'
+        'func canonical(): int {\n'
+        '  std.log.set_level("trace");\n'
+        '  std.log.error!("canonical");\n'
+        '  return 7;\n'
+        '}\n'
+        'println(str(bare()));\n'
+        'println(str(canonical()));\n',
+        stdout="101\n7",
+        stderr=" ERROR canonical",
+    )
+    check(
+        "P5.1 on/error are identifiers outside a handler",
+        'import std;\n'
+        'struct Box { on: int; error: int; }\n'
+        'let on = 1;\n'
+        'let error = 2;\n'
+        'let b = Box { on: on, error: error };\n'
+        'func f() { fail "x"; }\n'
+        'println(str(b.on + b.error));\n'
+        'println(str(f() on error(e) { recover on + error; }));\n',
+        stdout="3\n3",
+    )
+    check(
+        "P5.1 error stays in the type namespace",
+        'import std;\n'
+        'let e: error = 1;\n',
+        stderr="variable e expects error, got int",
+    )
+    check(
         "user macro must be declared before use",
         'func test(): int { return later!(1); }\n'
         'macro later(x: expr) { return #x; }\n',

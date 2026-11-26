@@ -191,7 +191,8 @@ import {retry! as r} from util;   // 调用时写 r!(...)
 ```
 
 规范路径始终可以显式写，不受裸名遮蔽影响。例如同文件用户定义了同名 `info`
-宏后，`info!` 指向用户宏，`std.log.info!` 仍指向内置宏。
+宏后，`info!` 指向用户宏，`std.log.info!` 仍指向内置宏。`error!` 也走这条普通
+`NAME MACRO_BANG` 路径；`error` 本身可以是变量、字段或类型名。
 
 ## 4. 展开模型
 
@@ -397,7 +398,7 @@ wrap!(2) {
 8. **P4.3（已完成）**：`export macro` 与 `import {name!} from pkg;`（含 alias）、
    宏与值/类型命名空间的隔离、定义点宏表快照、跨包 hygiene、循环检测、
    parse-only 包读取和完整测试矩阵；引号形式的外部 module 宏导入暂不支持。
-9. **P5.1**：`on` / `error` 评估 handler-scoped contextual；`error!` 改为普通
+9. **P5.1（已完成）**：`on` / `error` 评估 handler-scoped contextual；`error!` 改为普通
     `NAME MACRO_BANG` 路径，`type error` 走类型命名空间，`.error` 仍是普通字段；
    保留 `%prec ON`，补齐 handler body / defer / 默认参数诊断。
 10. **P5.2**：`as` contextual，独立步骤。
@@ -436,7 +437,7 @@ wrap!(2) {
    或 handler-scoped contextual 方案；诊断仍由现有 handler 栈检查产生；
 14. 宏简写只支持 `name!` 与 `name! x`；列表、字典、表达式、嵌套宏和成员链
    一律写括号；`foo! { ... }` 始终是 block；
-15. `on` / `error` 留到 Phase 9 再决定是 handler-scoped contextual 还是宏形式；
+15. `on` / `error` 已按 handler-scoped contextual 落地：`error!` 走普通宏路径，类型与字段位置不受影响；
 16. 内置宏默认 import 映射采用第 3.5 节的表；`fail!` / `recover!` / `pass!`
     的规范路径为 `std.error.fail!` / `std.error.recover!` / `std.error.pass!`；
 17. 协议声明关键字 `protocol` 重命名为 `proto`，作为全局保留字；泛型约束列表中

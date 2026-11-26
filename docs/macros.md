@@ -114,7 +114,9 @@ if (std.log.enabled("info")) {
 ```
 
 级别关闭时，`message` 和 `fields` 表达式完全不求值，宏表达式的结果是 `null`。
-裸写 `error!` 与 `std.log.error!` 都可用；`!` 紧跟保留字时按宏名解析。
+`error!` 现在与普通 `NAME MACRO_BANG` 走同一条解析路径：裸名是默认宏绑定，
+规范路径 `std.log.error!` 始终可用；`error` 本身已不是保留字，`: error` 走类型
+命名空间，`.error` 是普通字段。
 
 ### 3.3 指定 logger
 

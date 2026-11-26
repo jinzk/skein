@@ -2390,7 +2390,6 @@ fieldname: YIELD                              { $$ = copy_text("yield"); }
     | MATCH                                { $$ = copy_text("match"); }
     | ENUM                                 { $$ = copy_text("enum"); }
     | STRUCT                               { $$ = copy_text("struct"); }
-    | ERROR                                { $$ = copy_text("error"); }
     | BUILTIN {
         const char *name = builtin_field_name($1);
         if (name) {
@@ -2666,35 +2665,6 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
     | exp MACRO_BANG NAME %prec PRIMARY {
         $$ = expand_macro($1, newref($3), NULL,
                                   @2.first_line, @2.first_column, false);
-      }
-    /* `error` is reserved, so bare `error!` needs its own callee node. */
-    | ERROR MACRO_BANG '(' explist ')' %prec PRIMARY {
-        $$ = expand_macro(newref(copy_text("error")), $4, NULL,
-                                  @2.first_line, @2.first_column, false);
-      }
-    | ERROR MACRO_BANG '(' explist ')' '{' macro_block_start EMPTY_BLOCK_CLOSE %prec PRIMARY {
-        bool generator = finish_function();
-        $$ = expand_macro(newref(copy_text("error")), $4,
-                                  newscope(NULL), @2.first_line,
-                                  @2.first_column, generator);
-      }
-    | ERROR MACRO_BANG '(' explist ')' '{' macro_block_start list '}' %prec PRIMARY {
-        bool generator = finish_function();
-        $$ = expand_macro(newref(copy_text("error")), $4,
-                                  newscope($8), @2.first_line,
-                                  @2.first_column, generator);
-      }
-    | ERROR MACRO_BANG '{' macro_block_start EMPTY_BLOCK_CLOSE %prec PRIMARY {
-        bool generator = finish_function();
-        $$ = expand_macro(newref(copy_text("error")), NULL,
-                                  newscope(NULL), @2.first_line,
-                                  @2.first_column, generator);
-      }
-    | ERROR MACRO_BANG '{' macro_block_start list '}' %prec PRIMARY {
-        bool generator = finish_function();
-        $$ = expand_macro(newref(copy_text("error")), NULL,
-                                  newscope($5), @2.first_line,
-                                  @2.first_column, generator);
       }
     | exp '[' exp ',' explist ']'         {
         $$ = newindex($1, bracket_args_list(newast('L', $3, $5)),
@@ -3235,7 +3205,6 @@ type_name: NAME                           {
       }
     | BUILTIN                             { $$ = type_constraint_from_builtin($1); }
     | FUNC                                { $$ = new_type_constraint(TYPE_FUNCTION); }
-    | ERROR                               { $$ = new_type_constraint(TYPE_ERROR); }
     | NULLVAL                             { $$ = new_type_constraint(TYPE_NULL); }
     ;
 

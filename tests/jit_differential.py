@@ -45,6 +45,23 @@ CASES = [
         expect_debug="[jit] enter risky",
     ),
     case(
+        "p5-handler-contextual-names",
+        "import std;\n"
+        "struct Box { on: int; error: int; }\n"
+        "let on = 1;\n"
+        "let error = 2;\n"
+        "let b = Box { on: on, error: error };\n"
+        "func risky(x) {\n"
+        "  return (10 / x) on error(e) { recover on + error; };\n"
+        "}\n"
+        "println(str(b.on + b.error));\n"
+        "println(str(risky(2)));\n"
+        "println(str(risky(0)));\n"
+        "macro error(x: expr) { #x + 100; }\n"
+        "println(str(error!(1)));\n",
+        expect_debug="[jit] enter risky",
+    ),
+    case(
         "detached-task-fail",
         "import std;\n"
         "func bad() {\n"

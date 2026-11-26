@@ -33,11 +33,16 @@ if else while do for
 switch case default
 struct impl proto ref weak
 return break continue goto
-fail on error recover pass
+fail recover pass
 is
 null true false
 as
 ```
+
+`on` / `error` 不是全局保留字：它们只在 `expr on error(e) { ... }` handler
+位置作为 contextual keyword（保留 `%prec ON` 的绑定规则）；其他位置仍是普通
+标识符，可声明为变量、字段名或类型名。`error!` 走普通 `NAME MACRO_BANG`
+路径，按默认宏绑定解析为 `std.log.error!`。
 
 `def` 已不再使用，匿名/命名函数统一使用 `func`。
 
@@ -63,7 +68,8 @@ contextual keyword，不是全局保留字：`launch f()` 启动 task，`await f
 目前仍由类型命名空间处理。
 
 `fail` / `recover` / `pass` 的规范写法是内置宏 `fail!` / `recover!` / `pass!`；
-旧关键字形式暂时保留兼容。`on` / `error` 留待 handler-scoped contextual 评估。
+旧关键字形式暂时保留兼容。`on` / `error` 已按 handler-scoped contextual 处理：
+`error!` 是普通宏调用，`: error` 走类型命名空间，`.error` 是普通字段。
 设计见 [`docs/macros_user_defined.md`](docs/macros_user_defined.md)。
 
 
@@ -1881,6 +1887,8 @@ let n = parse_positive("0") on error(e) {
 - `fail;` 抛出空错误；
 - 普通值会被包装成 `error(kind="fail", message=...)`；
 - `call() on error(e) { ... }` 捕获 `fail`、运行时错误和 `result.err`；
+  `on` / `error` 只在紧贴表达式的 `on error(...)` 中作为 contextual keyword，
+  变量名 `on` / `error`、字段 `.on` / `.error` 与类型名 `error` 不受影响；
 - `result.ok(v) on error(...)` 直接得到 `v`，不执行 handler；
 - `e` 是 `error` 值，只在 handler 作用域内有效；
 - `str(e)` 或 `std.error.message(e)` 取得消息；

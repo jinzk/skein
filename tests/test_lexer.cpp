@@ -66,6 +66,16 @@ bool has_text(const std::vector<token> &tokens, int kind,
     return false;
 }
 
+bool has_member_name(const std::vector<token> &tokens,
+                     const std::string &name) {
+    for (std::size_t i = 1; i < tokens.size(); ++i) {
+        if (tokens[i - 1].kind == '.' && tokens[i].kind == SKEIN_TOK_NAME &&
+            tokens[i].text == name)
+            return true;
+    }
+    return false;
+}
+
 void check_multiline_label() {
     std::vector<token> tokens = lex_source(
         "func f() {\n"
@@ -222,6 +232,32 @@ void check_contextual_task_keywords() {
             "wait member name must stay an identifier");
 }
 
+void check_contextual_handler_keywords() {
+    std::vector<token> tokens = lex_source(
+        "f() on error(e) { recover 1; }\n"
+        "let on = 1;\n"
+        "let error = 2;\n"
+        "println(on + error);\n"
+        "value.on;\n"
+        "value.error;\n"
+        "error!(1);\n"
+        "let e: error = null;\n");
+    require(count_kind(tokens, SKEIN_TOK_ON) == 1,
+            "handler-scoped on keyword count mismatch");
+    require(count_kind(tokens, SKEIN_TOK_ERROR) == 1,
+            "handler-scoped error keyword count mismatch");
+    require(count_kind(tokens, SKEIN_TOK_MACRO_BANG) == 1,
+            "error! must use the ordinary macro bang path");
+    require(has_text(tokens, SKEIN_TOK_NAME, "on"),
+            "let on must stay an identifier");
+    require(has_text(tokens, SKEIN_TOK_NAME, "error"),
+            "let error must stay an identifier");
+    require(has_member_name(tokens, "on"),
+            ".on must stay an ordinary member name");
+    require(has_member_name(tokens, "error"),
+            ".error must stay an ordinary member name");
+}
+
 void check_user_macro_tokens() {
     std::vector<token> tokens = lex_source(
         "macro twice(x: expr) { return #x * 2; }\n"
@@ -257,6 +293,7 @@ int main() {
     check_label_body_block();
     check_switch_arm_label();
     check_contextual_task_keywords();
+    check_contextual_handler_keywords();
     check_user_macro_tokens();
 
     std::printf("lexer_test: ok\n");

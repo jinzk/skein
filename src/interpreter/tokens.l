@@ -257,6 +257,32 @@ static bool expression_start_token(int tok) {
     }
 }
 
+/* Tokens that can end an expression, so a following `on error` is a handler
+ * suffix rather than an ordinary identifier. */
+static bool handler_context_token(int tok) {
+    switch (tok) {
+        case SKEIN_TOK_NAME:
+        case SKEIN_TOK_INT:
+        case SKEIN_TOK_FLOAT:
+        case SKEIN_TOK_XSTRING:
+        case SKEIN_TOK_CHAR:
+        case SKEIN_TOK_TRUE:
+        case SKEIN_TOK_FALSE:
+        case SKEIN_TOK_NULLVAL:
+        case SKEIN_TOK_MACRO_BANG:
+        case SKEIN_TOK_MACRO_ARG_EXPAND:
+        case SKEIN_TOK_MACRO_BLOCK_STMT:
+        case ')':
+        case ']':
+        case '}':
+        case SKEIN_TOK_EMPTY_BLOCK_CLOSE:
+        case SKEIN_TOK_EMPTY_DICT_CLOSE:
+            return true;
+        default:
+            return false;
+    }
+}
+
 static void note_contextual_in_name(const char *text, int len) {
     contextual_in_separator =
         token_is_in_name(text, len) &&
@@ -933,7 +959,7 @@ static bool reserved_name(const char *text, int len) {
         "switch",   "match",    "case",     "default",  "let",
         "const",    "func",     "yield",    "defer",    "macro",
         "return",   "break",    "continue", "fail",     "is",
-        "goto",     "on",       "error",    "recover",  "pass",
+        "goto",     "recover",  "pass",
         "as",       "null",     "true",     "false",
         "int",      "float",    "bool",     "str",      "char",
         "byte",
@@ -1037,7 +1063,7 @@ TASK_KEYWORD_NEXT ([A-Za-z_]|{UTF8_SEQ}|\(|\[|\{|[0-9]|\"|\')
   * distinct preserves unary `!` precedence and leaves `!=` untouched.
   */
 "!" {
-    if ((last_token == SKEIN_TOK_NAME || last_token == SKEIN_TOK_ERROR ||
+    if ((last_token == SKEIN_TOK_NAME ||
          last_token == SKEIN_TOK_FAIL || last_token == SKEIN_TOK_RECOVER ||
          last_token == SKEIN_TOK_PASS || last_token == SKEIN_TOK_WAIT) &&
         last_token_line == g_token_line &&
@@ -1436,9 +1462,19 @@ TASK_KEYWORD_NEXT ([A-Za-z_]|{UTF8_SEQ}|\(|\[|\{|[0-9]|\"|\')
 "fail" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_FAIL); }
 "is" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_IS); }
 "goto" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_GOTO); }
-"on" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_ON); }
-"error"/"!" { MACRO_CALLEE_NAME(); }
-"error" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_ERROR); }
+"on"/[ \t]*"error" {
+    MEMBER_NAME_AFTER_DOT();
+    if (handler_context_token(last_token))
+        YYRET(SKEIN_TOK_ON);
+    YYRET(contextual_name_token());
+  }
+"on" { MEMBER_NAME_AFTER_DOT(); YYRET(contextual_name_token()); }
+"error" {
+    MEMBER_NAME_AFTER_DOT();
+    if (last_token == SKEIN_TOK_ON)
+        YYRET(SKEIN_TOK_ERROR);
+    YYRET(contextual_name_token());
+  }
 "recover"/"!" { MACRO_CALLEE_NAME(); }
 "recover" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_RECOVER); }
 "pass"/"!" { MACRO_CALLEE_NAME(); }

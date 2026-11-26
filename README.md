@@ -266,6 +266,8 @@ let n = parse_positive("0") on error(e) {
 - `on error()` 可以不绑定错误值；handler 以 `recover`、`pass` 或 `fail` 结束；
 - task 内的错误在观察点抛出：`wait t on error(e) { ... }`、`wait launch f() on error(e) { ... }`；
 - `launch f() on error(...)` 不能捕获任务体错误，会产生 warning；
+- `on` / `error` 是 handler-scoped contextual keyword，其他位置仍是普通标识符
+  （变量、字段、类型名均可）；`error!` 走普通宏解析路径；
 - 详见 [SYNTAX.md](SYNTAX.md) 和 [docs/stdlib.md](docs/stdlib.md)。
 
 ## 能力一览

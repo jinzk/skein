@@ -48,6 +48,8 @@ syntax match skeinEnumMember '\<\u\w*\ze\.'
 syntax match skeinEnumVariant '\.\zs\u\w*'
 
 " Keywords ------------------------------------------------------------------
+" `on` / `error` (and `launch` / `wait` / `await`) are contextual keywords,
+" highlighted here for readability only; they remain usable as identifiers.
 syntax keyword skeinKeyword let const func yield defer launch wait
 syntax keyword skeinKeyword in is as
 syntax keyword skeinConditional if else switch case default match

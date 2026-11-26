@@ -886,6 +886,8 @@ let v = outer() on error(e) {
 - `std.error.trace(e)` 返回调用栈（最多 64 帧），最内层帧在前；
 - `std.error.format_trace(e)` 返回与 CLI 诊断格式一致的多行文本；
 - `call() on error(e) { ... }` 捕获 `fail`、运行时错误和 `result.err`；
+  `on` / `error` 只在紧贴表达式的 handler 位置是 contextual keyword，其他位置
+  仍是普通标识符，`: error` 走类型命名空间、`.error` 是普通字段；
 - `result.ok(v) on error(...)` 直接得到 `v`，不执行 handler；
 - `e` 是 `error` 值，只在 handler 作用域内有效；
 - `str(e)` 或 `std.error.message(e)` 取得消息；

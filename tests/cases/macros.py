@@ -291,9 +291,70 @@ def run_cases():
         stderr="unknown macro placeholder",
     )
     check(
-        "user macro unknown fragment kind",
-        'macro m(x: type) { return 1; }\n',
-        stderr="unknown macro fragment 'type'",
+        "user macro type fragment annotation",
+        'macro make(T: type, v: expr) { let x: #T = #v; return x; }\n'
+        'func test(): int { return make!(int, 7); }\n'
+        'println(str(test()));\n',
+        stdout="7",
+    )
+    check(
+        "user macro type fragment cast",
+        'macro cast_it(T: type, v: expr) { let x = #v as #T; return x; }\n'
+        'func test(): int { return cast_it!(int, 7); }\n'
+        'println(str(test()));\n',
+        stdout="7",
+    )
+    check(
+        "user macro type fragment is proto",
+        'proto Drawable { func draw(self); }\n'
+        'struct D { func draw(self) { } }\n'
+        'macro is_p(P: type, v: expr) { return #v is #P; }\n'
+        'func test(): bool { let d = D { }; return is_p!(Drawable, d); }\n'
+        'println(str(test()));\n',
+        stdout="true",
+    )
+    check(
+        "user macro type fragment must be a type name",
+        'macro bad(T: type) { return 1; }\n'
+        'func test(): int { return bad!(1 + 2); }\n'
+        'println(str(test()));\n',
+        stderr="type fragment expects a type name",
+    )
+    check(
+        "user macro type fragment rejects constraint markers",
+        'macro bad(T: type) { let x: #T = 1; return x; }\n'
+        'func test(): int { return bad!(hashable); }\n'
+        'println(str(test()));\n',
+        stderr="hashable and iterable require a constraint fragment",
+    )
+    check(
+        "user macro type fragment cannot be a value",
+        'macro bad(T: type) { let x = #T; return 1; }\n'
+        'func test(): int { return bad!(int); }\n'
+        'println(str(test()));\n',
+        stderr="type fragment cannot be used as a value or name",
+    )
+    check(
+        "user macro expr fragment cannot be a type",
+        'macro bad(T: expr, v: expr) { let x: #T = #v; return x; }\n'
+        'func test(): int { return bad!(int, 7); }\n'
+        'println(str(test()));\n',
+        stderr="macro fragment cannot be used here",
+    )
+    check(
+        "user macro type fragment rejects variadic",
+        'macro bad(T: type...) { return 1; }\n'
+        'func test(): int { return bad!(int); }\n'
+        'println(str(test()));\n',
+        stderr="only expr parameters support '...'",
+    )
+    check(
+        "user macro type fragment rejects generic arguments",
+        'struct Box[T any] { value: T; }\n'
+        'macro bad(P: type) { let x: Box[#P] = 1; return 1; }\n'
+        'func test(): int { return bad!(int); }\n'
+        'println(str(test()));\n',
+        stderr="type fragment cannot be used inside a generic type",
     )
     check(
         "user macro block fragment must be last",
@@ -394,6 +455,30 @@ def run_cases():
             'println(str(test()));\n')
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout.splitlines() == ["3"], proc.stdout
+
+        write("types.skein",
+              'package types {\n'
+              '  export struct P { x: int; }\n'
+              '  proto D { func d(self); }\n'
+              '  impl P {\n'
+              '    func d(self) { return self.x; }\n'
+              '  }\n'
+              '  export func make() { return P { x: 7 }; }\n'
+              '  export macro typed() { let x: P = types.make(); return x.x; }\n'
+              '}\n')
+        write("typed_main.skein",
+              'import types;\n'
+              'import types as lib;\n'
+              'import {typed!} from types;\n'
+              'struct P { y: string; }\n'
+              'macro is_p(P: type, v: expr) { return #v is #P; }\n'
+              'func test(): bool { return is_p!(lib.D, lib.make()); }\n'
+              'func test_typed(): int { return typed!(); }\n'
+              'println(str(test()));\n'
+              'println(str(test_typed()));\n')
+        proc = run_file(os.path.join(tmp, "typed_main.skein"))
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout.splitlines() == ["true", "7"], proc.stdout
 
         write("helpers.skein",
               'package helpers {\n'

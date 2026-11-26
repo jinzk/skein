@@ -224,6 +224,10 @@ static void add_macro_param(char *name, char *fragment, bool variadic,
         if (variadic)
             valid = false;
         param.kind = user_macro_param_kind::block;
+    } else if (name_is(fragment, "type")) {
+        if (variadic)
+            valid = false;
+        param.kind = user_macro_param_kind::type;
     } else {
         valid = false;
         param.kind = user_macro_param_kind::expr;
@@ -847,9 +851,21 @@ static const char *builtin_field_name(int functype) {
 
 static bool is_active_type_param(const char *name);
 
+/* `#T` reaches the grammar as a NAME with an internal prefix so it can occupy
+ * any existing type slot.  Keep the prefixed spelling on the constraint so
+ * macro expansion can recognise and substitute it later. */
+static bool macro_type_param_from_name(const char *name) {
+    if (!name)
+        return false;
+    return std::strncmp(name, USER_MACRO_PARAM_PREFIX,
+                        sizeof(USER_MACRO_PARAM_PREFIX) - 1) == 0;
+}
+
 static struct type_constraint *type_constraint_from_name(const char *name) {
     if (!name)
         return new_type_constraint(TYPE_INVALID);
+    if (macro_type_param_from_name(name))
+        return new_named_type_constraint(name, diag_current_source_name().c_str());
     if (is_active_type_param(name)) {
         struct type_constraint *type = new_named_type_constraint(
             name, diag_current_source_name().c_str());

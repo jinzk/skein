@@ -1,6 +1,7 @@
 # Skein 宏（第一批：内置语法宏）
 
-- 状态：第一批内置宏已完成；用户自定义宏 v1 已落地（见
+- 状态：第一批内置宏已完成；用户自定义宏 v1、G1 AST 泛型实参、G2 受限
+  `type` 片段已落地（见
   [`docs/macros_user_defined.md`](macros_user_defined.md)）
 - 相关模块：`std.assert`、`std.log`、`std.result`
 - 实现位置：`src/interpreter/macros.cpp`、`src/interpreter/user_macros.cpp`、
@@ -12,8 +13,8 @@ Skein 的第一批宏只做**受限 AST 级语法脱糖**。宏在语法分析�
 随后进入普通的 name resolution、typecheck、bytecode/JIT 流程。
 
 宏不是文本替换，不是编译期任意执行，宏名也不是一等值。宏调用展开后是普通
-表达式。宏不能访问类型信息，
-不能创建新的类型约束、proto 能力、specialization 或转换规则。
+表达式。用户宏可以接收调用点已有的类型名作为受限 `type` 片段，但不能做类型
+计算或类型内省，不能创建新的类型约束、proto 能力、specialization 或转换规则。
 
 > 泛型负责类型抽象；宏负责语法抽象。
 
@@ -228,7 +229,7 @@ for (k, v) in iter!({"a": 1}) { ... }
   [`docs/macros_user_defined.md`](macros_user_defined.md)；
 - `list!` / `dict!` / `try!`：已决定不实现；列表和字典直接使用普通字面量，
   错误捕获使用 `std.result.capture` 或 `on error`；
-- `type` / `pattern` / `module` / `operator` 片段；
+- `pattern` / `module` / `operator` 片段；第一类 `type` 片段见用户宏文档；
 - 宏递归；
 - 一等宏值；
 - 声明生成宏；
@@ -255,7 +256,8 @@ for (k, v) in iter!({"a": 1}) { ... }
 - 序列化 type descriptor。
 
 typechecker 已直接使用 AST 中的泛型实参（roadmap G1），不再从原始源码文本
-重新解析。但第一批仍不允许宏生成泛型语法；受限 `type` 片段属于后续 G2。
+重新解析。G2 的受限 `type` 片段只把调用点已有名字放进类型位置，仍不允许宏
+生成泛型声明、`Box[int] { ... }` 或 `f[int](...)`。
 
 ## 6. 测试
 

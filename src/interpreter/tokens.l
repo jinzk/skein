@@ -1061,8 +1061,8 @@ UTF8_SEQ ({UTF8_2}|{UTF8_3}|{UTF8_4})
 
 UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 TASK_KEYWORD_NEXT ([A-Za-z_]|{UTF8_SEQ}|\(|\[|\{|[0-9]|\"|\')
-REF_PREFIX_NEXT ([A-Za-z_]|{UTF8_SEQ}|\()
-TYPE_PREFIX_NEXT ([A-Za-z_]|{UTF8_SEQ})
+REF_PREFIX_NEXT ([A-Za-z_]|{UTF8_SEQ}|\(|#)
+TYPE_PREFIX_NEXT ([A-Za-z_]|{UTF8_SEQ}|#)
 
 %%
 

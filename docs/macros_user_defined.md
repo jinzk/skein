@@ -1,6 +1,7 @@
 # 用户自定义宏设计（设计方案）
 
-- 状态：P1 / P2 / P3.1 / P4 同文件 v1 已完成；跨包宏待实施
+- 状态：P1 / P2 / P3.1 / P4 同文件 v1、跨包宏、G1 AST 泛型实参、G2 受限
+  `type` 片段已完成；G3–G5 待实施
 - 关联：[`docs/macros.md`](macros.md)、[`docs/roadmap.md`](roadmap.md)
 - 建议里程碑：M11，不回写已完成的 M10
 - 拟改动：`src/interpreter/tokens.l`、`src/interpreter/parser.y`、新增
@@ -16,7 +17,8 @@ typecheck 前展开**。它不应变成编译期任意执行，也不应触碰�
 本提案建议的最小版本是：
 
 - 宏声明是静态 AST 模板，宏体用 `#参数名` 标记占位符；
-- 只支持 `expr`、`ident`、一个尾部 `expr...`、一个尾部 `block`；
+- 支持 `expr`、`ident`、一个尾部 `expr...`、一个尾部 `block`，以及只用于
+  类型位置的 `type` 片段（G2）；
 - 宏调用保持现有 `name!(...)` / `name! { ... }` / `name!(...) { ... }` 形式；
   后续阶段只追加两种简写：`name!`（零参数）与 `name! x`（单个 `NAME`
   参数），所有其他参数仍必须写在括号内；
@@ -64,13 +66,15 @@ macro name(param: expr, label: ident, body: block) {
 | 标识符 | `n: ident` | 名字位置，如 `let #n = ...` | 保留调用点拼写，故意不参与 hygiene 重命名 |
 | 表达式序列 | `xs: expr...` | 最后一个表达式参数 | 展开为逗号分隔的表达式列表 |
 | 块 | `b: block` | 语句列表位置，写成 `#b` 且不带分号 | 必须是最后一个参数；克隆调用点语句列表 |
+| 类型 | `T: type` | 类型位置，如 `let x: #T`、`#v is #T` | 传入类型命名空间中已有的类型名；调用点拼写与 import 别名保留 |
 
 约束：
 
 - `expr...` 只能有一个，且必须是最后一个表达式参数；
 - `block` 只能有一个，且必须是整个参数列表的最后一个；
 - `block` 不能放进括号内；
-- 不支持 `type`、`pattern`、`module`、`operator` 片段；
+- `type` 片段不支持 `...`，不能作为值或名字使用；
+- 不支持 `pattern`、`module`、`operator` 片段；
 - `#名字` 只能引用当前宏的参数，未声明的占位符是定义期语法错误。
 
 示例：
@@ -85,6 +89,14 @@ macro call_all(f: expr, args: expr...) {
   #f(#args...);
 }
 ```
+
+`type` 片段只接受调用点的普通类型名、限定名（`pkg.Type` / `pkg.Proto`）和内建
+类型名；表达式、约束标记 `hashable` / `iterable`、内部占位符拼写都会被拒绝。
+传入的名字保留调用点拼写和 import 别名，因此 `is #T` 能识别调用点可见的 proto；
+模板内部写出的字面类型名仍按定义点解析。类型片段可出现在变量/函数参数类型、
+`as` 与 `is` 的类型位置，以及 `#T?` / `ref #T` / `weak #T` 前缀或后缀包装中。
+它不能进入普通泛型实参（`Box[#T]` / `f[#T](...)`），也不能用于生成泛型声明；
+`[V proto Drawable]` 这类约束仍由普通源码书写。
 
 ### 3.3 调用
 
@@ -273,7 +285,7 @@ wrap!(2) {
 
 - 用户宏值、宏作为一等值传递或赋值；
 - 编译期任意执行、编译期 I/O、反射或类型内省；
-- `type` / `pattern` / `module` / `operator` 片段；
+- `pattern` / `module` / `operator` 片段，以及类型计算、类型内省和专用约束片段；
 - 宏递归、互递归或展开次数参数；
 - 生成泛型声明或泛型调用，如 `f[int](...)` / `Box[int]{}`；
 - 声明生成宏；
@@ -288,8 +300,9 @@ wrap!(2) {
 - 改变装饰器语义：装饰器继续是 `@expr` 普通高阶函数。
 
 显式泛型实参已由 parser 一次解析并保存在 AST 节点上（roadmap G1），typechecker
-不再回读原始源码文本。v1 模板仍禁止生成泛型语法：现有用户宏片段只支持
-`expr` / `ident` / `expr...` / `block`，受限 `type` 片段属于后续 G2。
+不再回读原始源码文本。模板仍禁止生成泛型语法：用户宏片段支持
+`expr` / `ident` / `expr...` / `block` 与受限 `type`（G2），但 `Box[#T]`、
+`f[#T](...)` 和泛型声明生成都保持禁止。
 
 ## 7. 诊断
 
@@ -299,7 +312,9 @@ wrap!(2) {
 
 - `is not a known built-in or user-defined macro`；
 - 未知占位符；
-- 片段类型不匹配，例如把 `expr` 放进 `ident` 位置；
+- 片段类型不匹配，例如把 `expr` 放进 `ident` 位置，或把 `expr` / `ident` /
+  `block` 放进类型位置；
+- `type` 片段收到表达式、约束标记或泛型实参位置；
 - `expr...` 不是最后一个表达式参数；
 - `block` 不是最后一个参数，或出现在括号内；
 - 同文件宏重名；遮蔽内置裸名不是错误，但需说明实际命中的来源；
@@ -314,8 +329,8 @@ wrap!(2) {
 
 ## 8. 工具链
 
-- **formatter**：无损往返 `macro` 声明、`#param` 占位符、`expr...`、宏调用和
-  selective import；
+- **formatter**：无损往返 `macro` 声明、`#param` 占位符、`expr...`、`T: type`、
+  类型位置的 `#T`、宏调用和 selective import；
 - **lint**：报告未使用参数、未知宏、模板中的非法占位符；
 - **LSP**：宏名补全、签名 hover、调用点/定义点跳转；v1 不做跨文件 rename；
 - **snippets**：可选添加 `macro` 声明模板；
@@ -325,7 +340,7 @@ wrap!(2) {
 
 ### 9.1 parser / 展开
 
-- 四种片段单独与组合使用；
+- 五种片段（`expr` / `ident` / `expr...` / `block` / `type`）单独与组合使用；
 - `expr...` 后接尾部 `block`；
 - 内置宏与用户宏同名冲突；
 - 声明前调用、未知宏、递归宏；
@@ -333,7 +348,10 @@ wrap!(2) {
 - 表达式上下文中的展开结果；
 - 块片段中的 `return` / `yield` / `do` 语义；
 - selective import 的值/类型/宏形式、alias、`from` contextual keyword；
-- `import {retry} from util;` 与 `import {retry!} from util;` 命名空间隔离。
+- `import {retry} from util;` 与 `import {retry!} from util;` 命名空间隔离；
+- `type` 片段的标注、`as` / `is`、`#T?` / `ref #T` 包装，以及调用点限定名和
+  import alias；模板内字面类型名按定义点解析；
+- `type` 片段拒绝表达式、约束标记、泛型实参及非类型位置。
 
 ### 9.2 hygiene / 运行时
 

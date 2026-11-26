@@ -303,3 +303,27 @@ def run_cases():
         )
     finally:
         os.unlink(macro_import_path)
+
+    type_fragment_source = (
+        "macro wrap(T:type,v:expr){let x:#T=#v;return x;}\n"
+    )
+    type_fragment_expected = (
+        "macro wrap(T: type, v: expr) { let x: #T = #v; return x; }\n"
+    )
+    type_fragment_path = write_temp(type_fragment_source)
+    try:
+        formatted = run_fmt(type_fragment_path)
+        assert formatted.returncode == 0, decode(formatted.stderr)
+        assert decode(formatted.stdout) == type_fragment_expected, decode(
+            formatted.stdout
+        )
+
+        second = run_fmt("-", stdin=formatted.stdout)
+        assert second.returncode == 0, decode(second.stderr)
+        assert second.stdout == formatted.stdout, (
+            "fmt must be idempotent for type fragments\n"
+            f"first:\n{decode(formatted.stdout)}\n"
+            f"second:\n{decode(second.stdout)}"
+        )
+    finally:
+        os.unlink(type_fragment_path)

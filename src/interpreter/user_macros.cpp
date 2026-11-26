@@ -2,6 +2,7 @@
 
 #include "diagnostics.h"
 #include "macros.h"
+#include "static_type.h"
 #include "structeval.h"
 
 #include <algorithm>
@@ -60,6 +61,7 @@ struct param_value {
     std::string ident;
     std::vector<struct ast *> exprs;
     struct ast *block = NULL;
+    struct type_constraint *type = NULL;
 };
 
 struct expansion_state {
@@ -154,6 +156,186 @@ void report_at(int line, int column, const char *message,
         yyerror("%s: %s", message, detail);
     else
         yyerror("%s", message);
+}
+
+/* `hashable` / `iterable` are generic constraint markers, not ordinary type
+ * namespace values.  They need a dedicated constraint fragment in a later
+ * stage, so a `type` fragment refuses them explicitly. */
+bool is_constraint_marker_name(const std::string &name) {
+    return name == "hashable" || name == "iterable";
+}
+
+bool type_name_from_arg(const struct ast *arg, std::string &out) {
+    if (!arg)
+        return false;
+    if (arg->nodetype == 'N') {
+        const char *name = ((const struct symref *)arg)->name;
+        if (!name || is_internal_name(name))
+            return false;
+        out = name;
+        return true;
+    }
+    if (arg->nodetype == 'j') {
+        std::string base;
+        if (!type_name_from_arg(arg->l, base))
+            return false;
+        const struct ast *field = arg->r;
+        if (!field || field->nodetype != 'V')
+            return false;
+        const struct val *literal = (const struct val *)field;
+        if (!literal->val || literal->val->type != T_string)
+            return false;
+        const char *name =
+            ((const struct string_value_t *)literal->val)->value;
+        if (!name || is_internal_name(name))
+            return false;
+        out = base + "." + name;
+        return true;
+    }
+    return false;
+}
+
+struct type_constraint *builtin_type_from_functype(int functype) {
+    switch (functype) {
+        case B_int: return new_type_constraint(TYPE_INT);
+        case B_float: return new_type_constraint(TYPE_FLOAT);
+        case B_bool: return new_type_constraint(TYPE_BOOL);
+        case B_str: return new_type_constraint(TYPE_STRING);
+        case B_char: return new_type_constraint(TYPE_CHAR);
+        case B_byte: return new_type_constraint(TYPE_BYTE);
+        case B_list: return new_type_constraint(TYPE_LIST);
+        case B_dict: return new_type_constraint(TYPE_DICT);
+        default: return NULL;
+    }
+}
+
+/* Convert a call-site macro argument into an owned type_constraint.  Only
+ * plain and qualified type names are accepted; expressions, spreads and
+ * internal placeholder names are rejected here rather than leaking into the
+ * type namespace. */
+struct type_constraint *type_from_arg(const struct ast *arg, int line,
+                                      int column) {
+    if (arg && arg->nodetype == 'V') {
+        const struct val *literal = (const struct val *)arg;
+        if (literal->val && literal->val->type == T_builtin) {
+            struct type_constraint *type = builtin_type_from_functype(
+                ((const struct builtin_value_t *)literal->val)->functype);
+            if (type)
+                return type;
+        }
+    }
+    std::string name;
+    if (type_name_from_arg(arg, name)) {
+        if (is_constraint_marker_name(name)) {
+            report_at(line, column,
+                      "hashable and iterable require a constraint fragment",
+                      name.c_str());
+            return NULL;
+        }
+        enum type_constraint_kind kind;
+        if (type_constraint_kind_for_builtin_name(name.c_str(), kind))
+            return new_type_constraint(kind);
+        return new_named_type_constraint(name.c_str(),
+                                         diag_current_source_name().c_str());
+    }
+    report_at(line, column, "type fragment expects a type name");
+    return NULL;
+}
+
+bool macro_type_placeholder(const struct type_constraint *type,
+                            std::string *param) {
+    if (!type)
+        return false;
+    return placeholder_of(type->name, param);
+}
+
+bool type_constraint_contains_placeholder(const struct type_constraint *type) {
+    if (!type)
+        return false;
+    if (placeholder_of(type->name, NULL))
+        return true;
+    /* Generic and function types keep their arguments in the interned detail
+     * graph; their display string is the stable user-facing spelling of those
+     * names. */
+    return type->display &&
+           std::strstr(type->display, USER_MACRO_PARAM_PREFIX) != NULL;
+}
+
+const user_macro_param *find_param(const user_macro_template *macro,
+                                   const std::string &name) {
+    if (!macro)
+        return NULL;
+    for (const auto &param : macro->params)
+        if (param.name == name)
+            return &param;
+    return NULL;
+}
+
+bool validate_type_constraint(const struct type_constraint *type,
+                              const user_macro_template &macro, int line,
+                              int column) {
+    if (!type)
+        return true;
+    std::string param_name;
+    if (macro_type_placeholder(type, &param_name)) {
+        const user_macro_param *param = find_param(&macro, param_name);
+        if (!param) {
+            report_at(line, column, "unknown macro placeholder",
+                      param_name.c_str());
+            return false;
+        }
+        if (param->kind != user_macro_param_kind::type) {
+            report_at(line, column, "macro fragment cannot be used here",
+                      param_name.c_str());
+            return false;
+        }
+        return true;
+    }
+    if (type_constraint_contains_placeholder(type)) {
+        report_at(line, column,
+                  "type fragment cannot be used inside a generic type");
+        return false;
+    }
+    return true;
+}
+
+/* Replace `#T` type placeholders with the call-site constraint.  Literal
+ * template types are duplicated unchanged, so their source string still
+ * resolves at the macro definition point. */
+struct type_constraint *substitute_type(const struct type_constraint *type,
+                                        expansion_state &state, int line,
+                                        int column) {
+    if (!type)
+        return NULL;
+    std::string param_name;
+    if (macro_type_placeholder(type, &param_name)) {
+        auto it = state.values.find(param_name);
+        if (it == state.values.end()) {
+            report_at(line, column, "unknown macro placeholder",
+                      param_name.c_str());
+            state.failed = true;
+            return new_type_constraint(TYPE_ANY);
+        }
+        if (it->second.kind != user_macro_param_kind::type ||
+            !it->second.type) {
+            report_at(line, column, "macro fragment cannot be used here",
+                      param_name.c_str());
+            state.failed = true;
+            return new_type_constraint(TYPE_ANY);
+        }
+        struct type_constraint *copy = dup_type(it->second.type);
+        if (type->kind == TYPE_REF || type->kind == TYPE_WEAK)
+            copy = skein::typecheck::type_apply_prefix(type->kind, copy);
+        if (type->nullable && copy && !copy->nullable)
+            copy = skein::typecheck::type_apply_nullable(copy);
+        return copy;
+    }
+    if (type_constraint_contains_placeholder(type)) {
+        report_at(line, column,
+                  "type fragment cannot be used inside a generic type");
+        state.failed = true;
+    }
+    return dup_type(type);
 }
 
 template <typename T>
@@ -271,8 +453,9 @@ struct symlist *clone_symlist(const struct symlist *list,
         std::string name = resolve_placeholder_or_name(
             raw, state, clone_context::name, 0, 0);
         struct symbol *sym = newsym(copy_string(name.c_str()));
-        struct symlist *copy = newsymlist(sym, dup_type(item->type), NULL,
-                                          item->variadic);
+        struct symlist *copy =
+            newsymlist(sym, substitute_type(item->type, state, 0, 0), NULL,
+                       item->variadic);
         struct ast *default_value =
             (struct ast *)take_symlist_default_ast((struct symlist *)item);
         if (default_value) {
@@ -368,6 +551,12 @@ struct ast *clone_node(const struct ast *node, expansion_state &state,
                     case user_macro_param_kind::expr_list:
                         report_at(node->line, node->column,
                                   "expr... fragment must be used in an argument list",
+                                  param_name.c_str());
+                        state.failed = true;
+                        return newref(copy_string(param_name.c_str()));
+                    case user_macro_param_kind::type:
+                        report_at(node->line, node->column,
+                                  "type fragment cannot be used as a value or name",
                                   param_name.c_str());
                         state.failed = true;
                         return newref(copy_string(param_name.c_str()));
@@ -490,7 +679,8 @@ struct ast *clone_node(const struct ast *node, expansion_state &state,
                 node->column);
             copy->name = copy_string(name.c_str());
             copy->v = clone_node(source->v, state, clone_context::expr);
-            copy->type = dup_type(source->type);
+            copy->type = substitute_type(source->type, state, node->line,
+                                         node->column);
             return (struct ast *)copy;
         }
         case 'R': {
@@ -594,7 +784,8 @@ struct ast *clone_node(const struct ast *node, expansion_state &state,
             struct is_node *copy = copy_node(source);
             copy->value = clone_node(source->value, state,
                                      clone_context::expr);
-            copy->type = dup_type(source->type);
+            copy->type = substitute_type(source->type, state, node->line,
+                                         node->column);
             return (struct ast *)copy;
         }
         case NODE_CAST: {
@@ -602,7 +793,8 @@ struct ast *clone_node(const struct ast *node, expansion_state &state,
             struct cast_node *copy = copy_node(source);
             copy->value = clone_node(source->value, state,
                                      clone_context::expr);
-            copy->type = dup_type(source->type);
+            copy->type = substitute_type(source->type, state, node->line,
+                                         node->column);
             return (struct ast *)copy;
         }
         case 'x': {
@@ -628,8 +820,11 @@ struct ast *clone_node(const struct ast *node, expansion_state &state,
                              : NULL;
             copy->sl = clone_symlist(source->sl, state);
             copy->ast = clone_node(source->ast, state, clone_context::stmt);
-            copy->ret_type = dup_type(source->ret_type);
-            copy->method_self_type = dup_type(source->method_self_type);
+            copy->ret_type = substitute_type(source->ret_type, state,
+                                             node->line, node->column);
+            copy->method_self_type =
+                substitute_type(source->method_self_type, state, node->line,
+                                node->column);
             copy->generic_params = NULL;
             copy->moved = 0;
             copy->decorated_generator_source = NULL;
@@ -881,6 +1076,12 @@ bool validate_node(const struct ast *node, const user_macro_template &macro,
                       param_name.c_str());
             return false;
         }
+        if (kind == user_macro_param_kind::type) {
+            report_at(node->line, node->column,
+                      "type fragment cannot be used as a value or name",
+                      param_name.c_str());
+            return false;
+        }
         return true;
     }
 
@@ -901,6 +1102,9 @@ bool validate_node(const struct ast *node, const user_macro_template &macro,
                     ok = false;
                 }
             }
+            ok = validate_type_constraint(def->type, macro, node->line,
+                                          node->column) &&
+                 ok;
             ok = validate_node(def->v, macro, clone_context::expr) && ok;
             break;
         }
@@ -911,8 +1115,17 @@ bool validate_node(const struct ast *node, const user_macro_template &macro,
                           "macro template cannot generate generic syntax");
                 ok = false;
             }
+            ok = validate_type_constraint(func->ret_type, macro, node->line,
+                                          node->column) &&
+                 ok;
+            ok = validate_type_constraint(func->method_self_type, macro,
+                                          node->line, node->column) &&
+                 ok;
             for (const struct symlist *param = func->sl; param;
                  param = param->next) {
+                ok = validate_type_constraint(param->type, macro, node->line,
+                                              node->column) &&
+                     ok;
                 const char *name = param->sym ? param->sym->name : NULL;
                 if (placeholder_of(name, &param_name)) {
                     bool is_ident = false;
@@ -1040,9 +1253,27 @@ bool validate_node(const struct ast *node, const user_macro_template &macro,
         case 'T':
         case 'P':
         case 'S':
-        case 'c':
-        case 'k':
-        case NODE_CAST:
+        case 'c': {
+            ok = validate_node(node->l, macro, clone_context::expr) &&
+                 validate_node(node->r, macro, clone_context::expr) && ok;
+            break;
+        }
+        case 'k': {
+            const struct is_node *is = (const struct is_node *)node;
+            ok = validate_type_constraint(is->type, macro, node->line,
+                                          node->column) &&
+                 ok;
+            ok = validate_node(is->value, macro, clone_context::expr) && ok;
+            break;
+        }
+        case NODE_CAST: {
+            const struct cast_node *cast = (const struct cast_node *)node;
+            ok = validate_type_constraint(cast->type, macro, node->line,
+                                          node->column) &&
+                 ok;
+            ok = validate_node(cast->value, macro, clone_context::expr) && ok;
+            break;
+        }
         case 'x':
         case 'g':
         case NODE_GOTO:
@@ -1320,6 +1551,7 @@ void free_param_values(std::unordered_map<std::string, param_value> &values) {
         for (struct ast *item : entry.second.exprs)
             treefree(item);
         treefree(entry.second.block);
+        free_type_constraint(entry.second.type);
     }
     values.clear();
 }
@@ -1407,6 +1639,14 @@ struct ast *expand_user_macro(macro_entry *entry, struct ast *args,
                     break;
                 }
                 value.ident = ((const struct symref *)arg)->name;
+                treefree(arg);
+                arg_values[i] = NULL;
+            } else if (param.kind == user_macro_param_kind::type) {
+                value.type = type_from_arg(arg, line, column);
+                if (!value.type) {
+                    ok = false;
+                    break;
+                }
                 treefree(arg);
                 arg_values[i] = NULL;
             } else {
@@ -1622,6 +1862,9 @@ bool user_macro_define(const char *name,
                 break;
             case user_macro_param_kind::block:
                 value.block = newscope(NULL);
+                break;
+            case user_macro_param_kind::type:
+                value.type = new_type_constraint(TYPE_ANY);
                 break;
         }
         validation.values[param.name] = std::move(value);

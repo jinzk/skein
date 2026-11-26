@@ -844,8 +844,10 @@ capture! { statements }
 日志宏会先检查 `enabled(level)`，级别关闭时参数表达式不求值。
 `capture! { ... }` 展开成 `std.result.capture(func() { ... })`。
 
-宏在 typecheck 前展开成普通 AST，不提供类型片段、类型内省、编译期执行、
-递归展开或专用 opcode。详细规则见 [`docs/macros.md`](docs/macros.md)。
+宏在 typecheck 前展开成普通 AST，不提供类型内省、编译期执行、递归展开或专用
+opcode。用户宏另有受限 `type` 片段，只把调用点已有的类型名放进类型位置；
+详细规则见 [`docs/macros.md`](docs/macros.md) 与
+[`docs/macros_user_defined.md`](docs/macros_user_defined.md)。
 
 调用简写 `name!`（零参数）和 `name! x`（单个 `NAME` 参数）已实现；列表、字典、
 表达式、嵌套宏和成员链仍写括号。控制流宏 `fail!` / `recover!` / `pass!` 与任务宏

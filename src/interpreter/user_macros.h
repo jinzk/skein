@@ -23,6 +23,7 @@ enum class user_macro_param_kind {
     ident,
     expr_list,
     block,
+    type,
 };
 
 struct user_macro_param {

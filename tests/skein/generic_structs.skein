@@ -13,6 +13,10 @@ struct Pair[A any, B any] {
   second: B;
 }
 
+struct Limited[T int | string] {
+  value: T;
+}
+
 func unwrap_int(x: Box[int]): int {
   return x.value;
 }
@@ -42,6 +46,13 @@ ts_test("generic struct explicit literal", func() {
   ts_eq(a.value, 3);
   let b = Box[string] { value: "b" };
   ts_eq(b.value, "b");
+});
+
+ts_test("generic struct constraint", func() {
+  let a = Limited[int] { value: 4 };
+  ts_eq(a.value, 4);
+  let b = Limited[string] { value: "c" };
+  ts_eq(b.value, "c");
 });
 
 ts_test("generic struct multiple parameters", func() {

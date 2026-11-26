@@ -182,6 +182,23 @@ def run_cases():
           "let d: dict[User, int] = {};\n",
           stderr="type error: dict key type User is not hashable")
 
+    check("generic struct union constraint",
+          "struct Box[T int | string] { value: T; }\n"
+          "let b = Box[bool] { value: true };\n",
+          stderr="type error: type argument bool does not satisfy generic constraint for Box")
+
+    check("generic struct hashable constraint",
+          "struct Box[T hashable] { value: T; }\n"
+          "let b = Box[list[int]] { value: [1] };\n",
+          stderr="type error: type argument list[int] does not satisfy generic constraint for Box")
+
+    check("generic struct protocol constraint",
+          "protocol Drawable { func draw(self); }\n"
+          "struct D { func draw(self) { } }\n"
+          "struct Box[T Drawable] { value: T; }\n"
+          "let b = Box[int] { value: 1 };\n",
+          stderr="type error: type argument int does not satisfy generic constraint for Box")
+
     check("dict builtin key contract",
           "import std;\n"
           "struct Bad { xs: list[int]; }\n"

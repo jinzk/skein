@@ -33,8 +33,14 @@ Mode g_mode = Mode::Warn;
 thread_local std::unordered_map<std::string, std::vector<std::string>>
     g_generic_function_params;
 
+struct GenericConstraintMeta {
+    enum generic_constraint_kind kind = GENERIC_CONSTRAINT_SINGLE;
+    std::vector<const TypeNode *> items;
+};
+
 struct GenericTypeMeta {
     std::vector<std::string> params;
+    std::vector<GenericConstraintMeta> constraints;
     ConstTypeMap fields;
     std::unordered_map<std::string, ConstTypeMap> variants;
 };
@@ -1037,6 +1043,127 @@ struct Checker : public BuiltinContext {
         for (std::size_t i = 0; i < params->size(); ++i)
             bindings[(*params)[i]] = type->args[i];
         return instantiate_type(it->second, bindings);
+    }
+
+    GenericConstraintMeta generic_constraint_meta(
+        const struct generic_constraint *constraint) {
+        GenericConstraintMeta meta;
+        if (!constraint)
+            return meta;
+        meta.kind = constraint->kind;
+        for (struct generic_constraint_item *item = constraint->items;
+             item; item = item->next) {
+            if (item->type)
+                meta.items.push_back(type_from_constraint(item->type));
+        }
+        return meta;
+    }
+
+    bool type_satisfies_generic_constraint(
+        const TypeNode *arg, const GenericConstraintMeta &constraint) {
+        if (!arg || arg->kind == TYPE_ANY || type_contains_vars(arg))
+            return true;
+        if (constraint.items.empty())
+            return true;
+
+        auto is_hashable = [](const TypeNode *type) {
+            return key_contract(type) != KeyContract::No;
+        };
+        auto protocol_lookup = [&](const TypeNode *item,
+                                   structtype_lookup_result &out) {
+            return lookup_named_type(item, out) && out.protocol;
+        };
+        auto actual_type = [&](const TypeNode *type) {
+            structtype_lookup_result lookup;
+            if (!lookup_named_type(type, lookup))
+                return static_cast<const type_def *>(nullptr);
+            return lookup.structure
+                       ? static_cast<const type_def *>(lookup.structure)
+                       : static_cast<const type_def *>(lookup.enumeration);
+        };
+
+        if (constraint.kind == GENERIC_CONSTRAINT_OR) {
+            for (const TypeNode *item : constraint.items) {
+                if (type_equal(arg, item))
+                    return true;
+                if (item && item->kind == TYPE_ANY)
+                    return true;
+            }
+            return false;
+        }
+
+        if (constraint.kind == GENERIC_CONSTRAINT_SINGLE &&
+            constraint.items.size() == 1) {
+            const TypeNode *item = constraint.items[0];
+            if (item->kind == TYPE_ANY)
+                return true;
+            if (item->kind == TYPE_NAMED && item->name == "hashable")
+                return is_hashable(arg);
+            if (item->kind == TYPE_NAMED) {
+                structtype_lookup_result protocol;
+                if (protocol_lookup(item, protocol)) {
+                    const type_def *actual = actual_type(arg);
+                    return actual &&
+                           structtype_satisfies_protocol(actual,
+                                                         protocol.protocol);
+                }
+            }
+            return type_equal(arg, item);
+        }
+
+        for (const TypeNode *item : constraint.items) {
+            if (!item)
+                continue;
+            if (item->kind == TYPE_NAMED && item->name == "hashable") {
+                if (!is_hashable(arg))
+                    return false;
+                continue;
+            }
+            structtype_lookup_result protocol;
+            if (!protocol_lookup(item, protocol))
+                return false;
+            const type_def *actual = actual_type(arg);
+            if (!actual ||
+                !structtype_satisfies_protocol(actual, protocol.protocol))
+                return false;
+        }
+        return true;
+    }
+
+    const std::vector<GenericConstraintMeta> *generic_constraints_for(
+        const char *source, const char *name) {
+        std::string key = static_type_key(source, name);
+        auto it = static_types.find(key);
+        if (it != static_types.end() && !it->second.generic_params.empty()) {
+            /* GenericTypeMeta carries the normalized constraints. */
+        }
+        auto meta = g_generic_type_meta.find(key);
+        if (meta == g_generic_type_meta.end() ||
+            meta->second.constraints.empty())
+            return NULL;
+        return &meta->second.constraints;
+    }
+
+    bool check_generic_type_arguments(
+        const TypeNode *type, const std::vector<const TypeNode *> &args,
+        int line, int column) {
+        if (!type || type->kind != TYPE_NAMED)
+            return true;
+        const std::vector<GenericConstraintMeta> *constraints =
+            generic_constraints_for(type->source.c_str(), type->name.c_str());
+        if (!constraints)
+            return true;
+        for (std::size_t i = 0;
+             i < args.size() && i < constraints->size(); ++i) {
+            if (type_satisfies_generic_constraint(args[i], (*constraints)[i]))
+                continue;
+            std::string message =
+                std::string("type argument ") + type_display(args[i]) +
+                " does not satisfy generic constraint for " + type->name;
+            report_error(line, column, message.c_str());
+            return false;
+        }
+        return true;
     }
 
     bool generic_bindings_for(const TypeNode *type,
@@ -2830,17 +2957,20 @@ struct Checker : public BuiltinContext {
         }
 
         if (generic_literal) {
+            std::vector<const TypeNode *> args;
             if (explicit_bindings) {
-                generic_literal_args[expr] = explicit_args;
+                args = explicit_args;
             } else {
-                std::vector<const TypeNode *> args;
                 for (const std::string &param : *generic_params) {
                     auto it = bindings.find(param);
                     args.push_back(it == bindings.end() ? type_any()
                                                         : it->second);
                 }
-                generic_literal_args[expr] = args;
             }
+            if (!check_generic_type_arguments(literal_type, args,
+                                              expr->line, expr->column))
+                return false;
+            generic_literal_args[expr] = args;
         }
         return true;
     }
@@ -2877,6 +3007,10 @@ struct Checker : public BuiltinContext {
                         std::to_string(type->args.size());
                     report_error(line, column, message.c_str());
                     ok = false;
+                } else {
+                    ok = check_generic_type_arguments(
+                             type, type->args, line, column) &&
+                         ok;
                 }
             }
         }
@@ -3089,10 +3223,14 @@ struct Checker : public BuiltinContext {
             static_type_key(decl->source, decl->name)];
         info.is_enum = false;
         info.generic_params.clear();
+        std::vector<GenericConstraintMeta> struct_constraints;
         for (struct generic_param *param = decl->generic_params;
              param; param = param->next) {
-            if (param->name)
+            if (param->name) {
                 info.generic_params.push_back(param->name);
+                struct_constraints.push_back(
+                    generic_constraint_meta(param->constraint));
+            }
         }
         for (struct struct_member *member = decl->members; member;
              member = member->next) {
@@ -3112,6 +3250,7 @@ struct Checker : public BuiltinContext {
         GenericTypeMeta &meta =
             g_generic_type_meta[static_type_key(decl->source, decl->name)];
         meta.params = info.generic_params;
+        meta.constraints = struct_constraints;
         meta.fields = info.fields;
         for (struct struct_member *member = decl->members; member;
              member = member->next) {
@@ -3137,10 +3276,14 @@ struct Checker : public BuiltinContext {
             static_type_key(decl->source, decl->name)];
         info.is_enum = true;
         info.generic_params.clear();
+        std::vector<GenericConstraintMeta> enum_constraints;
         for (struct generic_param *param = decl->generic_params;
              param; param = param->next) {
-            if (param->name)
+            if (param->name) {
                 info.generic_params.push_back(param->name);
+                enum_constraints.push_back(
+                    generic_constraint_meta(param->constraint));
+            }
         }
         for (struct enum_variant *variant = decl->variants; variant;
              variant = variant->next) {
@@ -3162,6 +3305,7 @@ struct Checker : public BuiltinContext {
         GenericTypeMeta &meta =
             g_generic_type_meta[static_type_key(decl->source, decl->name)];
         meta.params = info.generic_params;
+        meta.constraints = enum_constraints;
         meta.variants = info.variants;
         for (struct enum_variant *variant = decl->variants; variant;
              variant = variant->next) {

@@ -2352,6 +2352,7 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
                           NULL, NULL);
       }
     | exp '[' exp ']' '{' empty_body {
+        treefree($3);
         $$ = newstructlit($1->nodetype == 'N'
                               ? copy_text(((struct symref *)$1)->name)
                               : copy_text(""),
@@ -2363,6 +2364,7 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
               @4.first_column };
       }
     | exp '[' exp ']' '{' struct_fields '}' {
+        treefree($3);
         $$ = newstructlit($1->nodetype == 'N'
                               ? copy_text(((struct symref *)$1)->name)
                               : copy_text(""),
@@ -2374,6 +2376,8 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
               @4.first_column };
       }
     | exp '[' exp ',' explist ']' '{' empty_body {
+        treefree($3);
+        treefree($5);
         $$ = newstructlit($1->nodetype == 'N'
                               ? copy_text(((struct symref *)$1)->name)
                               : copy_text(""),
@@ -2385,6 +2389,8 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
               @6.first_column };
       }
     | exp '[' exp ',' explist ']' '{' struct_fields '}' {
+        treefree($3);
+        treefree($5);
         $$ = newstructlit($1->nodetype == 'N'
                               ? copy_text(((struct symref *)$1)->name)
                               : copy_text(""),

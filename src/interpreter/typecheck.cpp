@@ -205,6 +205,18 @@ struct Checker : public BuiltinContext {
         return true;
     }
 
+    bool callee_is_builtin(const std::string &name, int functype,
+                           Env &env) {
+        if (env.lookup(name) || functions.find(name) != functions.end())
+            return false;
+        struct symbol *sym = lookupsym(name.c_str());
+        if (!sym || !sym->val || sym->val->type != T_builtin)
+            return false;
+        struct builtin_value_t *builtin =
+            (struct builtin_value_t *)sym->val;
+        return builtin->functype == functype;
+    }
+
     static bool narrow_path(const struct ast *node, std::string &path) {
         if (!node)
             return false;
@@ -1975,6 +1987,12 @@ struct Checker : public BuiltinContext {
         std::string canonical =
             has_path ? canonical_builtin_path(path, source)
                      : std::string();
+        if (has_path && path.find('.') == std::string::npos) {
+            if (path == "list" && callee_is_builtin(path, B_list, env))
+                canonical = "std.list.new";
+            else if (path == "dict" && callee_is_builtin(path, B_dict, env))
+                canonical = "std.dict.new";
+        }
         bool spread = false;
         for (struct ast *arg : args) {
             if (arg && arg->nodetype == 'x') {
@@ -2084,6 +2102,7 @@ struct Checker : public BuiltinContext {
              canonical.rfind("std.generator.", 0) == 0 ||
              canonical == "std.set.from_list" ||
              canonical == "std.dict.index_by" ||
+             canonical == "std.list.new" || canonical == "std.dict.new" ||
              needs_static_check(expected) ||
              (!args.empty() &&
               expr_has_declared_container(args[0], env)));

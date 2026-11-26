@@ -80,6 +80,20 @@ bool check_builtin(BuiltinContext &context, const std::string &path,
                              where ? where->column : 0, message.c_str());
         return false;
     };
+    auto pair_parts = [](const TypeNode *element, const TypeNode *&key,
+                         const TypeNode *&value) -> bool {
+        if (!element || element->args.empty())
+            return false;
+        if (element->kind != TYPE_PAIR && element->kind != TYPE_LIST &&
+            element->kind != TYPE_TUPLE)
+            return false;
+        /* A list type records only its joined element type, so a two-item
+         * list literal appears as list[T].  Accept it as a potential pair and
+         * let the runtime builtin validate the actual length. */
+        key = element->args[0];
+        value = element->args.size() > 1 ? element->args[1] : key;
+        return true;
+    };
 
     if (path == "std.generator.next" ||
         path == "std.generator.done" ||
@@ -183,6 +197,79 @@ bool check_builtin(BuiltinContext &context, const std::string &path,
         } else {
             result = type_container(kind, {type_any()});
         }
+        return true;
+    }
+
+    if (path == "std.list.new") {
+        if (args.size() > 1) {
+            context.report_error(args[1]->line, args[1]->column,
+                                 "std.list.new expects 0 or 1 arguments");
+            result = type_any();
+            return true;
+        }
+        const TypeNode *wanted = expected_element(expected, TYPE_LIST, 0);
+        const TypeNode *element = type_any();
+        if (args.size() == 1) {
+            const TypeNode *source = context.infer(args[0], env);
+            element = source && source->kind == TYPE_DICT
+                          ? expected_element(source, TYPE_DICT, 0)
+                          : context.infer_iterable_element(args[0], false,
+                                                           env);
+            if (!element)
+                element = type_any();
+            if (wanted->kind != TYPE_ANY) {
+                if (!check_arg(0, type_container(TYPE_LIST, {wanted}), false))
+                    return true;
+                element = wanted;
+            }
+        }
+        result = type_container(TYPE_LIST, {element});
+        return true;
+    }
+
+    if (path == "std.dict.new") {
+        if (args.size() > 1) {
+            context.report_error(args[1]->line, args[1]->column,
+                                 "std.dict.new expects 0 or 1 arguments");
+            result = type_any();
+            return true;
+        }
+        const TypeNode *wanted_key = expected_element(expected, TYPE_DICT, 0);
+        const TypeNode *wanted_value =
+            expected_element(expected, TYPE_DICT, 1);
+        const TypeNode *key = type_any();
+        const TypeNode *value = type_any();
+        if (args.size() == 1) {
+            const TypeNode *source = context.infer(args[0], env);
+            if (source && source->kind == TYPE_DICT) {
+                key = expected_element(source, TYPE_DICT, 0);
+                value = expected_element(source, TYPE_DICT, 1);
+            } else if (!pair_parts(context.infer_iterable_element(
+                                       args[0], false, env),
+                                   key, value)) {
+                const TypeNode *element =
+                    context.infer_iterable_element(args[0], false, env);
+                char message[256];
+                std::snprintf(message, sizeof(message),
+                              "std.dict.new expects an iterable of pairs, "
+                              "got %s",
+                              type_display(element));
+                context.report_error(args[0]->line, args[0]->column, message);
+                result = type_any();
+                return true;
+            }
+            if (wanted_key->kind != TYPE_ANY || wanted_value->kind != TYPE_ANY) {
+                if (!check_arg(0, type_container(TYPE_DICT,
+                                                 {wanted_key, wanted_value}),
+                               false))
+                    return true;
+                key = wanted_key;
+                value = wanted_value;
+            }
+        }
+        if (!require_key_contract(key, 0, "std.dict.new key"))
+            return true;
+        result = type_container(TYPE_DICT, {key, value});
         return true;
     }
 
@@ -740,6 +827,8 @@ const TypeNode *builtin_polymorphic_type(const std::string &path) {
     const TypeNode *integer_type = integer();
     const TypeNode *bool_type = boolean();
 
+    if (path == "std.list.new")
+        return poly_builtin({any_type()}, list_t, 1);
     if (path == "std.list.len")
         return poly_builtin({list_t}, integer_type);
     if (path == "std.list.slice")
@@ -983,6 +1072,8 @@ const TypeNode *builtin_polymorphic_type(const std::string &path) {
         return poly_builtin({websocket_type, integer_type},
                             poly_task(dict_any), 1);
 
+    if (path == "std.dict.new")
+        return poly_builtin({any_type()}, dict_kv, 1);
     if (path == "std.dict.len")
         return poly_builtin({dict_kv}, integer_type);
     if (path == "std.dict.has")
@@ -1090,6 +1181,11 @@ const TypeNode *builtin_function_type(int functype) {
             return builtin_sig({integer(), integer()}, integer());
         case B_len:
             return builtin_sig({any_type()}, integer());
+        case B_list:
+            return poly_builtin({any_type()}, poly_list(any_type()), 1);
+        case B_dict:
+            return poly_builtin({any_type()},
+                                poly_dict(any_type(), any_type()), 1);
         case B_int:
             return builtin_sig({any_type()}, integer());
         case B_float:

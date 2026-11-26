@@ -39,7 +39,7 @@ info!("ready", {"service": "api"});
 capture! { return int("42"); }
 ```
 
-后续阶段只追加两种简写（尚未实现）：
+同时支持两种简写：
 
 ```text
 name!       // 零参数，等价于 name!()
@@ -66,6 +66,10 @@ name! x     // 单个 NAME 参数
 | `error!` | `std.log.error!` |
 | `log_to!` | `std.log.log_to!` |
 | `capture!` | `std.result.capture!` |
+| `fail!` | `std.error.fail!` |
+| `recover!` | `std.error.recover!` |
+| `pass!` | `std.error.pass!` |
+| `wait!` | `std.task.wait!` |
 
 `std.assert.that!` / `std.assert.schema!` 本身就是规范路径，没有裸名别名。
 
@@ -107,7 +111,7 @@ if (std.log.enabled("info")) {
 ```
 
 级别关闭时，`message` 和 `fields` 表达式完全不求值，宏表达式的结果是 `null`。
-`error!` 是保留字特例，裸写 `error!` 与 `std.log.error!` 都可用。
+裸写 `error!` 与 `std.log.error!` 都可用；`!` 紧跟保留字时按宏名解析。
 
 ### 3.3 指定 logger
 
@@ -151,6 +155,27 @@ std.result.capture(func() { statements })
 - block 内的 `return` 返回生成的 thunk，不直接返回外层函数；
 - 可与 `on error` 组合。
 
+### 3.5 控制流与任务宏
+
+```text
+fail!([expr])
+recover!([expr])
+pass!([expr])
+wait!(task)
+```
+
+`fail!` / `recover!` / `pass!` 展开为对应的控制流 AST 节点，语义与旧关键字形式
+`fail expr` / `recover expr` / `pass expr` 一致；`wait!(t)` 展开为 `t.wait()`。
+
+```text
+let r = std.result.capture! { std.error.fail!("boom"); };
+let v = wait launch work();
+let w = wait!(t);
+```
+
+零参数写法 `fail!` / `recover!` / `pass!` 与单 NAME 写法 `recover! value`
+均可用；其他表达式必须放在括号内。旧关键字形式暂时保留作为兼容别名。
+
 ## 4. 边界
 
 第一批不包含：
@@ -167,11 +192,7 @@ std.result.capture(func() { statements })
 - `shape` 类型、proto 字段、鸭子类型；
 - 运算符宏；
 - 对 `if` / `for` / `match` / `defer` / `on error` 等核心语义的重写；
-- `fail!` / `recover!` / `pass!`：规划为后续阶段的内置控制流宏，用于把
-  `fail` / `recover` / `pass` 从保留字中移除，不属于第一批；
-- `wait!`：规划为任务宏，规范路径 `std.task.wait!`，展开为 `#expr.wait()`；
-  不属于第一批。`launch` / `await` 走表达式起始 contextual，不按宏处理；
-- 宏调用简写 `name!` / `name! x`：规划扩展，不属于第一批；
+- `launch` / `await`：走表达式起始 contextual，不按宏处理；
 - 专用宏 opcode。
 
 装饰器保持 `@expr` 普通高阶函数语义；本计划不改变用户写法。

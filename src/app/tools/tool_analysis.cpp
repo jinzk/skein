@@ -90,7 +90,9 @@ void collect_visible_symbols(const std::string &source, scope_context &scopes,
         if (std::shared_ptr<scope_t> scope = weak.lock())
             collect_scope_symbols(scope.get(), seen, symbols);
     }
-    collect_scope_symbols(scopes.current.get(), seen, symbols);
+    for (std::shared_ptr<scope_t> scope = scopes.current;
+         scope; scope = scope->parent)
+        collect_scope_symbols(scope.get(), seen, symbols);
     collect_typecheck_symbols(source, seen, symbols);
 }
 

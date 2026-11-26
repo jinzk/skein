@@ -536,7 +536,13 @@ let empty_list = [];
 let empty_dict = {};
 let empty_list_alt = list();
 let empty_dict_alt = dict();
+let copied_list = list([1, 2]);
+let copied_dict = dict({"a": 1});
 ```
+
+`list()` / `dict()` 是 `std.list.new()` / `std.dict.new()` 的 prelude 别名；单参数
+形式从可迭代对象构造，`dict` 接受 dict 或由长度 2 的 pair/list 组成的可迭代对象。
+裸名可以遮蔽，但类型注解里的 `list[T]` / `dict[K, V]` 不受影响。
 
 支持链式下标赋值：`a[0][1] = 9`、`d["a"]["b"] = 1`。
 
@@ -1516,7 +1522,7 @@ for (let value in values) {
 
 #### 内置函数
 
-内置函数（无需 `import`）：`len`、`range`、`print`、`println`、`input`、`list`、`dict`、`int`、`float`、`bool`、`str`、`char`、`byte`、`kind_of`、`type_name`、`type_package`、`type_module_name`、`type_source`。数学、字符串、格式化、文件与 bytes 函数位于 `std.math`、`std.string`、`std.fs`、`std.bytes`，使用前需要 `import std;`。内置函数同样是一等值：
+无需 `import` 的 prelude 值：`len`、`range`、`print`、`println`、`input`、`list`、`dict`、`kind_of`、`type_name`、`type_package`、`type_module_name`、`type_source`，规范路径分别为 `std.utils.*`、`std.io.*`、`std.list.new` / `std.dict.new`、`std.type.*`；它们可被局部绑定或显式 import 遮蔽。`int`、`float`、`bool`、`str`、`char`、`byte` 仍是词法识别的转换函数与类型名。数学、字符串、格式化、文件与 bytes 函数位于 `std.math`、`std.string`、`std.fs`、`std.bytes`，使用前需要 `import std;`。内置函数同样是一等值：
 
 ```text
 import std;

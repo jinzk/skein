@@ -203,3 +203,43 @@ def run_cases():
         assert check_clean.returncode == 1, decode(check_clean.stderr)
     finally:
         os.unlink(selective_path)
+
+    macro_source = (
+        "import std;\n"
+        "func f():int{return 1;}\n"
+        "let a=1;\n"
+        "info!(a);\n"
+        "fail!;\n"
+        "let b=2;\n"
+        "fail! b;\n"
+        "let t=launch f();\n"
+        "println(str(wait! t));\n"
+    )
+    macro_expected = (
+        "import std;\n"
+        "func f(): int { return 1; }\n"
+        "let a = 1;\n"
+        "info!(a);\n"
+        "fail!;\n"
+        "let b = 2;\n"
+        "fail! b;\n"
+        "let t = launch f();\n"
+        "println(str(wait! t));\n"
+    )
+    macro_path = write_temp(macro_source)
+    try:
+        formatted = run_fmt(macro_path)
+        assert formatted.returncode == 0, decode(formatted.stderr)
+        assert decode(formatted.stdout) == macro_expected, decode(
+            formatted.stdout
+        )
+
+        second = run_fmt("-", stdin=formatted.stdout)
+        assert second.returncode == 0, decode(second.stderr)
+        assert second.stdout == formatted.stdout, (
+            "fmt must be idempotent for macro shorthands\n"
+            f"first:\n{decode(formatted.stdout)}\n"
+            f"second:\n{decode(second.stdout)}"
+        )
+    finally:
+        os.unlink(macro_path)

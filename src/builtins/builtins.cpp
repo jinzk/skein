@@ -546,6 +546,56 @@ static struct value_t *call_ref_builtin(
     return ref_snapshot(args[0]);
 }
 
+static struct value_t *list_new_from_value(struct value_t *arg) {
+    std::vector<struct value_t *> collect_args;
+    collect_args.push_back(arg);
+    return call_iter_builtin(B_iter_collect, collect_args);
+}
+
+static struct value_t *dict_new_from_value(struct value_t *arg) {
+    if (arg->type == T_dict) {
+        struct dict_value_t *source = (struct dict_value_t *)arg;
+        struct dict_value_t *out = newdictval();
+        out->payload->items.reserve(source->payload->items.size());
+        for (const auto &entry : source->payload->items)
+            dict_append_item(out, dupval(entry.first), dupval(entry.second));
+        return (struct value_t *)out;
+    }
+
+    struct value_t *collected = list_new_from_value(arg);
+    if (!collected)
+        return NULL;
+    struct list_value_t *items = (struct list_value_t *)collected;
+    struct dict_value_t *out = newdictval();
+    out->payload->items.reserve(items->payload->items.size());
+    for (struct value_t *item : items->payload->items) {
+        if (!item || item->type != T_list) {
+            yyerror("std.dict.new expects pairs, got %s",
+                    typename_of(item));
+            freeval(collected);
+            return NULL;
+        }
+        struct list_value_t *pair = (struct list_value_t *)item;
+        if (pair->payload->items.size() != 2) {
+            yyerror("std.dict.new expects pairs of length 2, got %zu",
+                    pair->payload->items.size());
+            freeval(collected);
+            return NULL;
+        }
+        struct value_t *key = pair->payload->items[0];
+        struct value_t *value = pair->payload->items[1];
+        if (!dict_key_allowed(key)) {
+            yyerror("std.dict.new: %s, got %s", dict_key_error(),
+                    typename_of(key));
+            freeval(collected);
+            return NULL;
+        }
+        dict_append_item(out, dupval(key), dupval(value));
+    }
+    freeval(collected);
+    return (struct value_t *)out;
+}
+
 } // namespace
 
 struct value_t *call_builtin(int functype,
@@ -659,14 +709,19 @@ struct value_t *call_builtin(int functype,
         return call_websocket_builtin(functype, args);
 
     if (functype == B_list || functype == B_dict) {
-        if (!args.empty()) {
-            yyerror("built-in function expects 0 arguments, got %d",
+        const char *name = functype == B_list ? "std.list.new"
+                                              : "std.dict.new";
+        if (args.size() > 1) {
+            yyerror("%s expects 0 or 1 arguments, got %d", name,
                     (int)args.size());
             return NULL;
         }
-        return (functype == B_list)
-                   ? (struct value_t *)newlistval()
-                   : (struct value_t *)newdictval();
+        if (args.empty())
+            return (functype == B_list)
+                       ? (struct value_t *)newlistval()
+                       : (struct value_t *)newdictval();
+        return (functype == B_list) ? list_new_from_value(args[0])
+                                    : dict_new_from_value(args[0]);
     }
 
     if (functype == B_format || functype == B_print ||

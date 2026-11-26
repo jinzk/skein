@@ -142,16 +142,40 @@ bool known_level(const std::string &level) {
            level == "warn" || level == "error";
 }
 
+std::string canonical_macro_name(const std::string &name) {
+    static const struct {
+        const char *alias;
+        const char *canonical;
+    } aliases[] = {
+        {"trace", "std.log.trace"},
+        {"debug", "std.log.debug"},
+        {"info", "std.log.info"},
+        {"warn", "std.log.warn"},
+        {"error", "std.log.error"},
+        {"log_to", "std.log.log_to"},
+        {"capture", "std.result.capture"},
+        {"fail", "std.error.fail"},
+        {"recover", "std.error.recover"},
+        {"pass", "std.error.pass"},
+        {"wait", "std.task.wait"},
+    };
+    for (const auto &entry : aliases) {
+        if (name == entry.alias)
+            return entry.canonical;
+    }
+    return name;
+}
+
 int level_builtin(const std::string &macro_name) {
-    if (macro_name == "trace" || macro_name == "std.log.trace")
+    if (macro_name == "std.log.trace")
         return B_log_trace;
-    if (macro_name == "debug" || macro_name == "std.log.debug")
+    if (macro_name == "std.log.debug")
         return B_log_debug;
-    if (macro_name == "info" || macro_name == "std.log.info")
+    if (macro_name == "std.log.info")
         return B_log_info;
-    if (macro_name == "warn" || macro_name == "std.log.warn")
+    if (macro_name == "std.log.warn")
         return B_log_warn;
-    if (macro_name == "error" || macro_name == "std.log.error")
+    if (macro_name == "std.log.error")
         return B_log_error;
     return 0;
 }
@@ -184,6 +208,54 @@ struct ast *wrap_enabled_call(int level_builtin_id, const char *level,
     return branch;
 }
 
+struct ast *control_flow_macro(const std::string &name, struct ast *args,
+                               struct ast *block, std::size_t arg_count,
+                               int line, int column) {
+    if (block)
+        return fail_expansion(name.c_str(), "does not accept a block", NULL,
+                              args, block);
+    if (arg_count > 1)
+        return fail_expansion(name.c_str(), "expects 0 or 1 arguments", NULL,
+                              args, block);
+
+    std::vector<struct ast *> values = take_args(args);
+    if (any_spread(values)) {
+        free_values(values);
+        return fail_expansion(name.c_str(), "does not accept spread arguments",
+                              NULL, NULL, NULL);
+    }
+    struct ast *value = values.empty() ? NULL : values[0];
+    struct ast *result = NULL;
+    if (name == "std.error.fail")
+        result = newfail(value);
+    else if (name == "std.error.recover")
+        result = newrecover(value);
+    else
+        result = newpass(value);
+    set_location(result, line, column);
+    return result;
+}
+
+struct ast *wait_macro(struct ast *args, struct ast *block,
+                       std::size_t arg_count, int line, int column) {
+    if (block)
+        return fail_expansion("wait", "does not accept a block", NULL, args,
+                              block);
+    if (arg_count != 1)
+        return fail_expansion("wait", "expects 1 expression argument", NULL,
+                              args, block);
+
+    std::vector<struct ast *> values = take_args(args);
+    if (any_spread(values)) {
+        free_values(values);
+        return fail_expansion("wait", "does not accept spread arguments", NULL,
+                              NULL, NULL);
+    }
+    struct ast *result = new_wait_call(values[0]);
+    set_location(result, line, column);
+    return result;
+}
+
 } // namespace
 
 struct ast *expand_builtin_macro(struct ast *callee, struct ast *args,
@@ -198,6 +270,7 @@ struct ast *expand_builtin_macro(struct ast *callee, struct ast *args,
         return NULL;
     }
     treefree(callee);
+    name = canonical_macro_name(name);
 
     const std::size_t arg_count =
         [&]() -> std::size_t {
@@ -266,7 +339,7 @@ struct ast *expand_builtin_macro(struct ast *callee, struct ast *args,
                                  build_args(values, 0), line, column);
     }
 
-    if (name == "log_to") {
+    if (name == "std.log.log_to") {
         if (block)
             return fail_expansion(name.c_str(), "does not accept a block",
                                   NULL, args, block);
@@ -318,7 +391,7 @@ struct ast *expand_builtin_macro(struct ast *callee, struct ast *args,
         return scope;
     }
 
-    if (name == "capture") {
+    if (name == "std.result.capture") {
         if (!block)
             return fail_expansion(name.c_str(), "expects a block", NULL,
                                   args, NULL);
@@ -333,6 +406,13 @@ struct ast *expand_builtin_macro(struct ast *callee, struct ast *args,
         set_location(thunk, line, column);
         return builtin_call(B_result_capture, thunk, line, column);
     }
+
+    if (name == "std.error.fail" || name == "std.error.recover" ||
+        name == "std.error.pass")
+        return control_flow_macro(name, args, block, arg_count, line, column);
+
+    if (name == "std.task.wait")
+        return wait_macro(args, block, arg_count, line, column);
 
     return fail_expansion(name.c_str(), "is not a known built-in macro", NULL,
                           args, block);

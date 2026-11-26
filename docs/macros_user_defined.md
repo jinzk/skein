@@ -53,8 +53,8 @@ macro name(param: expr, label: ident, body: block) {
 保留字，而是默认 import 的解析期绑定（第 3.5 节）：当前规范路径包括
 `std.log.trace!`、`std.log.debug!`、`std.log.info!`、`std.log.warn!`、
 `std.log.error!`、`std.log.log_to!`、`std.result.capture!`、
-`std.assert.that!`、`std.assert.schema!`，后续还会加入 `std.error.fail!` /
-`std.error.recover!` / `std.error.pass!`。
+`std.assert.that!`、`std.assert.schema!`、`std.error.fail!` /
+`std.error.recover!` / `std.error.pass!` / `std.task.wait!`。
 
 ### 3.2 参数片段
 
@@ -157,7 +157,7 @@ import {retry! as r} from util;   // 调用时写 r!(...)
 ### 3.5 内置宏的默认 import
 
 内置宏不再是硬编码的裸名，而是 parser 侧的默认宏绑定：裸名是隐式导入的别名，
-每个宏都有规范路径。当前第一批的映射为：
+每个宏都有规范路径。当前映射为：
 
 | 裸名 | 规范路径 |
 | --- | --- |
@@ -168,16 +168,12 @@ import {retry! as r} from util;   // 调用时写 r!(...)
 | `error!` | `std.log.error!` |
 | `log_to!` | `std.log.log_to!` |
 | `capture!` | `std.result.capture!` |
-
-`std.assert.that!` / `std.assert.schema!` 本身就是规范路径，没有裸名别名。
-后续控制流与任务宏阶段加入：
-
-| 裸名 | 规范路径 |
-| --- | --- |
 | `fail!` | `std.error.fail!` |
 | `recover!` | `std.error.recover!` |
 | `pass!` | `std.error.pass!` |
 | `wait!` | `std.task.wait!` |
+
+`std.assert.that!` / `std.assert.schema!` 本身就是规范路径，没有裸名别名。
 
 宏解析发生在语法分析阶段，顺序为：
 
@@ -367,19 +363,18 @@ wrap!(2) {
 2. **P1.2（已完成）**：值/类型的 selective import `import {name} from pkg;`。
    `from` 只在 `import { ... }` 后 contextual；formatter / lint / LSP、文档与
    测试已同步，check-only 工具不执行被导入的包。
-3. **P2.1**：普通内置函数改为默认 import 的 prelude 值。`len` / `range` 放入
-   规划中的 `std.utils`；`print` / `println` / `input` → `std.io.*`；
+3. **P2.1（已完成）**：普通内置函数改为默认 import 的 prelude 值。`len` /
+   `range` 放入 `std.utils`；`print` / `println` / `input` → `std.io.*`；
    `kind_of` / `type_*` → `std.type.*`。lexer 不再发 `SKEIN_TOK_BUILTIN`，初始
    作用域注入绑定；VM / JIT 的 builtin id 不变。解析优先级为局部绑定 > 显式
    import > 默认 import。
-4. **P2.2**：内置宏改为 parser 侧默认宏绑定（第 3.5 节）。裸名只是别名，规范
+4. **P2.2（已完成）**：内置宏改为 parser 侧默认宏绑定（第 3.5 节）。裸名只是别名，规范
    路径仍可显式调用；加入 `fail!` / `recover!` / `pass!`（`std.error.*!`）和
    `wait!`（`std.task.wait!`，展开为 `#expr.wait()`）。落地第 3.3 节的
-   `name!` / `name! x` 两种简写；旧 bare 形式先并行并 deprecate。
-5. **P2.3**：`list` / `dict` 改为默认 import，新增 `std.list.new` /
-   `std.dict.new`，并与 `int` / `str` 等统一为类型构造器；`list(x)` / `dict(x)`
-   降糖为 `std.list.new(x)` / `std.dict.new(x)`；值作用域可遮蔽，类型命名空间
-   独立。不做 `list!` / `dict!` / `try!`。
+   `name!` / `name! x` 两种简写；旧 bare 形式暂时并行，后续阶段再 deprecate。
+5. **P2.3（已完成）**：`list` / `dict` 改为默认 import，新增 `std.list.new` /
+   `std.dict.new`；`list(x)` / `dict(x)` 解析为对应构造器，值作用域可遮蔽，
+   类型命名空间保持独立。不做 `list!` / `dict!` / `try!`。
 6. **P3.1**：`wait` 退出保留字；`launch` 与新增 `await` 改为表达式起始 contextual
    keyword。`launch f()` 启动 task，`await f()` 等价 `wait launch f()` 并要求
    后面是调用表达式；已有 task 写 `wait!(t)`。contextual 槽位覆盖语句开头、

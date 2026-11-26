@@ -903,38 +903,6 @@ static struct ast *new_call_with_placeholders(
                    newret(newcall(callee, args)), false, false);
 }
 
-/*
- * `wait value` desugars to `value.wait()`.  The extra flag only lets the
- * type checker report a targeted diagnostic; execution is identical to the
- * explicit method call.
- */
-static struct ast *new_wait_call(struct ast *value) {
-    /*
-     * `on error` binds tighter than `wait`, so `wait t on error(...)` arrives
-     * here as `wait (t on error(...))`.  Move the wait inside the handler so
-     * the handler covers the task failure raised by wait, for variables and
-     * for `launch` calls alike.
-     */
-    if (value && value->nodetype == 'o') {
-        struct on_error_node *handler = (struct on_error_node *)value;
-        handler->call = new_wait_call(handler->call);
-        return (struct ast *)handler;
-    }
-    struct ast *callee = newast('j', value, newstr("wait"));
-    struct ufncall *call =
-        (struct ufncall *)newcall(callee, NULL);
-    call->wait_sugar = 1;
-    /*
-     * `wait launch f()` observes the task before it can fail.  Mark the
-     * launch call so the task is not reported as detached when a fast body
-     * fails before `.wait()` is entered.
-     */
-    if (value && value->nodetype == 'C' &&
-        ((struct ufncall *)value)->launch)
-        ((struct ufncall *)value)->awaited = 1;
-    return (struct ast *)call;
-}
-
 static struct type_constraint *type_constraint_from_builtin(int functype) {
     switch (functype) {
         case B_int: return new_type_constraint(TYPE_INT);
@@ -2418,6 +2386,14 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
         bool generator = finish_function();
         $$ = expand_builtin_macro($1, NULL, newscope($5),
                                   @2.first_line, @2.first_column, generator);
+      }
+    | exp MACRO_BANG %prec PRIMARY {
+        $$ = expand_builtin_macro($1, NULL, NULL,
+                                  @2.first_line, @2.first_column, false);
+      }
+    | exp MACRO_BANG NAME %prec PRIMARY {
+        $$ = expand_builtin_macro($1, newref($3), NULL,
+                                  @2.first_line, @2.first_column, false);
       }
     /* `error` is reserved, so bare `error!` needs its own callee node. */
     | ERROR MACRO_BANG '(' explist ')' %prec PRIMARY {

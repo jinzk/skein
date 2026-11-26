@@ -502,17 +502,17 @@ keyword（`in` / `export` / `import` / `package` / `include`）已完成。其�
 2. **P1.2（已完成）** 值/类型的 selective import：`import {name} from pkg;`，
    `from` 为 contextual keyword；formatter / lint / LSP、文档与测试已同步，
    check-only 工具不执行被导入的包。
-3. **P2.1** 普通内置函数改为默认 import：`len` / `range` 放进规划中的
+3. **P2.1（已完成）** 普通内置函数改为默认 import：`len` / `range` 放进
    `std.utils`（`std.utils.len` / `std.utils.range`），`print` / `println` /
    `input` → `std.io.*`，类型内省 → `std.type.*`；lexer 不再发
    `SKEIN_TOK_BUILTIN`；解析优先级为局部绑定 > 显式 import > 默认 import。
-4. **P2.2** 内置宏改为 parser 侧默认宏绑定，裸名映射到 `std.log.*!` /
+4. **P2.2（已完成）** 内置宏改为 parser 侧默认宏绑定，裸名映射到 `std.log.*!` /
    `std.result.capture!` / `std.error.*!` / `std.task.wait!` 等规范路径；
-   `fail` / `recover` / `pass` / `wait` 退出保留字，只追加 `name!` 与
-   `name! x` 两种宏简写；用户宏可遮蔽裸名。
-5. **P2.3** `list` / `dict` 改为默认 import，与 `int` / `str` 等统一为类型构造器；
-   `list(x)` / `dict(x)` 降糖为 `std.list.new(x)` / `std.dict.new(x)`；不做
-   `list!` / `dict!` / `try!`。
+   `fail` / `recover` / `pass` / `wait` 的规范形式改为宏，旧关键字形式暂时并行；
+   追加 `name!` 与 `name! x` 两种宏简写；用户宏可遮蔽裸名。
+5. **P2.3（已完成）** `list` / `dict` 改为默认 import，规范路径为
+   `std.list.new` / `std.dict.new`；`list(x)` / `dict(x)` 解析为对应构造器，
+   值作用域可遮蔽且类型命名空间保持独立；不做 `list!` / `dict!` / `try!`。
 6. **P3.1** `launch` 与新增 `await` 改为表达式起始 contextual keyword，
    `await f()` 等价 `wait launch f()`，要求后面是调用表达式，保留 `on error`
    语义；postfix 优先级高于前缀，`.` 后仍是普通名字。

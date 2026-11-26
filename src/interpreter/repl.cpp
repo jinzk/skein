@@ -17,6 +17,7 @@
 #include <cstring>
 #include <deque>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 extern int indent_count;
@@ -353,17 +354,30 @@ const std::vector<std::string> &repl_commands() {
 }
 
 void append_global_symbols(completion::index &out) {
-    for (const struct symbol *sym : active_scope_context().global_slots) {
+    std::unordered_set<std::string> seen;
+    auto add = [&](const struct symbol *sym, const char *detail, int rank) {
         if (!sym || !sym->name || !sym->name[0] || sym->name[0] == '$')
-            continue;
+            return;
         if (std::strcmp(sym->name, "std") == 0)
-            continue;
+            return;
+        if (!seen.insert(sym->name).second)
+            return;
         const bool callable =
             sym->val && (sym->val->type == T_func ||
                          sym->val->type == T_builtin ||
                          sym->val->type == T_method ||
                          sym->val->type == T_native);
-        out.add_top({sym->name, callable ? 3 : 6, "global", false});
+        out.add_top({sym->name, callable ? rank : 6, detail, false});
+    };
+    scope_context &scopes = active_scope_context();
+    for (const struct symbol *sym : scopes.global_slots)
+        add(sym, "global", 3);
+    for (std::shared_ptr<scope_t> scope =
+             scopes.global_scope ? scopes.global_scope->parent
+                                 : std::shared_ptr<scope_t>();
+         scope; scope = scope->parent) {
+        for (const struct symbol *sym : scope->syms.small)
+            add(sym, "prelude", 4);
     }
 }
 

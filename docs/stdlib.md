@@ -251,9 +251,9 @@ t.detached() -> bool
 
 当前限制：
 
-- 规划中 `launch` / `await` 是表达式起始 contextual keyword，`wait` 改为内置宏
-  `wait!`（规范路径 `std.task.wait!`，展开为 `t.wait()`）；M11 落地前当前实现仍
-  使用保留字 `launch` / `wait`；
+- `wait` 的规范写法是内置宏 `wait!`（规范路径 `std.task.wait!`，展开为
+  `t.wait()`），旧关键字形式暂时并行；规划中 `launch` / `await` 是表达式起始
+  contextual keyword，M11 落地前当前实现仍使用保留字 `launch` / `wait`；
 - `launch` 推导为 `task[T]`；`func f(): void` 推导为 `task[void]`；
 - 静态已知返回 `task[...]` 的调用不能 `launch`，会报
   `launch cannot start a call that already returns task[...]; call it directly and use .wait()`；
@@ -2289,6 +2289,7 @@ std.process
 std.worker
 std.thread
 std.type
+std.utils
 std.ref
 std.meta
 std.native
@@ -3064,9 +3065,16 @@ drive-relative 的 `C:foo` 和普通相对路径为 `false`。
 - `std.path` 只做路径字符串运算；真实文件 I/O 仍由 `std.fs` 完成，现有
   `std.fs.path_*` 是宿主原生接口，行为随平台变化。
 
+`std.list` / `std.dict` 的规范构造器为 `new`：无参数返回空容器，单参数从
+可迭代对象构造（list 复制元素，dict 接受 dict 或由长度 2 的 pair/list 组成的
+可迭代对象）。裸写 `list(x)` / `dict(x)` 是 `std.list.new(x)` /
+`std.dict.new(x)` 的 prelude 别名，值作用域可遮蔽；类型注解中的 `list[T]` /
+`dict[K, V]` 始终按类型命名空间解析。
+
 `std.list` 新增常用算法：
 
 ```text
+std.list.new([1, 2])                     // [1, 2]
 std.list.slice(xs, start, length)         // length 省略时到末尾
 std.list.unique([1, 2, 1, 3, 2])        // [1, 2, 3]
 std.list.unique(xs[, key])              // key 省略时按值去重
@@ -3127,6 +3135,7 @@ std.iter.collect(std.iter.map(gen(), func(x) -> x * 10))
 当前提供的函数：
 
 ```text
+std.list.new
 std.list.len
 std.list.slice
 std.list.contains
@@ -3164,6 +3173,7 @@ std.iter.enumerate
 std.iter.collect
 std.iter.for_each
 
+std.dict.new
 std.dict.len
 std.dict.get
 std.dict.has
@@ -3333,6 +3343,9 @@ std.type.name
 std.type.package_name
 std.type.module_name
 std.type.source
+
+std.utils.len
+std.utils.range
 
 std.ref.set
 std.ref.upgrade

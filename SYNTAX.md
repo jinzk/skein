@@ -41,9 +41,10 @@ as
 
 `def` 已不再使用，匿名/命名函数统一使用 `func`。
 
-规划中的任务语法调整：`wait` 改为内置宏 `wait!` 并退出保留字；`launch` 与新增的
-`await` 改为表达式起始 contextual keyword。`launch f()` 启动 task，`await f()`
-等价 `wait launch f()`。详见任务章节；在 M11 落地前，当前实现仍使用保留字
+`wait` 的规范写法是内置宏 `wait!`（`wait!(t)` 或 `wait! t`，展开为 `t.wait()`）；
+旧关键字形式暂时保留兼容。规划中的任务语法调整：`launch` 与新增的 `await`
+改为表达式起始 contextual keyword。`launch f()` 启动 task，`await f()` 等价
+`wait launch f()`。详见任务章节；在 M11 落地前，当前实现仍使用保留字
 `launch` / `wait`。
 
 协议类型声明关键字为 `proto`，属于全局保留字（`proto Drawable`）；`protocol`
@@ -51,16 +52,20 @@ as
 `[V proto Drawable]` 这类位置生效。`std.meta.type_info` 等反射结果的 kind 字符串
 为 `"proto"`。
 
-核心内置函数名（`print`、`println`、`len`、`range`、`input`、`list`、`dict` 和类型转换名等）目前由词法器识别为函数值，不能用作普通变量名。`std.*` 中的函数是普通模块成员，不是保留字。
+`len` / `range` / `print` / `println` / `input` / `kind_of` / `type_name` /
+`type_package` / `type_module_name` / `type_source` 现在是默认导入的 prelude
+值，不再是保留字；局部变量或显式 import 会遮蔽默认绑定。规范路径为
+`std.utils.len` / `std.utils.range`、`std.io.print` / `std.io.println` /
+`std.io.input`，以及 `std.type.kind_of` / `std.type.name` /
+`std.type.package_name` / `std.type.module_name` / `std.type.source`。
+`list` / `dict` 现在也是默认导入的 prelude 值，规范路径为 `std.list.new` /
+`std.dict.new`；值作用域可遮蔽，但类型注解里的 `list[T]` / `dict[K, V]` 始终按
+独立的类型命名空间解析。`int` / `float` / `bool` / `str` / `char` / `byte`
+目前仍由类型命名空间处理。
 
-规划中的清理：低风险语法词已改为 contextual keyword；`fail` / `recover` /
-`pass` 将改为内置宏 `fail!` / `recover!` / `pass!` 并退出保留字列表；`on` /
-`error` 留待 handler-scoped contextual 评估。普通内置函数将改为默认 import
-的 prelude 值，其中 `len` / `range` 放进规划中的 `std.utils` 模块
-（`std.utils.len` / `std.utils.range`），`print` / `println` / `input` 映射到
-`std.io.*`，类型内省函数映射到 `std.type.*`。设计见
-[`docs/macros_user_defined.md`](docs/macros_user_defined.md)；这些规划尚未落地，
-当前行为仍以上述词法器规则为准。
+`fail` / `recover` / `pass` 的规范写法是内置宏 `fail!` / `recover!` / `pass!`；
+旧关键字形式暂时保留兼容。`on` / `error` 留待 handler-scoped contextual 评估。
+设计见 [`docs/macros_user_defined.md`](docs/macros_user_defined.md)。
 
 
 ### 1.3 注释
@@ -200,6 +205,8 @@ null
 ```
 
 列表字面量允许尾随逗号。函数参数和调用参数也允许尾随逗号；字典字面量不允许。
+`list()` 返回空列表，`list(x)` / `std.list.new(x)` 从任意可迭代对象复制元素；
+裸名 `list` 可被局部绑定遮蔽。
 
 ### 2.8 字典
 
@@ -208,11 +215,14 @@ null
 {1: "one", 2: "two"}
 ```
 
-空字典可以直接使用 `{}`，也可以使用 `dict()`：
+空字典可以直接使用 `{}`，也可以使用 `dict()` / `std.dict.new()`；单参数形式
+`dict(x)` / `std.dict.new(x)` 从 dict 或 pair 序列构造：
 
 ```text
 {}
 dict()
+dict({"a": 1})
+std.dict.new([["a", 1]])
 ```
 
 `{}` 在表达式/值位置表示空字典；在控制流、函数体或 `->` 后的块体位置表示空代码块：
@@ -822,15 +832,14 @@ capture! { statements }
 宏在 typecheck 前展开成普通 AST，不提供类型片段、类型内省、编译期执行、
 递归展开或专用 opcode。详细规则见 [`docs/macros.md`](docs/macros.md)。
 
-规划中的扩展只有两种调用简写：`name!`（零参数）和 `name! x`（单个 `NAME`
-参数）；列表、字典、表达式、嵌套宏和成员链仍写括号。控制流宏 `fail!` /
-`recover!` / `pass!` 与任务宏 `wait!`（规范路径 `std.task.wait!`，展开为
-`#expr.wait()`）也排在后续阶段，见
+调用简写 `name!`（零参数）和 `name! x`（单个 `NAME` 参数）已实现；列表、字典、
+表达式、嵌套宏和成员链仍写括号。控制流宏 `fail!` / `recover!` / `pass!` 与任务宏
+`wait!`（规范路径 `std.task.wait!`，展开为 `#expr.wait()`）已实现，见
 [`docs/macros_user_defined.md`](docs/macros_user_defined.md)。
 
-内置宏裸名（`info!` / `capture!` 等）也按默认 import 处理：它们是解析期别名，
-规范路径为 `std.log.*!`、`std.result.capture!`、`std.assert.*!`；规范路径始终
-可以显式调用，用户宏只遮蔽裸名。
+内置宏裸名（`info!` / `capture!` / `fail!` / `wait!` 等）也按默认 import 处理：
+它们是解析期别名，规范路径为 `std.log.*!`、`std.result.capture!`、`std.error.*!`、
+`std.task.wait!`、`std.assert.*!`；规范路径始终可以显式调用，用户宏只遮蔽裸名。
 
 ## 5. 语句
 
@@ -2865,6 +2874,7 @@ std.process
 std.worker
 std.thread
 std.type
+std.utils
 std.ref
 std.meta
 std.native
@@ -5253,15 +5263,18 @@ POSIX 使用 `:`，Windows 使用 `;`。
 
 ## 7. 内置函数
 
-全局内置函数（无需 `import`）：
+无需 `import` 即可使用的 prelude 值（默认导入，可被局部绑定或显式 import 遮蔽）：
 
 ```text
 len range print println input
-list dict int float bool str char byte
+list dict
 kind_of type_name type_package type_module_name type_source
 ```
 
-`list` / `dict` / `int` / `float` / `bool` / `str` / `char` / `byte` 同时是类型名和转换函数。
+`list` / `dict` 的规范路径是 `std.list.new` / `std.dict.new`，支持零参数和一个
+可迭代参数；类型注解里的 `list[T]` / `dict[K, V]` 使用独立的类型命名空间。
+`int` / `float` / `bool` / `str` / `char` / `byte` 仍是词法识别的转换函数，同时
+是类型名。
 
 数学、字符串、格式化、文件与 bytes 函数位于标准库命名空间，使用前需要 `import std;`：
 
@@ -5313,8 +5326,8 @@ std.math.tau    // 6.283185307179586
 ### 输出和转换
 
 ```text
-print println list dict int float bool str char byte
-len range input
+print println int float bool str char byte
+len range input list dict
 kind_of type_name type_package type_module_name type_source
 ```
 

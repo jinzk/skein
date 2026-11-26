@@ -674,6 +674,7 @@ struct ast *newgoto(char *name, int line, int column);
 struct ast *newfail(struct ast *v);
 struct ast *newrecover(struct ast *v);
 struct ast *newpass(struct ast *v);
+struct ast *new_wait_call(struct ast *v);
 struct ast *newonerror(struct ast *call, char *name, struct ast *body);
 struct ast *newis(struct ast *value, struct type_constraint *type);
 struct ast *newcast(struct ast *value, struct type_constraint *type);

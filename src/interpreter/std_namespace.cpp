@@ -32,6 +32,7 @@ value_t *build_namespace_impl() {
     struct dict_value_t *root = newdictval();
     root->payload->is_namespace = true;
     value_t *list_module = builtin_module({
+        {"new", B_list},
         {"len", B_len},
         {"slice", B_list_slice},
         {"contains", B_list_contains},
@@ -72,6 +73,7 @@ value_t *build_namespace_impl() {
         {"for_each", B_iter_for_each},
     });
     value_t *dict_module = builtin_module({
+        {"new", B_dict},
         {"len", B_len},
         {"get", B_dict_get},
         {"has", B_dict_has},
@@ -436,6 +438,12 @@ value_t *build_namespace_impl() {
             {"package_name", B_type_package},
             {"module_name", B_type_module_name},
             {"source", B_type_source},
+        })));
+    root->payload->items.push_back(std::make_pair(
+        newstrval("utils"),
+        builtin_module({
+            {"len", B_len},
+            {"range", B_range},
         })));
     root->payload->items.push_back(std::make_pair(
         newstrval("ref"),

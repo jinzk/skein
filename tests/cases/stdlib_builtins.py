@@ -12,6 +12,106 @@ VM_ENV = dict(os.environ, SKEIN_VM="1")
 
 
 def run_cases():
+    check(
+        "prelude builtins are ordinary bindings",
+        "println(str(len([1, 2, 3])));\n"
+        "let len = 7;\n"
+        "println(str(len));\n"
+        "let type_name = \"shadowed\";\n"
+        "println(type_name);\n",
+        stdout_all=["3", "7", "shadowed"],
+    )
+    check(
+        "prelude builtins canonical paths",
+        "println(str(std.utils.len([1, 2, 3])));\n"
+        "println(str(std.utils.range(3)));\n"
+        "println(std.type.name(1));\n"
+        "println(kind_of(1));\n",
+        stdout_all=["3", "[0, 1, 2]", "int"],
+    )
+    check(
+        "prelude builtins explicit import shadows default",
+        "import {len} from std.utils;\n"
+        "import {println as out} from std.io;\n"
+        "out(str(len([1, 2])));\n",
+        stdout="2",
+    )
+
+    constructor_source = (
+        "println(str(list()));\n"
+        "println(str(dict()));\n"
+        "println(list([1, 2]));\n"
+        'println(list("ab"));\n'
+        'println(list({"a": 1, "b": 2}));\n'
+        'println(dict({"a": 1}));\n'
+        'println(dict([["a", 1], ["b", 2]]));\n'
+    )
+    constructor_output = [
+        "[]",
+        "{}",
+        "[1, 2]",
+        "[a, b]",
+        "[a, b]",
+        "{a: 1}",
+        "{a: 1, b: 2}",
+    ]
+    check(
+        "list and dict constructors are prelude values",
+        constructor_source,
+        stdout_all=constructor_output,
+    )
+    check(
+        "list and dict constructors under VM",
+        constructor_source,
+        stdout_all=constructor_output,
+        env=VM_ENV,
+    )
+    check(
+        "list and dict constructors without typecheck",
+        constructor_source,
+        stdout_all=constructor_output,
+        env=OFF_ENV,
+    )
+    check(
+        "canonical container constructors and first-class values",
+        "import std;\n"
+        "println(std.list.new([1, 2]));\n"
+        'println(std.dict.new([["a", 1]]));\n'
+        "let make_list = std.list.new;\n"
+        'println(make_list("ab"));\n'
+        "let make_dict = dict;\n"
+        'println(make_dict({"k": 3}));\n',
+        stdout_all=["[1, 2]", "{a: 1}", "[a, b]", "{k: 3}"],
+    )
+    check(
+        "container builtins are shadowable without affecting type names",
+        "let list = 7;\n"
+        "let dict = 8;\n"
+        "println(str(list));\n"
+        "println(str(dict));\n"
+        "let xs: list[int] = [1];\n"
+        "let d: dict[str, int] = {\"a\": 1};\n"
+        "println(xs);\n"
+        "println(d);\n",
+        stdout_all=["7", "8", "[1]", "{a: 1}"],
+    )
+    check(
+        "function declaration shadows list constructor",
+        "func list(x): int { return x + 1; }\n"
+        "println(str(list(1)));\n",
+        stdout="2",
+    )
+    check(
+        "container constructor rejects extra arguments",
+        "println(list(1, 2));\n",
+        stderr="at most 1 argument",
+    )
+    check(
+        "dict constructor rejects invalid pairs",
+        'println(dict([1, 2]));\n',
+        stderr="expects an iterable of pairs",
+    )
+
     ffi_probe = run("import std;\nkind_of(std.ffi)\n")
     has_ffi = "= dict" in ffi_probe.stdout
     if sys.platform.startswith("linux") and has_ffi:

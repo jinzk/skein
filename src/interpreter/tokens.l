@@ -344,6 +344,17 @@ static void note_function_signature_token(int tok) {
         }                                                           \
     } while (0)
 
+/* A reserved word immediately followed by `!` is a macro callee name, so the
+ * following bang can be lexed by the ordinary MACRO_BANG rule. */
+#define MACRO_CALLEE_NAME()                                         \
+    do {                                                            \
+        int macro_tok = make_name_token(yytext, yyleng);            \
+        if (macro_tok == 0)                                         \
+            return 0;                                               \
+        note_for_name_token();                                      \
+        YYRET(macro_tok);                                           \
+    } while (0)
+
 #define YY_USER_ACTION do {                                              \
     diag_scan_token(yytext, yyleng);                                     \
     yylloc.first_line = g_token_line;                                    \
@@ -799,10 +810,8 @@ static bool reserved_name(const char *text, int len) {
         "return",   "break",    "continue", "fail",     "is",
         "goto",     "on",       "error",    "recover",  "pass",
         "as",       "null",     "true",     "false",
-        "len",      "range",    "print",    "println",  "input",
-        "list",     "dict",     "int",      "float",    "bool",
-        "str",      "char",     "byte",     "kind_of",  "type_name",
-        "type_package", "type_module_name", "type_source",
+        "int",      "float",    "bool",     "str",      "char",
+        "byte",
     };
     for (const char *word : words) {
         size_t word_len = std::strlen(word);
@@ -897,12 +906,14 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 ">>=" { YYRET(SKEIN_TOK_SHR_ASSIGN); }
 
  /*
-  * `name!(...)` / `name! { ... }` use a distinct token so unary `!` keeps its
-  * usual precedence.  The bang must touch the preceding name, which keeps
-  * `!(expr)` and `f[int](...)` unchanged.
+  * A bang attached to a macro-callee name is always a macro invocation marker:
+  * `name!(...)`, `name! { ... }`, `name! x`, or bare `name!`.  Keeping it
+  * distinct preserves unary `!` precedence and leaves `!=` untouched.
   */
-"!"/[ \t]*[({] {
-    if ((last_token == SKEIN_TOK_NAME || last_token == SKEIN_TOK_ERROR) &&
+"!" {
+    if ((last_token == SKEIN_TOK_NAME || last_token == SKEIN_TOK_ERROR ||
+         last_token == SKEIN_TOK_FAIL || last_token == SKEIN_TOK_RECOVER ||
+         last_token == SKEIN_TOK_PASS || last_token == SKEIN_TOK_WAIT) &&
         last_token_line == g_token_line &&
         last_token_end_column == yylloc.first_column)
         YYRET(SKEIN_TOK_MACRO_BANG);
@@ -922,7 +933,6 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 "|" |
 "^" |
 "~" |
-"!" |
 "@" |
 "?" {
     if (yytext[0] == ';') {
@@ -1220,6 +1230,7 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 }
 "yield" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_YIELD); }
 "launch" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_LAUNCH); }
+"wait"/"!" { MACRO_CALLEE_NAME(); }
 "wait" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_WAIT); }
 "defer" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_DEFER); }
 "include" {
@@ -1235,12 +1246,16 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 "return" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_RETURN); }
 "break" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_BREAK); }
 "continue" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_CONTINUE); }
+"fail"/"!" { MACRO_CALLEE_NAME(); }
 "fail" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_FAIL); }
 "is" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_IS); }
 "goto" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_GOTO); }
 "on" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_ON); }
+"error"/"!" { MACRO_CALLEE_NAME(); }
 "error" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_ERROR); }
+"recover"/"!" { MACRO_CALLEE_NAME(); }
 "recover" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_RECOVER); }
+"pass"/"!" { MACRO_CALLEE_NAME(); }
 "pass" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_PASS); }
 "package" {
     MEMBER_NAME_AFTER_DOT();
@@ -1268,38 +1283,14 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 "true" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_TRUE); }
 "false" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_FALSE); }
 
-"len" { MEMBER_NAME_AFTER_DOT(); yylval.fn = B_len; YYRET(SKEIN_TOK_BUILTIN); }
-"range" { MEMBER_NAME_AFTER_DOT(); yylval.fn = B_range; YYRET(SKEIN_TOK_BUILTIN); }
-"print" { MEMBER_NAME_AFTER_DOT(); yylval.fn = B_print; YYRET(SKEIN_TOK_BUILTIN); }
-"println" { MEMBER_NAME_AFTER_DOT(); yylval.fn = B_println; YYRET(SKEIN_TOK_BUILTIN); }
-"input" { MEMBER_NAME_AFTER_DOT(); yylval.fn = B_input; YYRET(SKEIN_TOK_BUILTIN); }
-"list"/"." { MEMBER_NAME_AFTER_DOT();
-    int token = make_name_token("list", 4);
-    if (token)
-        YYRET(token);
-    yylval.fn = B_list;
-    YYRET(SKEIN_TOK_BUILTIN);
-}
-"list" { MEMBER_NAME_AFTER_DOT(); yylval.fn = B_list; YYRET(SKEIN_TOK_BUILTIN); }
-"dict"/"." { MEMBER_NAME_AFTER_DOT();
-    int token = make_name_token("dict", 4);
-    if (token)
-        YYRET(token);
-    yylval.fn = B_dict;
-    YYRET(SKEIN_TOK_BUILTIN);
-}
-"dict" { MEMBER_NAME_AFTER_DOT(); yylval.fn = B_dict; YYRET(SKEIN_TOK_BUILTIN); }
+    /* Ordinary builtins, including list/dict, are prelude values. */
 "int" { MEMBER_NAME_AFTER_DOT(); yylval.fn = B_int; YYRET(SKEIN_TOK_BUILTIN); }
 "float" { MEMBER_NAME_AFTER_DOT(); yylval.fn = B_float; YYRET(SKEIN_TOK_BUILTIN); }
 "bool" { MEMBER_NAME_AFTER_DOT(); yylval.fn = B_bool; YYRET(SKEIN_TOK_BUILTIN); }
 "str" { MEMBER_NAME_AFTER_DOT(); yylval.fn = B_str; YYRET(SKEIN_TOK_BUILTIN); }
 "char" { MEMBER_NAME_AFTER_DOT(); yylval.fn = B_char; YYRET(SKEIN_TOK_BUILTIN); }
 "byte" { MEMBER_NAME_AFTER_DOT(); yylval.fn = B_byte; YYRET(SKEIN_TOK_BUILTIN); }
-"kind_of" { MEMBER_NAME_AFTER_DOT(); yylval.fn = B_kind_of; YYRET(SKEIN_TOK_BUILTIN); }
-"type_name" { MEMBER_NAME_AFTER_DOT(); yylval.fn = B_type_name; YYRET(SKEIN_TOK_BUILTIN); }
-"type_package" { MEMBER_NAME_AFTER_DOT(); yylval.fn = B_type_package; YYRET(SKEIN_TOK_BUILTIN); }
-"type_module_name" { MEMBER_NAME_AFTER_DOT(); yylval.fn = B_type_module_name; YYRET(SKEIN_TOK_BUILTIN); }
-"type_source" { MEMBER_NAME_AFTER_DOT(); yylval.fn = B_type_source; YYRET(SKEIN_TOK_BUILTIN); }
+    /* Type introspection names are prelude values in std.type, not keywords. */
 
 <INITIAL>{ASCII_NAME}[ \t]*":" {
     int name_len = yyleng;

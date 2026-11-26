@@ -542,6 +542,25 @@ struct ast *newpass(struct ast *v) {
     return (struct ast *)a;
 }
 
+/* `wait value` and `wait!(value)` desugar to `value.wait()`.  The flag only
+ * lets the type checker report a targeted diagnostic; execution is identical
+ * to the explicit method call. */
+struct ast *new_wait_call(struct ast *value) {
+    /* `on error` binds tighter than wait, so move wait inside the handler. */
+    if (value && value->nodetype == 'o') {
+        struct on_error_node *handler = (struct on_error_node *)value;
+        handler->call = new_wait_call(handler->call);
+        return (struct ast *)handler;
+    }
+    struct ast *callee = newast('j', value, newstr("wait"));
+    struct ufncall *call = (struct ufncall *)newcall(callee, NULL);
+    call->wait_sugar = 1;
+    if (value && value->nodetype == 'C' &&
+        ((struct ufncall *)value)->launch)
+        ((struct ufncall *)value)->awaited = 1;
+    return (struct ast *)call;
+}
+
 struct ast *newonerror(struct ast *call, char *name, struct ast *body) {
     struct on_error_node *a =
         (struct on_error_node *)ast_node_alloc(sizeof(struct on_error_node));

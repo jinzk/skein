@@ -50,6 +50,7 @@ static int char_start_column = 1;
 
 static int last_token = 0;
 static int prev_token = 0;
+static int last_token_end_column = 0;
 int last_token_line = 0;
 int prev_token_line = 0;
 static bool declaration_header = false;
@@ -269,7 +270,7 @@ static void note_function_signature_token(int tok) {
     }
 }
 
-#define YYRET(tok) do { int yyret_tok = (tok); note_for_header_token(yyret_tok); note_header_context_token(yyret_tok); note_function_signature_token(yyret_tok); note_token(yyret_tok); if (yyret_tok != SKEIN_TOK_EOL) { prev_token_line = last_token_line; last_token_line = g_token_line; } prev_token = last_token; last_token = yyret_tok; line_has_token = (yyret_tok != SKEIN_TOK_EOL); if (yyret_tok == SKEIN_TOK_RARROW) lambda_brace_pending = true; else if (yyret_tok != SKEIN_TOK_EOL && yyret_tok != '{' && yyret_tok != SKEIN_TOK_BODY_LBRACE) lambda_brace_pending = false; return yyret_tok; } while (0)
+#define YYRET(tok) do { int yyret_tok = (tok); note_for_header_token(yyret_tok); note_header_context_token(yyret_tok); note_function_signature_token(yyret_tok); note_token(yyret_tok); if (yyret_tok != SKEIN_TOK_EOL) { prev_token_line = last_token_line; last_token_line = g_token_line; last_token_end_column = yylloc.last_column; } prev_token = last_token; last_token = yyret_tok; line_has_token = (yyret_tok != SKEIN_TOK_EOL); if (yyret_tok == SKEIN_TOK_RARROW) lambda_brace_pending = true; else if (yyret_tok != SKEIN_TOK_EOL && yyret_tok != '{' && yyret_tok != SKEIN_TOK_BODY_LBRACE) lambda_brace_pending = false; return yyret_tok; } while (0)
 
 
 /* After '.', keywords and builtin names are ordinary member names. */
@@ -706,7 +707,8 @@ static bool brace_starts_block() {
     if (declaration_header || extern_header)
         return true;
     if (last_token == ')' || last_token == SKEIN_TOK_ELSE || last_token == SKEIN_TOK_DO ||
-        last_token == SKEIN_TOK_ARROW)
+        last_token == SKEIN_TOK_ARROW ||
+        last_token == SKEIN_TOK_MACRO_BANG)
         return true;
     switch (last_token) {
         case 0:
@@ -834,6 +836,19 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 "^=" { YYRET(SKEIN_TOK_XOR_ASSIGN); }
 "<<=" { YYRET(SKEIN_TOK_SHL_ASSIGN); }
 ">>=" { YYRET(SKEIN_TOK_SHR_ASSIGN); }
+
+ /*
+  * `name!(...)` / `name! { ... }` use a distinct token so unary `!` keeps its
+  * usual precedence.  The bang must touch the preceding name, which keeps
+  * `!(expr)` and `f[int](...)` unchanged.
+  */
+"!"/[ \t]*[({] {
+    if ((last_token == SKEIN_TOK_NAME || last_token == SKEIN_TOK_ERROR) &&
+        last_token_line == g_token_line &&
+        last_token_end_column == yylloc.first_column)
+        YYRET(SKEIN_TOK_MACRO_BANG);
+    YYRET('!');
+}
 
 "+" |
 "-" |

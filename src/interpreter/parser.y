@@ -21,6 +21,7 @@
 #include "scopestack.h"
 #include "gc.h"
 #include "eval.h"
+#include "macros.h"
 #include "package.h"
 #include "modfile.h"
 #include "vm.h"
@@ -1257,6 +1258,7 @@ static struct ast *new_member_or_enum_literal(struct ast *base, char *field) {
 %token IS "is" GOTO "goto"
 %token <str> LABEL "label"
 %token COLONCOLON "::"
+%token MACRO_BANG "macro invocation bang"
 %token PLUS_ASSIGN "+=" MINUS_ASSIGN "-=" MUL_ASSIGN "*=" DIV_ASSIGN "/="
 %token MOD_ASSIGN "%=" AND_ASSIGN "&=" OR_ASSIGN "|=" XOR_ASSIGN "^="
 %token SHL_ASSIGN "<<=" SHR_ASSIGN ">>="
@@ -1300,6 +1302,7 @@ static struct ast *new_member_or_enum_literal(struct ast *base, char *field) {
 %precedence ON
 %precedence NOELSE
 %precedence ELSE
+%precedence MACRO_BANG
 
 %type <a> exp value stmt list scope non_empty_scope do_block lambda_block explist arg top_expression top_statement line valuelist pairlist
 %type <a> slice_bound
@@ -2309,6 +2312,59 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
     | exp SHL_ASSIGN exp                  { $$ = newcompound($1, 's', $3); }
     | exp SHR_ASSIGN exp                  { $$ = newcompound($1, 'r', $3); }
     | exp '(' explist ')'      { $$ = new_call_with_placeholders($1, $3); }
+    | exp MACRO_BANG '(' explist ')' %prec PRIMARY {
+        $$ = expand_builtin_macro($1, $4, NULL,
+                                  @2.first_line, @2.first_column, false);
+      }
+    | exp MACRO_BANG '(' explist ')' '{' macro_block_start EMPTY_BLOCK_CLOSE %prec PRIMARY {
+        bool generator = finish_function();
+        $$ = expand_builtin_macro($1, $4, newscope(NULL),
+                                  @2.first_line, @2.first_column, generator);
+      }
+    | exp MACRO_BANG '(' explist ')' '{' macro_block_start list '}' %prec PRIMARY {
+        bool generator = finish_function();
+        $$ = expand_builtin_macro($1, $4, newscope($8),
+                                  @2.first_line, @2.first_column, generator);
+      }
+    | exp MACRO_BANG '{' macro_block_start EMPTY_BLOCK_CLOSE %prec PRIMARY {
+        bool generator = finish_function();
+        $$ = expand_builtin_macro($1, NULL, newscope(NULL),
+                                  @2.first_line, @2.first_column, generator);
+      }
+    | exp MACRO_BANG '{' macro_block_start list '}' %prec PRIMARY {
+        bool generator = finish_function();
+        $$ = expand_builtin_macro($1, NULL, newscope($5),
+                                  @2.first_line, @2.first_column, generator);
+      }
+    /* `error` is reserved, so bare `error!` needs its own callee node. */
+    | ERROR MACRO_BANG '(' explist ')' %prec PRIMARY {
+        $$ = expand_builtin_macro(newref(copy_text("error")), $4, NULL,
+                                  @2.first_line, @2.first_column, false);
+      }
+    | ERROR MACRO_BANG '(' explist ')' '{' macro_block_start EMPTY_BLOCK_CLOSE %prec PRIMARY {
+        bool generator = finish_function();
+        $$ = expand_builtin_macro(newref(copy_text("error")), $4,
+                                  newscope(NULL), @2.first_line,
+                                  @2.first_column, generator);
+      }
+    | ERROR MACRO_BANG '(' explist ')' '{' macro_block_start list '}' %prec PRIMARY {
+        bool generator = finish_function();
+        $$ = expand_builtin_macro(newref(copy_text("error")), $4,
+                                  newscope($8), @2.first_line,
+                                  @2.first_column, generator);
+      }
+    | ERROR MACRO_BANG '{' macro_block_start EMPTY_BLOCK_CLOSE %prec PRIMARY {
+        bool generator = finish_function();
+        $$ = expand_builtin_macro(newref(copy_text("error")), NULL,
+                                  newscope(NULL), @2.first_line,
+                                  @2.first_column, generator);
+      }
+    | ERROR MACRO_BANG '{' macro_block_start list '}' %prec PRIMARY {
+        bool generator = finish_function();
+        $$ = expand_builtin_macro(newref(copy_text("error")), NULL,
+                                  newscope($5), @2.first_line,
+                                  @2.first_column, generator);
+      }
     | exp '[' exp ',' explist ']'         {
         $$ = newindex($1, bracket_args_list(newast('L', $3, $5)),
                       @2.first_line, @2.first_column,
@@ -2510,6 +2566,14 @@ func_ret_opt: %empty                          { $$ = NULL; }
 
 lambda_start: %empty {
         push_func_location(g_token_line, g_token_column);
+        start_function();
+    }
+    ;
+
+/* A macro block becomes an anonymous function, so give it function context. */
+macro_block_start: %empty {
+        push_func_location(@$.first_line, @$.first_column);
+        ++g_include_function_depth;
         start_function();
     }
     ;

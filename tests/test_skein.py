@@ -9,6 +9,7 @@ import os
 import harness
 
 from cases import (
+    assertions,
     auth,
     build,
     cache,
@@ -27,6 +28,7 @@ from cases import (
     lint,
     logging,
     lsp,
+    macros,
     match_types,
     meta,
     modules,
@@ -43,6 +45,7 @@ from cases import (
 )
 
 MODULES = [
+    assertions,
     auth,
     build,
     cache,
@@ -71,6 +74,7 @@ MODULES = [
     lint,
     logging,
     lsp,
+    macros,
     tuple_semantics,
     typecheck,
     web,

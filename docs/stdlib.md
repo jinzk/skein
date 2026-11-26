@@ -1695,16 +1695,52 @@ std.error.format_trace(error) → string
 - `std.task.try_wait` / `try_wait_all` 是同步 result 等待；
 - `on error` 捕获显式 `fail`、运行时错误和 `result.err`，并对 `result.ok` 解包。
 
+## 断言
+
+```text
+std.assert.that(condition[, message]) → bool
+std.assert.schema(value, spec)        → bool
+```
+
+`std.assert.that` 在条件为假时抛出 `kind = "assert"` 的错误；
+`std.assert.schema` 按数据描述校验 `value`，失败时抛出同样的错误。
+两者都可通过 `on error` 或 `std.result.capture` 捕获，并且不受 release
+构建或 `SKEIN_TYPECHECK` 模式影响。
+
+`spec` 是纯数据描述，不是类型标注：
+
+- 字符串：检查运行时类型，例如 `"int"` / `"string"` / `"list"`；
+- `|` 分隔多个类型名，例如 `"int|string"`；
+- 列表：空列表表示任意 list；单元素表示同构 list；多元素表示逐位置匹配；
+- dict：检查必填字段及其嵌套结构，键名以 `?` 结尾表示可选字段；
+- 额外字段默认允许。
+
+示例：
+
+```text
+std.assert.that(age >= 0, "age must be non-negative");
+
+std.assert.schema({"name": "alice", "age": 20}, {
+  "name": "string",
+  "age": "int",
+  "nickname?": "string"
+});
+
+std.assert.schema([1, 2, 3], ["int"]);
+```
+
 ## 日志
 
 ```text
 std.log.new(options?)                 → logger
 std.log.trace/debug/info/warn/error(message[, fields])
+std.log.enabled(level)                → bool
 std.log.flush()
 std.log.set_level(level)
 
 logger.trace/debug/info/warn/error(message[, fields])
 logger.log(level, message[, fields])
+logger.enabled(level)                 → bool
 logger.with(fields)                   → logger
 logger.set_level(level)
 logger.flush()
@@ -1731,6 +1767,7 @@ writer:   func(record)                                    // 自定义输出，�
 - 模块级函数（`std.log.info` 等）写入默认 logger；`std.log.new` 创建独立 logger；
 - `logger` 是 `userdata`，`str(logger)` 返回 `logger(name)`；
 - 级别过滤在格式化之前完成，被过滤的调用不产生输出；
+- `std.log.enabled(level)` / `logger.enabled(level)` 返回该级别当前是否会输出，不修改 logger 状态；
 - 字段是最后一个 `dict` 参数，与 `fields` 及 `with` 的上下文合并；同名键以调用时参数为准；
 - `with` 返回新的 logger，不修改原 logger，共享同一个输出目标；
 - text 格式：`2026-11-20T12:34:56.789+08:00 INFO  app: message key=value`；
@@ -3425,12 +3462,16 @@ std.error.location
 std.error.trace
 std.error.format_trace
 
+std.assert.that
+std.assert.schema
+
 std.log.new
 std.log.trace
 std.log.debug
 std.log.info
 std.log.warn
 std.log.error
+std.log.enabled
 std.log.flush
 std.log.set_level
 

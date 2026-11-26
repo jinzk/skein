@@ -28,11 +28,13 @@
 ```text
 std.log.new(options?)                  → logger
 std.log.trace/debug/info/warn/error(message[, fields])
+std.log.enabled(level)                 → bool
 std.log.flush()
 std.log.set_level(level)
 
 logger.trace/debug/info/warn/error(message[, fields])
 logger.log(level, message[, fields])
+logger.enabled(level)                  → bool
 logger.with(fields)                    → logger
 logger.set_level(level)
 logger.flush()
@@ -102,6 +104,9 @@ TRACE < DEBUG < INFO < WARN < ERROR
 ```
 
 低于当前级别的调用不会格式化字段，也不会写输出。
+
+`std.log.enabled(level)` 和 `logger.enabled(level)` 返回该级别当前是否会输出。
+宏可以先用它保护参数表达式，使被过滤的调用完全不求值参数和字段。
 
 ### 字段与上下文
 

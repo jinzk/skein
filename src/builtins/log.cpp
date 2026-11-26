@@ -703,6 +703,9 @@ std::string logger_describe(const void *data) {
 }
 
 struct value_t *logger_get_field(void *data, const char *name);
+struct value_t *log_enabled(const std::shared_ptr<log_state> &state,
+                            const std::vector<value_t *> &args,
+                            const char *name);
 
 void logger_for_each_child(
     const void *data,
@@ -754,6 +757,11 @@ struct value_t *logger_sink_field(const std::shared_ptr<log_state> &state,
     if (std::strcmp(name, "log") == 0) {
         return newnativeval([state](const std::vector<value_t *> &args) {
             return log_with_level(state, args, "logger.log");
+        }, state);
+    }
+    if (std::strcmp(name, "enabled") == 0) {
+        return newnativeval([state](const std::vector<value_t *> &args) {
+            return log_enabled(state, args, "logger.enabled");
         }, state);
     }
     if (std::strcmp(name, "with") == 0) {
@@ -823,6 +831,28 @@ struct value_t *log_level_builtin(LogLevel level,
     return log_message(default_logger(), level, args, name);
 }
 
+struct value_t *log_enabled(const std::shared_ptr<log_state> &state,
+                            const std::vector<value_t *> &args,
+                            const char *name) {
+    if (args.size() != 1) {
+        yyerror("%s expects 1 argument", name);
+        return NULL;
+    }
+    if (!args[0] || args[0]->type != T_string) {
+        yyerror("%s level must be a string", name);
+        return NULL;
+    }
+    LogLevel level;
+    if (!parse_level(((const string_value_t *)args[0])->value, level)) {
+        yyerror("%s unknown level \"%s\"", name,
+                ((const string_value_t *)args[0])->value);
+        return NULL;
+    }
+    const bool enabled =
+        static_cast<int>(level) >= state->level.load(std::memory_order_relaxed);
+    return newboolval(enabled);
+}
+
 } // namespace
 
 struct value_t *call_log_builtin(
@@ -855,6 +885,8 @@ struct value_t *call_log_builtin(
                 return handle_write_failure(state, error);
             return newnull();
         }
+        case B_log_enabled:
+            return log_enabled(default_logger(), args, "std.log.enabled");
         case B_log_set_level: {
             if (args.size() != 1) {
                 yyerror("std.log.set_level expects 1 argument");

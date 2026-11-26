@@ -347,6 +347,7 @@ let folded = std.unicode.casefold("Straße");
 | [docs/encoding.md](docs/encoding.md) | 源文件编码、转码和编码表 |
 | [docs/unicode.md](docs/unicode.md) | Unicode 标识符和归一化 |
 | [docs/logging.md](docs/logging.md) | `std.log` 的 API、格式和写入语义 |
+| [docs/macros.md](docs/macros.md) | 第一批内置语法宏的规则、展开和边界 |
 
 ## AI / Agent skill
 

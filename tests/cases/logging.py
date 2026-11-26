@@ -152,3 +152,20 @@ def run_cases():
         "import std;\nstd.log.new({}).info(1);\n",
         stderr="message must be a string",
     )
+
+    proc = run(
+        "import std;\n"
+        'std.log.set_level("warn");\n'
+        'println(str(std.log.enabled("debug")));\n'
+        'println(str(std.log.enabled("error")));\n'
+        'let lg = std.log.new({"level": "trace"});\n'
+        'println(str(lg.enabled("trace")));\n'
+        'println(str(lg.enabled("info")));\n'
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.splitlines() == [
+        "false",
+        "true",
+        "true",
+        "true",
+    ], proc.stdout

@@ -726,6 +726,12 @@ value_t *build_namespace_impl() {
             {"format_trace", B_error_format_trace},
         })));
     root->payload->items.push_back(std::make_pair(
+        newstrval("assert"),
+        builtin_module({
+            {"that", B_assert_that},
+            {"schema", B_assert_schema},
+        })));
+    root->payload->items.push_back(std::make_pair(
         newstrval("log"),
         builtin_module({
             {"new", B_log_new},
@@ -734,6 +740,7 @@ value_t *build_namespace_impl() {
             {"info", B_log_info},
             {"warn", B_log_warn},
             {"error", B_log_error},
+            {"enabled", B_log_enabled},
             {"flush", B_log_flush},
             {"set_level", B_log_set_level},
         })));

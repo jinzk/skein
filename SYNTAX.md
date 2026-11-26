@@ -765,6 +765,43 @@ is
 后缀 ++ --
 ```
 
+### 4.13 内置宏调用
+
+第一批宏是内置 AST 语法糖，调用形式：
+
+```text
+name!(expr, ...)
+name! { statements }
+name!(expr, ...) { statements }
+```
+
+`!` 紧跟宏名；括号内只能是表达式参数，`{}` 中最多一个尾部 block。
+宏名本身不是一等值，不能赋值或传入函数；宏调用在展开后是普通表达式，
+可用于赋值等表达式位置。用户自定义 `macro` 声明不在第一批范围内。
+
+首批宏：
+
+```text
+std.assert.that!(condition[, message])
+std.assert.schema!(value, spec)
+
+trace!(message[, fields])
+debug!(message[, fields])
+info!(message[, fields])
+warn!(message[, fields])
+error!(message[, fields])
+
+log_to!(logger, level, message[, fields])
+
+capture! { statements }
+```
+
+日志宏会先检查 `enabled(level)`，级别关闭时参数表达式不求值。
+`capture! { ... }` 展开成 `std.result.capture(func() { ... })`。
+
+宏在 typecheck 前展开成普通 AST，不提供类型片段、类型内省、编译期执行、
+递归展开或专用 opcode。详细规则见 [`docs/macros.md`](docs/macros.md)。
+
 ## 5. 语句
 
 ### 5.1 表达式语句

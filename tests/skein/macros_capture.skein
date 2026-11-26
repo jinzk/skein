@@ -1,0 +1,65 @@
+import std;
+include "_support.skein";
+
+func with_capture() {
+  let r = capture! {
+    return 7;
+  };
+  return std.result.value(r) + 1;
+}
+
+ts_test("capture macro success", func() {
+  let r = capture! {
+    return 42;
+  };
+  ts_true(std.result.is_ok(r));
+  ts_eq(std.result.value(r), 42);
+});
+
+ts_test("capture macro empty block", func() {
+  let r = capture! {};
+  ts_true(std.result.is_ok(r));
+});
+
+ts_test("capture macro failure", func() {
+  let r = capture! {
+    fail("macro boom");
+  };
+  ts_true(std.result.is_err(r));
+  ts_eq(std.error.message(std.result.error(r)), "macro boom");
+});
+
+ts_test("capture macro return is local", func() {
+  ts_eq(with_capture(), 8);
+});
+
+func with_do() {
+  let r = capture! {
+    do {
+      return 5;
+    } while (false);
+  };
+  return std.result.value(r);
+}
+
+ts_test("capture macro with do block", func() {
+  ts_eq(with_do(), 5);
+});
+
+ts_test("capture macro does not flatten result", func() {
+  let r = capture! {
+    return std.result.err("inner");
+  };
+  ts_true(std.result.is_ok(r));
+});
+
+ts_test("capture macro composes with on error", func() {
+  let r = capture! {
+    fail("caught inside");
+  } on error(e) {
+    recover std.result.ok(1);
+  };
+  ts_eq(std.result.value(r), 1);
+});
+
+ts_finish();

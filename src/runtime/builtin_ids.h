@@ -495,7 +495,10 @@ enum bifs {
     B_ref_set,
     B_ref_upgrade,
     B_ref_snapshot,
-    B_ref_wrap
+    B_ref_wrap,
+    B_assert_that,
+    B_assert_schema,
+    B_log_enabled
 };
 
 #endif

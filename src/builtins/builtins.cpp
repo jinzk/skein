@@ -590,7 +590,11 @@ struct value_t *call_builtin(int functype,
         return call_result_builtin(functype, args);
     if (functype >= B_error_new && functype <= B_error_format_trace)
         return call_error_builtin(functype, args);
+    if (functype == B_assert_that || functype == B_assert_schema)
+        return call_error_builtin(functype, args);
     if (functype >= B_log_new && functype <= B_log_set_level)
+        return call_log_builtin(functype, args);
+    if (functype == B_log_enabled)
         return call_log_builtin(functype, args);
     if (functype >= B_list_builder && functype <= B_string_builder)
         return call_builder_builtin(functype, args);

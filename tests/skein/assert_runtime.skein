@@ -1,0 +1,76 @@
+import std;
+include "_support.skein";
+
+ts_test("assert that passes", func() {
+  ts_true(std.assert.that(true));
+  ts_true(std.assert.that(1 == 1, "equal"));
+});
+
+ts_test("assert that is catchable", func() {
+  let r = std.result.capture(func() {
+    std.assert.that(false, "bad condition");
+  });
+  ts_true(std.result.is_err(r));
+  let e = std.result.error(r);
+  ts_eq(std.error.kind(e), "assert");
+  ts_eq(std.error.message(e), "bad condition");
+});
+
+ts_test("assert that default message", func() {
+  let r = std.result.capture(func() {
+    std.assert.that(false);
+  });
+  ts_eq(std.error.message(std.result.error(r)), "assertion failed");
+});
+
+ts_test("assert schema primitive types", func() {
+  ts_true(std.assert.schema(1, "int"));
+  ts_true(std.assert.schema(1.5, "number"));
+  ts_true(std.assert.schema("x", "string"));
+  ts_true(std.assert.schema([1, 2, 3], "list"));
+});
+
+ts_test("assert schema nested dict", func() {
+  ts_true(std.assert.schema({"name": "alice", "age": 20}, {
+    "name": "string",
+    "age": "int"
+  }));
+});
+
+ts_test("assert schema optional field", func() {
+  ts_true(std.assert.schema({"name": "alice"}, {
+    "name": "string",
+    "age?": "int"
+  }));
+});
+
+ts_test("assert schema homogeneous list", func() {
+  ts_true(std.assert.schema([1, 2, 3], ["int"]));
+});
+
+ts_test("assert schema tuple list", func() {
+  ts_true(std.assert.schema([1, "x"], ["int", "string"]));
+});
+
+ts_test("assert schema failure path", func() {
+  let r = std.result.capture(func() {
+    std.assert.schema({"user": {"age": "old"}}, {
+      "user": {"age": "int"}
+    });
+  });
+  ts_true(std.result.is_err(r));
+  let e = std.result.error(r);
+  ts_eq(std.error.kind(e), "assert");
+  ts_eq(std.error.message(e),
+        "expected int at value.user.age, got string");
+});
+
+ts_test("assert schema missing field", func() {
+  let r = std.result.capture(func() {
+    std.assert.schema({"name": "alice"}, {"name": "string", "age": "int"});
+  });
+  ts_eq(std.error.message(std.result.error(r)),
+        "missing field \"age\" at value");
+});
+
+ts_finish();

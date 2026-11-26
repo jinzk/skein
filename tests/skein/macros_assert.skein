@@ -1,0 +1,43 @@
+import std;
+include "_support.skein";
+
+ts_test("assert macro passes", func() {
+  ts_true(std.assert.that!(true));
+  ts_true(std.assert.that!(1 == 1, "equal"));
+  ts_true(std.assert.schema!({"name": "alice"}, {
+    "name": "string",
+    "age?": "int"
+  }));
+});
+
+ts_test("assert macro failure is catchable", func() {
+  let r = std.result.capture(func() {
+    std.assert.that!(false, "bad macro assert");
+  });
+  ts_true(std.result.is_err(r));
+  let e = std.result.error(r);
+  ts_eq(std.error.kind(e), "assert");
+  ts_eq(std.error.message(e), "bad macro assert");
+});
+
+ts_test("schema macro failure path", func() {
+  let r = std.result.capture(func() {
+    std.assert.schema!({"user": {"age": "old"}}, {
+      "user": {"age": "int"}
+    });
+  });
+  ts_true(std.result.is_err(r));
+  ts_eq(std.error.message(std.result.error(r)),
+        "expected int at value.user.age, got string");
+});
+
+ts_test("on error catches assert macro", func() {
+  let message = "";
+  std.assert.that!(false, "via on error") on error(e) {
+    message = std.error.message(e);
+    recover null;
+  };
+  ts_eq(message, "via on error");
+});
+
+ts_finish();

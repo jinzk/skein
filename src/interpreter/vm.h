@@ -98,6 +98,8 @@ struct thread_transfer_type {
     std::string module;
     std::string name;
     bool exported = false;
+    std::vector<std::string> generic_params;
+    std::vector<std::string> generic_defaults;
     std::vector<thread_transfer_type_field> fields;
     std::vector<thread_transfer_type_variant> variants;
     std::vector<std::pair<std::string,

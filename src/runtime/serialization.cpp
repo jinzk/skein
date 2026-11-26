@@ -576,6 +576,65 @@ static struct type_constraint descriptor_constraint(
     return constraint;
 }
 
+static bool descriptor_matches_value(const type_descriptor &desc,
+                                     const struct value_t *value) {
+    if (!value)
+        return false;
+    if (value->type == T_null)
+        return desc.nullable;
+    if (desc.name == "any")
+        return true;
+    if (desc.name == "union") {
+        for (const type_descriptor_ptr &arg : desc.args) {
+            if (descriptor_matches_value(*arg, value))
+                return true;
+        }
+        return false;
+    }
+    if (desc.name == "list") {
+        if (value->type != T_list)
+            return false;
+        if (desc.args.empty())
+            return true;
+        const struct list_value_t *list = (const struct list_value_t *)value;
+        for (const struct value_t *item : list->payload->items) {
+            if (!descriptor_matches_value(*desc.args[0], item))
+                return false;
+        }
+        return true;
+    }
+    if (desc.name == "dict") {
+        if (value->type != T_dict)
+            return false;
+        const struct dict_value_t *dict = (const struct dict_value_t *)value;
+        for (const auto &entry : dict->payload->items) {
+            if (desc.args.size() > 0 &&
+                !descriptor_matches_value(*desc.args[0], entry.first))
+                return false;
+            if (desc.args.size() > 1 &&
+                !descriptor_matches_value(*desc.args[1], entry.second))
+                return false;
+        }
+        return true;
+    }
+    if (desc.name == "pair" || desc.name == "tuple") {
+        if (value->type != T_list)
+            return false;
+        const struct list_value_t *list = (const struct list_value_t *)value;
+        if (!list->payload || !list->payload->frozen ||
+            list->payload->items.size() != desc.args.size())
+            return false;
+        for (std::size_t i = 0; i < desc.args.size(); ++i) {
+            if (!descriptor_matches_value(*desc.args[i],
+                                          list->payload->items[i]))
+                return false;
+        }
+        return true;
+    }
+    struct type_constraint constraint = descriptor_constraint(desc);
+    return type_constraint_matches(&constraint, value);
+}
+
 static struct value_t *decode_value_for_descriptor(
     struct value_t *value, const type_descriptor &desc, int depth,
     const std::string &path, bool defaults) {
@@ -678,6 +737,17 @@ static struct value_t *decode_value_for_descriptor(
             out->payload->items.push_back(decoded);
         }
         return (struct value_t *)out;
+    }
+
+    if (desc.name == "union") {
+        for (const type_descriptor_ptr &arg : desc.args) {
+            if (descriptor_matches_value(*arg, value))
+                return decode_value_for_descriptor(value, *arg, depth,
+                                                   path, defaults);
+        }
+        yyerror("%s expects %s, got %s", decode_path_label(path),
+                type_descriptor_display(desc).c_str(), typename_of(value));
+        return NULL;
     }
 
     enum type_constraint_kind kind;

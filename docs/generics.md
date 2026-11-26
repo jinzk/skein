@@ -393,6 +393,7 @@ std.meta.type_params("Box[int]")
 
 - `std.struct.encode` / `std.enum.encode` 生成 envelope；
 - `std.struct.decode` / `std.enum.decode` 无显式类型时读取 `$type`；
+- 泛型声明元数据随线程 payload 类型描述一起传输；
 - 跨线程/进程默认依赖静态 schema，动态消息使用 envelope；
 - 二进制泛型格式仍待实现。
 

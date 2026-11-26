@@ -38,6 +38,18 @@ ts_test("generic struct decode defaults", func() {
   ts_eq(a.value, 4);
 });
 
+ts_test("generic struct decode union argument", func() {
+  let a = std.struct.decode({"value": 8},
+                            "SerdeBox[union[int, string]]");
+  ts_eq(a.value, 8);
+  let b = std.struct.decode({"value": "x"},
+                            "SerdeBox[union[int, string]]");
+  ts_eq(b.value, "x");
+  let c = std.struct.decode(
+    {"value": [1, "x"]}, "SerdeBox[list[union[int, string]]]");
+  ts_eq(c.value[1], "x");
+});
+
 ts_test("generic enum decode descriptor", func() {
   let a = std.enum.decode(
     {"$enum": "SerdeOption.Some", "payload": {"value": 5}},

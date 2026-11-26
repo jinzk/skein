@@ -26,7 +26,7 @@
 namespace {
 
 constexpr uint32_t kPayloadMagic = 0x48545453u; /* "STTH" */
-constexpr uint32_t kPayloadVersion = 13u;
+constexpr uint32_t kPayloadVersion = 14u;
 constexpr uint32_t kEndianMarker = 0x01020304u;
 constexpr uint32_t kMaxCount = 1000000u;
 constexpr uint32_t kMaxString = 64u * 1024u * 1024u;
@@ -1378,6 +1378,12 @@ bool write_type_metadata(
             out.str(def->module);
             out.str(def->name);
             out.u8(def->exported ? 1 : 0);
+            out.u32((uint32_t)def->generic_params.size());
+            for (const std::string &param : def->generic_params)
+                out.str(param);
+            out.u32((uint32_t)def->generic_defaults.size());
+            for (const std::string &value : def->generic_defaults)
+                out.str(value);
             out.u32((uint32_t)def->variants.size());
             for (const struct variant_def &variant : def->variants) {
                 out.str(variant.name);
@@ -1400,6 +1406,12 @@ bool write_type_metadata(
             out.str(def->module);
             out.str(def->name);
             out.u8(def->exported ? 1 : 0);
+            out.u32((uint32_t)def->generic_params.size());
+            for (const std::string &param : def->generic_params)
+                out.str(param);
+            out.u32((uint32_t)def->generic_defaults.size());
+            for (const std::string &value : def->generic_defaults)
+                out.str(value);
             out.u32((uint32_t)def->fields.size());
             for (const struct field_def &field : def->fields) {
                 out.str(field.name);
@@ -1441,6 +1453,35 @@ bool read_type_metadata(reader &in,
         }
         type.is_enum = is_enum != 0;
         type.exported = exported != 0;
+
+        uint32_t param_count = 0;
+        if (!in.count(param_count)) {
+            error = in.error;
+            return false;
+        }
+        type.generic_params.reserve(param_count);
+        for (uint32_t p = 0; p < param_count; ++p) {
+            std::string param;
+            if (!in.str(param)) {
+                error = in.error;
+                return false;
+            }
+            type.generic_params.push_back(std::move(param));
+        }
+        uint32_t default_count = 0;
+        if (!in.count(default_count)) {
+            error = in.error;
+            return false;
+        }
+        type.generic_defaults.reserve(default_count);
+        for (uint32_t d = 0; d < default_count; ++d) {
+            std::string value;
+            if (!in.str(value)) {
+                error = in.error;
+                return false;
+            }
+            type.generic_defaults.push_back(std::move(value));
+        }
 
         if (type.is_enum) {
             uint32_t variant_count = 0;
@@ -1497,7 +1538,8 @@ bool read_type_metadata(reader &in,
                                        type.package.c_str(),
                                        type.module.c_str(),
                                        type.name.c_str(), type.exported,
-                                       {}, {},
+                                       type.generic_params,
+                                       type.generic_defaults,
                                        variants, nullptr, declare_error)) {
                     error = declare_error.empty()
                                 ? "cannot register thread payload enum type"
@@ -1543,7 +1585,9 @@ bool read_type_metadata(reader &in,
                                          type.package.c_str(),
                                          type.module.c_str(),
                                          type.name.c_str(),
-                                         type.exported, {}, {},
+                                         type.exported,
+                                         type.generic_params,
+                                         type.generic_defaults,
                                          fields, nullptr,
                                          declare_error)) {
                     error = declare_error.empty()

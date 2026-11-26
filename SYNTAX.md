@@ -36,13 +36,15 @@ return break continue goto
 fail recover pass
 is
 null true false
-as
 ```
 
 `on` / `error` 不是全局保留字：它们只在 `expr on error(e) { ... }` handler
 位置作为 contextual keyword（保留 `%prec ON` 的绑定规则）；其他位置仍是普通
 标识符，可声明为变量、字段名或类型名。`error!` 走普通 `NAME MACRO_BANG`
 路径，按默认宏绑定解析为 `std.log.error!`。
+
+`as` 也不是全局保留字：它只在表达式之后（cast）、import 别名与模式绑定
+（`case P as p`）位置作为 contextual keyword；其他位置可作为变量、字段或宏名。
 
 `def` 已不再使用，匿名/命名函数统一使用 `func`。
 
@@ -2816,7 +2818,8 @@ import {retry! as r} from util;        // 宏别名 r，调用时写 r!(...)
 - 裸 `std` 才是内置标准库；`.std`、`..std`、`@std` 都按文件系统包路径解析；
 - `main` 不能被导入；`import main;` 和 `import main.*;` 会报错；
 - 普通包文件不能声明 `package main {}`；
-- 别名必须是普通标识符；`as` 是保留字；
+- 别名必须是普通标识符；`as` 只在别名分隔符位置是 contextual keyword，
+  其他位置仍是普通标识符；
 - import 语句需要分号；
 - 包名绑定到当前作用域。
 - `import {name} from pkg;` 只把选中的导出值或导出类型绑定到当前作用域，不绑定

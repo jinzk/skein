@@ -258,6 +258,23 @@ void check_contextual_handler_keywords() {
             ".error must stay an ordinary member name");
 }
 
+void check_contextual_as_keyword() {
+    std::vector<token> tokens = lex_source(
+        "let x = 1 as float;\n"
+        "let as = 2;\n"
+        "println(as);\n"
+        "value.as;\n"
+        "as!(3);\n");
+    require(count_kind(tokens, SKEIN_TOK_AS) == 1,
+            "cast as keyword count mismatch");
+    require(has_text(tokens, SKEIN_TOK_NAME, "as"),
+            "let as must stay an identifier");
+    require(has_member_name(tokens, "as"),
+            ".as must stay an ordinary member name");
+    require(count_kind(tokens, SKEIN_TOK_MACRO_BANG) == 1,
+            "as! must use the ordinary macro bang path");
+}
+
 void check_user_macro_tokens() {
     std::vector<token> tokens = lex_source(
         "macro twice(x: expr) { return #x * 2; }\n"
@@ -294,6 +311,7 @@ int main() {
     check_switch_arm_label();
     check_contextual_task_keywords();
     check_contextual_handler_keywords();
+    check_contextual_as_keyword();
     check_user_macro_tokens();
 
     std::printf("lexer_test: ok\n");

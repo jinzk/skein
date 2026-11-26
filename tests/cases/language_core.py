@@ -665,6 +665,33 @@ def run_cases():
           "println(str(a.x));\n",
           stdout="7.0")
 
+    check("P5.2 as is an identifier outside cast, alias and pattern slots",
+          "import std;\n"
+          "struct Box { as: int; }\n"
+          "let as = 7;\n"
+          "let b = Box { as: as };\n"
+          "println(str(b.as));\n"
+          "println(str(1 as float));\n"
+          "println(str(as));\n",
+          stdout="7\n1\n7")
+
+    check("P5.2 as can be a user macro name",
+          "macro as(x: expr) { #x + 100; }\n"
+          "println(str(as!(1)));\n",
+          stdout="101")
+
+    check("P5.2 as remains the import alias separator",
+          "import std.io as io;\n"
+          "import {println as p} from std.io;\n"
+          'p("alias-ok");\n',
+          stdout="alias-ok")
+
+    check("P5.2 as remains the pattern binding separator",
+          'match ({"a": 1}) { case {a} as whole => '
+          'println(str(whole["a"] + a)); }\n'
+          "match (5) { case is int as n => println(str(n + 1)); }\n",
+          stdout="2\n6")
+
     check("ref rejects a ref handle",
           "struct Point { x: float; }\n"
           "let a = ref Point { x: 1.0 };\n"

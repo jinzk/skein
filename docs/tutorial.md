@@ -3390,7 +3390,8 @@ import {parse} from "github.com/acme/util/json";
 - 裸 `std` 是内置标准库；`.std`、`..std`、`@std` 按文件系统包路径解析；
 - `main` 不能被导入；`import main;` 和 `import main.*;` 会报错；
 - 普通包文件不能声明 `package main {}`；
-- 别名必须是普通标识符，`as` 是保留字；
+- 别名必须是普通标识符，`as` 只在别名分隔符位置是 contextual keyword，
+  其他位置仍是普通标识符；
 - `import {name} from pkg;` 只绑定选中的导出值或导出类型，不绑定 `pkg` 本身；
   选择项可写 `name as alias`，至少写一项，重复名字或 alias 会报错；
 - `from` 只在 `import { ... }` 后作 contextual keyword，其他位置仍是普通标识符或

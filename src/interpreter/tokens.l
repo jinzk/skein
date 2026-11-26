@@ -257,11 +257,12 @@ static bool expression_start_token(int tok) {
     }
 }
 
-/* Tokens that can end an expression, so a following `on error` is a handler
- * suffix rather than an ordinary identifier. */
-static bool handler_context_token(int tok) {
+/* Tokens that can end an expression or pattern.  A following `on error` is a
+ * handler suffix, and a following `as` is a cast / alias / pattern binding. */
+static bool expression_end_token(int tok) {
     switch (tok) {
         case SKEIN_TOK_NAME:
+        case SKEIN_TOK_BUILTIN:
         case SKEIN_TOK_INT:
         case SKEIN_TOK_FLOAT:
         case SKEIN_TOK_XSTRING:
@@ -960,7 +961,7 @@ static bool reserved_name(const char *text, int len) {
         "const",    "func",     "yield",    "defer",    "macro",
         "return",   "break",    "continue", "fail",     "is",
         "goto",     "recover",  "pass",
-        "as",       "null",     "true",     "false",
+        "null",     "true",     "false",
         "int",      "float",    "bool",     "str",      "char",
         "byte",
     };
@@ -1464,7 +1465,7 @@ TASK_KEYWORD_NEXT ([A-Za-z_]|{UTF8_SEQ}|\(|\[|\{|[0-9]|\"|\')
 "goto" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_GOTO); }
 "on"/[ \t]*"error" {
     MEMBER_NAME_AFTER_DOT();
-    if (handler_context_token(last_token))
+    if (expression_end_token(last_token))
         YYRET(SKEIN_TOK_ON);
     YYRET(contextual_name_token());
   }
@@ -1500,7 +1501,12 @@ TASK_KEYWORD_NEXT ([A-Za-z_]|{UTF8_SEQ}|\(|\[|\{|[0-9]|\"|\')
     note_for_name_token();
     YYRET(tok);
 }
-"as" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_AS); }
+"as" {
+    MEMBER_NAME_AFTER_DOT();
+    if (expression_end_token(last_token))
+        YYRET(SKEIN_TOK_AS);
+    YYRET(contextual_name_token());
+  }
 "null" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_NULLVAL); }
 "true" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_TRUE); }
 "false" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_FALSE); }

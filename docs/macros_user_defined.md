@@ -401,7 +401,8 @@ wrap!(2) {
 9. **P5.1（已完成）**：`on` / `error` 评估 handler-scoped contextual；`error!` 改为普通
     `NAME MACRO_BANG` 路径，`type error` 走类型命名空间，`.error` 仍是普通字段；
    保留 `%prec ON`，补齐 handler body / defer / 默认参数诊断。
-10. **P5.2**：`as` contextual，独立步骤。
+10. **P5.2（已完成）**：`as` 改为 contextual；cast、import 别名与模式绑定仍是
+    分隔符，其他位置是普通标识符。
 11. **P5.3**：`ref` contextual，独立步骤。
 12. **P5.4**：`weak` contextual，独立步骤。
 13. **P5.5**：`is` contextual，独立步骤。
@@ -424,7 +425,7 @@ wrap!(2) {
    `import {name!} from pkg;`；
 8. `from` 只作为 selective import 的 contextual keyword，不设为全局保留字；
 9. 先做低风险 contextual keyword / selective import，再实现宏；`as`、`ref` /
-   `weak`、`is` 等中风险关键字在宏实现之后分独立步骤处理；`wait` 走内置宏，
+   `weak`、`is` 等中风险关键字在宏实现之后分独立步骤处理（`as` 已于 P5.2 完成）；`wait` 走内置宏，
    `launch` / `await` 走表达式起始 contextual；
 10. `in`、`export`、`package`、`import`、`include` 同属低风险 contextual
    keyword，在 Phase 1 处理；`module` 仅用于 manifest，不占 `.skein` 保留字；

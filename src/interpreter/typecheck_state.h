@@ -106,6 +106,16 @@ extern std::unordered_map<
     std::string, std::unordered_map<std::string, std::string>>
     g_import_aliases;
 
+/* Selective import bindings, keyed by source name and local alias. */
+extern std::unordered_map<
+    std::string, std::unordered_map<std::string, std::string>>
+    g_selective_imports;
+
+/* Exported name behind each selective import alias. */
+extern std::unordered_map<
+    std::string, std::unordered_map<std::string, std::string>>
+    g_selective_import_names;
+
 /* Top-level inferred bindings, keyed by source name. */
 extern std::unordered_map<
     std::string, std::unordered_map<std::string, VarInfo>>

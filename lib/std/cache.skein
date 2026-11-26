@@ -426,7 +426,7 @@ package cache {
     _close: callable;
   }
 
-  protocol ClientApi {
+  proto ClientApi {
     func get(self, key: string);
     func set(self, key: string, value: any, options: dict);
     func delete(self, key: string);

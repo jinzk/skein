@@ -19,6 +19,7 @@ std::unordered_map<std::string, struct_def *> logical_structs;
 std::unordered_map<std::string, protocol_def *> logical_protocols;
 std::unordered_map<std::string, enum_def *> logical_enums;
 std::unordered_map<std::string, std::string> source_aliases;
+std::unordered_map<std::string, std::string> type_alias_names;
 
 /*
  * Methods attached by a thread payload are thread-local overrides.  Keeping
@@ -99,6 +100,35 @@ resolved_type resolve_named(const char *source, const char *name,
     if (eit != enum_types.end()) {
         result.enumeration = eit->second.get();
         return result;
+    }
+
+    auto alias_it = source_aliases.find(alias_key(source, name));
+    if (alias_it != source_aliases.end()) {
+        const std::string &target = alias_it->second;
+        std::string original = name;
+        auto name_it = type_alias_names.find(alias_key(source, name));
+        if (name_it != type_alias_names.end())
+            original = name_it->second;
+        auto lsit =
+            logical_structs.find(type_key(target.c_str(), original.c_str()));
+        if (lsit != logical_structs.end() &&
+            (!require_exported || lsit->second->exported)) {
+            result.structure = lsit->second;
+            return result;
+        }
+        auto ltit =
+            logical_protocols.find(type_key(target.c_str(), original.c_str()));
+        if (ltit != logical_protocols.end()) {
+            result.protocol = ltit->second;
+            return result;
+        }
+        auto leit =
+            logical_enums.find(type_key(target.c_str(), original.c_str()));
+        if (leit != logical_enums.end() &&
+            (!require_exported || leit->second->exported)) {
+            result.enumeration = leit->second;
+            return result;
+        }
     }
 
     std::string prefix;
@@ -311,7 +341,7 @@ protocol_def *structtype_resolve_protocol(const char *source, const char *name,
     std::lock_guard<std::recursive_mutex> lock(type_registry_mutex);
     error.clear();
     if (!name) {
-        error = "invalid protocol name";
+        error = "invalid proto name";
         return NULL;
     }
 
@@ -325,14 +355,14 @@ protocol_def *structtype_resolve_protocol(const char *source, const char *name,
 
     resolved_type any = resolve_named(source, name, false);
     if (any.structure || any.enumeration) {
-        error = std::string("type ") + name + " is not a protocol";
+        error = std::string("type ") + name + " is not a proto";
         return NULL;
     }
     if (any.protocol && require_exported && !any.protocol->exported) {
-        error = std::string("protocol ") + name + " is not exported";
+        error = std::string("proto ") + name + " is not exported";
         return NULL;
     }
-    error = std::string("unknown protocol ") + name;
+    error = std::string("unknown proto ") + name;
     return NULL;
 }
 
@@ -364,6 +394,22 @@ enum_def *structtype_find_enum_by_name(const char *package,
         found = entry.second;
     }
     return found;
+}
+
+bool structtype_is_exported_type(const char *package, const char *name) {
+    std::lock_guard<std::recursive_mutex> lock(type_registry_mutex);
+    if (!package || !*package || !name || !*name)
+        return false;
+    const std::string key = type_key(package, name);
+    auto structure = logical_structs.find(key);
+    if (structure != logical_structs.end() && structure->second &&
+        structure->second->exported)
+        return true;
+    auto enumeration = logical_enums.find(key);
+    if (enumeration != logical_enums.end() && enumeration->second &&
+        enumeration->second->exported)
+        return true;
+    return logical_protocols.find(key) != logical_protocols.end();
 }
 
 static bool lookup_def_visible(const char *importer_source,
@@ -500,6 +546,65 @@ enum structtype_lookup_status structtype_lookup_type(
             return STRUCTTYPE_LOOKUP_AMBIGUOUS;
         }
         if (found == 1) {
+            if (structure) {
+                out.kind = STRUCTTYPE_LOOKUP_STRUCT;
+                out.structure = structure;
+            } else if (enumeration) {
+                out.kind = STRUCTTYPE_LOOKUP_ENUM;
+                out.enumeration = enumeration;
+            } else {
+                out.kind = STRUCTTYPE_LOOKUP_PROTOCOL;
+                out.protocol = protocol;
+            }
+            return STRUCTTYPE_LOOKUP_FOUND;
+        }
+    }
+
+    /* A selective import binds the local name directly to an exported type. */
+    auto alias_it = source_aliases.find(alias_key(importer_source, name));
+    if (alias_it != source_aliases.end()) {
+        const std::string &target = alias_it->second;
+        std::string original = name;
+        auto name_it =
+            type_alias_names.find(alias_key(importer_source, name));
+        if (name_it != type_alias_names.end())
+            original = name_it->second;
+        struct_def *structure =
+            structtype_find_struct(target.c_str(), original.c_str());
+        if (!structure)
+            structure = structtype_find_struct_by_name(target.c_str(),
+                                                       original.c_str(), NULL);
+        enum_def *enumeration =
+            structtype_find_enum(target.c_str(), original.c_str());
+        if (!enumeration)
+            enumeration = structtype_find_enum_by_name(target.c_str(),
+                                                       original.c_str(), NULL);
+        protocol_def *protocol =
+            structtype_find_protocol(target.c_str(), original.c_str());
+        if (!protocol)
+            protocol = structtype_find_protocol_by_name(target.c_str(),
+                                                        original.c_str(), NULL);
+        int found = (structure ? 1 : 0) + (enumeration ? 1 : 0) +
+                    (protocol ? 1 : 0);
+        if (found > 1) {
+            error = "ambiguous type " + text +
+                    "; use a package-qualified name";
+            return STRUCTTYPE_LOOKUP_AMBIGUOUS;
+        }
+        if (found == 1) {
+            bool visible =
+                structure
+                    ? lookup_def_visible(importer_source, importer_package,
+                                         structure)
+                    : enumeration
+                          ? lookup_def_visible(importer_source,
+                                               importer_package, enumeration)
+                          : lookup_protocol_visible(importer_source,
+                                                    importer_package, protocol);
+            if (!visible) {
+                error = "type " + text + " is not visible";
+                return STRUCTTYPE_LOOKUP_NOT_VISIBLE;
+            }
             if (structure) {
                 out.kind = STRUCTTYPE_LOOKUP_STRUCT;
                 out.structure = structure;
@@ -707,7 +812,7 @@ bool structtype_create_protocol(const char *source, const char *package,
     std::lock_guard<std::recursive_mutex> lock(type_registry_mutex);
     out = NULL;
     if (!name || !*name) {
-        error = "invalid protocol name";
+        error = "invalid proto name";
         return false;
     }
     if (structtype_type_exists(source, name)) {
@@ -726,11 +831,11 @@ bool structtype_create_protocol(const char *source, const char *package,
     std::unordered_map<std::string, bool> seen;
     for (size_t i = 0; i < methods.size(); ++i) {
         if (methods[i].name.empty()) {
-            error = "invalid protocol method name";
+            error = "invalid proto method name";
             return false;
         }
         if (!seen.emplace(methods[i].name, true).second) {
-            error = "protocol method repeated " + methods[i].name;
+            error = "proto method repeated " + methods[i].name;
             return false;
         }
         for (size_t j = 0; j < methods[i].params.size(); ++j) {
@@ -738,7 +843,7 @@ bool structtype_create_protocol(const char *source, const char *package,
             if (param.kind != TYPE_NAMED)
                 continue;
             if (!protocol_signature_type_visible(source, param.name)) {
-                error = "exported protocol " + std::string(name) +
+                error = "exported proto " + std::string(name) +
                         " method " + methods[i].name +
                         " uses non-exported type " +
                         (param.name ? param.name : "invalid");
@@ -748,7 +853,7 @@ bool structtype_create_protocol(const char *source, const char *package,
         const type_constraint *result = methods[i].return_type.get();
         if (result && result->kind == TYPE_NAMED &&
             !protocol_signature_type_visible(source, result->name)) {
-            error = "exported protocol " + std::string(name) +
+            error = "exported proto " + std::string(name) +
                     " method " + methods[i].name +
                     " uses non-exported return type " +
                     (result->name ? result->name : "invalid");
@@ -759,11 +864,11 @@ bool structtype_create_protocol(const char *source, const char *package,
     std::unordered_set<std::string> seen_params;
     for (const std::string &param : generic_params) {
         if (param.empty()) {
-            error = "invalid protocol type parameter";
+            error = "invalid proto type parameter";
             return false;
         }
         if (!seen_params.insert(param).second) {
-            error = "protocol type parameter repeated " + param;
+            error = "proto type parameter repeated " + param;
             return false;
         }
     }
@@ -950,7 +1055,7 @@ bool structtype_set_default_method(type_def *def, const std::string &name,
     std::lock_guard<std::recursive_mutex> registry_lock(type_registry_mutex);
     std::unique_lock<std::shared_mutex> method_lock(type_method_mutex);
     if (!def || !code || !protocol || name.empty()) {
-        error = "invalid protocol default method";
+        error = "invalid proto default method";
         return false;
     }
     if (def->explicit_methods.count(name) != 0)
@@ -1046,11 +1151,11 @@ bool structtype_add_protocol_default(protocol_def *protocol, const std::string &
     std::lock_guard<std::recursive_mutex> registry_lock(type_registry_mutex);
     std::unique_lock<std::shared_mutex> method_lock(type_method_mutex);
     if (!protocol || name.empty() || !code || !code->code) {
-        error = "invalid protocol default method";
+        error = "invalid proto default method";
         return false;
     }
     if (protocol->defaults.count(name) != 0) {
-        error = "protocol default method repeated " + name;
+        error = "proto default method repeated " + name;
         return false;
     }
     code->code->is_method = true;
@@ -1110,7 +1215,7 @@ bool protocol_method_signature_matches(
         return false;
     }
     if (sig.variadic || code->variadic) {
-        error = "protocol methods cannot be variadic";
+        error = "proto methods cannot be variadic";
         return false;
     }
     if (sig.params.empty() ||
@@ -1139,7 +1244,7 @@ bool protocol_method_signature_matches(
         if (!protocol_constraint_matches(expected, actual, generic_params,
                                          bindings)) {
             error = "method " + sig.name +
-                    " does not match the protocol signature";
+                    " does not match the proto signature";
             return false;
         }
     }
@@ -1153,7 +1258,7 @@ bool protocol_method_signature_matches(
             !protocol_constraint_matches(*sig.return_type, *code->ret_type,
                                          generic_params, bindings)) {
             error = "method " + sig.name +
-                    " does not match the protocol return type";
+                    " does not match the proto return type";
             return false;
         }
     }
@@ -1233,7 +1338,7 @@ std::vector<const protocol_def *> structtype_protocols(const type_def *def) {
 
 bool structtype_refresh_protocol_defaults(type_def *def, std::string &error) {
     if (!def) {
-        error = "invalid type for protocol defaults";
+        error = "invalid type for proto defaults";
         return false;
     }
     error.clear();
@@ -1267,9 +1372,9 @@ bool structtype_refresh_protocol_defaults(type_def *def, std::string &error) {
             if (def->explicit_methods.count(name) != 0)
                 continue;
             if (entry.second.size() > 1) {
-                error = "protocol " + entry.second.front()->name +
+                error = "proto " + entry.second.front()->name +
                         " default method " + name +
-                        " conflicts with another protocol default; implement "
+                        " conflicts with another proto default; implement "
                         "it explicitly";
                 return false;
             }
@@ -1396,6 +1501,21 @@ void structtype_register_alias(const char *importer, const char *alias,
     if (!importer || !alias || !target || !*alias || !*target)
         return;
     source_aliases[alias_key(importer, alias)] = target;
+}
+
+void structtype_register_type_alias(const char *importer, const char *alias,
+                                    const char *target,
+                                    const char *type_name) {
+    if (!type_name || !*type_name) {
+        structtype_register_alias(importer, alias, target);
+        return;
+    }
+    std::lock_guard<std::recursive_mutex> lock(type_registry_mutex);
+    if (!importer || !alias || !target || !*alias || !*target)
+        return;
+    const std::string key = alias_key(importer, alias);
+    source_aliases[key] = target;
+    type_alias_names[key] = type_name;
 }
 
 bool named_type_matches(const char *source, const char *name,

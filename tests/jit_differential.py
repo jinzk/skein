@@ -88,6 +88,13 @@ CASES = [
         expect_debug="[jit] enter make",
     ),
     case(
+        "selective-import",
+        "import {basename} from std.path;\n"
+        "func selected(path) { return basename(path); }\n"
+        'println(selected("/a/b.txt"));\n',
+        expect_debug="[jit] enter selected",
+    ),
+    case(
         "runtime-types-and-inline-caches",
         "func add(a, b) { return a + b; }\n"
         "func get(c, k) { return c[k]; }\n"
@@ -185,7 +192,7 @@ CASES = [
     ),
     case(
         "structural-protocol-dispatch",
-        "protocol Doubler {\n"
+        "proto Doubler {\n"
         "  func value(self) -> int;\n"
         "  func double(self) { return self.value() * 2; }\n"
         "}\n"
@@ -210,7 +217,7 @@ CASES = [
     case(
         "structural-protocol-thread-transfer",
         "import std;\n"
-        "protocol Doubler {\n"
+        "proto Doubler {\n"
         "  func value(self) -> int;\n"
         "  func double(self) { return self.value() * 2; }\n"
         "}\n"

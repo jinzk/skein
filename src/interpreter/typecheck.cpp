@@ -1078,7 +1078,7 @@ struct Checker : public BuiltinContext {
         if (!type_is_protocol_name(arg))
             return true;
         std::string message =
-            std::string("protocol ") + type_display(arg) +
+            std::string("proto ") + type_display(arg) +
             " cannot be used as a type argument";
         report_error(line, column, message.c_str());
         return false;
@@ -1227,7 +1227,7 @@ struct Checker : public BuiltinContext {
                 structtype_lookup_result lookup;
                 if (lookup_named_type(item, lookup) && lookup.protocol) {
                     std::string message =
-                        std::string("protocol ") + type_display(item) +
+                        std::string("proto ") + type_display(item) +
                         " cannot be used with '|'";
                     report_error(line, column, message.c_str());
                     return false;
@@ -3864,6 +3864,31 @@ struct Checker : public BuiltinContext {
                 std::string path = imp->path ? imp->path : "";
                 if (!path.empty() && path[0] == '\x02')
                     path.erase(0, 1);
+                if (imp->selections) {
+                    for (const struct import_selection *sel = imp->selections;
+                         sel; sel = sel->next) {
+                        const char *binding =
+                            sel->alias ? sel->alias : sel->name;
+                        if (!binding || !*binding)
+                            continue;
+                        const TypeNode *type = type_any();
+                        bool fixed = false;
+                        const std::string &selected =
+                            sel->name ? sel->name : "";
+                        auto pkg_it = g_exported_types.find(path);
+                        if (pkg_it != g_exported_types.end()) {
+                            auto type_it = pkg_it->second.find(selected);
+                            if (type_it != pkg_it->second.end()) {
+                                type = type_it->second.type;
+                                fixed = type_it->second.fixed;
+                            }
+                        }
+                        env.define(binding, type, fixed);
+                        g_selective_imports[source][binding] = path;
+                        g_selective_import_names[source][binding] = selected;
+                    }
+                    return true;
+                }
                 std::string alias =
                     imp->alias ? imp->alias : last_path_component(path);
                 if (!alias.empty())
@@ -4517,6 +4542,8 @@ bool check_statement(struct ast *statement) {
 
 void forget_source(const std::string &source_name) {
     g_import_aliases.erase(source_name);
+    g_selective_imports.erase(source_name);
+    g_selective_import_names.erase(source_name);
     g_persistent_bindings.erase(source_name);
     g_exported_types.erase(source_name);
 }

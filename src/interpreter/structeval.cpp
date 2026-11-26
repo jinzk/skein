@@ -16,6 +16,45 @@
 #include <utility>
 #include <vector>
 
+static struct_def *resolve_struct_for_value(const char *source,
+                                            const char *name) {
+    if (!name)
+        return NULL;
+    structtype_lookup_result result;
+    std::string error;
+    const char *importers[] = {source, diag_current_source_name().c_str(),
+                               diag_current_package_name().c_str()};
+    const char *package = diag_current_package_name().c_str();
+    for (const char *importer : importers) {
+        if (!importer || !*importer)
+            continue;
+        if (structtype_lookup_type(importer, package, name, result, error) ==
+                STRUCTTYPE_LOOKUP_FOUND &&
+            result.kind == STRUCTTYPE_LOOKUP_STRUCT)
+            return result.structure;
+    }
+    return NULL;
+}
+
+static enum_def *resolve_enum_for_value(const char *source, const char *name) {
+    if (!name)
+        return NULL;
+    structtype_lookup_result result;
+    std::string error;
+    const char *importers[] = {source, diag_current_source_name().c_str(),
+                               diag_current_package_name().c_str()};
+    const char *package = diag_current_package_name().c_str();
+    for (const char *importer : importers) {
+        if (!importer || !*importer)
+            continue;
+        if (structtype_lookup_type(importer, package, name, result, error) ==
+                STRUCTTYPE_LOOKUP_FOUND &&
+            result.kind == STRUCTTYPE_LOOKUP_ENUM)
+            return result.enumeration;
+    }
+    return NULL;
+}
+
 struct type_constraint any_type_constraint() {
     struct type_constraint type;
     type.kind = TYPE_ANY;
@@ -334,22 +373,22 @@ void eval_protocol_decl(struct protocol_node *t) {
         struct symlist *params =
             m->func ? ((struct funcdef *)m->func)->sl : m->params;
         if (!params || std::strcmp(params->sym->name, "self") != 0) {
-            yyerror("protocol method %s must start with self", m->name);
+            yyerror("proto method %s must start with self", m->name);
             return;
         }
         if (params->type && params->type->kind != TYPE_ANY) {
-            yyerror("protocol method %s self must be untyped", m->name);
+            yyerror("proto method %s self must be untyped", m->name);
             return;
         }
         method_sig sig;
         sig.name = m->name;
         for (struct symlist *p = params; p; p = p->next) {
             if (p->variadic) {
-                yyerror("protocol methods cannot be variadic");
+                yyerror("proto methods cannot be variadic");
                 return;
             }
             if (p->has_default) {
-                yyerror("protocol method %s cannot have default parameter values",
+                yyerror("proto method %s cannot have default parameter values",
                         m->name);
                 return;
             }
@@ -374,14 +413,14 @@ void eval_protocol_decl(struct protocol_node *t) {
             struct value_t *value = eval(m->func);
             if (!value || value->type != T_func) {
                 freeval(value);
-                yyerror("invalid protocol default method %s", m->name);
+                yyerror("invalid proto default method %s", m->name);
                 return;
             }
             std::shared_ptr<function_def> definition =
                 ((struct func_value_t *)value)->def;
             freeval(value);
             if (!definition || !definition->code) {
-                yyerror("invalid protocol default method %s", m->name);
+                yyerror("invalid proto default method %s", m->name);
                 return;
             }
             defaults.emplace_back(m->name, std::move(definition));
@@ -526,12 +565,12 @@ bool declare_protocol_meta(
     for (const protocol_method_meta &method : methods) {
         if (method.params.empty() ||
             method.params.front().name != "self") {
-            yyerror("protocol method %s must start with self",
+            yyerror("proto method %s must start with self",
                     method.name.c_str());
             return false;
         }
         if (method.params.front().type.kind != TYPE_ANY) {
-            yyerror("protocol method %s self must be untyped",
+            yyerror("proto method %s self must be untyped",
                     method.name.c_str());
             return false;
         }
@@ -539,11 +578,11 @@ bool declare_protocol_meta(
         signature.name = method.name;
         for (const protocol_param_meta &param : method.params) {
             if (param.variadic) {
-                yyerror("protocol methods cannot be variadic");
+                yyerror("proto methods cannot be variadic");
                 return false;
             }
             if (param.has_default) {
-                yyerror("protocol method %s cannot have default parameter "
+                yyerror("proto method %s cannot have default parameter "
                         "values", method.name.c_str());
                 return false;
             }
@@ -849,7 +888,7 @@ static value_t *build_struct_from_entries(
 }
 
 struct value_t *eval_struct_lit(struct struct_lit_node *lit) {
-    struct_def *def = structtype_find_struct(lit->source, lit->name);
+    struct_def *def = resolve_struct_for_value(lit->source, lit->name);
     if (!def) {
         yyerror("unknown struct type %s", lit->name);
         return NULL;
@@ -882,7 +921,7 @@ value_t *build_struct_value(
     const char *source, const char *name,
     std::vector<std::pair<std::string, value_t *>> &fields,
     const std::vector<bool> &spread, bool is_ref) {
-    struct_def *def = structtype_find_struct(source, name);
+    struct_def *def = resolve_struct_for_value(source, name);
     if (!def) {
         yyerror("unknown struct type %s", name ? name : "");
         free_constructed_fields(fields);
@@ -1014,7 +1053,7 @@ value_t *build_enum_value(
     const char *source, const char *name, const char *variant_name,
     std::vector<std::pair<std::string, value_t *>> &fields,
     const std::vector<bool> &spread) {
-    enum_def *def = structtype_find_enum(source, name);
+    enum_def *def = resolve_enum_for_value(source, name);
     if (!def) {
         yyerror("unknown enum type %s", name ? name : "");
         free_constructed_fields(fields);
@@ -1119,7 +1158,7 @@ struct value_t *eval_enum_lit(struct enum_lit_node *lit) {
             return NULL;
         }
     }
-    enum_def *def = structtype_find_enum(lit->source, lit->name);
+    enum_def *def = resolve_enum_for_value(lit->source, lit->name);
     if (!def) {
         yyerror("unknown enum type %s", lit->name);
         return NULL;

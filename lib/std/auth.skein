@@ -93,7 +93,7 @@ package auth {
     ttl: int;
   }
 
-  protocol SessionStoreApi {
+  proto SessionStoreApi {
     func create(self, value: any);
     func get(self, sid: string?);
     func set(self, sid: string?, value: any);

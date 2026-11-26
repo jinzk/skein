@@ -10,6 +10,7 @@
 #include "eval_internal.h"
 #include "scopestack.h"
 #include "structeval.h"
+#include "typecheck_state.h"
 #include "value_ops.h"
 
 #include <algorithm>
@@ -34,6 +35,19 @@ using skein::bc::Op;
 using skein::bc::Proto;
 using skein::bc::ProtoPtr;
 using skein::bc::SourceLoc;
+
+std::string resolve_selective_type_source(const char *source,
+                                          const char *name) {
+    if (!source)
+        return std::string();
+    const auto source_it =
+        skein::typecheck::detail::g_selective_imports.find(source);
+    if (source_it == skein::typecheck::detail::g_selective_imports.end() ||
+        !name)
+        return source;
+    const auto alias_it = source_it->second.find(name);
+    return alias_it == source_it->second.end() ? source : alias_it->second;
+}
 
 struct value_deleter {
     void operator()(value_t *value) const { freeval(value); }
@@ -433,6 +447,7 @@ struct Compiler {
     std::vector<std::string> param_names;
     std::vector<std::string> upvalue_names;
     std::unordered_set<std::string> declared_names;
+    std::unordered_set<std::string> selective_bindings;
     std::vector<SlotScope> slot_scopes;
     int scope_depth = 0;
     bool slot_fast_path = false;
@@ -1079,11 +1094,25 @@ struct Compiler {
         return add_expression_proto(expression, "$defer", &captures, true);
     }
 
-    uint32_t add_import(const struct import_node *node) {
+    uint32_t add_import(const struct import_node *node,
+                        const std::vector<uint32_t> &selection_slots = {}) {
         skein::bc::ImportDesc desc;
         desc.path = node && node->path ? node->path : "";
         desc.alias = node && node->alias ? node->alias : "";
         desc.base = node && node->base ? node->base : "";
+        size_t index = 0;
+        for (const struct import_selection *sel =
+                 node ? node->selections : NULL;
+             sel; sel = sel->next, ++index) {
+            skein::bc::ImportSelectionDesc item;
+            item.name = sel->name ? sel->name : "";
+            item.alias = sel->alias ? sel->alias
+                                    : (sel->name ? sel->name : "");
+            item.slot = index < selection_slots.size()
+                            ? selection_slots[index]
+                            : UINT32_MAX;
+            desc.selections.push_back(std::move(item));
+        }
         proto.imports.push_back(std::move(desc));
         return static_cast<uint32_t>(proto.imports.size() - 1);
     }
@@ -2222,7 +2251,8 @@ struct Compiler {
                 const char *field = literal_string(node->r);
                 if (field && node->l && node->l->nodetype == 'N') {
                     const char *base = ((struct symref *)node->l)->name;
-                    if (base && !name_is_resolved(base)) {
+                    if (base && (!name_is_resolved(base) ||
+                                 selective_bindings.count(base) != 0)) {
                         uint32_t desc = add_field_or_enum(
                             proto.package.c_str(), base, field);
                         emit(Op::GetFieldOrEnum, 0, 0, desc, here);
@@ -2379,8 +2409,10 @@ struct Compiler {
                     fields.push_back(init->name ? init->name : "");
                     spread.push_back(init->name == NULL);
                 }
+                const std::string source = resolve_selective_type_source(
+                    lit->source, lit->name);
                 uint32_t descriptor = add_construct(
-                    lit->source, lit->name, "", std::move(fields),
+                    source.c_str(), lit->name, "", std::move(fields),
                     std::move(spread), lit->is_ref);
                 emit(Op::NewStruct, 0, 0, descriptor, here);
                 return;
@@ -2401,8 +2433,10 @@ struct Compiler {
                     fields.push_back(init->name);
                     spread.push_back(false);
                 }
+                const std::string source = resolve_selective_type_source(
+                    lit->source, lit->name);
                 uint32_t descriptor = add_construct(
-                    lit->source, lit->name, lit->variant,
+                    source.c_str(), lit->name, lit->variant,
                     std::move(fields), std::move(spread));
                 emit(Op::NewEnum, 0, 0, descriptor, here);
                 return;
@@ -2428,6 +2462,42 @@ struct Compiler {
             case 'J': {
                 struct import_node *imp = (struct import_node *)node;
                 uint32_t name_slot = UINT32_MAX;
+                std::vector<uint32_t> selection_slots;
+                if (imp->selections) {
+                    for (const struct import_selection *sel = imp->selections;
+                         sel; sel = sel->next) {
+                        const char *binding =
+                            sel->alias ? sel->alias : sel->name;
+                        if (binding && *binding)
+                            selective_bindings.insert(binding);
+                    }
+                    if (slot_fast_path && !slot_scopes.empty()) {
+                        SlotScope &scope = slot_scopes.back();
+                        for (const struct import_selection *sel =
+                                 imp->selections;
+                             sel; sel = sel->next) {
+                            const char *binding =
+                                sel->alias ? sel->alias : sel->name;
+                            if (binding && scope.names.count(binding) != 0) {
+                                uint32_t message = add_name(
+                                    std::string("symbol repeated ") + binding);
+                                emit(Op::RuntimeError, 0, 0, message, here);
+                                return;
+                            }
+                            uint32_t slot = add_slot(binding, NULL, false);
+                            if (binding && *binding) {
+                                scope.names[binding] =
+                                    static_cast<int>(slot);
+                            }
+                            scope.declared.push_back(static_cast<int>(slot));
+                            selection_slots.push_back(slot);
+                        }
+                    }
+                    uint32_t desc = add_import(imp, selection_slots);
+                    emit(Op::Import, 0, static_cast<uint16_t>(desc),
+                         UINT32_MAX, here);
+                    return;
+                }
                 if (slot_fast_path && !slot_scopes.empty()) {
                     const char *binding =
                         imp->alias ? imp->alias

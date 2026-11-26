@@ -218,7 +218,7 @@ const char *keyword_detail(const std::string &word) {
         {"default", "switch default"},{"match", "pattern match"},
         {"let", "binding"},           {"const", "constant binding"},
         {"func", "function"},         {"struct", "struct type"},
-        {"enum", "enum type"},        {"protocol", "protocol"},
+        {"enum", "enum type"},        {"proto", "proto"},
         {"impl", "implementation"},   {"extern", "external declaration"},
         {"package", "package"},       {"module", "module"},
         {"import", "import"},         {"include", "include"},
@@ -250,14 +250,14 @@ int symbol_kind_for_keyword(const std::string &keyword) {
     if (keyword == "const") return 14;      // Constant
     if (keyword == "struct" || keyword == "impl") return 5; // Class
     if (keyword == "enum") return 10;       // Enum
-    if (keyword == "protocol") return 11;      // Interface
+    if (keyword == "proto") return 11;         // Interface
     if (keyword == "package" || keyword == "module") return 3; // Namespace
     return 12;
 }
 
 std::vector<doc_symbol> scan_document_symbols(const std::string &text) {
     static const std::vector<std::string> keywords = {
-        "func", "struct", "enum", "protocol", "impl", "let", "const",
+        "func", "struct", "enum", "proto", "impl", "let", "const",
         "package", "module", "extern",
     };
     std::vector<doc_symbol> symbols;
@@ -355,6 +355,11 @@ std::string read_ident(const std::string &text, std::size_t &pos) {
     return text.substr(start, pos - start);
 }
 
+struct selective_import_binding {
+    std::string alias;
+    std::string target;
+};
+
 /* Find the '}' matching the '{' at `open`; returns text.size() when
  * unbalanced.  Comments, strings and chars are skipped. */
 std::size_t matching_brace(const std::string &text, std::size_t open) {
@@ -387,6 +392,87 @@ std::size_t matching_brace(const std::string &text, std::size_t open) {
         ++pos;
     }
     return text.size();
+}
+
+/* Bare names bound by `import { name [as alias], ... } from path;`. */
+std::vector<selective_import_binding>
+collect_selective_imports(const std::string &text) {
+    std::vector<selective_import_binding> bindings;
+    std::size_t pos = 0;
+    while (pos < text.size()) {
+        const std::size_t line_end = text.find('\n', pos);
+        const std::size_t end =
+            line_end == std::string::npos ? text.size() : line_end;
+        std::size_t cursor = skip_space(text, pos);
+        const bool import_word =
+            text.compare(cursor, 6, "import") == 0 &&
+            (cursor + 6 == text.size() ||
+             !is_ident_byte((unsigned char)text[cursor + 6]));
+        if (import_word) {
+            cursor = skip_space(text, cursor + 6);
+            if (cursor < end && text[cursor] == '{') {
+                const std::size_t close = matching_brace(text, cursor);
+                if (close < text.size()) {
+                    std::vector<selective_import_binding> current;
+                    std::size_t item = cursor + 1;
+                    while (item < close) {
+                        item = skip_space(text, item);
+                        std::string name = read_ident(text, item);
+                        if (name.empty()) {
+                            ++item;
+                            continue;
+                        }
+                        item = skip_space(text, item);
+                        std::string alias = name;
+                        if (text.compare(item, 2, "as") == 0 &&
+                            (item + 2 == text.size() ||
+                             !is_ident_byte(
+                                 (unsigned char)text[item + 2]))) {
+                            item = skip_space(text, item + 2);
+                            const std::string read = read_ident(text, item);
+                            if (!read.empty())
+                                alias = read;
+                        }
+                        current.push_back({alias, name});
+                        while (item < close && text[item] != ',')
+                            ++item;
+                        if (item < close)
+                            ++item;
+                    }
+                    std::size_t after = skip_space(text, close + 1);
+                    if (text.compare(after, 4, "from") == 0 &&
+                        (after + 4 == text.size() ||
+                         !is_ident_byte((unsigned char)text[after + 4]))) {
+                        after = skip_space(text, after + 4);
+                        std::string path;
+                        if (after < end && (text[after] == '"' ||
+                                            text[after] == '\'')) {
+                            const std::size_t quoted = skip_quoted(text, after);
+                            path = text.substr(after + 1,
+                                               quoted > after + 1
+                                                   ? quoted - after - 2
+                                                   : 0);
+                        } else {
+                            const std::size_t start = after;
+                            while (after < end &&
+                                   (is_ident_byte((unsigned char)text[after]) ||
+                                    text[after] == '.' || text[after] == '@'))
+                                ++after;
+                            path = text.substr(start, after - start);
+                        }
+                        for (selective_import_binding &binding : current) {
+                            if (!binding.target.empty() && !path.empty())
+                                binding.target = path + "." + binding.target;
+                        }
+                    }
+                    bindings.insert(bindings.end(), current.begin(),
+                                    current.end());
+                }
+            }
+        }
+        pos = end + 1;
+    }
+    return bindings;
 }
 
 void scan_type_body(const std::string &text, std::size_t begin, std::size_t end,
@@ -893,6 +979,24 @@ private:
         if (it != std_index_.end())
             return it->second.signature;
 
+        /* Selective imports are resolved statically so check-only tools never
+         * execute the imported package.  They take precedence over the bare
+         * placeholder binding recorded by the checker. */
+        for (const selective_import_binding &binding :
+             collect_selective_imports(document.text)) {
+            if (binding.alias != word)
+                continue;
+            auto std_it = std_index_.find(binding.target);
+            if (std_it != std_index_.end())
+                return std_it->second.signature;
+            for (const index_entry &entry : index_.lookup(binding.target)) {
+                if (!entry.type.empty())
+                    return (entry.callable ? "func " : "let ") + word + ": " +
+                           entry.type;
+                return entry.callable ? "func " + word : "let " + word;
+            }
+        }
+
         for (const analysis_symbol &symbol : document.symbols) {
             if (symbol.name != word)
                 continue;
@@ -945,6 +1049,21 @@ private:
         completion::index candidates;
         if (qualifier.empty()) {
             completion::add_keywords(candidates);
+            for (const selective_import_binding &binding :
+                 collect_selective_imports(document->text)) {
+                std::string detail = "selective import";
+                auto std_it = std_index_.find(binding.target);
+                if (std_it != std_index_.end())
+                    detail = std_it->second.signature;
+                else
+                    for (const index_entry &entry :
+                         index_.lookup(binding.target)) {
+                        if (!entry.type.empty())
+                            detail = entry.type;
+                        break;
+                    }
+                candidates.add_top({binding.alias, 7, detail, false});
+            }
             for (const analysis_symbol &symbol : document->symbols)
                 candidates.add_top(
                     {symbol.name, symbol.callable ? 3 : 6,
@@ -1177,6 +1296,22 @@ private:
                                        entry.character + utf16_length(word)};
                 json::push(locations, location_value(entry.uri, start, end));
                 found_local = true;
+            }
+        }
+        if (qualifier.empty()) {
+            for (const selective_import_binding &binding :
+                 collect_selective_imports(document->text)) {
+                if (binding.alias != word)
+                    continue;
+                for (const index_entry &entry : index_.lookup(binding.target)) {
+                    const lsp_position start{entry.line, entry.character};
+                    const lsp_position end{
+                        entry.line,
+                        entry.character + utf16_length(word)};
+                    json::push(locations,
+                               location_value(entry.uri, start, end));
+                    found_local = true;
+                }
             }
         }
         (void)found_local;

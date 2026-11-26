@@ -2432,8 +2432,8 @@ print(std.meta.has_type("int"));      // true
 的类型必须 `export`；不可见类型报错，`has_type` 返回 `false`。
 `fields` / `variants` / `methods` / `protocols` 对不适用的类型返回空列表。
 `methods` 同时包含 struct 内联方法和 `impl Type` 追加的方法，二者共享方法表；
-`protocols` / `implements` 按结构式方法签名匹配检查 proto。反射 kind 字符串
-规划为 `"proto"`；在 M11 落地前，当前实现仍返回 `"protocol"`。
+`protocols` / `implements` 按结构式方法签名匹配检查 proto。反射 kind 字符串为
+`"proto"`。
 返回字典同时包含 `package`、`module`、`source`：
 `package` 是完整包身份，`module` 是 Module 容器名（普通包和入口为空字符串），
 `source` 是源文件路径。

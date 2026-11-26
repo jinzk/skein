@@ -45,9 +45,9 @@ module 代码。
 | `publishDiagnosticsProvider` | `didOpen` / `didChange` / `didSave` 后发布诊断；`didChange` 使用 debounce |
 | `documentFormattingProvider` | 复用 `skein fmt` 的 token/trivia formatter，输出前做 token 等价与 parse 校验 |
 | `documentRangeFormattingProvider` | 与整文档格式化相同（MVP 忽略 range，返回整文档替换） |
-| `completionProvider` | 触发字符 `.`；提供关键字、当前可见符号、`std.*` 命名空间成员，以及工作区 module 的导出符号（含 `as` 别名） |
-| `hoverProvider` | 返回关键字说明、局部变量类型、`std.*` 签名或导入模块的导出符号签名 |
-| `definitionProvider` | 先在当前文档内按声明名跳转，未命中时按 import 别名解析到工作区 module 的导出声明（跨文件） |
+| `completionProvider` | 触发字符 `.`；提供关键字、当前可见符号、selective import 别名、`std.*` 命名空间成员，以及工作区 module 的导出符号（含 `as` 别名） |
+| `hoverProvider` | 返回关键字说明、局部变量类型、selective import 的静态解析结果、`std.*` 签名或导入模块的导出符号签名 |
+| `definitionProvider` | 先在当前文档内按声明名跳转；selective import 别名按原导出路径解析到工作区 module 的声明（跨文件） |
 | `documentSymbolProvider` | `func` / `let` / `const` / `struct` / `enum` / `proto` / `impl` 等顶层声明；struct 内联方法和 `impl` 方法是类型成员，不另列为顶层符号 |
 | `workspace.workspaceFolders` | 声明支持多根工作区；文件夹与 `-I` 路径共同构成索引根 |
 
@@ -64,10 +64,13 @@ UTF-16 code unit character；内部来自结构化诊断的 `utf16_offset`，不
 **不执行任何被索引脚本**。索引结果用于：
 
 - `textDocument/completion`：`math.` 列出 `math` module 的导出名；顶层补全
-  也会提示 module 名；`import x as y` 的别名按原路径解析。
+  也会提示 module 名；`import x as y` 的别名按原路径解析；
+  `import {name as n} from math;` 的 `n` 按 `math.name` 解析。
 - `textDocument/definition`：按光标所在词的 import 限定符解析到导出声明所在
-  文件与行列，实现跨文件跳转；本地同名声明优先。
-- `textDocument/hover`：显示导入模块的导出符号签名。
+  文件与行列，实现跨文件跳转；`import {name}` 的别名走同一条静态路径；本地
+  同名声明优先。
+- `textDocument/hover`：显示导入模块的导出符号签名，包括 selective import
+  别名；全程只读取索引，不执行被导入脚本。
 
 索引只在启动时构建一次；运行期文件变化不会重建索引，需重启语言服务器刷新。
 

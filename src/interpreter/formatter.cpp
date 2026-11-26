@@ -301,7 +301,7 @@ bool is_prefix_candidate(const std::string &text) {
 
 bool is_join_word(const std::string &text) {
     return text == "else" || text == "while" || text == "in" ||
-           text == "is" || text == "as";
+           text == "is" || text == "as" || text == "from";
 }
 
 bool is_control_keyword(const std::string &text) {
@@ -361,13 +361,29 @@ std::string render_tokens(const std::vector<Token> &code) {
     std::vector<bool> operand_stack;
     const Token *prev = NULL;
     bool ternary_pending = false;
+    bool import_brace_pending = false;
+    bool in_import_selection = false;
 
     for (std::size_t i = 0; i < code.size(); ++i) {
         const Token &cur = code[i];
-        if (prev && should_space(*prev, cur, expect_operand, prev_unary,
-                                 ternary_pending))
+        const bool compact_braces =
+            in_import_selection && prev &&
+            (prev->raw == "{" || cur.raw == "}");
+        if (prev && !compact_braces &&
+            should_space(*prev, cur, expect_operand, prev_unary,
+                         ternary_pending))
             out.push_back(' ');
         out += cur.raw;
+
+        if (cur.raw == "import" && i + 1 < code.size() &&
+            code[i + 1].raw == "{") {
+            import_brace_pending = true;
+        } else if (import_brace_pending && cur.raw == "{") {
+            in_import_selection = true;
+            import_brace_pending = false;
+        } else if (in_import_selection && cur.raw == "}") {
+            in_import_selection = false;
+        }
 
         if (cur.raw == "?") {
             ternary_pending = true;

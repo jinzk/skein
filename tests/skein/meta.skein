@@ -22,7 +22,7 @@ enum MetaEnumInfo {
   B;
 }
 
-protocol MetaProtocolD {
+proto MetaProtocolD {
   func draw(self);
 }
 
@@ -101,7 +101,7 @@ ts_test("meta protocol info", func() {
   ts_eq(std.meta.protocols("MetaNoProtocolP"), []);
   ts_eq(std.meta.type_info("MetaProtocolP")["protocols"],
         ["main.MetaProtocolD"]);
-  ts_eq(std.meta.type_info("MetaProtocolD")["kind"], "protocol");
+  ts_eq(std.meta.type_info("MetaProtocolD")["kind"], "proto");
   ts_eq(len(std.meta.type_info("MetaProtocolD")["methods"][0]["params"]), 0);
   ts_eq(std.meta.fields("MetaProtocolD"), []);
   ts_eq(std.meta.variants("MetaProtocolD"), []);
@@ -164,7 +164,7 @@ ts_test("meta unknown type", func() {
 ts_test("meta unknown protocol", func() {
   ts_error(func() {
     return std.meta.implements("int", "Nope");
-  }, "unknown protocol Nope");
+  }, "unknown proto Nope");
 });
 
 ts_test("meta result isolation", func() {

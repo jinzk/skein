@@ -46,11 +46,10 @@ as
 等价 `wait launch f()`。详见任务章节；在 M11 落地前，当前实现仍使用保留字
 `launch` / `wait`。
 
-规划中的语言级重命名：`protocol` → `proto`。`proto` 作为协议类型声明关键字时是
-全局保留字（`proto Drawable`）；泛型约束列表里的 `proto` 与 `type` 一样是
-contextual 标记，只在 `[V proto Drawable]` 这类位置生效。`std.meta.type_info`
-等反射结果的 kind 字符串同步改为 `"proto"`。本文档示例使用目标拼写；在 M11
-落地前，当前实现仍使用 `protocol` / `"protocol"`。
+协议类型声明关键字为 `proto`，属于全局保留字（`proto Drawable`）；`protocol`
+不再是关键字。泛型约束列表里的 `proto` 与 `type` 一样是 contextual 标记，只在
+`[V proto Drawable]` 这类位置生效。`std.meta.type_info` 等反射结果的 kind 字符串
+为 `"proto"`。
 
 核心内置函数名（`print`、`println`、`len`、`range`、`input`、`list`、`dict` 和类型转换名等）目前由词法器识别为函数值，不能用作普通变量名。`std.*` 中的函数是普通模块成员，不是保留字。
 
@@ -2687,6 +2686,13 @@ import std as s;
 import .sibling;        // 当前包目录
 import ..common;        // 上一级目录
 import @top.pkg;        // 项目根目录
+
+import {answer} from util;              // 只绑定 answer
+import {answer as a} from util;         // 绑定别名 a
+import {Point, make} from @top.shapes;  // 值和导出类型都可选择
+import {parse} from .jsonutil;
+import {parse} from ..common;
+import {parse} from "github.com/acme/util/json";
 ```
 
 - `import aa.bb.cc;` 绑定最后一个包名 `cc`；
@@ -2707,6 +2713,14 @@ import @top.pkg;        // 项目根目录
 - 别名必须是普通标识符；`as` 是保留字；
 - import 语句需要分号；
 - 包名绑定到当前作用域。
+- `import {name} from pkg;` 只把选中的导出值或导出类型绑定到当前作用域，不绑定
+  `pkg` 本身；需要 `pkg.name` 写法时仍要另写 `import pkg;`。
+- 选择项可以写 `name as alias`；alias 是普通标识符，不能重复。
+- 选择列表至少一项；重复名字、重复 alias、找不到导出名都会报错。
+- `from` 只在 `import { ... }` 之后、`importref` 之前是 contextual keyword；
+  其他位置仍是普通标识符或字段名，例如 `let from = 7;`、
+  `std.path.relative(from, to)`。
+- check-only / lint / LSP 不执行被导入的包来验证选择项。
 - `import` 是 contextual keyword，只在语句开头作导入声明；其他位置仍是普通
   标识符，例如 `let import = 1;`；
 - `include` 同样是 contextual keyword，只在语句开头作声明包含；其他位置仍是

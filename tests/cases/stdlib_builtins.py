@@ -2511,8 +2511,8 @@ def run_cases():
           "func f(...xs) { return len(xs); }\nf(...1)\n",
           stderr="spread expects a list, got int")
     check("protocol variadic rejected",
-          "protocol T { func f(self, ...args); }\n",
-          stderr="protocol methods cannot be variadic")
+          "proto T { func f(self, ...args); }\n",
+          stderr="proto methods cannot be variadic")
 
     many_globals = "".join(f"let v{i} = {i};\n" for i in range(40))
     check("large symbol table lookup", many_globals + "v0 + v39\n",
@@ -2911,7 +2911,7 @@ def run_cases():
           stdout_all=["= 5", "= 1", "= 5"])
 
     check("protocol implementation",
-          "protocol Drawable { func draw(self); }\n"
+          "proto Drawable { func draw(self); }\n"
           "struct Point { x: int; }\n"
           "impl Point {\n"
           "  func draw(self) { print(\"point\"); }\n"
@@ -2922,26 +2922,26 @@ def run_cases():
           "render(p)\n",
           stdout_all=["point", "point"])
     check("protocol typed variable",
-          "protocol Drawable { func draw(self); }\n"
+          "proto Drawable { func draw(self); }\n"
           "struct Point { x: int; }\n"
           "impl Point { func draw(self) { return 1; } }\n"
           "let d: Drawable = Point { x: 1 };\nd.draw()\n",
           stdout="= 1")
     check("protocol signature mismatch",
-          "protocol Drawable { func draw(self, x: int); }\n"
+          "proto Drawable { func draw(self, x: int); }\n"
           "struct Point { x: int; }\n"
           "impl Point { func draw(self, x: string) { return x; } }\n"
           "func render(x: Drawable) { return x.draw(1); }\n"
           "render(Point { x: 1 });\n",
           stderr="expected Drawable, got Point")
     check("protocol missing method",
-          "protocol Drawable { func draw(self); }\n"
+          "proto Drawable { func draw(self); }\n"
           "struct Point { x: int; }\n"
           "func render(x: Drawable) { x.draw(); }\n"
           "render(Point { x: 1 });\n",
           stderr="expected Drawable, got Point")
     check("protocol extra method allowed",
-          "protocol Drawable { func draw(self); }\n"
+          "proto Drawable { func draw(self); }\n"
           "struct Point { x: int; }\n"
           "impl Point {\n"
           "  func draw(self) { return 1; }\n"
@@ -2952,7 +2952,7 @@ def run_cases():
           "println(Point { x: 1 }.other());\n",
           stdout_all=["1", "2"])
     check("inline method satisfies protocol default",
-          "protocol Doubler {\n"
+          "proto Doubler {\n"
           "  func value(self) -> int;\n"
           "  func double(self) { return self.value() * 2; }\n"
           "}\n"
@@ -2962,8 +2962,8 @@ def run_cases():
           "println(Num { n: 5 } is Doubler);\n",
           stdout_all=["10", "true"])
     check("protocol method repeated",
-          "protocol Drawable { func draw(self); func draw(self); }\n",
-          stderr="protocol method repeated draw")
+          "proto Drawable { func draw(self); func draw(self); }\n",
+          stderr="proto method repeated draw")
     check("duplicate impl method",
           "struct Point { x: int; }\n"
           "impl Point { func get(self) { return 1; } }\n"
@@ -3020,7 +3020,7 @@ def run_cases():
           "print(f());\n",
           stdout="4")
     check("enum protocol implementation",
-          "protocol Drawable { func draw(self); }\n"
+          "proto Drawable { func draw(self); }\n"
           "enum Shape { Circle { r: int; }; Empty; }\n"
           "impl Shape {\n"
           "  func draw(self) {\n"
@@ -3034,14 +3034,14 @@ def run_cases():
           "print(s.draw());\nprint(s is Drawable);\n",
           stdout_all=["7", "true"])
     check("enum protocol structural match",
-          "protocol D { func d(self); }\n"
+          "proto D { func d(self); }\n"
           "enum E { A; }\n"
           "impl E { func d(self) { return 1; } }\n"
           "let e = E.A;\n"
           "print(e is D);\nprint(e.d());\n",
           stdout_all=["true", "1"])
     check("enum protocol pattern",
-          "protocol D { func d(self); }\n"
+          "proto D { func d(self); }\n"
           "enum E { A { n: int; }; }\n"
           "impl E { func d(self) { return self.n; } }\n"
           "func describe(x) {\n"
@@ -3098,7 +3098,7 @@ def run_cases():
           stdout_all=["= true", "= true", "= false", "= true",
                       "= true", "= true", "= true", "= true"])
     check("is struct and protocol",
-          "protocol Drawable { func draw(self); }\n"
+          "proto Drawable { func draw(self); }\n"
           "struct Point { x: int; }\n"
           "struct Other { x: int; }\n"
           "impl Point { func draw(self) { return 1; } }\n"

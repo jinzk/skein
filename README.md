@@ -184,9 +184,8 @@ let desc = match (event) {
 
 ### 组织代码：struct、proto、`ref` 与枚举
 
-> 规划中的重命名：`protocol` → `proto`。`proto` 作为协议声明关键字是全局保留字；
-> 泛型约束列表里的 `proto` / `type` 是地位相同的 contextual 标记。示例使用目标
-> 拼写，在 M11 落地前当前实现仍使用 `protocol`。
+`proto` 是协议声明关键字，属于全局保留字；泛型约束列表里的 `proto` / `type` 是
+地位相同的 contextual 标记，`protocol` 不再作为关键字使用。
 
 `struct` 声明数据和方法，`impl` 可追加方法，`proto` 声明结构式接口；枚举支持带载荷变体和穷尽匹配：
 

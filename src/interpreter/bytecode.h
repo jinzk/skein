@@ -207,10 +207,17 @@ struct IndexDesc {
     uint32_t const_key = UINT32_MAX;
 };
 
+struct ImportSelectionDesc {
+    std::string name;
+    std::string alias;
+    uint32_t slot = UINT32_MAX;
+};
+
 struct ImportDesc {
     std::string path;
     std::string alias;
     std::string base;
+    std::vector<ImportSelectionDesc> selections;
 };
 
 struct ConstructDesc {

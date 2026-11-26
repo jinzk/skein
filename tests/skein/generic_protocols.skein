@@ -1,16 +1,16 @@
 import std;
 include "_support.skein";
 
-protocol Keyed[K any] {
+proto Keyed[K any] {
   func key(self): K;
 }
 
-protocol PairKeyed[K any] {
+proto PairKeyed[K any] {
   func first(self): K;
   func second(self): K;
 }
 
-protocol Badged[K any] {
+proto Badged[K any] {
   func key(self): K;
   func badge(self): K {
     return self.key();

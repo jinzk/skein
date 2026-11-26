@@ -1087,6 +1087,12 @@ def run_cases():
             "println(c.value);\n"
             "import @top.pkg as p;\n"
             "println(p.value);\n"
+            "import {value as top_value} from @top.pkg;\n"
+            "println(top_value);\n"
+            "import {value as local_value} from .local;\n"
+            "println(local_value);\n"
+            "import {value as common_value} from ..common;\n"
+            "println(common_value);\n"
             "import user;\n"
             "println(user.run());\n"
             "func later() {\n"
@@ -1110,6 +1116,9 @@ def run_cases():
             "local",
             "common",
             "root",
+            "root",
+            "local",
+            "common",
             "helper:sibling:root",
             "local",
         ], proc.stdout
@@ -1159,7 +1168,7 @@ def run_cases():
             "package aa {\n"
             "  export struct P { x: int; }\n"
             "  struct Hidden { h: int; }\n"
-            "  protocol D { func d(self); }\n"
+            "  proto D { func d(self); }\n"
             "  impl P {\n"
             "    func d(self) { return self.x; }\n"
             "    func get(self) { return self.x; }\n"
@@ -1227,8 +1236,8 @@ def run_cases():
             "app/lib.skein",
             "package lib {\n"
             "  export struct P { x: int; }\n"
-            "  protocol D { func d(self); }\n"
-            "  protocol T { func take(self, p: P); }\n"
+            "  proto D { func d(self); }\n"
+            "  proto T { func take(self, p: P); }\n"
             "  func default_x() { return 7; }\n"
             "  export struct C { v: int = default_x(); }\n"
             "  export func make_p(x: int) { return P { x: x }; }\n"
@@ -1296,7 +1305,7 @@ def run_cases():
             "app/badlib.skein",
             "package badlib {\n"
             "  struct Hidden { x: int; }\n"
-            "  protocol Bad { func b(self, h: Hidden); }\n"
+            "  proto Bad { func b(self, h: Hidden); }\n"
             "}\n",
         )
         bad_main = write(
@@ -1319,10 +1328,10 @@ def run_cases():
             "app/d.skein",
             "package d {\n"
             "  func helper(x) { return x + 1; }\n"
-            "  protocol D {\n"
+            "  proto D {\n"
             "    func d(self, x) { return helper(x); }\n"
             "  }\n"
-            '  protocol E { func e(self) { return "e"; } }\n'
+            '  proto E { func e(self) { return "e"; } }\n'
             "  export struct P { x: int; }\n"
             "  export func make() { return P { x: 1 }; }\n"
             "}\n",

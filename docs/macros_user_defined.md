@@ -120,10 +120,10 @@ name!(recover!())
 `(foo!(x)).y`；`foo! [1, 2]` 解析为 `(foo!())[1, 2]`（裸列表参数不支持）；
 `foo! { ... }` 始终是 block，不能当 dict。
 
-### 3.4 跨包导入（后续阶段）
+### 3.4 跨包导入（值/类型已实现，宏待实现）
 
-v1 只做文件内可见性。跨包阶段不引入独立的 `use` 关键字，而是先给值/类型
-增加 selective import，再让宏复用同一形式：
+值/类型的 selective import 已落地；跨包宏导入仍属后续阶段。跨包阶段不引入
+独立的 `use` 关键字，而是复用同一形式：
 
 ```text
 import {retry} from util;
@@ -215,7 +215,7 @@ v1 只支持同文件、声明先于使用：
 - import / export 宏、包级宏、跨模块宏都明确不支持；
 - 内置宏名不能被用户宏覆盖。
 
-跨包阶段按第 3.4 节推进：先实现值的 selective import，再支持
+跨包阶段按第 3.4 节推进：值/类型的 selective import 已完成，下一步再支持
 `export macro` 与 `import {name!} from pkg;`。宏依赖图必须无环，且只读取
 导出宏的源码模板，不执行包代码；这部分不纳入 v1。
 
@@ -344,49 +344,64 @@ wrap!(2) {
 
 ## 10. 分阶段落地
 
-实施顺序遵循“先低风险、后中风险”：低风险 contextual keyword 和 selective
-import 先做；builtin/prelude 清理与中风险关键字在宏实现之后再分独立步骤处理。
+实施顺序按**依赖关系、风险、收益和文档一致性**重新排定：先落地已经写进文档但
+代码尚未跟上的机械变更，再做内置值 / 内置宏默认化，然后做任务语法，最后做用户
+宏与高风险 contextual。M11 不回写已完成的 M10。
 
-1. **Phase 0**：本 ADR 评审并确认第 11 节的待定项。
-2. **Phase 1（已完成）**：contextual keyword 基础设施；`in`、`export`、
-   `package`、`import`、`include` 已改为 contextual keyword；`module` 在
-   `.skein` 源码中本来就不是保留字。
-3. **Phase 2**：值的 selective import `import {name} from pkg;`，`from` 从一开
-   始就是 contextual keyword；配套 formatter / lint / LSP、文档与测试。
-4. **Phase 3**：`macro` 声明语法、签名校验、宏表、未知宏诊断；先只支持一个
-   `expr` 片段的模板展开与 hygiene 基础设施。
-5. **Phase 4**：补齐 `ident`、`expr...`、`block` 与块函数上下文；完整测试矩阵。
-6. **Phase 5**：`export macro` 与 `import {name!} from pkg;`，跨包 hygiene、
-   循环检测和完整测试矩阵。
-7. **Phase 6**：普通内置函数改为默认 import 的 prelude 值。`len` / `range`
-   放入规划中的 `std.utils`（`std.utils.len` / `std.utils.range`）；`print` /
-   `println` / `input` 映射到 `std.io.*`；`kind_of` / `type_*` 映射到
-   `std.type.*`。lexer 不再发 `SKEIN_TOK_BUILTIN`，初始作用域注入绑定，
-   VM/JIT 的 builtin id 不变。同期把内置宏改为 parser 侧默认宏绑定
-   （第 3.5 节）：裸名只是别名，规范路径仍可显式调用；解析顺序为用户宏 >
-   显式宏 import > 默认内置宏。
-8. **Phase 7**：`list` / `dict` 改为默认 import，并与 `int` / `str` 等统一为
-   类型构造器。`list(x)` / `dict(x)` 降糖为 `std.list.new(x)` /
-   `std.dict.new(x)`；值作用域可用局部绑定遮蔽，类型作用域保持独立。
-9. **Phase 8**：`fail` / `recover` / `pass` 改为内置宏 `fail!` / `recover!` /
-   `pass!`（规范路径 `std.error.*!`），展开到现有 `newfail` / `newrecover` /
-   `newpass`；先与旧 bare 形式
-   并行并 deprecate，再删除对应 token 和保留字。同期落地第 3.3 节的两种简写，
-   需要调整 lexer 的 `MACRO_BANG` 判定和 parser precedence。
-10. **Phase 9**：`on` / `error` 评估 handler-scoped contextual；`error!` 改为普通
-    `NAME MACRO_BANG` 路径，`type error` 走类型命名空间，`.error` 仍是普通字段。
-    保留 `%prec ON`，并补齐 handler body / defer / 默认参数诊断。
-11. **Phase 10**：`wait` 改为内置宏 `wait!`（规范路径 `std.task.wait!`，展开
-    为 `#expr.wait()`）并退出保留字；`launch` 与新增的 `await` 改为表达式起始
-    位置的 contextual keyword：`launch f()` 启动 task，`await f()` 等价
-    `wait launch f()`。`await` 不引入函数颜色，要求后面是调用表达式；等待已有
-    task 用 `wait!(t)`。`as`、`ref` / `weak`、`is` 仍按独立步骤处理。
-12. **Phase 11**：协议声明关键字 `protocol` 重命名为 `proto`，作为全局保留字；
-    泛型约束列表里的 `proto` / `type` 仍是地位相同的 contextual 标记；同步
-    LSP、文档、测试和反射 kind 字符串 `"proto"`。该阶段独立发布，不回写已完成
-    里程碑。
+优先级分组：
 
-每个阶段都要保持旧的内置宏测试全绿；用户宏不得改变第一批宏的行为。
+| 优先级 | 内容 | 理由 |
+| --- | --- | --- |
+| P0（已完成） | 低风险 contextual：`in` / `export` / `import` / `package` / `include`；`module` 仅 manifest | 基线不动 |
+| P1（已完成） | `protocol` → `proto` 实现落地；值/类型的 selective import | 已消除文档漂移；selective import 是宏 import 的前置 |
+| P2 | 普通内置函数默认 import；内置宏默认绑定与 `fail!` / `recover!` / `pass!` / `wait!`；`list` / `dict` 默认 import | 一次性移除大量保留名，并为宏表和类型构造器统一打底 |
+| P3 | `launch` / `await` 表达式起始 contextual | 依赖 `wait!`；保住“启动并立即等待”的写法，退出 `wait` 保留字 |
+| P4 | 用户宏 v1（最小 → 完整 → 跨包） | 复用 P2 建立的 MacroTable 与调用简写；属于功能增量 |
+| P5 | `on` / `error`、`as`、`ref` / `weak`、`is` | 高风险 contextual，冲突面大，必须各自独立 |
+
+具体顺序：
+
+1. **P1.1（已完成）**：`protocol` → `proto` 实现落地。lexer / parser / AST / typecheck /
+   LSP / formatter / lint / 反射 kind 字符串同步改为 `"proto"`；泛型约束列表里的
+   `proto` / `type` 仍是 contextual 标记；不保留 `"protocol"` 别名。
+2. **P1.2（已完成）**：值/类型的 selective import `import {name} from pkg;`。
+   `from` 只在 `import { ... }` 后 contextual；formatter / lint / LSP、文档与
+   测试已同步，check-only 工具不执行被导入的包。
+3. **P2.1**：普通内置函数改为默认 import 的 prelude 值。`len` / `range` 放入
+   规划中的 `std.utils`；`print` / `println` / `input` → `std.io.*`；
+   `kind_of` / `type_*` → `std.type.*`。lexer 不再发 `SKEIN_TOK_BUILTIN`，初始
+   作用域注入绑定；VM / JIT 的 builtin id 不变。解析优先级为局部绑定 > 显式
+   import > 默认 import。
+4. **P2.2**：内置宏改为 parser 侧默认宏绑定（第 3.5 节）。裸名只是别名，规范
+   路径仍可显式调用；加入 `fail!` / `recover!` / `pass!`（`std.error.*!`）和
+   `wait!`（`std.task.wait!`，展开为 `#expr.wait()`）。落地第 3.3 节的
+   `name!` / `name! x` 两种简写；旧 bare 形式先并行并 deprecate。
+5. **P2.3**：`list` / `dict` 改为默认 import，新增 `std.list.new` /
+   `std.dict.new`，并与 `int` / `str` 等统一为类型构造器；`list(x)` / `dict(x)`
+   降糖为 `std.list.new(x)` / `std.dict.new(x)`；值作用域可遮蔽，类型命名空间
+   独立。不做 `list!` / `dict!` / `try!`。
+6. **P3.1**：`wait` 退出保留字；`launch` 与新增 `await` 改为表达式起始 contextual
+   keyword。`launch f()` 启动 task，`await f()` 等价 `wait launch f()` 并要求
+   后面是调用表达式；已有 task 写 `wait!(t)`。contextual 槽位覆盖语句开头、
+   `=` / `return` / `yield` / `(` / `[` / `{` / `,` / `:` 和二元运算符之后；`.`
+   之后仍是普通名字；`await(f())` 是前缀形式，同名变量写 `(await)(f())`；
+   postfix 优先级高于前缀。`await f() on error(...)` 沿用当前 handler 语义。
+7. **P4.1**：`macro` 声明语法、签名校验、宏表、未知宏诊断；先只支持一个 `expr`
+   片段的模板展开与 hygiene 基础设施。
+8. **P4.2**：补齐 `ident`、一个尾部 `expr...`、一个尾部 `block` 与块函数上下文；
+   完整测试矩阵。
+9. **P4.3**：`export macro` 与 `import {name!} from pkg;`；跨包 hygiene、循环
+   检测和完整测试矩阵。
+10. **P5.1**：`on` / `error` 评估 handler-scoped contextual；`error!` 改为普通
+    `NAME MACRO_BANG` 路径，`type error` 走类型命名空间，`.error` 仍是普通字段；
+   保留 `%prec ON`，补齐 handler body / defer / 默认参数诊断。
+11. **P5.2**：`as` contextual，独立步骤。
+12. **P5.3**：`ref` contextual，独立步骤。
+13. **P5.4**：`weak` contextual，独立步骤。
+14. **P5.5**：`is` contextual，独立步骤。
+
+每个阶段都要保持第一批宏与全量测试全绿；用户宏不得改变第一批宏的行为；每阶段
+运行 `tools/check_docs_sync.py` 与 `git diff --check`。
 
 ## 11. 待确认的默认决策
 

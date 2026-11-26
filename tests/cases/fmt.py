@@ -180,3 +180,26 @@ def run_cases():
         assert check_clean.returncode == 0, decode(check_clean.stderr)
     finally:
         os.unlink(lambda_path)
+
+    selective_source = "import{basename as base}from std.path;\n"
+    selective_expected = "import {basename as base} from std.path;\n"
+    selective_path = write_temp(selective_source)
+    try:
+        formatted = run_fmt(selective_path)
+        assert formatted.returncode == 0, decode(formatted.stderr)
+        assert decode(formatted.stdout) == selective_expected, decode(
+            formatted.stdout
+        )
+
+        second = run_fmt("-", stdin=formatted.stdout)
+        assert second.returncode == 0, decode(second.stderr)
+        assert second.stdout == formatted.stdout, (
+            "fmt must be idempotent for selective imports\n"
+            f"first:\n{decode(formatted.stdout)}\n"
+            f"second:\n{decode(second.stdout)}"
+        )
+
+        check_clean = run_fmt("--check", selective_path)
+        assert check_clean.returncode == 1, decode(check_clean.stderr)
+    finally:
+        os.unlink(selective_path)

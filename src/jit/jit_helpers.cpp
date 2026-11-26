@@ -45,6 +45,26 @@ using skein::jit::internal::read_bool_env;
 using skein::jit::internal::resolve_global_symbol;
 using skein::jit::internal::unpack_loc;
 
+value_t *import_selection_value(value_t *ns, const char *name) {
+    if (!ns || ns->type != T_dict || !name)
+        return NULL;
+    struct string_value_t key;
+    key.type = T_string;
+    key.value = const_cast<char *>(name);
+    int found = dict_find_index((struct dict_value_t *)ns,
+                                (struct value_t *)&key);
+    if (found < 0)
+        return NULL;
+    return dupval(((struct dict_value_t *)ns)->payload->items[(size_t)found]
+                      .second);
+}
+
+bool import_selection_is_type(const char *package, const char *name) {
+    if (!package || !*package || !name || !*name)
+        return false;
+    return structtype_is_exported_type(package, name);
+}
+
 } // namespace
 
 extern "C" SKEIN_JIT_SYSV int skein_jit_check_interrupt() {
@@ -826,7 +846,8 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_get_field_or_enum(
     structtype_lookup_result lookup;
     std::string error;
     structtype_lookup_status status = structtype_lookup_type(
-        nullptr, desc->source.c_str(), desc->base.c_str(), lookup, error);
+        diag_current_source_name().c_str(),
+        diag_current_package_name().c_str(), desc->base.c_str(), lookup, error);
     if (status == STRUCTTYPE_LOOKUP_FOUND &&
         lookup.kind == STRUCTTYPE_LOOKUP_ENUM && lookup.enumeration) {
         skein::jit::build_enum_fn build = skein::jit::build_enum();
@@ -1407,8 +1428,8 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_bind_func(
 }
 
 extern "C" SKEIN_JIT_SYSV value_t *skein_jit_import(
-    const skein::bc::Proto *proto, uint32_t index, value_t **slot,
-    uint64_t packed_loc) {
+    const skein::bc::Proto *proto, uint32_t index, value_t **slots,
+    uint32_t slot_index, uint64_t packed_loc) {
     int line = 0;
     int column = 0;
     unpack_loc(packed_loc, line, column);
@@ -1441,13 +1462,67 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_import(
         return nullptr;
     }
 
+    if (!desc.selections.empty()) {
+        const std::string &path = desc.path;
+        const char *import_target =
+            imported_package.empty() ? path.c_str() : imported_package.c_str();
+        if (import_target && *import_target == '\x02')
+            ++import_target;
+        bool ok = true;
+        for (const skein::bc::ImportSelectionDesc &sel : desc.selections) {
+            value_t *value = import_selection_value(ns, sel.name.c_str());
+            bool type_only = false;
+            if (!value) {
+                type_only = import_selection_is_type(import_target,
+                                                     sel.name.c_str());
+                if (!type_only) {
+                    yyerror("import name not found: %s", sel.name.c_str());
+                    ok = false;
+                    break;
+                }
+                value = newnull();
+            }
+            const char *binding = sel.alias.c_str();
+            if (sel.slot != UINT32_MAX && slots &&
+                sel.slot < proto->slots.size()) {
+                freeval(slots[sel.slot]);
+                slots[sel.slot] = value;
+            } else if (isrepeated(binding)) {
+                yyerror("import name already exists: %s", binding);
+                freeval(value);
+                ok = false;
+                break;
+            } else if (!type_only) {
+                struct symbol *sym = newsym(binding);
+                sym->val = value;
+                savesym(sym);
+            } else {
+                freeval(value);
+            }
+        }
+        freeval(ns);
+        if (!ok) {
+            diag_mark_script_failure();
+            return nullptr;
+        }
+        if (import_target && *import_target) {
+            for (const skein::bc::ImportSelectionDesc &sel : desc.selections) {
+                structtype_register_type_alias(
+                    diag_current_source_name().c_str(), sel.alias.c_str(),
+                    import_target, sel.name.c_str());
+            }
+        }
+        return newnull();
+    }
+
     const char *name =
         desc.alias.empty()
             ? skein_vm_import_binding_name(desc.path.c_str())
             : desc.alias.c_str();
-    if (slot) {
-        freeval(*slot);
-        *slot = ns;
+    if (slots && slot_index != UINT32_MAX &&
+        slot_index < proto->slots.size()) {
+        freeval(slots[slot_index]);
+        slots[slot_index] = ns;
     } else if (isrepeated(name)) {
         struct symbol *existing = lookupsym(name);
         bool same_namespace =

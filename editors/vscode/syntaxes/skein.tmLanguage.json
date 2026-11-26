@@ -81,7 +81,7 @@
           }
         },
         {
-          "match": "\\b(struct|enum|protocol|impl|package|extern)\\s+([\\p{L}_][\\p{L}\\p{N}_]*)",
+          "match": "\\b(struct|enum|proto|impl|package|extern)\\s+([\\p{L}_][\\p{L}\\p{N}_]*)",
           "captures": {
             "1": { "name": "storage.type.skein" },
             "2": { "name": "entity.name.type.skein" }
@@ -181,7 +181,7 @@
         },
         {
           "name": "keyword.other.skein",
-          "match": "\\b(?:let|const|func|struct|impl|protocol|enum|extern|package|import|include|export|as|is|in)\\b"
+          "match": "\\b(?:let|const|func|struct|impl|proto|enum|extern|package|import|include|export|as|is|in)\\b"
         },
         {
           "name": "variable.language.skein",

@@ -334,7 +334,7 @@ package web {
     window_ms: int;
   }
 
-  protocol LimiterApi {
+  proto LimiterApi {
     func check(self, req: dict);
     func middleware(self, req: dict);
     func reset(self, key);

@@ -185,7 +185,7 @@ bool is_ident_byte(unsigned char c) {
 /** Lightweight declaration scanner; enough for definition positions. */
 std::vector<scanned_symbol> scan_symbols(const std::string &text) {
     static const std::vector<std::string> keywords = {
-        "func", "struct", "enum", "protocol", "impl", "let", "const",
+        "func", "struct", "enum", "proto", "impl", "let", "const",
         "package", "module", "extern",
     };
     std::vector<scanned_symbol> symbols;

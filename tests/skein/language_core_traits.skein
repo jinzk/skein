@@ -1,7 +1,7 @@
 import std;
 include "_support.skein";
 
-protocol ProtoDrawable {
+proto ProtoDrawable {
   func draw(self) {
     return "default";
   }
@@ -23,7 +23,7 @@ func proto_area(value: ProtoDrawable) {
   return value.area();
 }
 
-protocol ProtoOverride {
+proto ProtoOverride {
   func label(self) {
     return "protocol";
   }
@@ -37,7 +37,7 @@ impl ProtoOverrideC {
   }
 }
 
-protocol ProtoRequired {
+proto ProtoRequired {
   func base(self);
 
   func doubled(self) {
@@ -53,7 +53,7 @@ impl ProtoRequiredC {
   }
 }
 
-protocol ProtoInlineRequired {
+proto ProtoInlineRequired {
   func base(self) -> int;
 
   func doubled(self) {
@@ -76,7 +76,7 @@ func proto_inline_doubled(value: ProtoInlineRequired) {
   return value.doubled();
 }
 
-protocol ProtoStructDefault {
+proto ProtoStructDefault {
   func struct_default(self) {
     return "struct";
   }
@@ -86,7 +86,7 @@ struct ProtoStructC {
   x: int;
 }
 
-protocol ProtoEnumRequired {
+proto ProtoEnumRequired {
   func value(self) -> int;
 }
 
@@ -108,7 +108,7 @@ func proto_value(value: ProtoEnumRequired) {
   return value.value();
 }
 
-protocol ProtoEnumDefault {
+proto ProtoEnumDefault {
   func enum_default(self) {
     return "enum";
   }

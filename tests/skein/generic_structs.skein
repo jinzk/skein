@@ -21,7 +21,7 @@ struct UnionLimited[T int | string] {
   value: T;
 }
 
-protocol Drawable {
+proto Drawable {
   func draw(self);
 }
 

@@ -138,6 +138,7 @@ enum_def *structtype_find_enum_by_name(const char *package,
                                        const char *name,
                                        bool *ambiguous = NULL);
 bool structtype_type_exists(const char *module, const char *name);
+bool structtype_is_exported_type(const char *package, const char *name);
 bool named_type_visible(const char *source, const char *name);
 
 enum structtype_lookup_kind {
@@ -262,6 +263,11 @@ bool structtype_named_types_equal(const char *module_a, const char *name_a,
 /* importer is the source identity; target is the package/module name. */
 void structtype_register_alias(const char *importer, const char *alias,
                                const char *target);
+
+/* Selective import alias for a type; type_name is its exported name. */
+void structtype_register_type_alias(const char *importer, const char *alias,
+                                    const char *target,
+                                    const char *type_name);
 
 struct value_t *newstructval(struct_def *def,
                              std::shared_ptr<struct_payload> payload);

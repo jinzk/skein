@@ -169,6 +169,18 @@ def run_cases():
         assert alias_executed.returncode == 0, alias_executed.stderr
         assert alias_executed.stdout == "42\n", alias_executed.stdout
 
+        selective_main = write(
+            project,
+            "selective.skein",
+            'import {answer} from "example.test/util/json";\n'
+            "println(answer());\n",
+        )
+        selective_executed = run_skein(
+            [selective_main], env=env, cwd=project
+        )
+        assert selective_executed.returncode == 0, selective_executed.stderr
+        assert selective_executed.stdout == "42\n", selective_executed.stdout
+
         verified = run_skein(["mod", "verify", "-C", project], env=env)
         assert verified.returncode == 0, verified.stderr
         assert "verified 1 module(s)" in verified.stdout, verified.stdout

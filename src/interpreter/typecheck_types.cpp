@@ -475,31 +475,58 @@ bool lookup_named_type(const TypeNode *type,
     out = structtype_lookup_result();
 
     const char *logical_module = diag_current_package_name().c_str();
+    const char *resolved_source = type->source.c_str();
+    std::string selected_source;
+    std::string selected_name = type->name;
+    auto source_it = g_selective_imports.find(type->source);
+    if (source_it != g_selective_imports.end()) {
+        auto alias_it = source_it->second.find(type->name);
+        if (alias_it != source_it->second.end()) {
+            selected_source = alias_it->second;
+            resolved_source = selected_source.c_str();
+            auto name_it = g_selective_import_names.find(type->source);
+            if (name_it != g_selective_import_names.end()) {
+                auto original_it = name_it->second.find(type->name);
+                if (original_it != name_it->second.end())
+                    selected_name = original_it->second;
+            }
+        }
+    }
+
     struct_def *structure =
-        structtype_find_struct(type->source.c_str(), type->name.c_str());
+        structtype_find_struct(resolved_source, selected_name.c_str());
     if (!structure)
-        structure = structtype_find_struct_by_name(
-            logical_module, type->name.c_str(), NULL);
+        structure = structtype_find_struct_by_name(logical_module,
+                                                   selected_name.c_str(), NULL);
+    if (!structure && !selected_source.empty())
+        structure = structtype_find_struct_by_name(NULL, selected_name.c_str(),
+                                                   NULL);
     if (structure) {
         out.kind = STRUCTTYPE_LOOKUP_STRUCT;
         out.structure = structure;
         return true;
     }
     enum_def *enumeration =
-        structtype_find_enum(type->source.c_str(), type->name.c_str());
+        structtype_find_enum(resolved_source, selected_name.c_str());
     if (!enumeration)
-        enumeration = structtype_find_enum_by_name(
-            logical_module, type->name.c_str(), NULL);
+        enumeration = structtype_find_enum_by_name(logical_module,
+                                                   selected_name.c_str(), NULL);
+    if (!enumeration && !selected_source.empty())
+        enumeration = structtype_find_enum_by_name(NULL, selected_name.c_str(),
+                                                   NULL);
     if (enumeration) {
         out.kind = STRUCTTYPE_LOOKUP_ENUM;
         out.enumeration = enumeration;
         return true;
     }
     protocol_def *protocol =
-        structtype_find_protocol(type->source.c_str(), type->name.c_str());
+        structtype_find_protocol(resolved_source, selected_name.c_str());
     if (!protocol)
-        protocol = structtype_find_protocol_by_name(
-            logical_module, type->name.c_str(), NULL);
+        protocol = structtype_find_protocol_by_name(logical_module,
+                                                    selected_name.c_str(), NULL);
+    if (!protocol && !selected_source.empty())
+        protocol = structtype_find_protocol_by_name(NULL, selected_name.c_str(),
+                                                    NULL);
     if (protocol) {
         out.kind = STRUCTTYPE_LOOKUP_PROTOCOL;
         out.protocol = protocol;
@@ -507,9 +534,9 @@ bool lookup_named_type(const TypeNode *type,
     }
 
     std::string error;
-    return structtype_lookup_type(
-               type->source.c_str(), diag_current_package_name().c_str(),
-               type->name.c_str(), out, error) ==
+    return structtype_lookup_type(resolved_source,
+                                  diag_current_package_name().c_str(),
+                                  selected_name.c_str(), out, error) ==
            STRUCTTYPE_LOOKUP_FOUND;
 }
 

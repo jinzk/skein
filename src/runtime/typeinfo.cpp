@@ -197,13 +197,13 @@ resolve_status resolve_protocol_arg(const char *importer_source,
     out = NULL;
     error.clear();
     if (!arg || arg->type != T_string) {
-        error = "std.meta.implements expects a protocol name string";
+        error = "std.meta.implements expects a proto name string";
         return RESOLVE_ERROR;
     }
 
     std::string text = ((const string_value_t *)arg)->value;
     if (type_constraint_canonical_builtin_name(text.c_str())) {
-        error = "type " + text + " is not a protocol";
+        error = "type " + text + " is not a proto";
         return RESOLVE_ERROR;
     }
 
@@ -214,7 +214,7 @@ resolve_status resolve_protocol_arg(const char *importer_source,
         case STRUCTTYPE_LOOKUP_FOUND:
             break;
         case STRUCTTYPE_LOOKUP_NOT_FOUND:
-            error = "unknown protocol " + text;
+            error = "unknown proto " + text;
             return RESOLVE_NOT_FOUND;
         case STRUCTTYPE_LOOKUP_AMBIGUOUS:
         case STRUCTTYPE_LOOKUP_NOT_VISIBLE:
@@ -223,7 +223,7 @@ resolve_status resolve_protocol_arg(const char *importer_source,
     }
 
     if (lookup.kind != STRUCTTYPE_LOOKUP_PROTOCOL) {
-        error = "type " + text + " is not a protocol";
+        error = "type " + text + " is not a proto";
         return RESOLVE_ERROR;
     }
     out = lookup.protocol;
@@ -438,7 +438,7 @@ struct value_t *make_type_info(const resolved_type &type) {
         }
         case RESOLVED_PROTOCOL: {
             const protocol_def *def = type.protocol;
-            return new_type_dict("protocol", def->name.c_str(), def->package,
+            return new_type_dict("proto", def->name.c_str(), def->package,
                                  def->module, def->source, def->exported,
                                  new_string_list(), new_string_list(),
                                  protocol_methods(def), new_string_list());
@@ -867,7 +867,7 @@ struct value_t *typeinfo_generic_info(const char *importer_source,
         source = type.enumeration->source;
         exported = type.enumeration->exported;
     } else if (type.kind == RESOLVED_PROTOCOL) {
-        kind = "protocol";
+        kind = "proto";
         package = type.protocol->package;
         module = type.protocol->module;
         source = type.protocol->source;

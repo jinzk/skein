@@ -216,8 +216,11 @@ std::string disassemble(const Proto &proto) {
         }
         if (op == Op::BinarySlotConst)
             out << " slot=" << ins.a;
-        if (op == Op::Import && ins.a < proto.imports.size())
+        if (op == Op::Import && ins.a < proto.imports.size()) {
             out << " import=" << proto.imports[ins.a].path;
+            if (!proto.imports[ins.a].selections.empty())
+                out << " select=" << proto.imports[ins.a].selections.size();
+        }
         if (op == Op::DeferPush && ins.b < proto.defer_protos.size())
             out << " defer=" << ins.b;
         if ((op == Op::NewStruct || op == Op::NewEnum) &&
@@ -228,7 +231,7 @@ std::string disassemble(const Proto &proto) {
         if (op == Op::DeclareEnum && ins.b < proto.enum_decls.size())
             out << " enum=" << proto.enum_decls[ins.b].name;
         if (op == Op::DeclareProtocol && ins.b < proto.protocol_decls.size())
-            out << " protocol=" << proto.protocol_decls[ins.b].name;
+            out << " proto=" << proto.protocol_decls[ins.b].name;
         if (op == Op::DeclareImpl && ins.b < proto.impl_decls.size())
             out << " impl=" << proto.impl_decls[ins.b].type_name;
         if (op == Op::DeclarePackage && ins.b < proto.packages.size())

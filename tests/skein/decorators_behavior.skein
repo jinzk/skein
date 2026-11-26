@@ -260,7 +260,7 @@ impl DecTimedP {
   }
 }
 
-protocol DecHandleS {
+proto DecHandleS {
   func handle(self);
 }
 
@@ -291,7 +291,7 @@ impl DecEnum {
   }
 }
 
-protocol DecDraw {
+proto DecDraw {
   func draw(self);
 }
 
@@ -310,7 +310,7 @@ func dec_render(x: DecDraw) {
   return x.draw();
 }
 
-protocol DecAdapterD {
+proto DecAdapterD {
   func draw(self);
 }
 

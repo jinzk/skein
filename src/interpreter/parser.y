@@ -179,6 +179,18 @@ static void expect_contextual_keyword(const char *name, const char *word) {
         yyerror("expected '%s'", word);
 }
 
+static void validate_import_selections(const struct import_selection *list) {
+    std::unordered_set<std::string> names;
+    std::unordered_set<std::string> aliases;
+    for (const struct import_selection *sel = list; sel; sel = sel->next) {
+        if (!names.insert(sel->name ? sel->name : "").second)
+            yyerror("duplicate import name: %s", sel->name ? sel->name : "");
+        const char *alias = sel->alias ? sel->alias : sel->name;
+        if (!aliases.insert(alias ? alias : "").second)
+            yyerror("duplicate import alias: %s", alias ? alias : "");
+    }
+}
+
 static char *join_import_path(const char *left, const char *right) {
     size_t left_len = std::strlen(left);
     size_t right_len = std::strlen(right);
@@ -1242,6 +1254,7 @@ static struct ast *new_member_or_enum_literal(struct ast *base, char *field) {
     long long i;
     int fn;
     char *str;
+    struct import_selection *sel;
 }
 
 %define api.token.prefix {SKEIN_TOK_}
@@ -1257,7 +1270,7 @@ static struct ast *new_member_or_enum_literal(struct ast *base, char *field) {
 %token YIELD "yield" DEFER "defer"
 %token LAUNCH "launch"
 %token WAIT "wait"
-%token STRUCT "struct" IMPL "impl" PROTOCOL "protocol" ENUM "enum"
+%token STRUCT "struct" IMPL "impl" PROTOCOL "proto" ENUM "enum"
 %token TYPE_MARK PROTO_MARK
 %token REF "ref" WEAK "weak" QUESTION_DOT "?."
 %token EXTERN "extern"
@@ -1335,6 +1348,7 @@ static struct ast *new_member_or_enum_literal(struct ast *base, char *field) {
 %type <type> type type_name func_ret_opt
 %type <tl> type_list
 %type <str> importref importpath fieldname
+%type <sel> import_names import_name
 %type <a> ffi_items ffi_item ffi_fields ffi_params ffi_param_list ffi_param ffi_type ffi_const_value ffi_annotations ffi_annotation_list ffi_annotation
 
 %destructor { treefree($$); } <a>
@@ -1342,6 +1356,7 @@ static struct ast *new_member_or_enum_literal(struct ast *base, char *field) {
 %destructor { symlistfree_full($$); } <sl>
 %destructor { free_type_constraint($$); } <type>
 %destructor { free_type_list($$); } <tl>
+%destructor { free_import_selections($$); } <sel>
 
 /* Postfix `.` binds tighter than a bare identifier, so field/enum access and
  * qualified structure literals are shifted instead of reducing `NAME` to
@@ -1503,6 +1518,25 @@ stmt: IF HEADER_LPAREN exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, 
     | IMPORT XSTRING AS NAME ';'          {
         char *path = make_external_import_path($2);
         $$ = newimport(path, $4);
+      }
+    | IMPORT '{' import_names '}' from_kw importref ';' {
+        validate_import_selections($3);
+        $$ = newimport_select($6, NULL, $3);
+      }
+    | IMPORT '{' import_names '}' from_kw XSTRING ';' {
+        validate_import_selections($3);
+        char *path = make_external_import_path($6);
+        $$ = newimport_select(path, NULL, $3);
+      }
+    | IMPORT '{' EMPTY_DICT_CLOSE from_kw importref ';' {
+        std::free($5);
+        yyerror("selective import requires at least one name");
+        $$ = NULL;
+      }
+    | IMPORT '{' EMPTY_DICT_CLOSE from_kw XSTRING ';' {
+        std::free($5);
+        yyerror("selective import requires at least one name");
+        $$ = NULL;
       }
     | INCLUDE XSTRING ';' {
         if (g_include_function_depth > 0) {
@@ -2040,6 +2074,30 @@ for_in: NAME {
 export_kw: NAME {
         expect_contextual_keyword($1, "export");
         free($1);
+      }
+    ;
+
+/* `from` is contextual: only the separator after an import selection list. */
+from_kw: NAME {
+        expect_contextual_keyword($1, "from");
+        free($1);
+      }
+    ;
+
+import_name: NAME {
+        $$ = newimport_selection($1, NULL);
+      }
+    | NAME AS NAME {
+        $$ = newimport_selection($1, $3);
+      }
+    ;
+
+import_names: import_name {
+        $$ = $1;
+      }
+    | import_name ',' import_names {
+        $1->next = $3;
+        $$ = $1;
       }
     ;
 

@@ -570,7 +570,7 @@ bool effect_for(const Proto &proto, const Instr &ins, size_t pc,
             break;
         case Op::DeclareProtocol:
             if (ins.b >= proto.protocol_decls.size())
-                return fail(error, at_pc("protocol declaration out of range", pc));
+                return fail(error, at_pc("proto declaration out of range", pc));
             stack(0, 1);
             break;
         case Op::DeclareImpl:
@@ -590,6 +590,11 @@ bool effect_for(const Proto &proto, const Instr &ins, size_t pc,
                 return fail(error, at_pc("import descriptor out of range", pc));
             if (ins.b != UINT32_MAX)
                 if (!check_slot(proto, ins.b, pc, error))
+                    return false;
+            for (const skein::bc::ImportSelectionDesc &sel :
+                 proto.imports[ins.a].selections)
+                if (sel.slot != UINT32_MAX &&
+                    !check_slot(proto, sel.slot, pc, error))
                     return false;
             stack(0, 1);
             break;

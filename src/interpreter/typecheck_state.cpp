@@ -9,6 +9,14 @@ std::unordered_map<std::string,
     g_import_aliases;
 
 std::unordered_map<std::string,
+                   std::unordered_map<std::string, std::string>>
+    g_selective_imports;
+
+std::unordered_map<std::string,
+                   std::unordered_map<std::string, std::string>>
+    g_selective_import_names;
+
+std::unordered_map<std::string,
                    std::unordered_map<std::string, VarInfo>>
     g_persistent_bindings;
 

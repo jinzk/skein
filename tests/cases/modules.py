@@ -189,6 +189,49 @@ def run_cases():
         )
         run_module(
             tmp,
+            "import {add, normalize as norm} from math;\n"
+            "println(str(add(2, 3)));\n"
+            "println(str(norm(41)));\n",
+            ["5", "42"],
+        )
+        run_module_error(
+            tmp,
+            "import {add} from math;\n"
+            "println(str(math.add(1, 2)));\n",
+            "symbol not found math",
+        )
+        run_module_error(
+            tmp,
+            "import {missing} from math;\n",
+            "import name not found: missing",
+        )
+        run_module_error(
+            tmp,
+            "import {} from math;\n",
+            "selective import requires at least one name",
+        )
+        run_module_error(
+            tmp,
+            "import {add, add} from math;\n",
+            "duplicate import name: add",
+        )
+        run_module_error(
+            tmp,
+            "import {add as x, normalize as x} from math;\n",
+            "duplicate import alias: x",
+        )
+        run_module_error(
+            tmp,
+            "let add = 1;\nimport {add} from math;\n",
+            "import name already exists: add",
+        )
+        run_module(
+            tmp,
+            "let from = 7;\nprintln(str(from));\n",
+            ["7"],
+        )
+        run_module(
+            tmp,
             "import std;\n"
             "import math;\n"
             "func worker(ctx) {\n"
@@ -227,6 +270,43 @@ def run_cases():
             "println(str(math.normalize(5)));\n"
             "println(str(math.helpers.normalize(6)));\n",
             ["3", "14", "10", "12"],
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        write(
+            tmp,
+            "aa.skein",
+            "package aa {\n"
+            "  export struct Point { x: int; }\n"
+            "  export enum Color { Red; Blue; }\n"
+            "  struct Secret { x: int; }\n"
+            "  export func make() { return Point { x: 7 }; }\n"
+            "}\n",
+        )
+        run_module(
+            tmp,
+            "import {Point, Color, make} from aa;\n"
+            "let p: Point = make();\n"
+            "println(str(p.x));\n"
+            "println(Color.Blue);\n",
+            ["7", "Color.Blue"],
+        )
+        run_module(
+            tmp,
+            "import {Point as P, make} from aa;\n"
+            "let p: P = P { x: 9 };\n"
+            "println(str(p.x));\n",
+            ["9"],
+        )
+        run_module_error(
+            tmp,
+            "import {Hidden} from aa;\n",
+            "import name not found: Hidden",
+        )
+        run_module_error(
+            tmp,
+            "import {Secret} from aa;\n",
+            "import name not found: Secret",
         )
 
     with tempfile.TemporaryDirectory() as tmp:

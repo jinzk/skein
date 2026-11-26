@@ -74,7 +74,7 @@ if x {
 ```
 
 - body 的 `{` 必须和 `if` / `while` / `for` / `switch` / `match` / `func` /
-  `struct` / `enum` / `protocol` / `impl` / `package` / `extern` 头部同一行；
+  `struct` / `enum` / `proto` / `impl` / `package` / `extern` 头部同一行；
 - `else` 必须和前面的 `}` 同一行；
 - `do { ... } while cond;` 的 `while` 必须和 `}` 同一行。
 
@@ -286,7 +286,7 @@ grep -n 'std\.iter' docs/stdlib.md SYNTAX.md
 | match | §5.7 |
 | 错误处理 | §5.10 |
 | 函数、默认参数、可变参数 | §5.11 |
-| struct / impl / protocol | §5.12 |
+| struct / impl / proto | §5.12 |
 | enum | §5.13 |
 | package / import / std | §6 |
 

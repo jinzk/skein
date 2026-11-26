@@ -4,11 +4,10 @@
 
 语法细节查 [SYNTAX.md](../SYNTAX.md)，标准库 API 查 [标准库指南](stdlib.md)，只想快速浏览语言特性可以看 [README](../README.md)。
 
-规划中的语言级重命名：`protocol` → `proto`。`proto` 作为协议声明关键字是全局
-保留字；泛型约束列表里的 `proto` / `type` 是地位相同的 contextual 标记，只在
-`[V proto Drawable]` 这类位置生效。反射 kind 字符串同步改为 `"proto"`。本教程
-示例使用目标拼写；在 M11 落地前，当前实现仍使用 `protocol` / `"protocol"`。
-worker 配置里的 `protocol` 字段是普通 API 名，不受此重命名影响。
+协议声明关键字为 `proto`，属于全局保留字；`protocol` 不再是关键字。泛型约束
+列表里的 `proto` / `type` 是地位相同的 contextual 标记，只在
+`[V proto Drawable]` 这类位置生效。反射 kind 字符串为 `"proto"`。worker 配置里的
+`protocol` 字段是普通 API 名，不受此重命名影响。
 
 ## 本教程内容
 
@@ -3287,6 +3286,13 @@ import std as s;       // 标准库也可使用别名
 import .sibling;       // 当前文件目录
 import ..common;       // 上一级目录
 import @top.pkg;       // 项目根目录
+
+import {answer} from util;              // 只绑定 answer，不绑定 util
+import {answer as a} from util;         // 绑定别名 a
+import {Point, make} from @top.shapes;  // 导出值和导出类型都可选择
+import {parse} from .jsonutil;
+import {parse} from ..common;
+import {parse} from "github.com/acme/util/json";
 ```
 
 - `import aa.bb` 的普通包基准是主脚本目录；
@@ -3300,6 +3306,10 @@ import @top.pkg;       // 项目根目录
 - `main` 不能被导入；`import main;` 和 `import main.*;` 会报错；
 - 普通包文件不能声明 `package main {}`；
 - 别名必须是普通标识符，`as` 是保留字；
+- `import {name} from pkg;` 只绑定选中的导出值或导出类型，不绑定 `pkg` 本身；
+  选择项可写 `name as alias`，至少写一项，重复名字或 alias 会报错；
+- `from` 只在 `import { ... }` 后作 contextual keyword，其他位置仍是普通标识符或
+  字段名；check-only / lint / LSP 不执行被导入的包来验证选择项；
 - 同一个包只加载一次，之后复用缓存；
 - 循环导入会报错，不会递归挂起；
 - 当前不提供通配导入。

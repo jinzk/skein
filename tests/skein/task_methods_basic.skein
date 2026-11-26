@@ -59,7 +59,7 @@ impl TaskMethodE {
   }
 }
 
-protocol TaskMethodS {
+proto TaskMethodS {
   func handle(self, x: int);
 }
 
@@ -77,7 +77,7 @@ func task_use(s: TaskMethodS) {
   return s.handle(2);
 }
 
-protocol TaskAdapterS {
+proto TaskAdapterS {
   func handle(self);
 }
 
@@ -95,7 +95,7 @@ func task_adapter_use(s: TaskAdapterS) {
   return s.handle();
 }
 
-protocol TaskDefaultS {
+proto TaskDefaultS {
   func handle(self);
 
   func twice(self) {

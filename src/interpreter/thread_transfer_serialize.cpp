@@ -26,7 +26,7 @@
 namespace {
 
 constexpr uint32_t kPayloadMagic = 0x48545453u; /* "STTH" */
-constexpr uint32_t kPayloadVersion = 14u;
+constexpr uint32_t kPayloadVersion = 15u;
 constexpr uint32_t kEndianMarker = 0x01020304u;
 constexpr uint32_t kMaxCount = 1000000u;
 constexpr uint32_t kMaxString = 64u * 1024u * 1024u;
@@ -2105,7 +2105,7 @@ bool prepare_inline_functions(const skein::bc::Proto &proto,
     }
     for (const skein::bc::ProtocolDeclMeta &decl : proto.protocol_decls) {
         for (const skein::bc::ProtocolMethodMeta &method : decl.methods) {
-            if (!prepare(method.code, "protocol default method"))
+            if (!prepare(method.code, "proto default method"))
                 return false;
         }
     }
@@ -2355,6 +2355,12 @@ bool write_proto(writer &out, const skein::bc::Proto &proto,
         out.str(import.path);
         out.str(import.alias);
         out.str(import.base);
+        out.u32((uint32_t)import.selections.size());
+        for (const skein::bc::ImportSelectionDesc &sel : import.selections) {
+            out.str(sel.name);
+            out.str(sel.alias);
+            out.u32(sel.slot);
+        }
     }
 
     out.u32((uint32_t)proto.constructs.size());
@@ -2501,7 +2507,7 @@ bool write_proto(writer &out, const skein::bc::Proto &proto,
             if (!write_type(out, method.return_type.get()))
                 return false;
             if (!write_inline_function(out, method.code,
-                                       "protocol default method", nullptr,
+                                       "proto default method", nullptr,
                                        error))
                 return false;
         }
@@ -2730,6 +2736,20 @@ bool read_proto(reader &in, std::shared_ptr<skein::bc::Proto> &proto,
             !in.str(import.base)) {
             error = in.error;
             return false;
+        }
+        uint32_t selection_count = 0;
+        if (!in.count(selection_count)) {
+            error = in.error;
+            return false;
+        }
+        import.selections.reserve(selection_count);
+        for (uint32_t j = 0; j < selection_count; ++j) {
+            skein::bc::ImportSelectionDesc sel;
+            if (!in.str(sel.name) || !in.str(sel.alias) || !in.u32(sel.slot)) {
+                error = in.error;
+                return false;
+            }
+            import.selections.push_back(std::move(sel));
         }
         proto->imports.push_back(std::move(import));
     }

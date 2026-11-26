@@ -791,7 +791,7 @@ static bool brace_starts_block() {
 static bool reserved_name(const char *text, int len) {
     static const char *const words[] = {
         "if",       "else",     "while",    "do",       "for",
-        "struct",   "extern",   "enum",     "impl",     "protocol",
+        "struct",   "extern",   "enum",     "impl",     "proto",
         "ref",      "weak",
         "switch",   "match",    "case",     "default",  "let",
         "const",    "func",     "yield",    "launch",   "wait",
@@ -1189,13 +1189,6 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
     }
     YYRET(SKEIN_TOK_IMPL);
 }
-"protocol" { MEMBER_NAME_AFTER_DOT();
-    if (last_token != '.') {
-        pending_decl_kind = SKEIN_TOK_PROTOCOL;
-        pending_decl_skip = true;
-    }
-    YYRET(SKEIN_TOK_PROTOCOL);
-}
 "ref" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_REF); }
 "weak" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_WEAK); }
 "switch" { MEMBER_NAME_AFTER_DOT();
@@ -1364,11 +1357,11 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
     MEMBER_NAME_AFTER_DOT();
     if (generic_param_depth > 0 && last_token == SKEIN_TOK_NAME)
         YYRET(SKEIN_TOK_PROTO_MARK);
-    int tok = make_name_token(yytext, yyleng);
-    if (tok == 0)
-        return 0;
-    note_for_name_token();
-    YYRET(tok);
+    if (last_token != '.') {
+        pending_decl_kind = SKEIN_TOK_PROTOCOL;
+        pending_decl_skip = true;
+    }
+    YYRET(SKEIN_TOK_PROTOCOL);
 }
 {ASCII_NAME} {
     int tok = make_name_token(yytext, yyleng);

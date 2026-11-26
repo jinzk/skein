@@ -2,11 +2,9 @@
 
 状态：**已完成（当前范围）**。
 
-规划中的语言级重命名：`protocol` → `proto`。`proto` 作为协议类型声明关键字时是
-全局保留字（`proto Keyed[K any]`）；泛型约束列表里的 `proto` 与 `type` 一样是
-contextual 标记，只在 `[V proto Drawable]` 这类位置生效。反射 kind 字符串同步
-改为 `"proto"`。本文示例使用目标拼写；在 M11 落地前，当前实现仍使用
-`protocol` / `"protocol"`。
+协议类型声明关键字为 `proto`，属于全局保留字（`proto Keyed[K any]`）；
+`protocol` 不再是关键字。泛型约束列表里的 `proto` 与 `type` 一样是 contextual
+标记，只在 `[V proto Drawable]` 这类位置生效。反射 kind 字符串为 `"proto"`。
 
 本文记录用户自定义泛型的最终语法、语义决议、实现阶段和测试要求。当前已实现：
 

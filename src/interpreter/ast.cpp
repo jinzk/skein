@@ -963,7 +963,42 @@ struct ast *newpackage(char *name, struct ast *body) {
     return (struct ast *)a;
 }
 
-struct ast *newimport(char *path, char *alias) {
+struct import_selection *newimport_selection(char *name, char *alias) {
+    struct import_selection *selection =
+        (struct import_selection *)std::malloc(sizeof(struct import_selection));
+    if (!selection) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    selection->name = name;
+    selection->alias = alias;
+    selection->next = NULL;
+    return selection;
+}
+
+struct import_selection *append_import_selection(struct import_selection *head,
+                                                 struct import_selection *tail) {
+    if (!head)
+        return tail;
+    struct import_selection *item = head;
+    while (item->next)
+        item = item->next;
+    item->next = tail;
+    return head;
+}
+
+void free_import_selections(struct import_selection *selection) {
+    while (selection) {
+        struct import_selection *next = selection->next;
+        std::free(selection->name);
+        std::free(selection->alias);
+        std::free(selection);
+        selection = next;
+    }
+}
+
+struct ast *newimport_select(char *path, char *alias,
+                             struct import_selection *selections) {
     struct import_node *a =
         (struct import_node *)ast_node_alloc(sizeof(struct import_node));
     if (!a) {
@@ -975,7 +1010,12 @@ struct ast *newimport(char *path, char *alias) {
     a->path = path;
     a->alias = alias;
     a->base = copy_string(package_current_import_base().c_str());
+    a->selections = selections;
     return (struct ast *)a;
+}
+
+struct ast *newimport(char *path, char *alias) {
+    return newimport_select(path, alias, NULL);
 }
 
 struct ast *newinclude(char *path) {
@@ -1881,6 +1921,7 @@ void treefree(struct ast *a) {
             std::free(imp->path);
             std::free(imp->alias);
             std::free(imp->base);
+            free_import_selections(imp->selections);
             break;
         }
         case NODE_INCLUDE: {

@@ -1,7 +1,7 @@
 import std;
 include "_support.skein";
 
-protocol RefDrawable {
+proto RefDrawable {
   func draw(self) -> int;
 }
 

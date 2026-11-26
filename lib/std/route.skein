@@ -20,7 +20,7 @@ package route {
     _inspect: callable;
   }
 
-  protocol RouterApi {
+  proto RouterApi {
     func add(self, method: string, pattern: string, handler: any);
     func get(self, pattern: string, handler: any);
     func post(self, pattern: string, handler: any);

@@ -554,6 +554,12 @@ struct package_node {
     struct ast *body;
 };
 
+struct import_selection {
+    char *name;
+    char *alias;
+    struct import_selection *next;
+};
+
 struct import_node {
     int nodetype;
     int line;
@@ -561,6 +567,7 @@ struct import_node {
     char *path;
     char *alias;
     char *base;
+    struct import_selection *selections;
 };
 
 struct include_node {
@@ -679,6 +686,12 @@ struct ast *newyield(struct ast *value);
 struct ast *newdefer(struct ast *value);
 struct ast *newpackage(char *name, struct ast *body);
 struct ast *newimport(char *path, char *alias);
+struct import_selection *newimport_selection(char *name, char *alias);
+struct import_selection *append_import_selection(struct import_selection *head,
+                                                 struct import_selection *tail);
+void free_import_selections(struct import_selection *selection);
+struct ast *newimport_select(char *path, char *alias,
+                             struct import_selection *selections);
 struct ast *newinclude(char *path);
 void push_func_location(int line, int column);
 void clear_func_locations();

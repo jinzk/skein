@@ -106,6 +106,12 @@ static void collect_defer_declaration_sites(
         }
         case 'J': {
             struct import_node *imp = (struct import_node *)node;
+            if (imp->selections) {
+                for (const struct import_selection *sel = imp->selections;
+                     sel; sel = sel->next)
+                    record(sel->alias ? sel->alias : sel->name);
+                return;
+            }
             record(imp->alias ? imp->alias
                               : import_binding_name(imp->path));
             return;

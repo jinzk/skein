@@ -73,7 +73,7 @@ package metrics {
     _reset: callable;
   }
 
-  protocol RegistryApi {
+  proto RegistryApi {
     func counter(self, name: string, labels: dict, delta: number);
     func gauge(self, name: string, labels: dict, value: number);
     func observe(self, name: string, labels: dict, value: number, buckets: any);

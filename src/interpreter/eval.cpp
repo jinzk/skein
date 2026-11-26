@@ -34,6 +34,27 @@ static const char *literal_field_name(const struct ast *node) {
     return ((const struct string_value_t *)value->val)->value;
 }
 
+static struct value_t *import_selection_value(struct value_t *ns,
+                                              const char *name) {
+    if (!ns || ns->type != T_dict || !name)
+        return NULL;
+    struct string_value_t key;
+    key.type = T_string;
+    key.value = const_cast<char *>(name);
+    int found = dict_find_index((struct dict_value_t *)ns,
+                                (struct value_t *)&key);
+    if (found < 0)
+        return NULL;
+    return dupval(((struct dict_value_t *)ns)->payload->items[(size_t)found]
+                      .second);
+}
+
+static bool import_selection_is_type(const char *package, const char *name) {
+    if (!package || !*package || !name || !*name)
+        return false;
+    return structtype_is_exported_type(package, name);
+}
+
 static struct value_t *eval_optional_chain(struct optional_chain_node *chain) {
     if (!chain)
         return NULL;
@@ -216,6 +237,60 @@ struct value_t *eval(struct ast *a) {
                     yyerror("import %s: %s", display_path.c_str(),
                             error.c_str());
                 else
+                    diag_mark_script_failure();
+                break;
+            }
+            if (imp->selections) {
+                const char *import_target = imported_package.empty()
+                                                ? (imp->path ? imp->path : "")
+                                                : imported_package.c_str();
+                if (*import_target == '\x02')
+                    ++import_target;
+                bool ok = true;
+                for (const struct import_selection *sel = imp->selections;
+                     sel; sel = sel->next) {
+                    struct value_t *value = import_selection_value(
+                        ns, sel->name ? sel->name : "");
+                    bool type_only = false;
+                    if (!value) {
+                        type_only = import_selection_is_type(import_target,
+                                                             sel->name);
+                        if (!type_only) {
+                            yyerror("import name not found: %s",
+                                    sel->name ? sel->name : "");
+                            ok = false;
+                            break;
+                        }
+                        value = newnull();
+                    }
+                    const char *binding = sel->alias ? sel->alias : sel->name;
+                    if (isrepeated(binding)) {
+                        yyerror("import name already exists: %s",
+                                binding ? binding : "");
+                        freeval(value);
+                        ok = false;
+                        break;
+                    }
+                    if (type_only) {
+                        freeval(value);
+                    } else {
+                        struct symbol *sym = newsym(binding);
+                        sym->val = value;
+                        savesym(sym);
+                    }
+                }
+                if (*import_target) {
+                    for (const struct import_selection *sel = imp->selections;
+                         sel; sel = sel->next) {
+                        const char *binding =
+                            sel->alias ? sel->alias : sel->name;
+                        structtype_register_type_alias(
+                            diag_current_source_name().c_str(), binding,
+                            import_target, sel->name);
+                    }
+                }
+                freeval(ns);
+                if (!ok)
                     diag_mark_script_failure();
                 break;
             }
@@ -1667,8 +1742,9 @@ struct value_t *eval(struct ast *a) {
                     std::string error;
                     structtype_lookup_status status =
                         structtype_lookup_type(
-                            nullptr, diag_current_package_name().c_str(),
-                            base, lookup, error);
+                            diag_current_source_name().c_str(),
+                            diag_current_package_name().c_str(), base, lookup,
+                            error);
                     if (status == STRUCTTYPE_LOOKUP_FOUND &&
                         lookup.kind == STRUCTTYPE_LOOKUP_ENUM) {
                         std::vector<std::pair<std::string, value_t *>>

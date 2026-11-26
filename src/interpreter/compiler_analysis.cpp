@@ -406,6 +406,15 @@ void collect_local_declared_names(
         }
         case 'J': {
             struct import_node *imp = (struct import_node *)node;
+            if (imp->selections) {
+                for (const struct import_selection *sel = imp->selections;
+                     sel; sel = sel->next) {
+                    const char *binding = sel->alias ? sel->alias : sel->name;
+                    if (binding && *binding)
+                        names.insert(binding);
+                }
+                return;
+            }
             const char *binding =
                 imp->alias ? imp->alias
                            : import_binding_name(imp->path);

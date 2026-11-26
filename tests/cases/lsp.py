@@ -239,6 +239,46 @@ def run_workspace_cases():
             assert target["uri"].endswith("/math/add.skein"), target
             assert target["range"]["start"]["line"] == 1, target
 
+            # Selective imports resolve the alias statically, without running
+            # the imported module.
+            did_change(session, uri, 3, "import {total as t} from math;\nt\n")
+            session.wait_for_diagnostics(uri)
+            alias_hover = session.request(
+                "textDocument/hover",
+                {
+                    "textDocument": {"uri": uri},
+                    "position": {"line": 1, "character": 0},
+                },
+            )
+            assert "func t" in alias_hover["contents"]["value"], alias_hover
+            alias_definitions = session.request(
+                "textDocument/definition",
+                {
+                    "textDocument": {"uri": uri},
+                    "position": {"line": 1, "character": 0},
+                },
+            )
+            assert len(alias_definitions) == 1, alias_definitions
+            assert alias_definitions[0]["uri"].endswith(
+                "/math/vector.skein"
+            ), alias_definitions
+
+            did_change(
+                session, uri, 4, "import {total as t} from math;\n"
+            )
+            session.wait_for_diagnostics(uri)
+            alias_items = session.request(
+                "textDocument/completion",
+                {
+                    "textDocument": {"uri": uri},
+                    "position": {"line": 1, "character": 0},
+                },
+            )["items"]
+            alias = next(
+                item for item in alias_items if item["label"] == "t"
+            )
+            assert alias["detail"] == "selective import", alias
+
             stderr = session.stop()
             assert "SKEIN_LSP_SIDE_EFFECT" not in stderr, stderr
         finally:

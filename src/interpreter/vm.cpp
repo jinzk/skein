@@ -51,6 +51,27 @@ thread_local vm_stats_data vm_stats;
 std::atomic<bool> vm_stats_enabled{false};
 
 namespace {
+
+value_t *import_selection_value(value_t *ns, const char *name) {
+    if (!ns || ns->type != T_dict || !name)
+        return NULL;
+    struct string_value_t key;
+    key.type = T_string;
+    key.value = const_cast<char *>(name);
+    int found = dict_find_index((struct dict_value_t *)ns,
+                                (struct value_t *)&key);
+    if (found < 0)
+        return NULL;
+    return dupval(((struct dict_value_t *)ns)->payload->items[(size_t)found]
+                      .second);
+}
+
+bool import_selection_is_type(const char *package, const char *name) {
+    if (!package || !*package || !name || !*name)
+        return false;
+    return structtype_is_exported_type(package, name);
+}
+
 std::mutex vm_stats_total_mutex;
 vm_stats_data vm_stats_total;
 thread_local bool vm_stats_merged = false;
@@ -556,6 +577,72 @@ public:
                     return OpResult::Abort;
                 }
 
+                if (!desc.selections.empty()) {
+                    const std::string &path = desc.path;
+                    const char *import_target =
+                        imported_package.empty() ? path.c_str()
+                                                 : imported_package.c_str();
+                    if (import_target && *import_target == '\x02')
+                        ++import_target;
+                    bool ok = true;
+                    for (const skein::bc::ImportSelectionDesc &sel :
+                         desc.selections) {
+                        value_t *value = import_selection_value(
+                            ns, sel.name.c_str());
+                        bool type_only = false;
+                        if (!value) {
+                            type_only = import_selection_is_type(
+                                import_target, sel.name.c_str());
+                            if (!type_only) {
+                                yyerror("import name not found: %s",
+                                        sel.name.c_str());
+                                ok = false;
+                                break;
+                            }
+                            value = newnull();
+                        }
+                        const char *binding = sel.alias.c_str();
+                        if (sel.slot != UINT32_MAX && direct_slots_ &&
+                            sel.slot < slot_values_.size()) {
+                            freeval(slot_values_[sel.slot]);
+                            slot_values_[sel.slot] = value;
+                            if (sel.slot < slot_const_.size())
+                                slot_const_[sel.slot] = 0;
+                        } else if (isrepeated(binding)) {
+                            yyerror("import name already exists: %s", binding);
+                            freeval(value);
+                            ok = false;
+                            break;
+                        } else if (!type_only) {
+                            struct symbol *sym = newsym(binding);
+                            sym->val = value;
+                            savesym(sym);
+                            if (sel.slot != UINT32_MAX &&
+                                sel.slot < slot_symbols_.size())
+                                slot_symbols_[sel.slot] = sym;
+                            invalidate_name_cache(binding);
+                        } else if (type_only) {
+                            freeval(value);
+                        }
+                    }
+                    freeval(ns);
+                    if (!ok) {
+                        diag_mark_script_failure();
+                        return OpResult::Abort;
+                    }
+                    if (import_target && *import_target) {
+                        for (const skein::bc::ImportSelectionDesc &sel :
+                             desc.selections) {
+                            structtype_register_type_alias(
+                                diag_current_source_name().c_str(),
+                                sel.alias.c_str(), import_target,
+                                sel.name.c_str());
+                        }
+                    }
+                    push(newnull());
+                    return OpResult::Continue;
+                }
+
                 const char *name =
                     desc.alias.empty()
                         ? skein_vm_import_binding_name(desc.path.c_str())
@@ -692,7 +779,7 @@ public:
 
             case Op::DeclareProtocol: {
                 if (ins.b >= proto().protocol_decls.size()) {
-                    yyerror("invalid bytecode protocol declaration");
+                    yyerror("invalid bytecode proto declaration");
                     return OpResult::Abort;
                 }
                 const skein::bc::ProtocolDeclMeta &meta =
@@ -1449,7 +1536,8 @@ public:
                     structtype_lookup_result lookup;
                     std::string error;
                     structtype_lookup_status status = structtype_lookup_type(
-                        nullptr, desc.source.c_str(), desc.base.c_str(),
+                        diag_current_source_name().c_str(),
+                        diag_current_package_name().c_str(), desc.base.c_str(),
                         lookup, error);
                     if (status == STRUCTTYPE_LOOKUP_FOUND &&
                         lookup.kind == STRUCTTYPE_LOOKUP_ENUM) {

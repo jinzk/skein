@@ -133,8 +133,8 @@ SKEIN_JIT_SYSV value_t *skein_jit_bind_func(skein::jit::thread_state *ts,
                                             uint32_t name_index, int exported,
                                             uint64_t loc);
 SKEIN_JIT_SYSV value_t *skein_jit_import(const skein::bc::Proto *proto,
-                                         uint32_t index, value_t **slot,
-                                         uint64_t loc);
+                                         uint32_t index, value_t **slots,
+                                         uint32_t slot_index, uint64_t loc);
 SKEIN_JIT_SYSV void skein_jit_recover(skein::jit::thread_state *ts,
                                       value_t *value, uint64_t loc);
 SKEIN_JIT_SYSV void skein_jit_pass(skein::jit::thread_state *ts,
@@ -562,6 +562,11 @@ bool can_compile(const skein::bc::Proto &proto, bool top_level,
                     return reject("import descriptor");
                 if (ins.b != UINT32_MAX && ins.b >= proto.slots.size())
                     return reject("import slot");
+                for (const skein::bc::ImportSelectionDesc &sel :
+                     proto.imports[ins.a].selections)
+                    if (sel.slot != UINT32_MAX &&
+                        sel.slot >= proto.slots.size())
+                        return reject("import selection slot");
                 break;
             case skein::bc::Op::RuntimeError:
                 if (ins.b >= proto.consts.size() ||
@@ -2720,13 +2725,14 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
                 a.mov(asmjit::x86::rdi,
                       asmjit::imm(fn_address(&proto)));
                 a.mov(asmjit::x86::esi, asmjit::imm(ins.a));
-                if (ins.b != UINT32_MAX)
+                if (!proto.slots.empty())
                     a.lea(asmjit::x86::rdx,
                           asmjit::x86::ptr(asmjit::x86::rbp,
-                                           slot_off(ins.b)));
+                                           slot_off(0)));
                 else
                     a.xor_(asmjit::x86::edx, asmjit::x86::edx);
-                a.mov(asmjit::x86::rcx, asmjit::imm(pack_loc(loc)));
+                a.mov(asmjit::x86::ecx, asmjit::imm(ins.b));
+                a.mov(asmjit::x86::r8, asmjit::imm(pack_loc(loc)));
                 call_addr(fn_address(&skein_jit_import));
                 push_reg(depth, asmjit::x86::rax);
                 a.test(asmjit::x86::rax, asmjit::x86::rax);

@@ -109,10 +109,15 @@ def run_cases():
     )
     check(
         "protocols golden output",
-        "protocol G { func d(self) { return \"g\"; } }\n"
+        "proto G { func d(self) { return \"g\"; } }\n"
         "struct S { x: int; }\n"
         "println(S { x: 1 }.d());\n",
         stdout="g",
+    )
+    check(
+        "protocol is ordinary identifier",
+        "let protocol = 7;\nprintln(protocol);\n",
+        stdout="7",
     )
     check(
         "headers golden output",
@@ -419,31 +424,31 @@ def run_cases():
 
 
     check("protocol default conflict",
-          'protocol A { func m(self) { return 1; } }\n'
-          'protocol B { func m(self) { return 2; } }\n'
+          'proto A { func m(self) { return 1; } }\n'
+          'proto B { func m(self) { return 2; } }\n'
           'struct S { }\n',
-          stderr="conflicts with another protocol default")
+          stderr="conflicts with another proto default")
     check("protocol default conflict resolved by concrete override",
           'struct S { }\n'
           'impl S { func m(self) { return 3; } }\n'
-          'protocol A { func m(self) { return 1; } }\n'
-          'protocol B { func m(self) { return 2; } }\n'
+          'proto A { func m(self) { return 1; } }\n'
+          'proto B { func m(self) { return 2; } }\n'
           'println(S {}.m());\n',
           stdout="3")
     check("protocol default conflict resolved by inline method",
           'struct S { func m(self) { return 3; } }\n'
-          'protocol A { func m(self) { return 1; } }\n'
-          'protocol B { func m(self) { return 2; } }\n'
+          'proto A { func m(self) { return 1; } }\n'
+          'proto B { func m(self) { return 2; } }\n'
           'println(S {}.m());\n',
           stdout="3")
     check("protocol missing method still rejected",
-          'protocol T { func m(self); }\n'
+          'proto T { func m(self); }\n'
           'struct S { }\n'
           'func use(x: T) { return x.m(); }\n'
           'use(S {});\n',
           stderr="expected T, got S")
     check("protocol return type mismatch rejected",
-          'protocol R { func m(self) -> int; }\n'
+          'proto R { func m(self) -> int; }\n'
           'struct S { }\n'
           'impl S { func m(self): string { return "x"; } }\n'
           'func use(x: R) { return x.m(); }\n'
@@ -471,23 +476,23 @@ def run_cases():
           'struct S {}\nimpl S { func m(self = S {}, x = 1) -> x; }\n',
           stderr="method self cannot have a default value")
     check("default parameter protocol rejected",
-          'protocol T { func m(self, x: int = 1); }\n',
-          stderr="protocol method m cannot have default parameter values")
+          'proto T { func m(self, x: int = 1); }\n',
+          stderr="proto method m cannot have default parameter values")
 
     check("trait keyword removed",
           'trait T { func m(self); }\n',
           stderr="syntax error")
     check("impl Protocol for Type removed",
-          'protocol D { func d(self); }\n'
+          'proto D { func d(self); }\n'
           'struct S { }\n'
           'impl D for S { func d(self) { return 1; } }\n',
           stderr="syntax error")
     check("protocol with shorthand removed",
-          'protocol D { func d(self) { return 1; } }\n'
+          'proto D { func d(self) { return 1; } }\n'
           'struct S with D { }\n',
           stderr="syntax error")
     check("export protocol removed",
-          'export protocol D { func d(self); }\n',
+          'export proto D { func d(self); }\n',
           stderr="syntax error")
     check("std.meta.traits removed",
           'import std;\n'

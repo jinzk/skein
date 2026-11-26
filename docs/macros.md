@@ -1,6 +1,6 @@
 # Skein 宏（第一批：内置语法宏）
 
-- 状态：第一批已实现
+- 状态：第一批已完成；用户自定义宏暂不纳入
 - 相关模块：`std.assert`、`std.log`、`std.result`
 - 实现位置：`src/interpreter/macros.cpp`、`src/interpreter/parser.y`
 

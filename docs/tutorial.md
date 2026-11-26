@@ -680,30 +680,35 @@ for key, value in {"a": 1, "b": 2} {
 }
 ```
 
-pair 解构形式：
+tuple 解构形式：
 
 ```text
 for (a, b) in [(1, "x"), (2, "y")] {
   print(str(a) + ":" + b);
 }
 
-func pairs(): list[tuple[int, string]] {
-  return [(1, "x")];
+for (a, b, c) in [(1, "x", true), (2, "y", false)] {
+  print(str(a) + ":" + b + ":" + str(c));
 }
 
-for (a, b) in pairs() {
-  print(str(a) + ":" + b);
+func triples(): list[tuple[int, string, bool]] {
+  return [(1, "x", true)];
+}
+
+for (a, b, c) in triples() {
+  print(str(a) + ":" + b + ":" + str(c));
 }
 ```
 
-`for (a, b) in iterable` 对每个元素做 pair/tuple 解构；元素静态类型必须是 pair 或 tuple；
-可以用于 list、generator 等单值迭代。它和 `for k, v in dict` 不同，后者绑定 dict 的 key/value。
+`for (a, b, ...) in iterable` 对每个元素做 tuple 解构；元素静态类型必须是 pair 或 tuple，
+元素个数必须一致；可以用于 list、generator 等单值迭代。它和 `for k, v in dict` 不同，
+后者绑定 dict 的 key/value。
 
 `for ... in` 规则：
 
 - 单变量：list 遍历元素，dict 遍历键；deque / heap / set 也遍历元素（heap 按层序，set 按插入顺序）；
 - 双变量只能用于 dict，得到 `key, value`；
-- `for (a, b) in iterable` 对每个元素做 pair/tuple 解构，支持 list、generator 等单值迭代；元素静态类型必须是 pair 或 tuple；
+- `for (a, b, ...) in iterable` 对每个元素做 tuple 解构，支持 list、generator 等单值迭代；元素静态类型必须是 pair 或 tuple，元素个数必须一致；
 - 显式惰性迭代使用 `std.list.iter(xs)`、`std.dict.iter_keys(d)`、`std.dict.iter_values(d)`、`std.dict.iter_items(d)` 或 `std.dict.iter(d)`；这些返回 generator，可直接用于 `for` 或 `std.iter.*`；
 - list 需要下标时用 `range(len(list))` 或 C 风格 `for`；
 - string 遍历 UTF-8 字符；bytes 遍历 `0..255` 的字节值；

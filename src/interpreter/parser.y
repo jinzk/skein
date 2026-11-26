@@ -750,13 +750,11 @@ static struct type_constraint *type_constraint_from_return_exp(struct ast *exp) 
 static int destructure_param_id = 0;
 static int pattern_for_id = 0;
 
-static struct ast *build_pair_forin(char *first, char *second,
-                                    struct ast *iterable,
-                                    struct ast *body) {
+static struct ast *build_pattern_forin(struct ast *pattern,
+                                       struct ast *iterable,
+                                       struct ast *body) {
     char hidden[32];
-    std::snprintf(hidden, sizeof(hidden), "#forpair%d", ++pattern_for_id);
-    struct ast *pattern = newpatterntuple(
-        append_patternitem(newpatternname(first), newpatternname(second)));
+    std::snprintf(hidden, sizeof(hidden), "#forpat%d", ++pattern_for_id);
     struct ast *destructure = newdestructure(
         pattern, newref(copy_text(hidden)), false);
     struct ast *scope = newscope(newast('L', destructure, body));
@@ -1371,7 +1369,7 @@ static struct ast *new_member_or_enum_literal(struct ast *base, char *field) {
 %type <a> exp value stmt list scope non_empty_scope do_block lambda_block explist arg top_expression top_statement line valuelist pairlist
 %type <a> slice_bound
 %type <str> on_error_name
-%type <a> forinit forcond forend
+%type <a> forinit forcond forend for_pattern_names
 %type <a> switch_body switch_cases switch_case case_values
 %type <a> match_arms match_arm pattern pattern_list pattern_items tuple_pattern_items value_pattern match_values
 %type <a> tuple_body
@@ -1497,10 +1495,14 @@ stmt: IF HEADER_LPAREN exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, 
                                            { $$ = newforin($4, $6, $8, $10); }
     | FOR NAME for_in exp BODY_LBRACE EMPTY_BLOCK_CLOSE
                                            { $$ = newforin($2, NULL, $4, newscope(NULL)); }
-    | FOR HEADER_LPAREN NAME ',' NAME ')' for_in exp BODY_LBRACE EMPTY_BLOCK_CLOSE
-                                           { $$ = build_pair_forin($3, $5, $8, NULL); }
-    | FOR HEADER_LPAREN NAME ',' NAME ')' for_in exp BODY_LBRACE list '}'
-                                           { $$ = build_pair_forin($3, $5, $8, $10); }
+    | FOR HEADER_LPAREN for_pattern_names ')' for_in exp BODY_LBRACE EMPTY_BLOCK_CLOSE
+                                           { $$ = build_pattern_forin(
+                                                 newpatterntuple($3), $6,
+                                                 NULL); }
+    | FOR HEADER_LPAREN for_pattern_names ')' for_in exp BODY_LBRACE list '}'
+                                           { $$ = build_pattern_forin(
+                                                 newpatterntuple($3), $6,
+                                                 $8); }
     | FOR NAME for_in exp BODY_LBRACE list '}'
                                            { $$ = newforin($2, NULL, $4, newscope($6)); }
     | FOR NAME ',' NAME for_in exp BODY_LBRACE EMPTY_BLOCK_CLOSE
@@ -2712,6 +2714,12 @@ valuelist: %empty                         { $$ = newlist(NULL, NULL); }
 
 pairlist: exp ':' exp                     { $$ = newdict($1, $3, NULL); }
     | exp ':' exp ',' pairlist            { $$ = newdict($1, $3, $5); }
+    ;
+
+for_pattern_names: NAME                  { $$ = newpatternname($1); }
+    | for_pattern_names ',' NAME         {
+        $$ = append_patternitem($1, newpatternname($3));
+      }
     ;
 
 forinit: %empty                           { $$ = NULL; }

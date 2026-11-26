@@ -1518,26 +1518,30 @@ for key, value in {"a": 1, "b": 2} {
 }
 ```
 
-`(a, b)` 形式按 pair 解构每个元素：
+`(a, b, c, ...)` 形式按 tuple 解构每个元素：
 
 ```text
 for (a, b) in [(1, "x"), (2, "y")] {
   print(str(a) + ":" + b);
 }
 
-func pairs(): list[tuple[int, string]] {
-  return [(1, "x")];
+for (a, b, c) in [(1, "x", true), (2, "y", false)] {
+  print(str(a) + ":" + b + ":" + str(c));
 }
 
-for (a, b) in pairs() {
-  print(str(a) + ":" + b);
+func triples(): list[tuple[int, string, bool]] {
+  return [(1, "x", true)];
+}
+
+for (a, b, c) in triples() {
+  print(str(a) + ":" + b + ":" + str(c));
 }
 ```
 
 这种形式与双变量 dict 形式不同：
 
 - `for k, v in dict` 绑定 dict 的 key / value；
-- `for (a, b) in iterable` 对每个元素做 pair/tuple 解构，元素静态类型必须是 pair 或 tuple；
+- `for (a, b, ...) in iterable` 对每个元素做 tuple 解构，元素静态类型必须是 pair 或 tuple，元素个数必须一致；
 - 可用于 list、generator 等单值迭代；生成器每个 `yield` 的值会被解构；
 - 循环体必须使用 `{ ... }` 形式。
 
@@ -1545,7 +1549,7 @@ for (a, b) in pairs() {
 
 - 单变量形式：`for (let NAME in exp)` 或 `for NAME in exp`；
 - 双变量形式：`for (let NAME1, NAME2 in exp)` 或 `for NAME1, NAME2 in exp`，只支持 dict；
-- pair 解构形式：`for (NAME1, NAME2) in exp { ... }`，对每个元素做 pair/tuple 解构，支持 list、generator 等单值迭代；元素静态类型必须是 pair 或 tuple；
+- tuple 解构形式：`for (NAME1, NAME2, ...) in exp { ... }`，对每个元素做 pair/tuple 解构，支持 list、generator 等单值迭代；元素静态类型必须是 pair 或 tuple，元素个数必须一致；
 - 显式惰性迭代使用 `std.list.iter(xs)`、`std.dict.iter_keys(d)`、`std.dict.iter_values(d)`、`std.dict.iter_items(d)` 或 `std.dict.iter(d)`；这些返回 generator，可直接用于 `for` 或 `std.iter.*`；
 - 省略形式中的循环变量是块级新变量，会遮蔽外层同名变量，循环结束后外层变量不变；
 - 省略形式的循环体必须是 `{ ... }`，不支持单条语句；

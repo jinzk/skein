@@ -15,6 +15,10 @@ func lang_iter_gen_pairs(): generator[tuple[int, string]] {
   yield (4, "d");
 }
 
+func lang_iter_triples(): list[tuple[int, string, bool]] {
+  return [(1, "a", true), (2, "b", false)];
+}
+
 ts_test("for in without let over list", func() {
   let out = [];
   for x in [1, 2, 3] {
@@ -257,6 +261,18 @@ ts_test("for in pair pattern over generator", func() {
     out = std.list.append(out, str(a) + ":" + b);
   }
   ts_eq(out, ["3:c", "4:d"]);
+});
+
+ts_test("for in tuple pattern", func() {
+  let out = [];
+  for (a, b, c) in lang_iter_triples() {
+    out = std.list.append(out, str(a) + ":" + b + ":" + str(c));
+  }
+  ts_eq(out, ["1:a:true", "2:b:false"]);
+
+  for (a, b, c, d) in [(1, 2, 3, 4)] {
+    ts_eq(a + b + c + d, 10);
+  }
 });
 
 ts_finish();

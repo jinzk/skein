@@ -1187,6 +1187,59 @@ struct Checker : public BuiltinContext {
         return true;
     }
 
+    bool validate_generic_constraint(const GenericConstraintMeta &meta,
+                                     const char *param, int line,
+                                     int column) {
+        if (meta.kind == GENERIC_CONSTRAINT_AND) {
+            for (const TypeNode *item : meta.items) {
+                if (!item)
+                    continue;
+                if (item->kind == TYPE_ANY) {
+                    report_error(line, column,
+                                 "'any' cannot be used with '&'");
+                    return false;
+                }
+                if (item->kind == TYPE_NAMED &&
+                    item->name == "hashable")
+                    continue;
+                structtype_lookup_result lookup;
+                if (lookup_named_type(item, lookup) && lookup.protocol)
+                    continue;
+                std::string message =
+                    std::string("concrete type ") + type_display(item) +
+                    " cannot be used with '&' in the constraint for " +
+                    (param ? param : "type parameter");
+                report_error(line, column, message.c_str());
+                return false;
+            }
+        } else if (meta.kind == GENERIC_CONSTRAINT_OR) {
+            for (const TypeNode *item : meta.items) {
+                if (!item)
+                    continue;
+                if (item->kind == TYPE_ANY) {
+                    report_error(line, column,
+                                 "'any' cannot be used with '|'");
+                    return false;
+                }
+                if (item->kind == TYPE_NAMED &&
+                    item->name == "hashable") {
+                    report_error(line, column,
+                                 "'hashable' cannot be used with '|'");
+                    return false;
+                }
+                structtype_lookup_result lookup;
+                if (lookup_named_type(item, lookup) && lookup.protocol) {
+                    std::string message =
+                        std::string("protocol ") + type_display(item) +
+                        " cannot be used with '|'";
+                    report_error(line, column, message.c_str());
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
     bool collect_generic_param_meta(
         struct generic_param *params, std::vector<std::string> &names,
         std::vector<GenericConstraintMeta> &constraints,
@@ -1217,6 +1270,9 @@ struct Checker : public BuiltinContext {
             }
             GenericConstraintMeta meta =
                 generic_constraint_meta(param->constraint);
+            if (!validate_generic_constraint(meta, param->name, line,
+                                             column))
+                return false;
             if (default_type &&
                 !type_satisfies_generic_constraint(default_type, meta)) {
                 std::string message =

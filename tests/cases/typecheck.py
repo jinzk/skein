@@ -272,6 +272,14 @@ def run_cases():
           "struct Bad[T int | string = bool] { }\n",
           stderr="type error: default type bool does not satisfy the constraint for T")
 
+    check("generic constraint rejects concrete type in and-group",
+          "struct Bad[T int & hashable] { }\n",
+          stderr="type error: concrete type int cannot be used with '&' in the constraint for T")
+
+    check("generic constraint rejects hashable union",
+          "struct Bad[T hashable | int] { }\n",
+          stderr="type error: 'hashable' cannot be used with '|'")
+
     check("generic proto marker constraint",
           "protocol Drawable { func draw(self); }\n"
           "struct Box[T proto Drawable] { value: T; }\n"

@@ -1480,6 +1480,27 @@ struct ast *newbracketapply(struct ast *base, int start_line,
     return (struct ast *)a;
 }
 
+struct ast *newindex(struct ast *container, struct ast *index,
+                     int start_line, int start_column, int end_line,
+                     int end_column) {
+    struct index_node *a =
+        (struct index_node *)ast_node_alloc(sizeof(struct index_node));
+    if (!a) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    a->nodetype = 'G';
+    set_loc(a, container ? container->line : start_line,
+            container ? container->column : start_column);
+    a->l = container;
+    a->r = index;
+    a->span.start_line = start_line;
+    a->span.start_column = start_column;
+    a->span.end_line = end_line;
+    a->span.end_column = end_column;
+    return (struct ast *)a;
+}
+
 struct ast *newoptionalchain(struct ast *base, char *name) {
     struct optional_chain_node *a =
         (struct optional_chain_node *)

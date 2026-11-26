@@ -283,7 +283,13 @@ static void note_function_signature_token(int tok) {
         }                                                           \
     } while (0)
 
-#define YY_USER_ACTION diag_scan_token(yytext, yyleng);
+#define YY_USER_ACTION do {                                              \
+    diag_scan_token(yytext, yyleng);                                     \
+    yylloc.first_line = g_token_line;                                    \
+    yylloc.first_column = g_token_column;                                \
+    yylloc.last_line = g_token_line;                                     \
+    yylloc.last_column = g_token_column + yyleng;                        \
+} while (0);
 
 // 当 stdin 不是终端（管道、IDE 运行窗口等）时，内核不会处理退格，
 // 需要自己按行读出并删除 \b / 0x7f 前的一个字符。

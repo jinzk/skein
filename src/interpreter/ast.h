@@ -81,6 +81,15 @@ struct bracket_apply_node {
     struct ast *suffix_value;
 };
 
+struct index_node {
+    int nodetype;
+    int line;
+    int column;
+    struct ast *l;
+    struct ast *r;
+    struct source_span span;
+};
+
 struct fnret {
     int nodetype;
     int line;
@@ -716,6 +725,9 @@ struct ast *newbracketapply(struct ast *base, int start_line,
                             int start_column, int end_line,
                             int end_column, int suffix,
                             struct ast *suffix_value);
+struct ast *newindex(struct ast *container, struct ast *index,
+                     int start_line, int start_column, int end_line,
+                     int end_column);
 struct ast *newenumdecl(char *name, char *source,
                         struct generic_param *generic_params,
                         struct enum_variant *variants,

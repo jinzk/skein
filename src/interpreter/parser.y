@@ -1083,6 +1083,7 @@ static struct type_constraint *runtime_type_or_error(
 }
 %}
 
+%locations
 %define parse.error custom
 %define parse.lac full
 
@@ -2121,7 +2122,11 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
     | exp SHL_ASSIGN exp                  { $$ = newcompound($1, 's', $3); }
     | exp SHR_ASSIGN exp                  { $$ = newcompound($1, 'r', $3); }
     | exp '(' explist ')'      { $$ = new_call_with_placeholders($1, $3); }
-    | exp '[' exp ']'                     { $$ = newast('G', $1, $3); }
+    | exp '[' exp ']'                     {
+        $$ = newindex($1, $3,
+                      @2.first_line, @2.first_column,
+                      @4.first_line, @4.first_column);
+      }
     | exp '[' slice_bound ':' slice_bound ']' {
         $$ = newslice($1, $3, $5, NULL);
       }

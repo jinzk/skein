@@ -88,9 +88,8 @@ ProtocolMatch match_protocol(
         nullptr);
 
 /*
- * Built-in `iterable` constraint predicate.  This is deliberately broader
- * than the std.traits.Iterable proto: a user `iter` method may return any
- * iterable value, not only generator[T].
+ * Built-in `iterable` constraint predicate.  This mirrors the strict
+ * std.traits.Iterable[T] proto: user `iter` methods must return generator[T].
  */
 enum class IterableContract {
     No,

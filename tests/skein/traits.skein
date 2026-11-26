@@ -90,7 +90,16 @@ ts_test("traits generic iterable constraint", func() {
   ts_eq(trait_need_iter(TraitRange {
     start: 1, end: 3, extra: []
   }).start, 1);
-  ts_eq(trait_need_lower_iter(TraitListIter { xs: [5] }).xs[0], 5);
+  ts_eq(trait_need_lower_iter([5]).len(), 1);
+});
+
+ts_test("traits iter macro accepts list-returning iter", func() {
+  let box = TraitListIter { xs: [5, 6] };
+  let out = [];
+  for x in iter!(box) {
+    out = std.list.append(out, x);
+  }
+  ts_eq(out, [5, 6]);
 });
 
 ts_test("traits proto iter dispatch", func() {

@@ -728,58 +728,7 @@ void bind_protocol_param(
         constraint_from_static_type(type);
 }
 
-struct IterableContractState {
-    std::unordered_set<const type_def *> active;
-};
-
-IterableContract iterable_contract_inner(const TypeNode *type,
-                                         IterableContractState &state);
-
-IterableContract iterable_contract_named(const TypeNode *type,
-                                         IterableContractState &state) {
-    structtype_lookup_result lookup;
-    if (!lookup_named_type(type, lookup))
-        return IterableContract::Unknown;
-    if (lookup.kind == STRUCTTYPE_LOOKUP_PROTOCOL)
-        return IterableContract::Unknown;
-    const type_def *def =
-        lookup.kind == STRUCTTYPE_LOOKUP_STRUCT
-            ? static_cast<const type_def *>(lookup.structure)
-            : static_cast<const type_def *>(lookup.enumeration);
-    if (!def)
-        return IterableContract::Unknown;
-
-    std::shared_ptr<function_def> method = structtype_method(def, "iter");
-    if (!method || !method->code)
-        return IterableContract::No;
-    const function_code *code = method->code.get();
-    if (code->variadic || code->nparams != 1)
-        return IterableContract::No;
-    if (!code->ret_type) {
-        /* The method exists but has no declared return type.  Treat it as
-         * dynamically iterable; the runtime still performs the real check. */
-        return IterableContract::Unknown;
-    }
-    if (!state.active.insert(def).second)
-        return IterableContract::No;
-
-    TypeBindings bindings;
-    if (!type->args.empty() && !def->generic_params.empty() &&
-        type->args.size() == def->generic_params.size()) {
-        for (std::size_t i = 0; i < def->generic_params.size(); ++i)
-            bindings[def->generic_params[i]] = type->args[i];
-    }
-    const TypeNode *result =
-        type_from_constraint(code->ret_type.get());
-    if (!bindings.empty())
-        result = instantiate_type(result, bindings);
-    IterableContract contract = iterable_contract_inner(result, state);
-    state.active.erase(def);
-    return contract;
-}
-
-IterableContract iterable_contract_inner(const TypeNode *type,
-                                         IterableContractState &state) {
+IterableContract iterable_contract_inner(const TypeNode *type) {
     if (!type)
         return IterableContract::Unknown;
     switch (type->kind) {
@@ -798,7 +747,7 @@ IterableContract iterable_contract_inner(const TypeNode *type,
         case TYPE_UNION: {
             bool unknown = false;
             for (const TypeNode *member : type->args) {
-                IterableContract item = iterable_contract_inner(member, state);
+                IterableContract item = iterable_contract_inner(member);
                 if (item == IterableContract::No)
                     return IterableContract::No;
                 if (item == IterableContract::Unknown)
@@ -808,8 +757,35 @@ IterableContract iterable_contract_inner(const TypeNode *type,
                            : IterableContract::Yes;
         }
 
-        case TYPE_NAMED:
-            return iterable_contract_named(type, state);
+        case TYPE_NAMED: {
+            structtype_lookup_result lookup;
+            if (!lookup_named_type(type, lookup))
+                return IterableContract::Unknown;
+            if (lookup.kind == STRUCTTYPE_LOOKUP_PROTOCOL)
+                return IterableContract::Unknown;
+            const type_def *def =
+                lookup.kind == STRUCTTYPE_LOOKUP_STRUCT
+                    ? static_cast<const type_def *>(lookup.structure)
+                    : static_cast<const type_def *>(lookup.enumeration);
+            if (!def)
+                return IterableContract::Unknown;
+
+            std::shared_ptr<function_def> method =
+                structtype_method(def, "iter");
+            if (!method || !method->code)
+                return IterableContract::No;
+            const function_code *code = method->code.get();
+            if (code->variadic || code->nparams != 1 || !code->ret_type)
+                return IterableContract::No;
+            const TypeNode *result =
+                type_from_constraint(code->ret_type.get());
+            /* Unified with std.traits.Iterable[T]: the method must return
+             * generator[T].  Returning list/string/etc. is no longer treated
+             * as satisfying the iterable constraint. */
+            return result && result->kind == TYPE_GENERATOR
+                       ? IterableContract::Yes
+                       : IterableContract::No;
+        }
 
         case TYPE_ANY:
         case TYPE_VAR:
@@ -887,8 +863,7 @@ ProtocolMatch iterable_protocol_match(
 } // namespace
 
 IterableContract iterable_contract(const TypeNode *type) {
-    IterableContractState state;
-    return iterable_contract_inner(type, state);
+    return iterable_contract_inner(type);
 }
 
 ProtocolMatch match_protocol(

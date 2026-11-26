@@ -1634,6 +1634,11 @@ def run_cases():
           "func f[T Iterable](x: T): T { return x; }\n"
           "f(A {});\n",
           stderr="does not satisfy generic constraint")
+    check("lowercase iterable rejects list-returning iter",
+          "struct A { func iter(self): list[int] { return [1]; } }\n"
+          "func f[T iterable](x: T): T { return x; }\n"
+          "f(A {});\n",
+          stderr="does not satisfy generic constraint")
     check("hashable let annotation rejects list",
           "import {Hashable} from std.traits;\n"
           "let x: Hashable = [1, 2];\n",

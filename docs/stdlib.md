@@ -2571,21 +2571,21 @@ struct Range {
 }
 ```
 
-`Iterable` 只接受返回 `generator[T]` 的实现。若 `iter` 返回其他可迭代值（例如 `list[int]`），使用小写内置约束 `iterable`：
+`Iterable` 和 `iterable` 现在使用同一套严格 conformance：用户类型的 `iter` 必须返回 `generator[T]`。返回 `list[int]` 等值的类型不再满足该约束；请改为 `return std.list.iter(self.xs);` 或使用 `yield`。
 
 ```text
 struct Box {
   xs: list[int];
 
-  func iter(self): list[int] {
-    return self.xs;
+  func iter(self): generator[int] {
+    return std.list.iter(self.xs);
   }
 }
 
-func collect[T iterable](x: T) { ... }
+func collect[T iterable](x: T) { ... }   // 等价于 [T Iterable]
 ```
 
-`hashable` / `iterable` 是内置约束别名，不依赖 `import std.traits`；`Hashable` / `Iterable` 是 proto 名，需要 selective import。
+`hashable` / `iterable` 是内置约束别名，不依赖 `import std.traits`；`Hashable` / `Iterable` 是 proto 名，需要 selective import。`Hashable` 没有泛型参数；`Hashable[T]` 不是有效写法。
 
 注意事项：
 

@@ -18,6 +18,10 @@ typecheck 前展开**。它不应变成编译期任意执行，也不应触碰�
 - 宏声明是静态 AST 模板，宏体用 `#参数名` 标记占位符；
 - 只支持 `expr`、`ident`、一个尾部 `expr...`、一个尾部 `block`；
 - 宏调用保持现有 `name!(...)` / `name! { ... }` / `name!(...) { ... }` 形式；
+  后续阶段只追加两种简写：`name!`（零参数）与 `name! x`（单个 `NAME`
+  参数），所有其他参数仍必须写在括号内；
+- 内置宏也按默认 import 处理：裸名是解析期的隐式绑定，每个宏都有规范路径，
+  用户宏可以遮蔽裸名，但规范路径仍可显式调用（第 3.5 节）；
 - 只在**同一文件、声明先于使用**的范围内可见；
 - 跨包阶段先用 `import {retry, Point} from util;` 给值/类型增加 selective
   import，宏写作 `import {retry!} from util;`；`from` 是 contextual keyword；
@@ -45,9 +49,12 @@ macro name(param: expr, label: ident, body: block) {
 }
 ```
 
-`macro` 建议作为新的保留声明关键字。宏名使用普通标识符，但不能与第一批
-内置宏名冲突：`trace!`、`debug!`、`info!`、`warn!`、`error!`、`log_to!`、
-`capture!`、`std.assert.that!`、`std.assert.schema!`。
+`macro` 建议作为新的保留声明关键字。宏名使用普通标识符。内置宏名不是全局
+保留字，而是默认 import 的解析期绑定（第 3.5 节）：当前规范路径包括
+`std.log.trace!`、`std.log.debug!`、`std.log.info!`、`std.log.warn!`、
+`std.log.error!`、`std.log.log_to!`、`std.result.capture!`、
+`std.assert.that!`、`std.assert.schema!`，后续还会加入 `std.error.fail!` /
+`std.error.recover!` / `std.error.pass!`。
 
 ### 3.2 参数片段
 
@@ -93,6 +100,26 @@ call_all!(add, 1, 2, 3);
 
 `!` 仍然必须紧贴宏名；普通调用、泛型下标、一元 `!` 和 `!(expr)` 不受影响。
 
+规划中的简写只追加两种形式：
+
+| 写法 | 含义 |
+| --- | --- |
+| `name!` | 零参数，等价于 `name!()` |
+| `name! x` | 单个 `NAME` 参数 |
+
+其余参数必须写括号：
+
+```text
+name!(x + y)
+name!([1, 2])
+name!({"a": 1})
+name!(recover!())
+```
+
+限制：`foo! x + y` 解析为 `(foo!(x)) + y`；`foo! x.y` 解析为
+`(foo!(x)).y`；`foo! [1, 2]` 解析为 `(foo!())[1, 2]`（裸列表参数不支持）；
+`foo! { ... }` 始终是 block，不能当 dict。
+
 ### 3.4 跨包导入（后续阶段）
 
 v1 只做文件内可见性。跨包阶段不引入独立的 `use` 关键字，而是先给值/类型
@@ -127,6 +154,39 @@ import {retry! as r} from util;   // 调用时写 r!(...)
 字段。parser 只在 `import { ... }` 之后、`importref` 之前把拼写为 `from` 的
 `NAME` token 当作分隔符；其他位置保持普通标识符。
 
+### 3.5 内置宏的默认 import
+
+内置宏不再是硬编码的裸名，而是 parser 侧的默认宏绑定：裸名是隐式导入的别名，
+每个宏都有规范路径。当前第一批的映射为：
+
+| 裸名 | 规范路径 |
+| --- | --- |
+| `trace!` | `std.log.trace!` |
+| `debug!` | `std.log.debug!` |
+| `info!` | `std.log.info!` |
+| `warn!` | `std.log.warn!` |
+| `error!` | `std.log.error!` |
+| `log_to!` | `std.log.log_to!` |
+| `capture!` | `std.result.capture!` |
+
+`std.assert.that!` / `std.assert.schema!` 本身就是规范路径，没有裸名别名。
+后续控制流宏阶段加入：
+
+| 裸名 | 规范路径 |
+| --- | --- |
+| `fail!` | `std.error.fail!` |
+| `recover!` | `std.error.recover!` |
+| `pass!` | `std.error.pass!` |
+
+宏解析发生在语法分析阶段，顺序为：
+
+```text
+同文件用户宏 > 显式 import 的宏 > 默认 import 的内置宏 > 未知宏诊断
+```
+
+规范路径始终可以显式写，不受裸名遮蔽影响。例如同文件用户定义了同名 `info`
+宏后，`info!` 指向用户宏，`std.log.info!` 仍指向内置宏。
+
 ## 4. 展开模型
 
 ### 4.1 解析期宏表
@@ -137,7 +197,8 @@ Parser 维护一个 `MacroTable`，键为宏名，值为已验证的 `MacroTempl
 
 1. 解析到 `macro` 声明时，把宏体解析成内部模板 AST，校验片段位置和占位符；
 2. 校验通过后注册到 `MacroTable`；该声明本身不产生运行时 AST；
-3. 解析到 `name!(...)` 时，先按现有规则尝试内置宏，再查 `MacroTable`；
+3. 解析到 `name!(...)` 时，先查 `MacroTable`，再按默认 import 映射解析内置
+   宏；显式 import 的宏在跨包阶段位于两者之间；
 4. 找到用户宏后，在 grammar action 中实例化模板；
 5. 实例化后的普通 AST 才进入逐 `top_statement` 的 typecheck。
 
@@ -208,7 +269,9 @@ wrap!(2) {
 - 宏递归、互递归或展开次数参数；
 - 生成泛型声明或泛型调用，如 `f[int](...)` / `Box[int]{}`；
 - 声明生成宏；
-- 对 `if` / `for` / `match` / `defer` / `on error` 等核心语义的重写；
+- 对 `if` / `for` / `match` / `defer` / `on error` 等核心语义的重写；用户宏不得
+  重写 `fail` / `recover` / `pass`，这三者由后续阶段的内置宏 `fail!` /
+  `recover!` / `pass!` 提供；
 - `shape` 类型、protocol 字段或鸭子类型；
 - 运算符宏；
 - 专用宏 opcode；
@@ -234,6 +297,7 @@ wrap!(2) {
 - 自递归 / 未注册宏调用；
 - 模板中出现泛型语法；
 - 无参数宏收到表达式参数，或需要参数的宏缺少参数；
+- 内置宏裸名与规范路径解析到不同定义时，诊断说明实际命中的来源；
 - 块片段中的控制流位置错误；
 - selective import 缺少 `from` 或路径非法；
 - selective import 的名字未导出、重复或 alias 冲突；
@@ -280,11 +344,11 @@ wrap!(2) {
 ## 10. 分阶段落地
 
 实施顺序遵循“先低风险、后中风险”：低风险 contextual keyword 和 selective
-import 先做；中风险关键字在宏实现完成后再分独立步骤处理。
+import 先做；builtin/prelude 清理与中风险关键字在宏实现之后再分独立步骤处理。
 
 1. **Phase 0**：本 ADR 评审并确认第 11 节的待定项。
-2. **Phase 1**：contextual keyword 基础设施；先把低风险的 `in`、`export`、
-   `package`、`import`、`include` 改为 contextual keyword；`module` 在
+2. **Phase 1（已完成）**：contextual keyword 基础设施；`in`、`export`、
+   `package`、`import`、`include` 已改为 contextual keyword；`module` 在
    `.skein` 源码中本来就不是保留字。
 3. **Phase 2**：值的 selective import `import {name} from pkg;`，`from` 从一开
    始就是 contextual keyword；配套 formatter / lint / LSP、文档与测试。
@@ -293,8 +357,26 @@ import 先做；中风险关键字在宏实现完成后再分独立步骤处理�
 5. **Phase 4**：补齐 `ident`、`expr...`、`block` 与块函数上下文；完整测试矩阵。
 6. **Phase 5**：`export macro` 与 `import {name!} from pkg;`，跨包 hygiene、
    循环检测和完整测试矩阵。
-7. **Phase 6+**：中风险关键字（`as`、`ref` / `weak`、`launch` / `wait`、`is`）
-   按独立步骤处理，均排在宏实现完成之后。
+7. **Phase 6**：普通内置函数改为默认 import 的 prelude 值。`len` / `range`
+   放入规划中的 `std.utils`（`std.utils.len` / `std.utils.range`）；`print` /
+   `println` / `input` 映射到 `std.io.*`；`kind_of` / `type_*` 映射到
+   `std.type.*`。lexer 不再发 `SKEIN_TOK_BUILTIN`，初始作用域注入绑定，
+   VM/JIT 的 builtin id 不变。同期把内置宏改为 parser 侧默认宏绑定
+   （第 3.5 节）：裸名只是别名，规范路径仍可显式调用；解析顺序为用户宏 >
+   显式宏 import > 默认内置宏。
+8. **Phase 7**：`list` / `dict` 改为默认 import，并与 `int` / `str` 等统一为
+   类型构造器。`list(x)` / `dict(x)` 降糖为 `std.list.new(x)` /
+   `std.dict.new(x)`；值作用域可用局部绑定遮蔽，类型作用域保持独立。
+9. **Phase 8**：`fail` / `recover` / `pass` 改为内置宏 `fail!` / `recover!` /
+   `pass!`（规范路径 `std.error.*!`），展开到现有 `newfail` / `newrecover` /
+   `newpass`；先与旧 bare 形式
+   并行并 deprecate，再删除对应 token 和保留字。同期落地第 3.3 节的两种简写，
+   需要调整 lexer 的 `MACRO_BANG` 判定和 parser precedence。
+10. **Phase 9**：`on` / `error` 评估 handler-scoped contextual；`error!` 改为普通
+    `NAME MACRO_BANG` 路径，`type error` 走类型命名空间，`.error` 仍是普通字段。
+    保留 `%prec ON`，并补齐 handler body / defer / 默认参数诊断。
+11. **Phase 10**：中风险关键字（`as`、`ref` / `weak`、`launch` / `wait`、
+    `is`）按独立步骤处理，均排在宏实现完成之后。
 
 每个阶段都要保持旧的内置宏测试全绿；用户宏不得改变第一批宏的行为。
 
@@ -306,7 +388,8 @@ import 先做；中风险关键字在宏实现完成后再分独立步骤处理�
 2. `macro` 作为新保留关键字；
 3. v1 只支持同文件、声明先于使用；
 4. 禁止递归和跨模块宏；
-5. 禁止用户宏覆盖内置宏名；
+5. 内置宏改为默认 import 的解析期绑定；同文件用户宏可遮蔽裸名，规范路径仍可
+   显式调用；
 6. 用户宏作为 M11，不回写已完成的 M10；
 7. 跨包 selective import 采用 `import {name} from pkg;`，宏写作
    `import {name!} from pkg;`；
@@ -314,4 +397,16 @@ import 先做；中风险关键字在宏实现完成后再分独立步骤处理�
 9. 先做低风险 contextual keyword / selective import，再实现宏；`as`、`ref` /
    `weak`、`launch` / `wait`、`is` 等中风险关键字在宏实现之后分独立步骤处理；
 10. `in`、`export`、`package`、`import`、`include` 同属低风险 contextual
-   keyword，在 Phase 1 处理；`module` 仅用于 manifest，不占 `.skein` 保留字。
+   keyword，在 Phase 1 处理；`module` 仅用于 manifest，不占 `.skein` 保留字；
+11. 普通内置函数改为默认 import；`len` / `range` 放进规划中的 `std.utils`
+   模块，而不是 `std.prelude`；解析优先级为局部绑定 > 显式 import > 默认
+   import；
+12. `list` / `dict` 作为默认 import 的 `std.list` / `std.dict`，裸构造调用与
+   其他类型构造器统一，降糖为 `std.list.new` / `std.dict.new`；
+13. `fail` / `recover` / `pass` 通过内置宏消除保留字，不再采用 statement-start
+   或 handler-scoped contextual 方案；诊断仍由现有 handler 栈检查产生；
+14. 宏简写只支持 `name!` 与 `name! x`；列表、字典、表达式、嵌套宏和成员链
+   一律写括号；`foo! { ... }` 始终是 block；
+15. `on` / `error` 留到 Phase 9 再决定是 handler-scoped contextual 还是宏形式；
+16. 内置宏默认 import 映射采用第 3.5 节的表；`fail!` / `recover!` / `pass!`
+    的规范路径为 `std.error.fail!` / `std.error.recover!` / `std.error.pass!`。

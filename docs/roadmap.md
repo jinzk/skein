@@ -38,7 +38,7 @@
 | 对象抽象 / `protocol` / `ref` / Channel 模型（M8） | 功能已完成 | Channel 端点对、结构化 `protocol`、struct 内联方法、`_` 包私有成员，以及 `ref` / `weak` / GC / channel payload 拒绝已落地；文档同步完成，仅剩 Windows x64 MinGW/MSVC CI 发布门槛 |
 | 用户自定义泛型（M9） | 已完成 | 泛型 struct/enum/函数/protocol、显式实例化、约束、默认类型参数、裸 `Box` 补全、递归、VM/JIT 擦除、`std.meta` 泛型入口和 JSON envelope 已完成；通用二进制值格式不在当前范围，按需再评估 |
 | 断言与内置语法宏（M10） | 已完成 | 第一批已完成：`std.assert` / `std.log.enabled` 与 assert、日志、`capture!` 内置 AST 宏已落地并通过全量验证；`list!` / `dict!` / `try!` 已决定不实现；用户自定义宏不在 M10 |
-| 用户自定义宏（M11，提案） | 待决策 | AST 级静态模板、受限片段、hygienic、同文件声明先于使用；跨包阶段复用 selective import `import {name} from pkg`；设计见 [`docs/macros_user_defined.md`](macros_user_defined.md) |
+| 用户自定义宏与保留字清理（M11，提案） | 待决策 | AST 级静态模板、受限片段、hygienic、同文件声明先于使用；跨包阶段复用 selective import `import {name} from pkg`；后续分阶段做 prelude 默认 import（`len` / `range` → 规划中的 `std.utils`，内置宏 → `std.log.*!` / `std.result.capture!` 等规范路径）、类型构造器、`fail!` / `recover!` / `pass!` 宏与中风险 contextual keyword；设计见 [`docs/macros_user_defined.md`](macros_user_defined.md) |
 | `std.cache`（M7）/ `std.kv` | 已完成 | 维护；Valkey 独立 CI 服务可按需补 |
 | FFI 平台 CI / fuzz | 按需 | Windows x64（MinGW/MSVC）进入正式发布；32 位 / ARM 与 fuzz 按需，见 `architecture.md` |
 
@@ -485,6 +485,34 @@ let got = parent.recv();
    删除旧共享队列 API 和两个 userdata meta 名；
 3. 验收：请求 / 响应双向通路、半关闭、rendezvous / unbounded、`select`
    和重定义后的 `broadcast`、channel 发送 `ref` / weak 报错均通过。
+
+### 2.8 用户自定义宏与保留字清理（M11，待决策）
+
+方向：宏继续是 AST 级、受限、hygienic、在 typecheck 前展开的静态模板；不引入
+文本宏、编译期任意执行、类型内省、一等宏值或泛型语法生成。低风险 contextual
+keyword（`in` / `export` / `import` / `package` / `include`）已完成，其余按
+“先宏、后清理”的顺序分阶段推进。
+
+阶段：
+
+1. selective import：`import {name} from pkg;`，`from` 为 contextual keyword；
+2. 用户宏 v1：`macro` 声明、`expr` / `ident` / 尾部 `expr...` / 尾部 `block`、
+   同文件声明先于使用；跨包阶段用 `import {name!} from pkg;`；
+3. 普通内置函数改为默认 import：`len` / `range` 放进规划中的 `std.utils`
+   （`std.utils.len` / `std.utils.range`），`print` / `println` / `input` →
+   `std.io.*`，类型内省 → `std.type.*`；lexer 不再发 `SKEIN_TOK_BUILTIN`；
+   内置宏同时改为 parser 侧默认宏绑定，裸名映射到 `std.log.*!` /
+   `std.result.capture!` 等规范路径，用户宏可遮蔽裸名；
+4. `list` / `dict` 改为默认 import，与 `int` / `str` 等统一为类型构造器；
+   `list(x)` / `dict(x)` 降糖为 `std.list.new(x)` / `std.dict.new(x)`；
+5. `fail` / `recover` / `pass` 改为内置宏 `fail!` / `recover!` / `pass!`，
+   退出保留字；同时只追加 `name!` 与 `name! x` 两种宏简写；
+6. `on` / `error` 评估 handler-scoped contextual，保留 `%prec ON`；
+7. 中风险关键字 `as`、`ref` / `weak`、`launch` / `wait`、`is` 分独立步骤处理。
+
+验收：每阶段保持第一批宏与全量测试全绿；`tools/check_docs_sync.py` 通过；
+遮蔽规则统一为“局部绑定 > 显式 import > 默认 import”，类型命名空间保持独立。
+设计细节见 [`docs/macros_user_defined.md`](macros_user_defined.md)。
 
 ---
 

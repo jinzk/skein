@@ -39,7 +39,35 @@ info!("ready", {"service": "api"});
 capture! { return int("42"); }
 ```
 
+后续阶段只追加两种简写（尚未实现）：
+
+```text
+name!       // 零参数，等价于 name!()
+name! x     // 单个 NAME 参数
+```
+
+所有其他参数仍必须写在括号内：`name!(x + y)`、`name!([1, 2])`、
+`name!({"a": 1})`、`name!(recover!())`。`name! [1, 2]` 会解析为
+`(name!())[1, 2]`，`name! { ... }` 始终是 block。详见
+[`docs/macros_user_defined.md`](macros_user_defined.md)。
+
 ## 3. 第一批内置宏
+
+下面的裸名都是默认 import 的解析期别名；右侧规范路径始终可以显式调用。用户
+自定义宏可以遮蔽裸名，规范路径不受影响，见
+[`docs/macros_user_defined.md`](macros_user_defined.md)。
+
+| 裸名 | 规范路径 |
+| --- | --- |
+| `trace!` | `std.log.trace!` |
+| `debug!` | `std.log.debug!` |
+| `info!` | `std.log.info!` |
+| `warn!` | `std.log.warn!` |
+| `error!` | `std.log.error!` |
+| `log_to!` | `std.log.log_to!` |
+| `capture!` | `std.result.capture!` |
+
+`std.assert.that!` / `std.assert.schema!` 本身就是规范路径，没有裸名别名。
 
 ### 3.1 断言
 
@@ -139,6 +167,9 @@ std.result.capture(func() { statements })
 - `shape` 类型、protocol 字段、鸭子类型；
 - 运算符宏；
 - 对 `if` / `for` / `match` / `defer` / `on error` 等核心语义的重写；
+- `fail!` / `recover!` / `pass!`：规划为后续阶段的内置控制流宏，用于把
+  `fail` / `recover` / `pass` 从保留字中移除，不属于第一批；
+- 宏调用简写 `name!` / `name! x`：规划扩展，不属于第一批；
 - 专用宏 opcode。
 
 装饰器保持 `@expr` 普通高阶函数语义；本计划不改变用户写法。

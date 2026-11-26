@@ -41,7 +41,17 @@ as
 
 `def` 已不再使用，匿名/命名函数统一使用 `func`。
 
-核心内置函数名（`print`、`println`、`len`、`range`、`input`、`list`、`dict` 和类型转换名等）由词法器识别为函数值，不能用作普通变量名。`std.*` 中的函数是普通模块成员，不是保留字。
+核心内置函数名（`print`、`println`、`len`、`range`、`input`、`list`、`dict` 和类型转换名等）目前由词法器识别为函数值，不能用作普通变量名。`std.*` 中的函数是普通模块成员，不是保留字。
+
+规划中的清理：低风险语法词已改为 contextual keyword；`fail` / `recover` /
+`pass` 将改为内置宏 `fail!` / `recover!` / `pass!` 并退出保留字列表；`on` /
+`error` 留待 handler-scoped contextual 评估。普通内置函数将改为默认 import
+的 prelude 值，其中 `len` / `range` 放进规划中的 `std.utils` 模块
+（`std.utils.len` / `std.utils.range`），`print` / `println` / `input` 映射到
+`std.io.*`，类型内省函数映射到 `std.type.*`。设计见
+[`docs/macros_user_defined.md`](docs/macros_user_defined.md)；这些规划尚未落地，
+当前行为仍以上述词法器规则为准。
+
 
 ### 1.3 注释
 
@@ -801,6 +811,15 @@ capture! { statements }
 
 宏在 typecheck 前展开成普通 AST，不提供类型片段、类型内省、编译期执行、
 递归展开或专用 opcode。详细规则见 [`docs/macros.md`](docs/macros.md)。
+
+规划中的扩展只有两种调用简写：`name!`（零参数）和 `name! x`（单个 `NAME`
+参数）；列表、字典、表达式、嵌套宏和成员链仍写括号。控制流宏 `fail!` /
+`recover!` / `pass!` 也排在后续阶段，见
+[`docs/macros_user_defined.md`](docs/macros_user_defined.md)。
+
+内置宏裸名（`info!` / `capture!` 等）也按默认 import 处理：它们是解析期别名，
+规范路径为 `std.log.*!`、`std.result.capture!`、`std.assert.*!`；规范路径始终
+可以显式调用，用户宏只遮蔽裸名。
 
 ## 5. 语句
 

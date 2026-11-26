@@ -202,6 +202,25 @@ void free_type_constraint(struct type_constraint *type) {
     std::free(type);
 }
 
+/*
+ * Runtime field/parameter checks see generic type parameters as named types in
+ * nested positions such as `ref T`.  The static checker has already validated
+ * them; at runtime a name that is not a declared type is an erased type
+ * parameter and matches any target.
+ */
+static bool type_name_is_known(const char *source, const char *name) {
+    if (!source || !name)
+        return false;
+    if (structtype_find_struct(source, name))
+        return true;
+    if (structtype_find_enum(source, name))
+        return true;
+    if (structtype_find_protocol(source, name))
+        return true;
+    enum type_constraint_kind kind;
+    return type_constraint_kind_for_builtin_name(name, kind);
+}
+
 bool type_constraint_matches(const struct type_constraint *type,
                              const struct value_t *value) {
     if (!type || !value)
@@ -273,7 +292,7 @@ bool type_constraint_matches(const struct type_constraint *type,
             struct value_t *plain = newstructval(def, nullptr);
             bool matched = named_type_matches(type->source, type->name, plain);
             freeval(plain);
-            return matched;
+            return matched || !type_name_is_known(type->source, type->name);
         }
         case TYPE_WEAK: {
             struct_def *def = ref_value_def(value);
@@ -284,7 +303,7 @@ bool type_constraint_matches(const struct type_constraint *type,
             struct value_t *plain = newstructval(def, nullptr);
             bool matched = named_type_matches(type->source, type->name, plain);
             freeval(plain);
-            return matched;
+            return matched || !type_name_is_known(type->source, type->name);
         }
         case TYPE_TASK:
             return userdata_name && std::strcmp(userdata_name, "task") == 0;

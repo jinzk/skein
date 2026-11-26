@@ -57,6 +57,14 @@ struct Holder[T any] {
 struct DefaultMarker[T = int] {
 }
 
+struct RefHolder[T any] {
+  value: ref T;
+}
+
+struct Point {
+  x: int;
+}
+
 func unwrap_int(x: Box[int]): int {
   return x.value;
 }
@@ -135,6 +143,11 @@ ts_test("generic struct recursive and nested", func() {
 
 ts_test("generic default type parameter", func() {
   ts_eq(use_default_marker(DefaultMarker {}), 1);
+});
+
+ts_test("generic ref field", func() {
+  let r: RefHolder[Point] = RefHolder[Point] { value: ref Point { x: 7 } };
+  ts_eq(r.value.x, 7);
 });
 
 ts_finish();

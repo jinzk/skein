@@ -219,6 +219,24 @@ def run_cases():
           "let b = Box[union[int, bool]] { value: true };\n",
           stderr="type error: type argument union[int, bool] does not satisfy generic constraint for Box")
 
+    check("generic invariant any",
+          "struct Box[T any] { value: T; }\n"
+          "let a: Box[int] = Box { value: 1 };\n"
+          "let b: Box[any] = a;\n",
+          stderr="type error: expected Box[any], got Box[int]")
+
+    check("generic invariant union",
+          "struct Box[T any] { value: T; }\n"
+          "let a: Box[int] = Box { value: 1 };\n"
+          "let b: Box[union[int, string]] = a;\n",
+          stderr="type error: expected Box[union[int, string]], got Box[int]")
+
+    check("protocol is not a type argument",
+          "protocol Drawable { func draw(self); }\n"
+          "struct Box[T any] { value: T; }\n"
+          "let b: Box[Drawable] = Box { value: 1 };\n",
+          stderr="type error: protocol Drawable cannot be used as a type argument")
+
     check("generic proto marker constraint",
           "protocol Drawable { func draw(self); }\n"
           "struct Box[T proto Drawable] { value: T; }\n"

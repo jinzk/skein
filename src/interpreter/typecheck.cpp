@@ -1067,9 +1067,26 @@ struct Checker : public BuiltinContext {
         return meta;
     }
 
+    bool type_is_protocol_name(const TypeNode *type) {
+        if (!type || type->kind != TYPE_NAMED)
+            return false;
+        structtype_lookup_result lookup;
+        return lookup_named_type(type, lookup) && lookup.protocol;
+    }
+
+    bool check_type_argument_is_type(const TypeNode *arg, int line,
+                                     int column) {
+        if (!type_is_protocol_name(arg))
+            return true;
+        std::string message =
+            std::string("protocol ") + type_display(arg) +
+            " cannot be used as a type argument";
+        report_error(line, column, message.c_str());
+        return false;
+    }
+
     bool type_satisfies_generic_constraint(
-        const TypeNode *arg, const GenericConstraintMeta &constraint) {
-        if (!arg || arg->kind == TYPE_ANY || type_contains_vars(arg))
+        const TypeNode *arg, const GenericConstraintMeta &constraint) {        if (!arg || arg->kind == TYPE_ANY || type_contains_vars(arg))
             return true;
         if (constraint.items.empty())
             return true;
@@ -1163,6 +1180,10 @@ struct Checker : public BuiltinContext {
         int line, int column) {
         if (!type || type->kind != TYPE_NAMED)
             return true;
+        for (const TypeNode *arg : args) {
+            if (!check_type_argument_is_type(arg, line, column))
+                return false;
+        }
         const std::vector<GenericConstraintMeta> *constraints =
             generic_constraints_for(type->source.c_str(), type->name.c_str());
         if (!constraints)
@@ -1759,6 +1780,9 @@ struct Checker : public BuiltinContext {
             const TypeNode *arg = type_from_constraint(constraints[i]);
             bindings[generic->second.params[i]] = arg;
             free_type_constraint(constraints[i]);
+            if (!check_type_argument_is_type(arg, bracket->line,
+                                             bracket->column))
+                return false;
             if (i < generic->second.constraints.size() &&
                 !type_satisfies_generic_constraint(
                     arg, generic->second.constraints[i])) {
@@ -2928,6 +2952,9 @@ struct Checker : public BuiltinContext {
             }
             for (std::size_t i = 0; i < constraints.size(); ++i) {
                 const TypeNode *arg = type_from_constraint(constraints[i]);
+                if (!check_type_argument_is_type(arg, expr->line,
+                                                 expr->column))
+                    return false;
                 explicit_args.push_back(arg);
                 bindings[(*generic_params)[i]] = arg;
                 free_type_constraint(constraints[i]);
@@ -3861,6 +3888,9 @@ struct Checker : public BuiltinContext {
                             type_from_constraint(constraints[i]);
                         bindings[generic->second.params[i]] = arg;
                         free_type_constraint(constraints[i]);
+                        if (!check_type_argument_is_type(
+                                arg, expr->line, expr->column))
+                            return type_any();
                         if (i < generic->second.constraints.size() &&
                             !type_satisfies_generic_constraint(
                                 arg, generic->second.constraints[i])) {

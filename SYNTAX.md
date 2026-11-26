@@ -1134,6 +1134,11 @@ let q: deque[int] = std.deque.from_list([1, 2]);
 q.size();
 q = q.push_back(3);
 q.to_list();
+
+for c in "ab".iter() { ... }
+for b in std.bytes.from_hex("00ff").iter() { ... }
+for x in gen().iter() { ... }
+for x in (1, 2).iter() { ... }
 ```
 
 方法名与对应命名空间函数一致；方法调用等价于把接收者作为第一个参数：

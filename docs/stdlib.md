@@ -3143,12 +3143,17 @@ std.dict.iter_items(d)     // generator[pair[K, V]]
 std.set.iter(s)
 std.deque.iter(q)
 std.heap.iter(h)
+std.iter.elements("ab")    // char
+std.iter.elements(bytes)   // byte
 
 std.iter.elements(xs)      // 通用元素迭代
 std.iter.keys(d)
 std.iter.values(d)
 std.iter.items(d)
 ```
+
+`iter()` 也支持 string、bytes、generator、pair、tuple；dict 的 `iter()` 产出
+entry pair，string/bytes 产出 char/byte，generator 产出自身元素。
 
 `keys` / `values` / `items` 仍返回 eager list；`iter_*` 版本返回惰性 generator，适合和
 `std.iter.take` / `map` / `filter` 组合。`for` 直接消费这些 generator：

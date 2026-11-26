@@ -1953,6 +1953,12 @@ struct Checker : public BuiltinContext {
             {TYPE_HEAP, "peek", "std.heap.peek", B_heap_peek},
             {TYPE_HEAP, "pop", "std.heap.pop", B_heap_pop},
             {TYPE_HEAP, "to_list", "std.heap.to_list", B_heap_to_list},
+
+            {TYPE_STRING, "iter", "std.iter.elements", B_iter_elements},
+            {TYPE_BYTES, "iter", "std.iter.elements", B_iter_elements},
+            {TYPE_GENERATOR, "iter", "std.iter.elements", B_iter_elements},
+            {TYPE_PAIR, "iter", "std.iter.elements", B_iter_elements},
+            {TYPE_TUPLE, "iter", "std.iter.elements", B_iter_elements},
         };
         for (const BuiltinMethod &method : methods) {
             if (method.receiver == receiver && name == method.name)
@@ -2125,7 +2131,12 @@ struct Checker : public BuiltinContext {
                      receiver->kind == TYPE_DICT ||
                      receiver->kind == TYPE_SET ||
                      receiver->kind == TYPE_DEQUE ||
-                     receiver->kind == TYPE_HEAP)) {
+                     receiver->kind == TYPE_HEAP ||
+                     receiver->kind == TYPE_STRING ||
+                     receiver->kind == TYPE_BYTES ||
+                     receiver->kind == TYPE_GENERATOR ||
+                     receiver->kind == TYPE_PAIR ||
+                     receiver->kind == TYPE_TUPLE)) {
                     const BuiltinMethod *builtin =
                         find_builtin_method(receiver->kind, method);
                     if (builtin) {

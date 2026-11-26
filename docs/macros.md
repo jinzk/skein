@@ -198,6 +198,18 @@ xs.iter()
 - 不接受 spread；
 - 等价于对接收者调用内置容器方法 `iter()`，因此接收者需要有具体容器静态类型。
 
+支持的内置可迭代类型：
+
+```text
+list、dict、set、deque、heap
+string、bytes
+generator
+pair、tuple
+```
+
+dict 的 `iter()` 产出 entry pair；string / bytes 分别产出 char / byte；
+generator 产出自身元素；pair / tuple 产出成员。
+
 ```text
 for x in iter!([1, 2, 3]) { ... }
 for (k, v) in iter!({"a": 1}) { ... }

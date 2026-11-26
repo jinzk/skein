@@ -60,4 +60,19 @@ ts_test("iter macro let form scoping", func() {
   ts_eq(x, 99);
 });
 
+ts_test("iter macro other builtin iterables", func() {
+  let chars = std.iter.collect(iter!("ab"));
+  ts_eq(len(chars), 2);
+  ts_eq(str(chars[0]), "a");
+  ts_eq(str(chars[1]), "b");
+  ts_eq(std.iter.collect(iter!(std.bytes.from_hex("00ff"))), [0, 255]);
+
+  func gen(): generator[int] {
+    yield 1;
+    yield 2;
+  }
+  ts_eq(std.iter.collect(iter!(gen())), [1, 2]);
+  ts_eq(std.iter.collect(iter!((1, 2))), [1, 2]);
+});
+
 ts_finish();

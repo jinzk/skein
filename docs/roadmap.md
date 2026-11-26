@@ -38,7 +38,7 @@
 | 对象抽象 / `proto` / `ref` / Channel 模型（M8） | 功能已完成 | Channel 端点对、结构化 `proto`、struct 内联方法、`_` 包私有成员，以及 `ref` / `weak` / GC / channel payload 拒绝已落地；文档同步完成，仅剩 Windows x64 MinGW/MSVC CI 发布门槛 |
 | 用户自定义泛型（M9） | 已完成 | 泛型 struct/enum/函数/proto、显式实例化、约束、默认类型参数、裸 `Box` 补全、递归、VM/JIT 擦除、`std.meta` 泛型入口和 JSON envelope 已完成；通用二进制值格式不在当前范围，按需再评估 |
 | 断言与内置语法宏（M10） | 已完成 | 第一批已完成：`std.assert` / `std.log.enabled` 与 assert、日志、`capture!` 内置 AST 宏已落地并通过全量验证；`list!` / `dict!` / `try!` 已决定不实现；用户自定义宏不在 M10 |
-| 用户自定义宏与保留字清理（M11，进行中；P1 / P2 / P3.1 / P4 含跨包 / P5.1 / P5.2 / P5.3 / P5.4 已完成） | 剩余高风险 contextual 待实施 | AST 级静态模板、受限片段、hygienic、声明先于使用。`proto`、`import {name} from pkg`、prelude 默认 import、`list` / `dict` 构造器、`fail!` / `recover!` / `pass!` / `wait!` 宏、`launch` / `wait` / `await` 表达式起始 contextual、用户宏 v1 与跨包 `export macro` / `import {name!} from pkg;`，以及 `on` / `error` handler-scoped contextual、`as` / `ref` / `weak` contextual 均已落地；下一步分阶段处理 `is` contextual keyword；设计见 [`docs/macros_user_defined.md`](macros_user_defined.md) |
+| 用户自定义宏与保留字清理（M11，P1 / P2 / P3.1 / P4 含跨包 / P5.1–P5.5 已完成） | 已完成，待最终验收 | AST 级静态模板、受限片段、hygienic、声明先于使用。`proto`、`import {name} from pkg`、prelude 默认 import、`list` / `dict` 构造器、`fail!` / `recover!` / `pass!` / `wait!` 宏、`launch` / `wait` / `await` 表达式起始 contextual、用户宏 v1 与跨包 `export macro` / `import {name!} from pkg;`，以及 `on` / `error` handler-scoped contextual、`as` / `ref` / `weak` / `is` contextual 均已落地；设计见 [`docs/macros_user_defined.md`](macros_user_defined.md) |
 | `std.cache`（M7）/ `std.kv` | 已完成 | 维护；Valkey 独立 CI 服务可按需补 |
 | FFI 平台 CI / fuzz | 按需 | Windows x64（MinGW/MSVC）进入正式发布；32 位 / ARM 与 fuzz 按需，见 `architecture.md` |
 
@@ -56,6 +56,7 @@
 - P5.2：`as` contextual；cast、import 别名与模式绑定仍是分隔符，其他位置是普通标识符
 - P5.3：`ref` contextual；`ref(x)`、`ref Point { ... }` 与 `ref T` 前缀保持，其他位置是普通标识符
 - P5.4：`weak` contextual；只在 `weak T` 类型前缀位置作为关键字，其他位置是普通标识符
+- P5.5：`is` contextual；只在 `expr is T` / `case is T` 类型测试位置作为运算符，其他位置是普通标识符
 
 ### 1.2 推荐执行顺序
 
@@ -74,8 +75,8 @@
    确认不做；per-pc liveness / OSR / deopt 保持不做。
 6. 测试稳定性已完成：服务端测试改为子进程内绑定端口 0 并回读实际端口；
    `thread_bench` 门槛使用多次重复中的最好成绩。
-7. M11 的 P1 / P2 / P3.1 / P4（含跨包 P4.3）与 P5.1 / P5.2 / P5.3 / P5.4 已完成；下一步分阶段处理
-   `is` contextual keyword。
+7. M11 的 P1 / P2 / P3.1 / P4（含跨包 P4.3）与 P5.1–P5.5 已完成；M11 用户宏与
+   contextual keyword 阶段全部落地。
 8. 长尾能力按实际需求触发。
 
 ---
@@ -494,7 +495,7 @@ let got = parent.recv();
 3. 验收：请求 / 响应双向通路、半关闭、rendezvous / unbounded、`select`
    和重定义后的 `broadcast`、channel 发送 `ref` / weak 报错均通过。
 
-### 2.8 用户自定义宏与保留字清理（M11，P1 / P2 / P3.1 / P4 / P5.1 / P5.2 / P5.3 / P5.4 已完成）
+### 2.8 用户自定义宏与保留字清理（M11，P1 / P2 / P3.1 / P4 / P5.1–P5.5 已完成）
 
 方向：宏继续是 AST 级、受限、hygienic、在 typecheck 前展开的静态模板；不引入
 文本宏、编译期任意执行、类型内省、一等宏值或泛型语法生成。低风险 contextual
@@ -535,7 +536,7 @@ keyword（`in` / `export` / `import` / `package` / `include`）已完成。其�
 10. **P5.2（已完成）** `as` contextual：cast、import 别名与模式绑定位置为分隔符，其他位置仍是普通标识符。
 11. **P5.3（已完成）** `ref` contextual：`ref(x)`、`ref Point { ... }` 与 `ref T` 前缀保持，其他位置仍是普通标识符。
 12. **P5.4（已完成）** `weak` contextual：只在 `weak T` 类型前缀位置作为关键字，其他位置仍是普通标识符。
-13. **P5.5** `is` contextual，独立步骤处理。
+13. **P5.5（已完成）** `is` contextual：只在 `expr is T` / `case is T` 类型测试位置作为运算符，其他位置仍是普通标识符。
 
 验收：每阶段保持第一批宏与全量测试全绿；`tools/check_docs_sync.py` 通过；
 遮蔽规则统一为“局部绑定 / 同文件用户宏 > 显式 import > 默认 import”，类型命名

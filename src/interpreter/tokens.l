@@ -495,6 +495,14 @@ static int contextual_weak_token() {
     return contextual_name_token();
 }
 
+/* `is` is a contextual type-test operator in `expr is T` and `case is T`.
+ * Its spelling stays an ordinary identifier elsewhere, including macro names. */
+static int contextual_is_token() {
+    if (expression_end_token(last_token) || expression_start_token(last_token))
+        return SKEIN_TOK_IS;
+    return contextual_name_token();
+}
+
 #define YY_USER_ACTION do {                                              \
     diag_scan_token(yytext, yyleng);                                     \
     yylloc.first_line = g_token_line;                                    \
@@ -975,7 +983,7 @@ static bool reserved_name(const char *text, int len) {
         "struct",   "extern",   "enum",     "impl",     "proto",
         "switch",   "match",    "case",     "default",  "let",
         "const",    "func",     "yield",    "defer",    "macro",
-        "return",   "break",    "continue", "fail",     "is",
+        "return",   "break",    "continue", "fail",
         "goto",     "recover",  "pass",
         "null",     "true",     "false",
         "int",      "float",    "bool",     "str",      "char",
@@ -1497,7 +1505,27 @@ TYPE_PREFIX_NEXT ([A-Za-z_]|{UTF8_SEQ})
 "continue" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_CONTINUE); }
 "fail"/"!" { MACRO_CALLEE_NAME(); }
 "fail" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_FAIL); }
-"is" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_IS); }
+"is"/"!" { MACRO_CALLEE_NAME(); }
+"is"/[ \t]*"as"[^A-Za-z0-9_] {
+    MEMBER_NAME_AFTER_DOT();
+    YYRET(contextual_name_token());
+  }
+"is"/[ \t]*"is"[^A-Za-z0-9_] {
+    MEMBER_NAME_AFTER_DOT();
+    YYRET(contextual_name_token());
+  }
+"is"/[ \t]*{TYPE_PREFIX_NEXT} {
+    MEMBER_NAME_AFTER_DOT();
+    YYRET(contextual_is_token());
+  }
+"is"/[ \t]*\( {
+    MEMBER_NAME_AFTER_DOT();
+    if (expression_end_token(last_token) || last_token == SKEIN_TOK_CASE ||
+        last_token == '|')
+        YYRET(SKEIN_TOK_IS);
+    YYRET(contextual_name_token());
+  }
+"is" { MEMBER_NAME_AFTER_DOT(); YYRET(contextual_name_token()); }
 "goto" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_GOTO); }
 "on"/[ \t]*"error" {
     MEMBER_NAME_AFTER_DOT();

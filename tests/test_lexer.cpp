@@ -311,6 +311,25 @@ void check_contextual_weak_keyword() {
             "weak! must use the ordinary macro bang path");
 }
 
+void check_contextual_is_keyword() {
+    std::vector<token> tokens = lex_source(
+        "let is = 1;\n"
+        "println(is);\n"
+        "println(is is int);\n"
+        "value.is;\n"
+        "is!(2);\n"
+        "case is int => 1;\n"
+        "f is (int) -> int;\n");
+    require(count_kind(tokens, SKEIN_TOK_IS) == 3,
+            "is operator keyword count mismatch");
+    require(has_text(tokens, SKEIN_TOK_NAME, "is"),
+            "let is must stay an identifier");
+    require(has_member_name(tokens, "is"),
+            ".is must stay an ordinary member name");
+    require(count_kind(tokens, SKEIN_TOK_MACRO_BANG) == 1,
+            "is! must use the ordinary macro bang path");
+}
+
 void check_user_macro_tokens() {
     std::vector<token> tokens = lex_source(
         "macro twice(x: expr) { return #x * 2; }\n"
@@ -350,6 +369,7 @@ int main() {
     check_contextual_as_keyword();
     check_contextual_ref_keyword();
     check_contextual_weak_keyword();
+    check_contextual_is_keyword();
     check_user_macro_tokens();
 
     std::printf("lexer_test: ok\n");

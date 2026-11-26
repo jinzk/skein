@@ -407,7 +407,8 @@ wrap!(2) {
      `ref T` 前缀仍是关键字位置，其他位置是普通标识符。
 12. **P5.4（已完成）**：`weak` contextual；只在 `weak T` 类型前缀位置作为关键字，
     其他位置是普通标识符。
-13. **P5.5**：`is` contextual，独立步骤。
+13. **P5.5（已完成）**：`is` contextual；只在 `expr is T` / `case is T` 类型测试
+    位置作为运算符，其他位置是普通标识符。
 
 每个阶段都要保持第一批宏与全量测试全绿；用户宏不得改变第一批宏的行为；每阶段
 运行 `tools/check_docs_sync.py` 与 `git diff --check`。
@@ -427,7 +428,7 @@ wrap!(2) {
    `import {name!} from pkg;`；
 8. `from` 只作为 selective import 的 contextual keyword，不设为全局保留字；
 9. 先做低风险 contextual keyword / selective import，再实现宏；`as`、`ref` /
-   `weak`、`is` 等中风险关键字在宏实现之后分独立步骤处理（`as` / `ref` / `weak` 已分别于 P5.2 / P5.3 / P5.4 完成）；`wait` 走内置宏，
+   `weak`、`is` 等中风险关键字在宏实现之后分独立步骤处理（P5.2–P5.5 已完成）；`wait` 走内置宏，
    `launch` / `await` 走表达式起始 contextual；
 10. `in`、`export`、`package`、`import`、`include` 同属低风险 contextual
    keyword，在 Phase 1 处理；`module` 仅用于 manifest，不占 `.skein` 保留字；

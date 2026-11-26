@@ -34,7 +34,6 @@ switch case default
 struct impl proto
 return break continue goto
 fail recover pass
-is
 null true false
 ```
 
@@ -51,6 +50,9 @@ contextual keyword；其他位置可作为变量、字段或宏名。
 
 `weak` 只在 `weak T` 类型前缀位置作为 contextual keyword；其他位置可作为变量、
 字段或宏名。
+
+`is` 只在 `expr is T` 与 `case is T` 类型测试位置作为 contextual keyword；其他
+位置可作为变量、字段、类型名或宏名。函数类型签名仍不允许出现在 `is` 右侧。
 
 `def` 已不再使用，匿名/命名函数统一使用 `func`。
 

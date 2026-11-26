@@ -750,6 +750,30 @@ def run_cases():
           "println(str(weak!(1)));\n",
           stdout="101")
 
+    check("P5.5 is is an identifier outside type-test slots",
+          "import std;\n"
+          "let is = 7;\n"
+          "struct Box { is: int; }\n"
+          "let b = Box { is: is };\n"
+          "println(str(is));\n"
+          "println(str(b.is));\n"
+          "println(str(is is int));\n"
+          "func f(is: int) { return is + 1; }\n"
+          "println(str(f(2)));\n"
+          "println(str(is as float));\n",
+          stdout="7\n7\ntrue\n3\n7")
+
+    check("P5.5 is operator and type pattern still work",
+          "import std;\n"
+          "match (5) { case is int as n => println(str(n + 1)); }\n"
+          "println(str(5 is int));\n",
+          stdout="6\ntrue")
+
+    check("P5.5 is can be a user macro name",
+          "macro is(x: expr) { #x + 100; }\n"
+          "println(str(is!(1)));\n",
+          stdout="101")
+
     check("weak accepts a ref handle",
           "import std;\n"
           "struct Node { value: int; }\n"

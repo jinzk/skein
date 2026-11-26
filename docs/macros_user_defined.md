@@ -386,7 +386,7 @@ wrap!(2) {
 7. **P4（已完成）**：`macro` 声明语法、签名校验、同文件宏表、未知宏诊断，以及
    `expr` / `ident` / 尾部 `expr...` / 尾部 `block` 四种片段的完整 v1 展开；
    hygiene、块函数上下文、嵌套调用与递归禁止均已落地。
-8. **P4.2（后续）**：`export macro` 与 `import {name!} from pkg;`；跨包 hygiene、
+8. **P4.3（后续）**：`export macro` 与 `import {name!} from pkg;`；跨包 hygiene、
    循环检测和完整测试矩阵。
 9. **P5.1**：`on` / `error` 评估 handler-scoped contextual；`error!` 改为普通
     `NAME MACRO_BANG` 路径，`type error` 走类型命名空间，`.error` 仍是普通字段；

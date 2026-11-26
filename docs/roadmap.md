@@ -26,7 +26,7 @@
 
 ## 1. 当前状态
 
-### 1.1 主线概览（2026-11-25）
+### 1.1 主线概览（2026-11-27）
 
 | 主线 | 状态 | 下一步 |
 | --- | --- | --- |
@@ -35,8 +35,8 @@
 | 包生态与信任（M3） | 按需 | 公共生态暂缓，先支持私有/本地生态；SumDB / proxy / 私有认证按私有需求推进 |
 | JIT / VM 与 GC（M4） | 优化冻结 | moving GC 与 AOT / 字节码缓存均已确认不做；已完成记录见第 3 节 |
 | 长尾能力与体验（M5） | 按需 | 旧编码、HTTP/2 CONNECT、REPL / LSP 体验、LevelDB / RocksDB |
-| 对象抽象 / `protocol` / `ref` / Channel 模型（M8） | 功能已完成 | Channel 端点对、结构化 `protocol`、struct 内联方法、`_` 包私有成员，以及 `ref` / `weak` / GC / channel payload 拒绝已落地；文档同步完成，仅剩 Windows x64 MinGW/MSVC CI 发布门槛 |
-| 用户自定义泛型（M9） | 已完成 | 泛型 struct/enum/函数/protocol、显式实例化、约束、默认类型参数、裸 `Box` 补全、递归、VM/JIT 擦除、`std.meta` 泛型入口和 JSON envelope 已完成；通用二进制值格式不在当前范围，按需再评估 |
+| 对象抽象 / `proto` / `ref` / Channel 模型（M8） | 功能已完成 | Channel 端点对、结构化 `proto`、struct 内联方法、`_` 包私有成员，以及 `ref` / `weak` / GC / channel payload 拒绝已落地；文档同步完成，仅剩 Windows x64 MinGW/MSVC CI 发布门槛 |
+| 用户自定义泛型（M9） | 已完成 | 泛型 struct/enum/函数/proto、显式实例化、约束、默认类型参数、裸 `Box` 补全、递归、VM/JIT 擦除、`std.meta` 泛型入口和 JSON envelope 已完成；通用二进制值格式不在当前范围，按需再评估 |
 | 断言与内置语法宏（M10） | 已完成 | 第一批已完成：`std.assert` / `std.log.enabled` 与 assert、日志、`capture!` 内置 AST 宏已落地并通过全量验证；`list!` / `dict!` / `try!` 已决定不实现；用户自定义宏不在 M10 |
 | 用户自定义宏与保留字清理（M11，进行中；P1 / P2 / P3.1 / P4 v1 已完成） | 跨包宏待实施 | AST 级静态模板、受限片段、hygienic、同文件声明先于使用。`proto`、`import {name} from pkg`、prelude 默认 import、`list` / `dict` 构造器、`fail!` / `recover!` / `pass!` / `wait!` 宏、`launch` / `wait` / `await` 表达式起始 contextual、用户宏 v1 均已落地；下一步实现 `export macro` / `import {name!} from pkg;`，再分阶段处理 `on` / `error`、`as`、`ref`、`weak`、`is` contextual keyword；设计见 [`docs/macros_user_defined.md`](macros_user_defined.md) |
 | `std.cache`（M7）/ `std.kv` | 已完成 | 维护；Valkey 独立 CI 服务可按需补 |
@@ -49,6 +49,8 @@
 - `std.cache` Redis / Valkey 客户端与共享 Session / 限流 store
 - SQLite 单文件 `std.kv`
 - 启动 profiling、AST arena、内存输入 fast path
+- P1 / P2 / P3.1：`proto`、selective import、prelude 默认 import、`list` / `dict` 构造器、`fail!` / `recover!` / `pass!` / `wait!` 宏，以及 `launch` / `wait` / `await` contextual keyword
+- P4：同文件用户自定义宏 v1（四种片段、hygiene、嵌套调用、递归禁止）
 
 ### 1.2 推荐执行顺序
 
@@ -57,9 +59,9 @@
 2. M1 只剩 macOS `flock` 验证（暂缓）和交叉编译（按需）。
 3. 公共生态已确认暂缓；M3 先支持私有/本地生态，SumDB / proxy / 私有认证
    按私有需求推进。
-4. M8 已确认只保留 `protocol` 并直接删除 `trait`，且以 duplex 端点对作为
+4. M8 已确认只保留 `proto` 并直接删除 `trait`，且以 duplex 端点对作为
    唯一 Channel 模型并删除旧共享队列；阶段 1（端点对）、阶段 2（结构化
-   protocol）、阶段 3（`ref` / `weak` / GC / channel payload 拒绝）、struct
+   proto）、阶段 3（`ref` / `weak` / GC / channel payload 拒绝）、struct
    内联方法与 `_` 包私有成员均已完成；文档同步完成，仅剩 Windows x64
    MinGW/MSVC CI 发布门槛。
 5. M4 的 GC root 审计、热点 opcode / frame 分配、字符串拼接、
@@ -67,7 +69,9 @@
    确认不做；per-pc liveness / OSR / deopt 保持不做。
 6. 测试稳定性已完成：服务端测试改为子进程内绑定端口 0 并回读实际端口；
    `thread_bench` 门槛使用多次重复中的最好成绩。
-7. 长尾能力按实际需求触发。
+7. M11 的 P1 / P2 / P3.1 / P4 v1 已完成；下一步是跨包宏 P4.3，再分阶段
+   处理 `on` / `error`、`as`、`ref`、`weak`、`is` contextual keyword。
+8. 长尾能力按实际需求触发。
 
 ---
 
@@ -288,29 +292,28 @@ REPL / 工具链体验：
 - 模糊补全排序
 - 多行历史条目
 
-### 2.6 对象抽象、`protocol` 与引用模型（M8；阶段 3 已完成）
+### 2.6 对象抽象、`proto` 与引用模型（M8；阶段 3 已完成）
 
-状态：结构化 `protocol`、直接删除 `trait`、struct 内联 `func` 方法、`_`
+状态：结构化 `proto`、直接删除 `trait`、struct 内联 `func` 方法、`_`
 前缀包私有成员，以及 `ref` / `weak` / GC 接入与 channel payload 拒绝均已
 实现；顶层 `impl Type` 保留为补充方法容器。文档同步已完成，剩余工作仅为
 Windows x64 MinGW/MSVC CI 发布门槛。
 
 背景与问题：
 
-- 未标注调用按运行时能力工作，`struct` / `trait` 是名义式契约；两者分层
-  共存并不矛盾，但文档曾让读者把“动态类型”误读成完整鸭子类型；
+- 未标注调用按运行时能力工作；原 `trait` 名义式契约设计已移除，当前只保留
+  结构化 `proto`，文档已同步修正“动态类型”与鸭子类型的混淆；
 - 可选自引用字段可以表达形状，例如 `next: Node?`，但 `struct` 是 COW
   值类型，`a.next = b; b.next = a;` 仍会报
   `recursive value would create a cycle`；
 - 普通值互递归 struct 字段仍不支持（`struct A { b: B? }` 会报未知类型名并提示改用
   `ref B?` / `weak B?`）；`ref` / `weak` 字段支持前向互引用；
-- `SYNTAX.md` 对 trait 默认方法前后描述不一致：前文支持默认方法和冲突
-  规则，规则列表又写“不支持 trait 默认方法”；实现是支持默认方法的，
-  先修文档再推进语言调整。
+- `SYNTAX.md` 对 proto 默认方法的描述已统一：支持默认方法和冲突规则；此前
+  trait 默认方法的前后矛盾已随 trait 删除一并修正。
 
 产品方向：
 
-- 已确认只保留结构化 `protocol`，移除用户层 `trait` / `impl Trait for
+- 已确认只保留结构化 `proto`，移除用户层 `trait` / `impl Trait for
   Type`；`impl Type` 保留为具体类型写方法的机制；
 - 不把现有 `trait` 直接改成结构化语义，否则会破坏显式契约和已有诊断；
 - 不提供 deprecated alias；`trait` 与 `impl Trait for Type` 直接删除，一次性迁移；
@@ -318,10 +321,10 @@ Windows x64 MinGW/MSVC CI 发布门槛。
   等价于紧随 struct 的隐式 `impl Type`，因此后续顶层 `impl Type` 可以添加
   方法但不能覆盖同名方法，重名仍报 `method repeated <name>`。
 
-`protocol` 语义（已实现）：
+`proto` 语义（已实现）：
 
 ```skein
-protocol Drawable {
+proto Drawable {
   func draw(self);
   func describe(self) { print("drawable"); }
 }
@@ -342,11 +345,11 @@ render(Point {});   // 有匹配的 draw(self)，自动满足
 - 结构化匹配方法名、参数数量、参数类型、`self` 和返回类型；
 - 不需要 `impl Drawable for Point`；
 - 默认方法保留，具体类型写了同名方法则覆盖；
-- 多个 protocol 提供同名默认方法且具体类型未覆盖时报错，要求显式写方法；
-- `is protocol` 做结构化运行时检查；
+- 多个 proto 提供同名默认方法且具体类型未覆盖时报错，要求显式写方法；
+- `is Proto` 做结构化运行时检查；
 - `std.meta.protocols(type)` / `std.meta.implements(type, name)` 同步改为
   结构化语义；
-- 如果 `T` 满足 protocol，则 `ref T` 也自动满足。
+- 如果 `T` 满足 proto，则 `ref T` 也自动满足。
 
 `ref` / `weak` 语义（已实现）：
 
@@ -421,10 +424,10 @@ GC 接入（已实现）：
    被拒绝，channel 发送 `ref` / weak（含嵌套）报错且 snapshot 可发送，
    `SKEIN_GC_STRESS` 无漏根，JIT/VM 差分与语言核心测试稳定。
 
-阶段 2 验收已通过：结构化签名匹配、默认方法覆盖与冲突、`is protocol`、
+阶段 2 验收已通过：结构化签名匹配、默认方法覆盖与冲突、`is Proto`、
 `std.meta.protocols` / `implements`，以及 AST/VM/JIT 与线程 transfer 差分均稳定。
 
-阶段 3 验收已通过：`ref` 别名与替换、ref 方法、protocol 转发、`?.`、
+阶段 3 验收已通过：`ref` 别名与替换、ref 方法、proto 转发、`?.`、
 强环 sweep / weak 失效、普通值环拒绝、channel 嵌套拒绝与 snapshot 发送，
 在 AST / VM / JIT 与 `SKEIN_GC_STRESS` 下一致。
 
@@ -472,7 +475,7 @@ let got = parent.recv();
   `pool.submit` / `join` 不变；
 - 删除旧 `thread_channel` 共享队列 userdata、旧 `unbounded_channel` 等兼容
   名，以及 `thread_duplex` 独立类型名；脚本可见类型统一为一种 endpoint；
-- `protocol` 落地后可定义通用 `Endpoint` 协议（`send` / `recv` / `try_*`），
+- `proto` 落地后可定义通用 `Endpoint` 协议（`send` / `recv` / `try_*`），
   但不是合并类型的必经步骤；
 - 与 `ref` 边界一致：`validate_data_value()` 继续拒绝 `ref` / weak payload
   （含嵌套），channel / endpoint 句柄只放在 `handles`。
@@ -519,14 +522,15 @@ keyword（`in` / `export` / `import` / `package` / `include`）已完成。其�
    语义；postfix 优先级高于前缀，`.` 后仍是普通名字。
 7. **P4（已完成）** 用户宏 v1 一次落地：`macro` 声明、`expr` / `ident` / 尾部
    `expr...` / 尾部 `block`、同文件声明先于使用、hygiene、嵌套调用和递归禁止。
-8. **P4.2（后续）** 跨包阶段用 `export macro` 与 `import {name!} from pkg;`；跨包
+8. **P4.3（后续）** 跨包阶段用 `export macro` 与 `import {name!} from pkg;`；跨包
    hygiene、循环检测和完整测试矩阵。
 9. **P5.1** `on` / `error` 评估 handler-scoped contextual，保留 `%prec ON`；
    `error!` 改为普通 `NAME MACRO_BANG` 路径，`type error` 走类型命名空间。
 10. **P5.2–P5.5** `as`、`ref`、`weak`、`is` 分别 contextual，独立步骤处理。
 
 验收：每阶段保持第一批宏与全量测试全绿；`tools/check_docs_sync.py` 通过；
-遮蔽规则统一为“局部绑定 > 显式 import > 默认 import”，类型命名空间保持独立。
+遮蔽规则统一为“局部绑定 / 同文件用户宏 > 显式 import > 默认 import”，类型命名
+空间保持独立。
 设计细节见 [`docs/macros_user_defined.md`](macros_user_defined.md)。
 
 ---
@@ -827,7 +831,8 @@ RelWithDebInfo 下空脚本 `main()` 约 0.4 ms，`import std` 约 0.85 ms，
   `std.task.wait`、`std.regex.match`、枚举变体和 import 路径均无需特判。
   非 task 操作数在类型检查阶段报 `wait expects a task, got <type>`；
   `any` / 泛型 / union 保持宽松。不做：超时版 `wait e, ms`、
-  `wait all` / `wait any`、async/await 关键字、取消或恢复函数染色。
+  `wait all` / `wait any`、`async` 关键字、取消或恢复函数染色；`await` 已作为表达式
+  起始 contextual keyword 落地（见 P3.1）。
 - `launch` 直接作用于完整调用链（2026-11-22），不再下钻到最内层 call。
   `launch make().get()` 启动整个 `make().get()`；`launch f().wait()` 解析为
   `launch (f().wait())`。需要“启动后等待”时统一写 `wait launch f()` 或
@@ -877,8 +882,9 @@ RelWithDebInfo 下空脚本 `main()` 约 0.4 ms，`import std` 约 0.85 ms，
   defer / iterator / handler 清理（AST/VM）；已实现函数级 label 唯一性、
   重复 label 报错、未使用 label warning、生成器函数禁止 goto，以及同块内
   跨越 `let` / `const` 的检查。
-- 对象抽象方向（2026-11-25，已确认）：只保留结构化 `protocol`，移除用户层
-  `trait` / `impl Trait for Type`；`impl Type` 保留为具体类型方法容器。
+- 对象抽象方向（2026-11-25 已确认，P1.1 后关键字重命名为 `proto`）：只保留结构化
+  `proto`，移除用户层 `trait` / `impl Trait for Type`；`impl Type` 保留为具体类型
+  方法容器。
 - `trait` 过渡策略（2026-11-25，已确认）：不提供 deprecated alias，直接删除
   `trait` 与 `impl Trait for Type`，迁移一次性完成。
 - `ref` 跨线程（2026-11-25，已确认）：不可跨线程发送；ref heap 严格线程
@@ -959,7 +965,7 @@ RelWithDebInfo 下空脚本 `main()` 约 0.4 ms，`import std` 约 0.85 ms，
   规范化、AST arena 和内存输入 fast path；没有明确的冷启动目标前，不再
   继续拆分解析输入或诊断行存储，也不单独做跨进程 AST 缓存。
 - 不做延迟解析函数体、把 std 包改成动态插件、为解析速度裁剪 `std.web`
-  API；预编译 stdlib 属于 M5。
+  API；预编译 stdlib 已确认不做（见 M5 / AOT 决策）。
 
 Web 服务与数据层（JSON API、`std.cache`）：
 

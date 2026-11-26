@@ -478,6 +478,15 @@ static int contextual_task_token(int keyword) {
     return contextual_name_token();
 }
 
+/* `ref` stays a keyword only for `ref(x)`, `ref Point { ... }` and the `ref T`
+ * type prefix.  A bare `ref` is an ordinary identifier. */
+static int contextual_ref_token() {
+    if (expression_start_token(last_token) || last_token == SKEIN_TOK_REF ||
+        last_token == SKEIN_TOK_WEAK)
+        return SKEIN_TOK_REF;
+    return contextual_name_token();
+}
+
 #define YY_USER_ACTION do {                                              \
     diag_scan_token(yytext, yyleng);                                     \
     yylloc.first_line = g_token_line;                                    \
@@ -956,7 +965,7 @@ static bool reserved_name(const char *text, int len) {
     static const char *const words[] = {
         "if",       "else",     "while",    "do",       "for",
         "struct",   "extern",   "enum",     "impl",     "proto",
-        "ref",      "weak",
+        "weak",
         "switch",   "match",    "case",     "default",  "let",
         "const",    "func",     "yield",    "defer",    "macro",
         "return",   "break",    "continue", "fail",     "is",
@@ -1037,6 +1046,7 @@ UTF8_SEQ ({UTF8_2}|{UTF8_3}|{UTF8_4})
 
 UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
 TASK_KEYWORD_NEXT ([A-Za-z_]|{UTF8_SEQ}|\(|\[|\{|[0-9]|\"|\')
+REF_PREFIX_NEXT ([A-Za-z_]|{UTF8_SEQ}|\()
 
 %%
 
@@ -1387,7 +1397,16 @@ TASK_KEYWORD_NEXT ([A-Za-z_]|{UTF8_SEQ}|\(|\[|\{|[0-9]|\"|\')
     }
     YYRET(SKEIN_TOK_IMPL);
 }
-"ref" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_REF); }
+"ref"/"!" { MACRO_CALLEE_NAME(); }
+"ref"/[ \t]*"as"[^A-Za-z0-9_] {
+    MEMBER_NAME_AFTER_DOT();
+    YYRET(contextual_name_token());
+  }
+"ref"/[ \t]*{REF_PREFIX_NEXT} {
+    MEMBER_NAME_AFTER_DOT();
+    YYRET(contextual_ref_token());
+}
+"ref" { MEMBER_NAME_AFTER_DOT(); YYRET(contextual_name_token()); }
 "weak" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_WEAK); }
 "switch" { MEMBER_NAME_AFTER_DOT();
     start_header_context(SKEIN_TOK_SWITCH);

@@ -275,6 +275,24 @@ void check_contextual_as_keyword() {
             "as! must use the ordinary macro bang path");
 }
 
+void check_contextual_ref_keyword() {
+    std::vector<token> tokens = lex_source(
+        "let ref = 1;\n"
+        "println(ref);\n"
+        "value.ref;\n"
+        "ref!(2);\n"
+        "let a: ref Point = null;\n"
+        "let b = ref(a);\n");
+    require(count_kind(tokens, SKEIN_TOK_REF) == 2,
+            "ref prefix keyword count mismatch");
+    require(has_text(tokens, SKEIN_TOK_NAME, "ref"),
+            "let ref must stay an identifier");
+    require(has_member_name(tokens, "ref"),
+            ".ref must stay an ordinary member name");
+    require(count_kind(tokens, SKEIN_TOK_MACRO_BANG) == 1,
+            "ref! must use the ordinary macro bang path");
+}
+
 void check_user_macro_tokens() {
     std::vector<token> tokens = lex_source(
         "macro twice(x: expr) { return #x * 2; }\n"
@@ -312,6 +330,7 @@ int main() {
     check_contextual_task_keywords();
     check_contextual_handler_keywords();
     check_contextual_as_keyword();
+    check_contextual_ref_keyword();
     check_user_macro_tokens();
 
     std::printf("lexer_test: ok\n");

@@ -692,6 +692,30 @@ def run_cases():
           "match (5) { case is int as n => println(str(n + 1)); }\n",
           stdout="2\n6")
 
+    check("P5.3 ref is an identifier outside ref slots",
+          "import std;\n"
+          "let ref = 7;\n"
+          "struct Box { ref: int; }\n"
+          "let b = Box { ref: ref };\n"
+          "println(str(ref));\n"
+          "println(str(b.ref));\n",
+          stdout="7\n7")
+
+    check("P5.3 ref conversion, literal and type prefix still work",
+          "struct Point { x: float; }\n"
+          "let s = Point { x: 1.0 };\n"
+          "let a = ref(s);\n"
+          "a.x = 7.0;\n"
+          "let b = ref Point { x: 2.0 };\n"
+          "let c: ref Point = a;\n"
+          "println(str(a.x + b.x + c.x));\n",
+          stdout="16.0")
+
+    check("P5.3 ref can be a user macro name",
+          "macro ref(x: expr) { #x + 100; }\n"
+          "println(str(ref!(1)));\n",
+          stdout="101")
+
     check("ref rejects a ref handle",
           "struct Point { x: float; }\n"
           "let a = ref Point { x: 1.0 };\n"

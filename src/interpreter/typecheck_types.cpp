@@ -3,6 +3,7 @@
 #include "ast.h"
 #include "diagnostics.h"
 #include "refvalue.h"
+#include "static_type.h"
 #include "structtype.h"
 #include "typecheck_state.h"
 #include "valuetype.h"
@@ -666,7 +667,21 @@ KeyContract key_contract(const TypeNode *type) {
     return key_contract_inner(type, state);
 }
 
+namespace {
+
+thread_local int g_type_match_depth = 0;
+
+struct TypeMatchDepthGuard {
+    TypeMatchDepthGuard() { ++g_type_match_depth; }
+    ~TypeMatchDepthGuard() { --g_type_match_depth; }
+};
+
+} // namespace
+
 MatchResult match_type(const TypeNode *actual, const TypeNode *expected) {
+    TypeMatchDepthGuard depth_guard;
+    if (g_type_match_depth > 512)
+        return MatchResult::Unknown;
     if (!expected)
         expected = type_any();
     if (!actual)
@@ -935,6 +950,11 @@ const TypeNode *instantiate_type(const TypeNode *type,
         changed = true;
     if (!changed)
         return type;
+    if (type->kind == TYPE_NAMED) {
+        return type_named_generic(type->source.c_str(),
+                                  type->name.c_str(), args,
+                                  type->nullable);
+    }
     if (type->kind == TYPE_CALLABLE || type->kind == TYPE_FUNCTION ||
         type->kind == TYPE_BUILTIN) {
         return make_function_type(type->kind, args, type->optional_params,
@@ -945,6 +965,9 @@ const TypeNode *instantiate_type(const TypeNode *type,
 
 bool bind_type(const TypeNode *actual, const TypeNode *pattern,
                TypeBindings &bindings) {
+    TypeMatchDepthGuard depth_guard;
+    if (g_type_match_depth > 512)
+        return false;
     if (!pattern)
         return true;
     if (!actual)
@@ -1013,6 +1036,26 @@ bool bind_type(const TypeNode *actual, const TypeNode *pattern,
     }
     if (actual->nullable || actual->kind == TYPE_NULL)
         return false;
+
+    if (pattern->kind == TYPE_NAMED && actual->kind == TYPE_NAMED) {
+        bool same_named = structtype_named_types_equal(
+            actual->source.c_str(), actual->name.c_str(),
+            pattern->source.c_str(), pattern->name.c_str());
+        if (!same_named)
+            return type_contains_vars(pattern)
+                       ? false
+                       : match_type(actual, pattern) !=
+                             MatchResult::Mismatch;
+        if (pattern->args.empty() || actual->args.empty())
+            return true;
+        if (actual->args.size() != pattern->args.size())
+            return false;
+        for (std::size_t i = 0; i < pattern->args.size(); ++i) {
+            if (!bind_type(actual->args[i], pattern->args[i], bindings))
+                return false;
+        }
+        return true;
+    }
 
     if (type_is_function_signature(pattern)) {
         if (!type_is_function_signature(actual)) {

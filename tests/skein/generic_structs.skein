@@ -41,6 +41,15 @@ struct MarkedCombo[T type hashable & Drawable] {
   value: T;
 }
 
+struct Node[T any] {
+  value: T;
+  next: Node[T]?;
+}
+
+struct Holder[T any] {
+  inner: Box[T]?;
+}
+
 func unwrap_int(x: Box[int]): int {
   return x.value;
 }
@@ -94,6 +103,15 @@ ts_test("generic struct multiple parameters", func() {
   let p: Pair[int, string] = Pair { first: 1, second: "a" };
   ts_eq(p.first, 1);
   ts_eq(p.second, "a");
+});
+
+ts_test("generic struct recursive and nested", func() {
+  let n = Node[int] { value: 1, next: null };
+  let m: Node[int] = Node { value: 2, next: n };
+  ts_eq(m.value, 2);
+  ts_eq(m.next.value, 1);
+  let h = Holder[string] { inner: Box[string] { value: "b" } };
+  ts_eq(h.inner.value, "b");
 });
 
 ts_finish();

@@ -993,10 +993,7 @@ struct Checker : public BuiltinContext {
 
     static std::string static_type_key(const char *source,
                                        const char *name) {
-        std::string key = source ? source : "";
-        key += '\x1f';
-        key += name ? name : "";
-        return key;
+        return detail::generic_defaults_key(source, name);
     }
 
     const TypeNode *unwrap_ref_type(const TypeNode *type) {
@@ -1288,6 +1285,24 @@ struct Checker : public BuiltinContext {
             defaults.push_back(default_type);
         }
         return true;
+    }
+
+    void register_generic_defaults(
+        const char *source, const char *name,
+        const std::vector<std::string> &params,
+        const std::vector<const TypeNode *> &defaults) {
+        std::string key = static_type_key(source, name);
+        if (params.empty() || defaults.size() != params.size()) {
+            g_generic_default_types.erase(key);
+            return;
+        }
+        for (const TypeNode *default_type : defaults) {
+            if (!default_type) {
+                g_generic_default_types.erase(key);
+                return;
+            }
+        }
+        g_generic_default_types[key] = defaults;
     }
 
     const std::vector<GenericConstraintMeta> *generic_constraints_for(
@@ -3445,6 +3460,8 @@ struct Checker : public BuiltinContext {
                 struct_constraints, struct_defaults, decl->line,
                 decl->column))
             return false;
+        register_generic_defaults(decl->source, decl->name,
+                                  info.generic_params, struct_defaults);
         for (struct struct_member *member = decl->members; member;
              member = member->next) {
             if (member->name && member->type && !member->func) {
@@ -3499,6 +3516,8 @@ struct Checker : public BuiltinContext {
                 enum_constraints, enum_defaults, decl->line,
                 decl->column))
             return false;
+        register_generic_defaults(decl->source, decl->name,
+                                  info.generic_params, enum_defaults);
         for (struct enum_variant *variant = decl->variants; variant;
              variant = variant->next) {
             auto &fields = info.variants[variant->name

@@ -280,6 +280,11 @@ def run_cases():
           "struct Bad[T hashable | int] { }\n",
           stderr="type error: 'hashable' cannot be used with '|'")
 
+    check("bare generic type uses default arguments",
+          "struct Box[T = any] { value: T; }\n"
+          "let a: Box = Box[int] { value: 1 };\n",
+          stderr="type error: expected Box[any], got Box[int]")
+
     check("generic proto marker constraint",
           "protocol Drawable { func draw(self); }\n"
           "struct Box[T proto Drawable] { value: T; }\n"

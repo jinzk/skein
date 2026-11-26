@@ -24,6 +24,21 @@ struct VarInfo {
 
 using ConstTypeMap = std::unordered_map<std::string, const TypeNode *>;
 
+inline std::string generic_defaults_key(const char *source,
+                                        const char *name) {
+    std::string key = source ? source : "";
+    key += '\x1f';
+    key += name ? name : "";
+    return key;
+}
+
+/* Default type arguments for generic structs/enums, keyed by source + name.
+ * Populated by the type checker and consulted when a bare generic type name
+ * is converted to a static TypeNode. */
+extern std::unordered_map<std::string, std::vector<const TypeNode *>>
+    g_generic_default_types;
+
+
 struct StaticTypeInfo {
     bool is_enum = false;
     std::vector<std::string> generic_params;

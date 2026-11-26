@@ -2,6 +2,7 @@
 
 #include "diagnostics.h"
 #include "runtime_state.h"
+#include "typecheck_state.h"
 
 #include <cstdio>
 #include <functional>
@@ -388,11 +389,26 @@ const TypeNode *type_nullable(const TypeNode *type) {
     return type_container(TYPE_UNION, members);
 }
 
+static const TypeNode *expand_generic_defaults(const TypeNode *node) {
+    if (!node || node->kind != TYPE_NAMED || !node->args.empty())
+        return node;
+    std::string key = detail::generic_defaults_key(
+        node->source.c_str(), node->name.c_str());
+    auto it = detail::g_generic_default_types.find(key);
+    if (it == detail::g_generic_default_types.end() ||
+        it->second.empty())
+        return node;
+    return type_named_generic(node->source.c_str(), node->name.c_str(),
+                              it->second, node->nullable);
+}
+
 const TypeNode *type_from_constraint(const struct type_constraint *type) {
     if (!type)
         return type_any();
     if (type->detail) {
-        const TypeNode *node = static_cast<const TypeNode *>(type->detail);
+        const TypeNode *node =
+            expand_generic_defaults(
+                static_cast<const TypeNode *>(type->detail));
         if (type->nullable)
             return type_nullable(node);
         return node;
@@ -401,6 +417,7 @@ const TypeNode *type_from_constraint(const struct type_constraint *type) {
         intern_type(type->kind, type->name ? type->name : "",
                     type->source ? type->source : "", false,
                     std::vector<const TypeNode *>());
+    node = expand_generic_defaults(node);
     return type->nullable ? type_nullable(node) : node;
 }
 

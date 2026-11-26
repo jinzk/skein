@@ -21,6 +21,9 @@ std::unordered_map<std::string, const TypeNode *>
 std::unordered_map<std::string, const TypeNode *>
     g_generator_send_type_map;
 
+std::unordered_map<std::string, std::vector<const TypeNode *>>
+    g_generic_default_types;
+
 } // namespace detail
 } // namespace typecheck
 } // namespace skein

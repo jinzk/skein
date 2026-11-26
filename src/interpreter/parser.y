@@ -5,6 +5,7 @@
 #include <cstdarg>
 #include <cstring>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -1081,6 +1082,52 @@ static struct type_constraint *runtime_type_or_error(
     }
     return type;
 }
+
+static std::unordered_set<std::string> g_generic_decl_names;
+
+static void note_generic_decl(struct ast *decl) {
+    if (!decl)
+        return;
+    const char *name = NULL;
+    bool generic = false;
+    switch (decl->nodetype) {
+        case 'Y': {
+            struct struct_node *node = (struct struct_node *)decl;
+            name = node->name;
+            generic = node->generic_params != NULL;
+            break;
+        }
+        case NODE_ENUM_DECL: {
+            struct enum_node *node = (struct enum_node *)decl;
+            name = node->name;
+            generic = node->generic_params != NULL;
+            break;
+        }
+        case 't': {
+            struct protocol_node *node = (struct protocol_node *)decl;
+            name = node->name;
+            generic = node->generic_params != NULL;
+            break;
+        }
+        case 'Z': {
+            struct funcdef *node = (struct funcdef *)decl;
+            name = node->name;
+            generic = node->generic_params != NULL;
+            break;
+        }
+        default:
+            return;
+    }
+    if (generic && name && *name)
+        g_generic_decl_names.insert(name);
+}
+
+static bool is_known_generic_name(struct ast *expr) {
+    if (!expr || expr->nodetype != 'N')
+        return false;
+    const struct symref *ref = (const struct symref *)expr;
+    return ref->name && g_generic_decl_names.count(ref->name) != 0;
+}
 %}
 
 %locations
@@ -2125,7 +2172,8 @@ exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
     | exp '[' exp ']'                     {
         $$ = newindex($1, $3,
                       @2.first_line, @2.first_column,
-                      @4.first_line, @4.first_column);
+                      @4.first_line, @4.first_column,
+                      is_known_generic_name($1));
       }
     | exp '[' slice_bound ':' slice_bound ']' {
         $$ = newslice($1, $3, $5, NULL);
@@ -2558,6 +2606,7 @@ top_statement: top_expression EOL {
                 YYABORT;
         } else {
 
+        note_generic_decl($1);
         if (!g_statement_invalid && $1 &&
             !skein::typecheck::check_statement($1))
             g_statement_invalid = true;

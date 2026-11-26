@@ -1482,7 +1482,7 @@ struct ast *newbracketapply(struct ast *base, int start_line,
 
 struct ast *newindex(struct ast *container, struct ast *index,
                      int start_line, int start_column, int end_line,
-                     int end_column) {
+                     int end_column, bool generic_candidate) {
     struct index_node *a =
         (struct index_node *)ast_node_alloc(sizeof(struct index_node));
     if (!a) {
@@ -1498,6 +1498,7 @@ struct ast *newindex(struct ast *container, struct ast *index,
     a->span.start_column = start_column;
     a->span.end_line = end_line;
     a->span.end_column = end_column;
+    a->generic_candidate = generic_candidate;
     return (struct ast *)a;
 }
 

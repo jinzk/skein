@@ -1,0 +1,48 @@
+import std;
+include "_support.skein";
+
+enum Option[T any] {
+  None;
+  Some { value: T; }
+}
+
+ts_test("generic enum inference", func() {
+  let a = Option.Some { value: 1 };
+  let av = match (a) {
+    case Option.Some { value } => value;
+    case Option.None => 0;
+  };
+  ts_eq(av, 1);
+  let b = Option.Some { value: "x" };
+  let bv = match (b) {
+    case Option.Some { value } => value;
+    case Option.None => "";
+  };
+  ts_eq(bv, "x");
+});
+
+ts_test("generic enum annotation", func() {
+  let a: Option[int] = Option.Some { value: 2 };
+  let av = match (a) {
+    case Option.Some { value } => value;
+    case Option.None => 0;
+  };
+  ts_eq(av, 2);
+  let b: Option[string] = Option.Some { value: "y" };
+  let bv = match (b) {
+    case Option.Some { value } => value;
+    case Option.None => "";
+  };
+  ts_eq(bv, "y");
+});
+
+ts_test("generic enum pattern", func() {
+  let b: Option[string] = Option.Some { value: "z" };
+  let out = match (b) {
+    case Option.Some { value } => value;
+    case Option.None => "none";
+  };
+  ts_eq(out, "z");
+});
+
+ts_finish();

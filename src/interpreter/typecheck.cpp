@@ -36,6 +36,7 @@ thread_local std::unordered_map<std::string, std::vector<std::string>>
 struct GenericTypeMeta {
     std::vector<std::string> params;
     ConstTypeMap fields;
+    std::unordered_map<std::string, ConstTypeMap> variants;
 };
 
 thread_local std::unordered_map<std::string, GenericTypeMeta>
@@ -2677,8 +2678,16 @@ struct Checker : public BuiltinContext {
             auto meta = g_generic_type_meta.find(
                 static_type_key(source, name));
             if (meta != g_generic_type_meta.end()) {
-                if (!static_fields && !meta->second.fields.empty())
-                    static_fields = &meta->second.fields;
+                if (!static_fields) {
+                    if (variant_name) {
+                        auto variant_fields =
+                            meta->second.variants.find(variant_name);
+                        if (variant_fields != meta->second.variants.end())
+                            static_fields = &variant_fields->second;
+                    } else if (!meta->second.fields.empty()) {
+                        static_fields = &meta->second.fields;
+                    }
+                }
                 if (!meta->second.params.empty())
                     generic_params = &meta->second.params;
             }
@@ -3048,12 +3057,15 @@ struct Checker : public BuiltinContext {
     }
 
     bool check_enum_decl(struct enum_node *decl, Env &env) {
-        if (!reject_generic_params(decl->generic_params, decl->line,
-                                   decl->column))
-            return false;
         StaticTypeInfo &info = static_types[
             static_type_key(decl->source, decl->name)];
         info.is_enum = true;
+        info.generic_params.clear();
+        for (struct generic_param *param = decl->generic_params;
+             param; param = param->next) {
+            if (param->name)
+                info.generic_params.push_back(param->name);
+        }
         for (struct enum_variant *variant = decl->variants; variant;
              variant = variant->next) {
             auto &fields = info.variants[variant->name
@@ -3071,6 +3083,10 @@ struct Checker : public BuiltinContext {
                 }
             }
         }
+        GenericTypeMeta &meta =
+            g_generic_type_meta[static_type_key(decl->source, decl->name)];
+        meta.params = info.generic_params;
+        meta.variants = info.variants;
         for (struct enum_variant *variant = decl->variants; variant;
              variant = variant->next) {
             for (struct struct_member *field = variant->fields; field;
@@ -3710,7 +3726,13 @@ struct Checker : public BuiltinContext {
                 struct enum_lit_node *lit =
                     (struct enum_lit_node *)expr;
                 check_struct_literal(expr, env);
-                return type_named(lit->source, lit->name);
+                const TypeNode *named =
+                    type_named(lit->source, lit->name);
+                auto inferred = generic_literal_args.find(expr);
+                if (inferred != generic_literal_args.end())
+                    named = type_named_generic(lit->source, lit->name,
+                                               inferred->second);
+                return named;
             }
             case '=': {
                 struct symasgn *asgn = (struct symasgn *)expr;

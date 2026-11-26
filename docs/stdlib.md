@@ -2413,6 +2413,19 @@ std.meta.type_args(box_value)       // null；运行时值不携带类型实参
 类型描述符复用普通类型语法，例如 `"Box[int]"`、`"Option[list[string]]"`。
 泛型信息属于类型层；运行时值仍然完全擦除类型实参，因此不能从值反推类型实参。
 
+内建容器同样参与统一查询：
+
+```text
+std.meta.type_params("list")          // ["T"]
+std.meta.type_args("list[int]")       // ["int"]
+std.meta.type_args("dict[string, list[int]]")
+std.meta.generic_info("generator[int]")  // params T,S; args int,any
+std.meta.type_info("list[int]")       // kind=builtin, name=list
+```
+
+`type_info` 对泛型描述符只返回外层类型；需要实参时使用 `type_args` 或
+`generic_info`。
+
 `std.lru` 是内嵌 Skein 源码包（`lib/std/lru.skein`），需要 `import std.lru;`：
 
 ```text

@@ -455,6 +455,101 @@ const type_def *as_type_def(const resolved_type &type) {
     return NULL;
 }
 
+struct builtin_generic_def {
+    const char *name;
+    const char *canonical;
+    std::vector<std::string> params;
+    bool variadic;
+    int min_args;
+    int max_args;
+    std::vector<std::string> defaults;
+};
+
+const std::vector<builtin_generic_def> &builtin_generics() {
+    static const std::vector<builtin_generic_def> table = {
+        {"list", "list", {"T"}, false, 1, 1, {}},
+        {"dict", "dict", {"K", "V"}, false, 2, 2, {}},
+        {"set", "set", {"T"}, false, 1, 1, {}},
+        {"deque", "deque", {"T"}, false, 1, 1, {}},
+        {"heap", "heap", {"T"}, false, 1, 1, {}},
+        {"task", "task", {"T"}, false, 1, 1, {}},
+        {"generator", "generator", {"T", "S"}, false, 1, 2, {"", "any"}},
+        {"pair", "pair", {"A", "B"}, false, 2, 2, {}},
+        {"result", "result", {"T", "E"}, false, 2, 2, {}},
+        {"ref", "ref", {"T"}, false, 1, 1, {}},
+        {"weak", "weak", {"T"}, false, 1, 1, {}},
+        {"tuple", "tuple", {}, true, 0, -1, {}},
+        {"union", "union", {}, true, 1, -1, {}},
+    };
+    return table;
+}
+
+const builtin_generic_def *find_builtin_generic(const std::string &name) {
+    for (const builtin_generic_def &def : builtin_generics()) {
+        if (name == def.name)
+            return &def;
+    }
+    return NULL;
+}
+
+bool builtin_generic_arguments(const builtin_generic_def &def,
+                               const type_descriptor &desc,
+                               std::vector<std::string> &args,
+                               bool &defaulted, std::string &error,
+                               bool allow_incomplete = false) {
+    const int count = (int)desc.args.size();
+    if ((!def.variadic && count > def.max_args) ||
+        (def.variadic && def.max_args >= 0 && count > def.max_args)) {
+        if (def.min_args == def.max_args) {
+            error = "type " + std::string(def.canonical) + " expects " +
+                    std::to_string(def.min_args) +
+                    " type argument(s), got " + std::to_string(count);
+        } else if (def.variadic) {
+            error = "type " + std::string(def.canonical) + " expects at most " +
+                    std::to_string(def.max_args) +
+                    " type argument(s), got " + std::to_string(count);
+        } else {
+            error = "type " + std::string(def.canonical) + " expects " +
+                    std::to_string(def.min_args) + " to " +
+                    std::to_string(def.max_args) +
+                    " type argument(s), got " + std::to_string(count);
+        }
+        return false;
+    }
+    if (count < def.min_args && !allow_incomplete) {
+        if (def.variadic) {
+            error = "type " + std::string(def.canonical) + " expects at least " +
+                    std::to_string(def.min_args) +
+                    " type argument(s), got " + std::to_string(count);
+        } else {
+            error = "type " + std::string(def.canonical) + " expects " +
+                    std::to_string(def.min_args) +
+                    " type argument(s), got " + std::to_string(count);
+        }
+        return false;
+    }
+    args.clear();
+    for (const type_descriptor_ptr &arg : desc.args)
+        args.push_back(type_descriptor_display(*arg));
+    if (!def.variadic && (int)args.size() < def.max_args) {
+        for (std::size_t i = args.size();
+             i < def.params.size() && i < def.defaults.size(); ++i) {
+            if (!def.defaults[i].empty()) {
+                args.push_back(def.defaults[i]);
+                defaulted = true;
+            }
+        }
+    }
+    return true;
+}
+
+bool builtin_generic_instantiated(const builtin_generic_def &def,
+                                  std::size_t argc) {
+    if (def.variadic)
+        return (int)argc >= def.min_args;
+    return (int)argc == def.max_args;
+}
+
 const std::vector<std::string> *generic_params_of(
     const resolved_type &type) {
     if (type.kind == RESOLVED_STRUCT)
@@ -463,6 +558,12 @@ const std::vector<std::string> *generic_params_of(
         return &type.enumeration->generic_params;
     if (type.kind == RESOLVED_PROTOCOL)
         return &type.protocol->generic_params;
+    if (type.kind == RESOLVED_BUILTIN && type.builtin_name) {
+        const builtin_generic_def *def =
+            find_builtin_generic(type.builtin_name);
+        if (def)
+            return &def->params;
+    }
     return NULL;
 }
 
@@ -524,6 +625,25 @@ struct value_t *typeinfo_type_info(const char *importer_source,
                                    struct value_t *type_arg) {
     resolved_type type;
     std::string error;
+    if (type_arg && type_arg->type == T_string) {
+        std::string text = ((struct string_value_t *)type_arg)->value;
+        for (std::size_t pos = 0;
+             (pos = text.find("::", pos)) != std::string::npos;)
+            text.replace(pos, 2, ".");
+        type_descriptor desc;
+        std::string descriptor_error;
+        if (parse_type_descriptor(text, desc, descriptor_error)) {
+            std::string base = desc.package.empty()
+                                   ? desc.name
+                                   : desc.package + "." + desc.name;
+            if (!report_resolve_error(
+                    resolve_type_name_text(importer_source, importer_package,
+                                           base, type, error),
+                    error))
+                return NULL;
+            return make_type_info(type);
+        }
+    }
     if (!report_resolve_error(resolve_type_arg(importer_source,
                                                importer_package, type_arg,
                                                type, error),
@@ -674,6 +794,33 @@ struct value_t *typeinfo_generic_info(const char *importer_source,
         return NULL;
     }
 
+    if (const builtin_generic_def *builtin =
+            find_builtin_generic(desc.name)) {
+        std::vector<std::string> args;
+        bool defaulted = false;
+        if (!builtin_generic_arguments(*builtin, desc, args, defaulted,
+                                       error, true)) {
+            yyerror("std.meta.generic_info: %s", error.c_str());
+            return NULL;
+        }
+        struct dict_value_t *dict = newdictval();
+        dict_add(dict, "type", newstrval(text.c_str()));
+        dict_add(dict, "name", newstrval(builtin->canonical));
+        dict_add(dict, "kind", newstrval("builtin"));
+        dict_add(dict, "package", newstrval(""));
+        dict_add(dict, "module", newstrval(""));
+        dict_add(dict, "source", newstrval(""));
+        dict_add(dict, "exported", newboolval(false));
+        dict_add(dict, "params", string_list_of(builtin->params));
+        dict_add(dict, "args", string_list_of(args));
+        dict_add(dict, "instantiated",
+                 newboolval(builtin_generic_instantiated(
+                     *builtin, args.size())));
+        dict_add(dict, "defaulted", newboolval(defaulted));
+        dict_add(dict, "variadic", newboolval(builtin->variadic));
+        return (struct value_t *)dict;
+    }
+
     resolved_type type;
     std::string base = descriptor_base_text(desc);
     if (!report_resolve_error(
@@ -740,6 +887,7 @@ struct value_t *typeinfo_generic_info(const char *importer_source,
     dict_add(dict, "args", string_list_of(args));
     dict_add(dict, "instantiated", newboolval(instantiated));
     dict_add(dict, "defaulted", newboolval(defaulted));
+    dict_add(dict, "variadic", newboolval(false));
     return (struct value_t *)dict;
 }
 
@@ -754,6 +902,20 @@ struct value_t *typeinfo_type_args(const char *importer_source,
     if (!descriptor_from_string_arg(type_arg, desc, text, error)) {
         yyerror("std.meta.type_args: %s", error.c_str());
         return NULL;
+    }
+
+    if (const builtin_generic_def *builtin =
+            find_builtin_generic(desc.name)) {
+        std::vector<std::string> args;
+        bool defaulted = false;
+        if (!builtin_generic_arguments(*builtin, desc, args, defaulted,
+                                       error, true)) {
+            yyerror("std.meta.type_args: %s", error.c_str());
+            return NULL;
+        }
+        if (!builtin_generic_instantiated(*builtin, args.size()))
+            return newnull();
+        return string_list_of(args);
     }
 
     resolved_type type;
@@ -798,6 +960,9 @@ struct value_t *typeinfo_type_params(const char *importer_source,
             yyerror("std.meta.type_params: %s", error.c_str());
             return NULL;
         }
+        if (const builtin_generic_def *builtin =
+                find_builtin_generic(desc.name))
+            return string_list_of(builtin->params);
         std::string base = descriptor_base_text(desc);
         if (!report_resolve_error(
                 resolve_type_name_text(importer_source, importer_package,

@@ -49,4 +49,42 @@ ts_test("generic meta value has no runtime args", func() {
   ts_eq(std.meta.type_params(b), ["T"]);
 });
 
+ts_test("builtin container generic meta", func() {
+  ts_eq(std.meta.type_params("list"), ["T"]);
+  ts_eq(std.meta.type_args("list[int]"), ["int"]);
+  ts_eq(std.meta.type_args("dict[string, list[int]]"),
+        ["string", "list[int]"]);
+  ts_eq(std.meta.type_args("list"), null);
+
+  let gi = std.meta.generic_info("list[int]");
+  ts_eq(gi["kind"], "builtin");
+  ts_eq(gi["name"], "list");
+  ts_eq(gi["params"], ["T"]);
+  ts_eq(gi["args"], ["int"]);
+  ts_eq(gi["instantiated"], true);
+  ts_eq(gi["variadic"], false);
+});
+
+ts_test("builtin variadic generic meta", func() {
+  ts_eq(std.meta.type_args("tuple[int, string]"), ["int", "string"]);
+  ts_eq(std.meta.type_args("union[int, string]"), ["int", "string"]);
+  ts_eq(std.meta.generic_info("tuple[int]")["variadic"], true);
+});
+
+ts_test("builtin generator default argument", func() {
+  let gi = std.meta.generic_info("generator[int]");
+  ts_eq(gi["params"], ["T", "S"]);
+  ts_eq(gi["args"], ["int", "any"]);
+  ts_eq(gi["defaulted"], true);
+  ts_eq(gi["instantiated"], true);
+  ts_eq(std.meta.type_args("generator[int]"), ["int", "any"]);
+});
+
+ts_test("meta type_info accepts descriptors", func() {
+  ts_eq(std.meta.type_info("list[int]")["name"], "list");
+  ts_eq(std.meta.type_info("Box[int]")["name"], "Box");
+  ts_eq(std.meta.type_params([1, 2]), ["T"]);
+  ts_eq(std.meta.type_params({"a": 1}), ["K", "V"]);
+});
+
 ts_finish();

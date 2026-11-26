@@ -374,6 +374,9 @@ std.meta.type_params("Box[int]")
 行为：
 
 - 泛型信息通过显式类型描述符查询；
+- 内建容器同样支持：`type_params("list")`、`type_args("list[int]")`、
+  `generic_info("generator[int]")`；
+- `type_info` 对描述符只返回外层类型，实参查询使用 `type_args` / `generic_info`；
 - `Box[int]` 返回 `args: ["int"]`；
 - `Box[any]` 返回 `args: ["any"]`；
 - `Box` 有默认值时返回默认实参并标记 `defaulted: true`；

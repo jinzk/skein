@@ -127,7 +127,8 @@ std.result.capture(func() { statements })
 
 第一批不包含：
 
-- 用户自定义 `macro` 声明；
+- 用户自定义 `macro` 声明：不在第一批，设计提案见
+  [`docs/macros_user_defined.md`](macros_user_defined.md)；
 - `list!` / `dict!` / `try!`：已决定不实现；列表和字典直接使用普通字面量，
   错误捕获使用 `std.result.capture` 或 `on error`；
 - `type` / `pattern` / `module` / `operator` 片段；

@@ -48,7 +48,7 @@ module 代码。
 | `completionProvider` | 触发字符 `.`；提供关键字、当前可见符号、`std.*` 命名空间成员，以及工作区 module 的导出符号（含 `as` 别名） |
 | `hoverProvider` | 返回关键字说明、局部变量类型、`std.*` 签名或导入模块的导出符号签名 |
 | `definitionProvider` | 先在当前文档内按声明名跳转，未命中时按 import 别名解析到工作区 module 的导出声明（跨文件） |
-| `documentSymbolProvider` | `func` / `let` / `const` / `struct` / `enum` / `protocol` / `impl` 等顶层声明；struct 内联方法和 `impl` 方法是类型成员，不另列为顶层符号 |
+| `documentSymbolProvider` | `func` / `let` / `const` / `struct` / `enum` / `proto` / `impl` 等顶层声明；struct 内联方法和 `impl` 方法是类型成员，不另列为顶层符号 |
 | `workspace.workspaceFolders` | 声明支持多根工作区；文件夹与 `-I` 路径共同构成索引根 |
 
 诊断字段映射：`source` 固定为 `skein`，`code` 为 `PAR####` / `TYP####` /

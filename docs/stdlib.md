@@ -251,7 +251,9 @@ t.detached() -> bool
 
 当前限制：
 
-- `launch` 是保留关键字；
+- 规划中 `launch` / `await` 是表达式起始 contextual keyword，`wait` 改为内置宏
+  `wait!`（规范路径 `std.task.wait!`，展开为 `t.wait()`）；M11 落地前当前实现仍
+  使用保留字 `launch` / `wait`；
 - `launch` 推导为 `task[T]`；`func f(): void` 推导为 `task[void]`；
 - 静态已知返回 `task[...]` 的调用不能 `launch`，会报
   `launch cannot start a call that already returns task[...]; call it directly and use .wait()`；
@@ -2430,7 +2432,8 @@ print(std.meta.has_type("int"));      // true
 的类型必须 `export`；不可见类型报错，`has_type` 返回 `false`。
 `fields` / `variants` / `methods` / `protocols` 对不适用的类型返回空列表。
 `methods` 同时包含 struct 内联方法和 `impl Type` 追加的方法，二者共享方法表；
-`protocols` / `implements` 按结构式方法签名匹配检查 protocol。
+`protocols` / `implements` 按结构式方法签名匹配检查 proto。反射 kind 字符串
+规划为 `"proto"`；在 M11 落地前，当前实现仍返回 `"protocol"`。
 返回字典同时包含 `package`、`module`、`source`：
 `package` 是完整包身份，`module` 是 Module 容器名（普通包和入口为空字符串），
 `source` 是源文件路径。
@@ -3707,7 +3710,7 @@ std.thread.capabilities
 - `std.process` 提供命令执行和状态查询；
 - `std.type` 提供 `kind_of`、`type_name`、`type_package`、`type_module_name`、`type_source`；
 - `std.ref` 提供 `ref` / `weak` 句柄的替换、升级和值快照；
-- `std.meta` 提供只读类型反射，查询字段、变体、方法和 protocol；
+- `std.meta` 提供只读类型反射，查询字段、变体、方法和 proto；
 - `std.net` 提供同步和 task 形式异步的 TCP/DNS，数据使用 `bytes`，底层由 libuv 驱动；
 - `std.net` 的阻塞操作支持可选 `timeout_ms`，超时是运行时错误；
 - `std.net` 的 `local_addr` / `peer_addr` 返回 `address`、`port`、`family` 三项 dict；

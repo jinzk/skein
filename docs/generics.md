@@ -2,15 +2,21 @@
 
 状态：**已完成（当前范围）**。
 
+规划中的语言级重命名：`protocol` → `proto`。`proto` 作为协议类型声明关键字时是
+全局保留字（`proto Keyed[K any]`）；泛型约束列表里的 `proto` 与 `type` 一样是
+contextual 标记，只在 `[V proto Drawable]` 这类位置生效。反射 kind 字符串同步
+改为 `"proto"`。本文示例使用目标拼写；在 M11 落地前，当前实现仍使用
+`protocol` / `"protocol"`。
+
 本文记录用户自定义泛型的最终语法、语义决议、实现阶段和测试要求。当前已实现：
 
-- 泛型 `struct` / `enum` / `protocol` / 自由函数声明；
+- 泛型 `struct` / `enum` / `proto` / 自由函数声明；
 - `Box[int]`、`Option[int]` 类型注解；
 - `Box[int] { ... }`、`Option[int].Some { ... }`、`Option[int].None`；
 - 泛型函数调用推断、`f[int](...)` 和 `let g = f[int]`；
-- `|` 类型集合、`&` protocol/`hashable` 组和约束检查；
+- `|` 类型集合、`&` proto/`hashable` 组和约束检查；
 - `type` / `proto` 约束标记；
-- 泛型 protocol 的结构式匹配、类型参数推断、默认方法和 `[T Keyed[int]]` 约束；
+- 泛型 proto 的结构式匹配、类型参数推断、默认方法和 `[T Keyed[int]]` 约束；
 - 默认类型参数的声明、尾部/约束校验和推断缺失时的补全；
 - 裸 `Box` 类型注解按默认类型实参补全；
 - `std.meta.generic_info` / `type_args` / `type_params`；
@@ -26,9 +32,9 @@
 
 ## 1. 目标
 
-- 支持泛型 `struct` / `enum` / `protocol` / 自由函数；
+- 支持泛型 `struct` / `enum` / `proto` / 自由函数；
 - 类型参数只参与静态检查，运行时擦除；
-- 支持 protocol 约束、内置 `hashable` 约束和有限类型集合约束；
+- 支持 proto 约束、内置 `hashable` 约束和有限类型集合约束；
 - 保持现有非泛型 struct 的值语义、COW、递归和序列化边界；
 - 不引入泛型特化、泛型方法、运行时泛型标签或隐式泛型转换。
 
@@ -38,8 +44,8 @@
 
 - `impl Box[int]` / `impl Box[any]` 特化；
 - 泛型方法（`func map[U](self, ...)`）；
-- protocol 继承、关联类型、泛型 protocol 特化；
-- protocol 并集；
+- proto 继承、关联类型、泛型 proto 特化；
+- proto 并集；
 - `&` 和 `|` 混合约束；
 - 运行时 `is Box[int]`；
 - 从任意运行时值反推类型实参；
@@ -62,7 +68,7 @@ enum Option[T any] {
   Some { value: T; }
 }
 
-protocol Keyed[K any] {
+proto Keyed[K any] {
   func key(self): K;
 }
 
@@ -97,7 +103,9 @@ impl Box {
 ```
 
 - `type` 表示后面的约束是具体类型集合或单一具体类型；
-- `proto` 表示后面的约束是 protocol / 内置约束组；
+- `proto` 表示后面的约束是 proto / 内置约束组；
+- 这里的 `type` / `proto` 都是 contextual 标记，只在类型参数约束位置识别；
+  作为协议声明关键字的 `proto` 则是全局保留字；
 - 不同参数可以使用不同标记；
 - 不写标记的旧形式继续兼容。
 
@@ -131,21 +139,21 @@ struct Box[T = any] {
 约束只能是以下两种形态之一，不能混用：
 
 ```text
-ProtocolGroup := Protocol ('&' Protocol)*
+ProtoGroup := Proto ('&' Proto)*
 TypeUnion     := ConcreteType ('|' ConcreteType)*
 ```
 
-`type` 标记用于 `TypeUnion`，`proto` 标记用于 `ProtocolGroup`；
+`type` 标记用于 `TypeUnion`，`proto` 标记用于 `ProtoGroup`；
 不写标记时由编译器根据名字和已有声明推断。`hashable` 可出现在 `&` 组中。
 
-`ProtocolGroup`：
+`ProtoGroup`：
 
 ```skein
 [T Drawable]
 [T Drawable & std.dict_key.DictKey]
 ```
 
-- `&` 两侧必须是 protocol 或内置约束；
+- `&` 两侧必须是 proto 或内置约束；
 - `hashable` 是内置约束，可参与 `&`；
 - 不允许具体类型出现在 `&` 中。
 
@@ -157,7 +165,7 @@ TypeUnion     := ConcreteType ('|' ConcreteType)*
 ```
 
 - `|` 两侧必须是具体类型或已实例化的泛型类型；
-- protocol 不能作为 `|` 成员；
+- proto 不能作为 `|` 成员；
 - `any` 不能作为 `|` 成员；
 - `hashable` 不能作为 `|` 成员。
 
@@ -205,15 +213,15 @@ Box[int|bool]
 
 规则：union 类型实参满足约束，当且仅当 union 的所有成员都满足约束。
 
-### 3.5 `any` 和 protocol
+### 3.5 `any` 和 proto
 
 `any` 是动态顶层值类型：
 
 ```skein
-let x: any = user;   // user 可以是实现 protocol 的 struct/enum/function
+let x: any = user;   // user 可以是实现 proto 的 struct/enum/function
 ```
 
-但 protocol 不是类型实参：
+但 proto 不是类型实参：
 
 ```skein
 Box[any]      // 合法
@@ -229,7 +237,7 @@ struct Holder[T Keyed] {
 ```
 
 `T any` 可以绑定到 struct / enum / function 等具体类型，但不自动拥有
-`callable`、`hashable` 或 protocol 方法；需要时使用约束。
+`callable`、`hashable` 或 proto 方法；需要时使用约束。
 
 ### 3.6 显式类型实例化
 
@@ -290,7 +298,7 @@ let g = identity[int];   // 显式实例化的函数值
 ```
 
 不自动计算“所有成员的共同能力”。泛型体里对 `T` 的操作由写泛型代码的作者保证；
-如果作者需要静态保证，应使用 protocol 约束：
+如果作者需要静态保证，应使用 proto 约束：
 
 ```skein
 [T Drawable]
@@ -307,7 +315,7 @@ let g = identity[int];   // 显式实例化的函数值
 
 ### 4.5 `hashable`
 
-`hashable` 是内置约束，不是普通 protocol。语义复用现有 key 契约：
+`hashable` 是内置约束，不是普通 proto。语义复用现有 key 契约：
 
 满足：
 
@@ -324,12 +332,12 @@ let g = identity[int];   // 显式实例化的函数值
 - error / result / userdata；
 - `any`、未约束的类型参数。
 
-### 4.6 泛型 protocol
+### 4.6 泛型 proto
 
 支持：
 
 ```skein
-protocol Keyed[K any] {
+proto Keyed[K any] {
   func key(self): K;
 }
 ```
@@ -337,11 +345,11 @@ protocol Keyed[K any] {
 - 结构式方法签名匹配；
 - 类型参数替换；
 - 现有默认方法机制可用，但不能引入方法级类型参数；
-- 不支持 protocol 继承和关联类型；
+- 不支持 proto 继承和关联类型；
 - `x is Keyed` 只检查结构；
 - `x is Keyed[int]` 禁止；
-- 约束位置支持显式 protocol 类型实参，例如 `[T Keyed[int]]`；
-- 未写类型实参时从实现类型的方法签名推断 protocol 类型参数，并要求多个方法一致。
+- 约束位置支持显式 proto 类型实参，例如 `[T Keyed[int]]`；
+- 未写类型实参时从实现类型的方法签名推断 proto 类型参数，并要求多个方法一致。
 
 ### 4.7 递归
 
@@ -429,10 +437,10 @@ std.meta.type_params("Box[int]")
 
 工作项：
 
-- 声明上的类型参数列表：`struct` / `enum` / `protocol` / `func`；
+- 声明上的类型参数列表：`struct` / `enum` / `proto` / `func`；
 - `impl Box` 绑定声明中的全部类型参数；
 - 类型实参 `Box[int]`、`Box[int|string]`；
-- 约束解析：`&` protocol 组、`|` 类型集合，禁止混用；
+- 约束解析：`&` proto 组、`|` 类型集合，禁止混用；
 - 显式类型实参 `f[int]` / `f[int](...)`；
 - `let g = f[int]` 的 AST 形态；
 - `is Box` 允许，`is Box[int]` 在类型检查阶段拒绝。
@@ -440,7 +448,7 @@ std.meta.type_params("Box[int]")
 验收：
 
 - 正例可解析；
-- 混用 `&` / `|`、protocol `|`、部分显式类型实参产生明确语法/类型错误；
+- 混用 `&` / `|`、proto `|`、部分显式类型实参产生明确语法/类型错误；
 - 非泛型值的 `x[...]` 仍按索引解析。
 
 ### Phase 2：静态类型模型
@@ -482,10 +490,10 @@ std.meta.type_params("Box[int]")
 
 - 泛型 struct/enum 字段、构造和模式匹配；
 - 泛型函数声明、调用推断和显式实例化；
-- 泛型 protocol 的结构式匹配；
+- 泛型 proto 的结构式匹配；
 - `impl Box` 方法签名使用 struct 的类型参数；
 - `|` 实例化成员检查，不做共同能力强制；
-- `&` protocol 组和内置 `hashable` 检查；
+- `&` proto 组和内置 `hashable` 检查；
 - 泛型实例不可隐式转换；
 - `is Box` / `is Keyed` 的静态限制；
 - 诊断信息和错误位置。
@@ -600,13 +608,13 @@ std.meta.type_params("Box[int]")
 
 ### 语法
 
-- 泛型 struct / enum / protocol / function 声明；
+- 泛型 struct / enum / proto / function 声明；
 - 默认类型参数；
 - 类型实参 union；
-- `&` protocol 组；
+- `&` proto 组；
 - `|` 类型集合；
 - 禁止 `&` / `|` 混用；
-- 禁止 protocol `|`；
+- 禁止 proto `|`；
 - `f[int](...)` 和 `let g = f[int]`；
 - 部分显式类型实参报错；
 - 泛型方法声明报错；
@@ -623,7 +631,7 @@ std.meta.type_params("Box[int]")
 - `Box[int|string]` 在 `T int|string` 下允许；
 - `Box[int]` 不能赋给 `Box[any]`；
 - `Box[int]` 不能赋给 `Box[int|string]`；
-- protocol 约束包含检查；
+- proto 约束包含检查；
 - `any` 不能传给更窄约束；
 - `hashable` 正反例；
 - `is Box` / `is Keyed`；
@@ -670,4 +678,4 @@ std.meta.type_params("Box[int]")
 - release 和 JIT 全量测试通过；
 - meta 和序列化行为符合本文；
 - 文档同步；
-- 现有内部容器泛型和 `_` / `protocol` / `ref` 行为无回归。
+- 现有内部容器泛型和 `_` / `proto` / `ref` 行为无回归。

@@ -170,13 +170,14 @@ import {retry! as r} from util;   // 调用时写 r!(...)
 | `capture!` | `std.result.capture!` |
 
 `std.assert.that!` / `std.assert.schema!` 本身就是规范路径，没有裸名别名。
-后续控制流宏阶段加入：
+后续控制流与任务宏阶段加入：
 
 | 裸名 | 规范路径 |
 | --- | --- |
 | `fail!` | `std.error.fail!` |
 | `recover!` | `std.error.recover!` |
 | `pass!` | `std.error.pass!` |
+| `wait!` | `std.task.wait!` |
 
 宏解析发生在语法分析阶段，顺序为：
 
@@ -272,7 +273,7 @@ wrap!(2) {
 - 对 `if` / `for` / `match` / `defer` / `on error` 等核心语义的重写；用户宏不得
   重写 `fail` / `recover` / `pass`，这三者由后续阶段的内置宏 `fail!` /
   `recover!` / `pass!` 提供；
-- `shape` 类型、protocol 字段或鸭子类型；
+- `shape` 类型、proto 字段或鸭子类型；
 - 运算符宏；
 - 专用宏 opcode；
 - v1 跨模块宏可见性；后续按第 3.4 节的 selective import 设计；
@@ -375,8 +376,15 @@ import 先做；builtin/prelude 清理与中风险关键字在宏实现之后再
 10. **Phase 9**：`on` / `error` 评估 handler-scoped contextual；`error!` 改为普通
     `NAME MACRO_BANG` 路径，`type error` 走类型命名空间，`.error` 仍是普通字段。
     保留 `%prec ON`，并补齐 handler body / defer / 默认参数诊断。
-11. **Phase 10**：中风险关键字（`as`、`ref` / `weak`、`launch` / `wait`、
-    `is`）按独立步骤处理，均排在宏实现完成之后。
+11. **Phase 10**：`wait` 改为内置宏 `wait!`（规范路径 `std.task.wait!`，展开
+    为 `#expr.wait()`）并退出保留字；`launch` 与新增的 `await` 改为表达式起始
+    位置的 contextual keyword：`launch f()` 启动 task，`await f()` 等价
+    `wait launch f()`。`await` 不引入函数颜色，要求后面是调用表达式；等待已有
+    task 用 `wait!(t)`。`as`、`ref` / `weak`、`is` 仍按独立步骤处理。
+12. **Phase 11**：协议声明关键字 `protocol` 重命名为 `proto`，作为全局保留字；
+    泛型约束列表里的 `proto` / `type` 仍是地位相同的 contextual 标记；同步
+    LSP、文档、测试和反射 kind 字符串 `"proto"`。该阶段独立发布，不回写已完成
+    里程碑。
 
 每个阶段都要保持旧的内置宏测试全绿；用户宏不得改变第一批宏的行为。
 
@@ -395,7 +403,8 @@ import 先做；builtin/prelude 清理与中风险关键字在宏实现之后再
    `import {name!} from pkg;`；
 8. `from` 只作为 selective import 的 contextual keyword，不设为全局保留字；
 9. 先做低风险 contextual keyword / selective import，再实现宏；`as`、`ref` /
-   `weak`、`launch` / `wait`、`is` 等中风险关键字在宏实现之后分独立步骤处理；
+   `weak`、`is` 等中风险关键字在宏实现之后分独立步骤处理；`wait` 走内置宏，
+   `launch` / `await` 走表达式起始 contextual；
 10. `in`、`export`、`package`、`import`、`include` 同属低风险 contextual
    keyword，在 Phase 1 处理；`module` 仅用于 manifest，不占 `.skein` 保留字；
 11. 普通内置函数改为默认 import；`len` / `range` 放进规划中的 `std.utils`
@@ -409,4 +418,16 @@ import 先做；builtin/prelude 清理与中风险关键字在宏实现之后再
    一律写括号；`foo! { ... }` 始终是 block；
 15. `on` / `error` 留到 Phase 9 再决定是 handler-scoped contextual 还是宏形式；
 16. 内置宏默认 import 映射采用第 3.5 节的表；`fail!` / `recover!` / `pass!`
-    的规范路径为 `std.error.fail!` / `std.error.recover!` / `std.error.pass!`。
+    的规范路径为 `std.error.fail!` / `std.error.recover!` / `std.error.pass!`；
+17. 协议声明关键字 `protocol` 重命名为 `proto`，作为全局保留字；泛型约束列表中
+    的 `proto` / `type` 是地位相同的 contextual 标记，只在类型参数约束位置
+    生效；反射 kind 字符串同步改为 `"proto"`，不保留 `"protocol"` 别名；
+18. `wait` 改为内置宏 `wait!`，规范路径 `std.task.wait!`，展开为 `#expr.wait()`；
+    `launch` 与新增的 `await` 是表达式起始 contextual keyword，不是全局保留字。
+    contextual 槽位覆盖语句开头、`=` / `return` / `yield` / `(` / `[` / `{` /
+    `,` / `:` 和二元运算符之后；`.` 之后仍是普通名字；
+19. `launch f()` 启动 task；`await f()` 等价 `wait launch f()`，要求后面是调用
+    表达式，已有 task 写 `wait!(t)`。`await(f())` 是前缀形式；调用同名变量写
+    `(await)(f())`。postfix 优先级高于前缀：`await f().xxx` 是
+    `await (f().xxx)`，先 await 再取字段写 `(await f()).xxx`。`await f() on error(...)`
+    沿用当前 `wait launch f() on error(...)` 的 handler 语义。

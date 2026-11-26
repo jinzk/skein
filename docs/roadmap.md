@@ -38,7 +38,7 @@
 | 对象抽象 / `protocol` / `ref` / Channel 模型（M8） | 功能已完成 | Channel 端点对、结构化 `protocol`、struct 内联方法、`_` 包私有成员，以及 `ref` / `weak` / GC / channel payload 拒绝已落地；文档同步完成，仅剩 Windows x64 MinGW/MSVC CI 发布门槛 |
 | 用户自定义泛型（M9） | 已完成 | 泛型 struct/enum/函数/protocol、显式实例化、约束、默认类型参数、裸 `Box` 补全、递归、VM/JIT 擦除、`std.meta` 泛型入口和 JSON envelope 已完成；通用二进制值格式不在当前范围，按需再评估 |
 | 断言与内置语法宏（M10） | 已完成 | 第一批已完成：`std.assert` / `std.log.enabled` 与 assert、日志、`capture!` 内置 AST 宏已落地并通过全量验证；`list!` / `dict!` / `try!` 已决定不实现；用户自定义宏不在 M10 |
-| 用户自定义宏与保留字清理（M11，提案） | 待决策 | AST 级静态模板、受限片段、hygienic、同文件声明先于使用；跨包阶段复用 selective import `import {name} from pkg`；后续分阶段做 prelude 默认 import（`len` / `range` → 规划中的 `std.utils`，内置宏 → `std.log.*!` / `std.result.capture!` 等规范路径）、类型构造器、`fail!` / `recover!` / `pass!` 宏与中风险 contextual keyword；设计见 [`docs/macros_user_defined.md`](macros_user_defined.md) |
+| 用户自定义宏与保留字清理（M11，提案） | 待决策 | AST 级静态模板、受限片段、hygienic、同文件声明先于使用；跨包阶段复用 selective import `import {name} from pkg`；后续分阶段做 prelude 默认 import（`len` / `range` → 规划中的 `std.utils`，内置宏 → `std.log.*!` / `std.result.capture!` / `std.task.wait!` 等规范路径）、类型构造器、`fail!` / `recover!` / `pass!` 宏、`launch` / `await` 表达式起始 contextual 与 `wait!` 宏、协议声明关键字 `protocol` → `proto` 与其余中风险 contextual keyword；设计见 [`docs/macros_user_defined.md`](macros_user_defined.md) |
 | `std.cache`（M7）/ `std.kv` | 已完成 | 维护；Valkey 独立 CI 服务可按需补 |
 | FFI 平台 CI / fuzz | 按需 | Windows x64（MinGW/MSVC）进入正式发布；32 位 / ARM 与 fuzz 按需，见 `architecture.md` |
 
@@ -508,7 +508,13 @@ keyword（`in` / `export` / `import` / `package` / `include`）已完成，其�
 5. `fail` / `recover` / `pass` 改为内置宏 `fail!` / `recover!` / `pass!`，
    退出保留字；同时只追加 `name!` 与 `name! x` 两种宏简写；
 6. `on` / `error` 评估 handler-scoped contextual，保留 `%prec ON`；
-7. 中风险关键字 `as`、`ref` / `weak`、`launch` / `wait`、`is` 分独立步骤处理。
+7. `wait` 改为内置宏 `wait!`（规范路径 `std.task.wait!`，展开为 `#expr.wait()`）；
+   `launch` 与新增 `await` 改为表达式起始 contextual keyword，`await f()` 等价
+   `wait launch f()`，保留 `on error` 语义；`as`、`ref` / `weak`、`is` 分独立步骤
+   处理；
+8. 协议声明关键字 `protocol` 重命名为 `proto`，作为全局保留字；泛型约束列表
+   里的 `proto` / `type` 保持 contextual 标记，反射 kind 字符串同步改为
+   `"proto"`。
 
 验收：每阶段保持第一批宏与全量测试全绿；`tools/check_docs_sync.py` 通过；
 遮蔽规则统一为“局部绑定 > 显式 import > 默认 import”，类型命名空间保持独立。

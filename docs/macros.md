@@ -11,7 +11,7 @@ Skein 的第一批宏只做**受限 AST 级语法脱糖**。宏在语法分析�
 
 宏不是文本替换，不是编译期任意执行，宏名也不是一等值。宏调用展开后是普通
 表达式。宏不能访问类型信息，
-不能创建新的类型约束、protocol 能力、specialization 或转换规则。
+不能创建新的类型约束、proto 能力、specialization 或转换规则。
 
 > 泛型负责类型抽象；宏负责语法抽象。
 
@@ -164,11 +164,13 @@ std.result.capture(func() { statements })
 - 一等宏值；
 - 声明生成宏；
 - 泛型声明或泛型调用生成；
-- `shape` 类型、protocol 字段、鸭子类型；
+- `shape` 类型、proto 字段、鸭子类型；
 - 运算符宏；
 - 对 `if` / `for` / `match` / `defer` / `on error` 等核心语义的重写；
 - `fail!` / `recover!` / `pass!`：规划为后续阶段的内置控制流宏，用于把
   `fail` / `recover` / `pass` 从保留字中移除，不属于第一批；
+- `wait!`：规划为任务宏，规范路径 `std.task.wait!`，展开为 `#expr.wait()`；
+  不属于第一批。`launch` / `await` 走表达式起始 contextual，不按宏处理；
 - 宏调用简写 `name!` / `name! x`：规划扩展，不属于第一批；
 - 专用宏 opcode。
 
@@ -181,7 +183,7 @@ std.result.capture(func() { statements })
 
 - 类型参数；
 - 类型约束；
-- protocol 匹配；
+- proto 匹配；
 - 类型推断；
 - 类型实参；
 - 默认类型元数据；

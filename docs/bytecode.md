@@ -148,7 +148,7 @@ python3 tests/vm_differential.py ./build/skein --fuzz-seconds 60
 - 索引/字段赋值、复合赋值、自增自减（含 COW 与循环引用检查）
 - `is` 类型检查
 - struct / enum 字面量构造
-- struct（含 inline 方法）/ enum / protocol / impl 声明
+- struct（含 inline 方法）/ enum / proto / impl 声明
 - package 声明
 - `fail`
 - `on error` / `recover` / `pass`（handler 栈 + 局部 unwind）
@@ -354,7 +354,7 @@ list 和实参，`a` 是参数个数。运行时确认 callee 仍是内建 `std.
 - 函数体 AST 在成功编译后释放；默认参数表达式成功编译后也会释放对应
   AST。参数 destructuring pattern 的 AST 保留，供函数体 Proto 编译和 AST
   回退使用。`function_code` / `symlist` 不再持有 AST 指针，回退用的 AST
-  保存在 L2 side table；`function_code->sl` 只保留参数/protocol 签名元数据。
+  保存在 L2 side table；`function_code->sl` 只保留参数/proto 签名元数据。
 - fast frame 支持普通函数以及 handler、defer、iterator，参数 pattern 在
   编译期得到 binding slot 后同样进入 fast frame；generator、默认参数、
   variadic 和 method 调用仍回退 `call_value_args` / C++ 递归。

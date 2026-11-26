@@ -28,10 +28,10 @@ let foo变量 = 4;
 ### 1.2 关键字
 
 ```text
-let const func yield defer launch wait
+let const func yield defer
 if else while do for
 switch case default
-struct impl protocol ref weak
+struct impl proto ref weak
 return break continue goto
 fail on error recover pass
 is
@@ -40,6 +40,17 @@ as
 ```
 
 `def` 已不再使用，匿名/命名函数统一使用 `func`。
+
+规划中的任务语法调整：`wait` 改为内置宏 `wait!` 并退出保留字；`launch` 与新增的
+`await` 改为表达式起始 contextual keyword。`launch f()` 启动 task，`await f()`
+等价 `wait launch f()`。详见任务章节；在 M11 落地前，当前实现仍使用保留字
+`launch` / `wait`。
+
+规划中的语言级重命名：`protocol` → `proto`。`proto` 作为协议类型声明关键字时是
+全局保留字（`proto Drawable`）；泛型约束列表里的 `proto` 与 `type` 一样是
+contextual 标记，只在 `[V proto Drawable]` 这类位置生效。`std.meta.type_info`
+等反射结果的 kind 字符串同步改为 `"proto"`。本文档示例使用目标拼写；在 M11
+落地前，当前实现仍使用 `protocol` / `"protocol"`。
 
 核心内置函数名（`print`、`println`、`len`、`range`、`input`、`list`、`dict` 和类型转换名等）目前由词法器识别为函数值，不能用作普通变量名。`std.*` 中的函数是普通模块成员，不是保留字。
 
@@ -705,10 +716,10 @@ p is Point        // true
 p is int          // false
 ```
 
-protocol：
+proto：
 
 ```text
-protocol Drawable {
+proto Drawable {
   func draw(self);
 }
 
@@ -722,10 +733,10 @@ struct Point {
 p is Drawable     // true，Point 有签名匹配的 draw
 ```
 
-protocol 默认方法：
+proto 默认方法：
 
 ```text
-protocol Drawable {
+proto Drawable {
   func draw(self) { print("default"); }
   func area(self);
 }
@@ -733,22 +744,22 @@ protocol Drawable {
 struct Point {
   x: int;
   func area(self) { return 1; }
-  // draw 使用 protocol 默认实现
+  // draw 使用 proto 默认实现
 }
 ```
 
-- protocol 方法可以写签名或默认方法体；类型自带的同名 inline 方法或 `impl Type`
+- proto 方法可以写签名或默认方法体；类型自带的同名 inline 方法或 `impl Type`
   追加的同名方法覆盖默认实现；
 - 没有默认体的纯签名方法必须由 inline 方法或 `impl Type` 方法匹配，否则不满足
-  protocol；
-- 多个 protocol 提供同名默认方法而类型没有自己的实现时报冲突，需要在 `struct`
+  proto；
+- 多个 proto 提供同名默认方法而类型没有自己的实现时报冲突，需要在 `struct`
   中直接实现，或在 `impl Type` 中显式实现。
 
-protocol 是结构式契约：方法名、参数个数、参数类型、`self` 接收者和返回类型都匹配即满足，不需要 `impl Protocol for Type` 声明。`trait`、`impl Protocol for Type`、`export protocol`、`struct Name with Protocol` / `enum Name with Protocol` 简写均已移除，没有兼容别名；`with` 仍是普通标识符。
+proto 是结构式契约：方法名、参数个数、参数类型、`self` 接收者和返回类型都匹配即满足，不需要 `impl Proto for Type` 声明。`trait`、`impl Proto for Type`、`export proto`、`struct Name with Proto` / `enum Name with Proto` 简写均已移除，没有兼容别名；`with` 仍是普通标识符。
 
-未标注类型的方法调用按值的运行时能力查找：值上有同名方法即可调用，不要求事先写 protocol 标注。protocol 标注和 `is Protocol` 则按上述签名规则做结构式检查。
+未标注类型的方法调用按值的运行时能力查找：值上有同名方法即可调用，不要求事先写 proto 标注。proto 标注和 `is Proto` 则按上述签名规则做结构式检查。
 
-`is` 只接受类型名或 protocol 名作为右操作数，并做结构式运行时检查；不接受任意表达式。类型名按包解析，因此同名结构体不会混淆。
+`is` 只接受类型名或 proto 名作为右操作数，并做结构式运行时检查；不接受任意表达式。类型名按包解析，因此同名结构体不会混淆。
 
 ### 4.12 运算优先级
 
@@ -814,7 +825,8 @@ capture! { statements }
 
 规划中的扩展只有两种调用简写：`name!`（零参数）和 `name! x`（单个 `NAME`
 参数）；列表、字典、表达式、嵌套宏和成员链仍写括号。控制流宏 `fail!` /
-`recover!` / `pass!` 也排在后续阶段，见
+`recover!` / `pass!` 与任务宏 `wait!`（规范路径 `std.task.wait!`，展开为
+`#expr.wait()`）也排在后续阶段，见
 [`docs/macros_user_defined.md`](docs/macros_user_defined.md)。
 
 内置宏裸名（`info!` / `capture!` 等）也按默认 import 处理：它们是解析期别名，
@@ -902,7 +914,7 @@ let d: char?;                  // 默认 null
 
 `function`、`builtin`、`callable`、`userdata`、`heap`、`task`、`generator`、`socket`、`listener`、`websocket`、`stream`、`pair`、`tuple`，以及不包含 `null` 的 `union` 没有默认值，必须提供初始值。
 
-已声明的 `struct` / `protocol` 类型也可以用于类型标注，但没有默认值，必须提供初始值：
+已声明的 `struct` / `proto` 类型也可以用于类型标注，但没有默认值，必须提供初始值：
 
 ```text
 let x: int = 1;
@@ -933,7 +945,7 @@ let h: heap[int] = std.heap.from_list([1, 2], less);
 ```
 
 - 支持 `list[T]`、`dict[K,V]`、`set[T]`、`deque[T]`、`heap[T]`、`task[T]`、`generator[T]`、`generator[T, S]`、`pair[A, B]`、`tuple[A, B, ...]`、`union[A, B, ...]`，以及嵌套和可空形式，例如 `list[int?]`、`dict[int, list[int]]`、`list[int]?`、`union[int, string]?`；
-- 支持内建容器类型参数，也支持用户自定义泛型 `struct` / `enum` / `protocol` / 函数，见下文“用户自定义泛型”；
+- 支持内建容器类型参数，也支持用户自定义泛型 `struct` / `enum` / `proto` / 函数，见下文“用户自定义泛型”；
 - 用户类型可以作为参数，例如 `list[Point]`、`dict[string, Point]`；
 - 不带参数的 `list` / `dict` / `set` / `deque` / `heap` 仍然表示无元素约束。
 
@@ -962,13 +974,13 @@ h = std.heap.push(h, "a");                            // 错误
 
 #### 用户自定义泛型
 
-`struct`、`enum`、`protocol` 和自由函数都可以声明类型参数：
+`struct`、`enum`、`proto` 和自由函数都可以声明类型参数：
 
 ```text
 struct Box[T any] { value: T; }
 enum Option[T any] { None; Some { value: T; } }
 
-protocol Keyed[K any] {
+proto Keyed[K any] {
   func key(self): K;
 }
 
@@ -983,16 +995,19 @@ func identity[T any](x: T): T {
 [T any]
 [T = any]                 // 默认类型实参
 [K type int | string]     // 具体类型集合
-[V proto Drawable]        // protocol 组
+[V proto Drawable]        // proto 组
 [T hashable]
 [T proto hashable & Drawable]
 ```
 
+`type` / `proto` 在类型参数约束列表中都是 contextual 标记，只在该位置生效；
+`proto` 另外作为协议声明关键字全局保留。
+
 - `[T]`、`[T type]` 不合法；
 - 一个参数的约束不能混用 `&` 和 `|`；
-- protocol 不能作为 `|` 成员；
+- proto 不能作为 `|` 成员；
 - `hashable` 是内置约束，可参与 `&`；
-- protocol 不是类型实参：`Box[Keyed]` 非法。
+- proto 不是类型实参：`Box[Keyed]` 非法。
 
 实例化和推断：
 
@@ -1025,7 +1040,7 @@ impl Box {
 }
 ```
 
-泛型 protocol 按结构式方法签名匹配，`[T Keyed]` 和 `[T Keyed[int]]` 都可用于约束；
+泛型 proto 按结构式方法签名匹配，`[T Keyed]` 和 `[T Keyed[int]]` 都可用于约束；
 `x is Keyed` 只检查结构，`x is Keyed[int]` 非法。
 
 元数据和序列化：
@@ -1170,19 +1185,35 @@ struct Handler {
   子任务失败会取消同作用域其他子任务并向上传播。顶层 `launch` 默认 detached。
   `launch` 推导为 `task[T]`；静态已知 callee 返回 `task[...]` 时直接报错，
   应改为直接调用并 `.wait()`；只有 `any`/未知 callee 才允许运行时 adopt/proxy。
-  `launch` 是保留关键字。
-- `wait e` 是 `e.wait()` 的前缀写法，要求 `e: task[T]`，结果为 `T`：
+  `launch` 是表达式起始 contextual keyword，不是全局保留字。
+- `wait! e` 是 `e.wait()` 的内置宏糖（规范路径 `std.task.wait!`），要求
+  `e: task[T]`，结果为 `T`；`await f()` 是 `wait launch f()` 的 contextual 简写，
+  启动调用并立即等待，结果同样是 `T`：
 
   ```text
   let t = launch work(41);
-  let v = wait t;              // 42
-  let w = wait launch work(1); // 2
+  let v = wait!(t);            // 42，也可写 wait! t
+  let w = await work(1);       // 2，启动后立即等待
   ```
 
-  `wait` 只等待已有 task，不启动新 task，也不引入 `async` / `await`。
-  `wait` 不接受超时参数；需要超时请写 `t.wait(ms)` 或
-  `std.task.wait(t, ms)`。`launch wait f()` 会被拒绝；请写
-  `wait launch f()` 或 `wait (launch f())`。`wait` 是保留关键字。
+  `await` 要求后面是调用表达式；`await t`（`t` 已是 task）报错，应写 `wait!(t)`。
+  `wait!` 不接受超时参数；需要超时请写 `t.wait(ms)` 或
+  `std.task.wait(t, ms)`。`launch await f()` 会被拒绝。
+
+  `launch` / `await` 在表达式起始位置识别：语句开头，`=`、`return`、`yield`、
+  `(`、`[`、`{`、`,`、`:` 和二元运算符之后。`.` 之后仍是普通名字。示例：
+
+  ```text
+  d = await f();
+  int(await f());
+  (await f()).xxx;
+  ```
+
+  `await(f())` 是前缀形式，不是调用名为 `await` 的函数；要调用同名变量写
+  `(await)(f())`。postfix 优先级高于前缀：`await f().xxx` 等价于
+  `await (f().xxx)`；先 await 再取字段写 `(await f()).xxx`。
+  `await f() on error(e) { ... }` 与当前 `wait launch f() on error(...)` 等价，
+  handler 覆盖 task 内失败；`launch f() on error(...)` 仍只覆盖启动调用并告警。
 - 部分 `std.net` / `std.io` / `std.http` / `std.http2` / `std.websocket` 的 `*_task` builtin 返回 `task[...]`，例如 `std.http.get_task` 返回 `task[dict[string, any]]`；旧 `*_async` 名称已移除；其余未覆盖的异步 builtin 仍可能退化为 `any`；
 - 提供不可构造的静态 userdata 类型 `socket`、`listener`、`websocket`、`stream`；网络、I/O 和文件接口会返回这些类型，`socket` 可传给接受 `stream` 的接口；
 - `std.task.catch` 返回 `task[result[T, error]]`；`std.task.try_wait` / `std.task.try_wait_all` / `std.task.timeout` 返回 `result[...]`；`std.task.retry` 返回 task，回调结果类型暂不精化；
@@ -1368,7 +1399,7 @@ if (d == {"a": 1}) { ... }
 if ((Point { x: 1 }) is Point) { ... }
 ```
 
-所有控制流和声明体的 `{` 必须和头部在同一行，`if` / `while` / `for` / `switch` / `match` / `func` / `struct` / `enum` / `protocol` / `impl` / `package` / `extern` 都适用；`else` 必须和前面的 `}` 在同一行；`do ... while` 的 `while` 必须和 `}` 在同一行。进入 `{}` 后可以自由换行，表达式和字面量内部的换行仍然会被忽略。
+所有控制流和声明体的 `{` 必须和头部在同一行，`if` / `while` / `for` / `switch` / `match` / `func` / `struct` / `enum` / `proto` / `impl` / `package` / `extern` 都适用；`else` 必须和前面的 `}` 在同一行；`do ... while` 的 `while` 必须和 `}` 在同一行。进入 `{}` 后可以自由换行，表达式和字面量内部的换行仍然会被忽略。
 
 ### 5.4 while / do while
 
@@ -1616,7 +1647,7 @@ let next = match (state) {
 | 绑定 | `x` | 匹配任意值并绑定 |
 | 通配 | `_` | 匹配任意值，不绑定 |
 | 整体绑定 | `p as Point {x}` | 先匹配子模式，再把整个值绑定到 `p` |
-| 类型 | `case is int`、`case is Point as p` | 按运行时类型匹配，支持内建类型、结构体、enum 和 protocol |
+| 类型 | `case is int`、`case is Point as p` | 按运行时类型匹配，支持内建类型、结构体、enum 和 proto |
 | or | `case 1 \| 2`、`case E.A \| E.B` | 任一子模式匹配即可 |
 | 整数范围 | `case 1..9` | 包含两端，按 int 比较 |
 | dict | `{kind: "tool", data: d}` | 开放匹配，只要求列出的字符串 key 存在 |
@@ -1761,12 +1792,11 @@ let n = parse_positive("0") on error(e) {
 - `std.error.kind(e)` 取得错误类别；
 - handler 必须以 `recover`、`pass` 或 `fail` 结束，或通过 `return` / `break` / `continue` / `goto` 退出；
 - `on error()` 可以不绑定错误值；需要检查错误时用 `on error(e)`；
-- `wait t on error(e) { ... }`、`wait launch f() on error(e) { ... }` 的
-  handler 覆盖 `wait` 抛出的任务错误，可直接捕获任务内的 `fail`；
-  `wait (launch f()) on error(...)` 等价；被 `wait` 观察的任务不会再报
+- `wait!(t) on error(e) { ... }`、`await f() on error(e) { ... }` 的
+  handler 覆盖任务错误，可直接捕获任务内的 `fail`；被观察的任务不会再报
   detached task 诊断；
 - `launch f() on error(...)` 会给出 `launch` warning：handler 只覆盖启动调用，
-  不能捕获任务体内的 `fail`；请改用上面的 `wait` 形式；
+  不能捕获任务体内的 `fail`；请改用 `await f() on error(...)`；
 - `recover expr;` 结束 handler，并把 `expr` 作为整个 `on error` 表达式的值；
 - `recover;` 等价于 `recover null;`；
 - `pass e;` 继续向外层传播错误；
@@ -1966,7 +1996,7 @@ impl Box {
 Box { v: 10 }.add()      // 21
 ```
 
-`self` 本身不能有默认值，protocol 方法声明也不能有默认值。
+`self` 本身不能有默认值，proto 方法声明也不能有默认值。
 
 表达式函数同样支持类型约束：
 
@@ -2047,7 +2077,7 @@ sum(1, 2, 3)    // 6
 - 类型标注作用于每个额外参数；
 - 固定参数不足会报错；
 - 方法中 `self` 仍是第一个固定参数，例如 `func std.math.log(self, ...items)`；
-- protocol 方法暂不支持可变参数。
+- proto 方法暂不支持可变参数。
 
 调用点展开：
 
@@ -2129,11 +2159,11 @@ func fetch(x) { return x; }
 当前限制：
 
 - 匿名函数和 `let f = func(...)` 仍然手动包装：`f = dec(f)`；
-- 不支持 `struct` / `enum` / `protocol` 声明装饰器；
+- 不支持 `struct` / `enum` / `proto` 声明装饰器；
 - 不支持在 `let` / `const` 声明前写 `@`；
 - 方法装饰器见 5.12.1。
 
-### 5.12 结构体、impl 与 protocol
+### 5.12 结构体、impl 与 proto
 
 结构体：
 
@@ -2210,7 +2240,7 @@ let d = Point { ...p, x: 9 };
   两个 `struct` 的普通值互递归字段不支持，需使用 `ref T?` / `weak T?`（见 5.12.3）；
 - 普通值不允许创建环：`a.next = b; b.next = a;` 会报 `recursive value would create a cycle`；共享子结构（DAG）允许；使用 `ref` 字段的强引用环由 GC 回收，见 5.12.3；
 - 字段可以保存 `callable` / `function` 值，作为普通回调使用，不会自动绑定 `self`；
-- 不支持继承、静态方法、动态添加方法或运算符重载；唯一例外是构造函数，见 5.12.4；泛型 `struct` / `enum` / `protocol` / 函数见“用户自定义泛型”；
+- 不支持继承、静态方法、动态添加方法或运算符重载；唯一例外是构造函数，见 5.12.4；泛型 `struct` / `enum` / `proto` / 函数见“用户自定义泛型”；
 - 内建容器的类型参数见变量类型标注章节。
 
 #### 5.12.4 构造函数
@@ -2271,7 +2301,7 @@ p.area()      // enter / exit / 12
 规则：
 
 - `@expr` 放在 `struct` 内的方法或 `impl` 方法声明前，可以连续写多个；
-- 支持 inline 结构体方法和 `impl Type` 中的方法；protocol 默认方法也走同一套
+- 支持 inline 结构体方法和 `impl Type` 中的方法；proto 默认方法也走同一套
   方法签名检查；
 - 多个装饰器从下往上应用，`@a @b func m` 等价于 `a(b(m))`；
 - 装饰器在 `struct` / `impl` 声明执行时应用一次，不随方法调用重复执行；
@@ -2280,7 +2310,7 @@ p.area()      // enter / exit / 12
 - 装饰器必须返回 callable，否则在方法安装时报告 `expects callable`；
 - 方法装饰器收到的是 unbound function，`self` 是第一个参数；推荐用 `...args` 转发；
 - 装饰器可以修改参数，包括 `args[0]`（`self`），再调用原方法；
-- 调用点不变：`p.area()`、`let f = p.area; f()`，protocol 默认方法也走同一套方法查找；
+- 调用点不变：`p.area()`、`let f = p.area; f()`，proto 默认方法也走同一套方法查找；
 - `std.meta.methods` / `std.meta.protocols` 看到的方法签名不变；
 - generator 方法也支持装饰器：生成的 wrapper 是普通函数，直接返回装饰器链产生的
   generator；是否惰性由装饰器决定，与自由函数的 generator 装饰器一致。
@@ -2322,7 +2352,7 @@ for (let x in Counter { n: 3 }.items()) {
 当前限制：
 
 - 自由函数装饰器见 5.11.1；
-- 不支持 `struct` / `enum` / `protocol` 声明装饰器；
+- 不支持 `struct` / `enum` / `proto` 声明装饰器；
 - 被装饰方法不能使用解构参数；
 - 被装饰方法可以调用会挂起的 API；wrapper 会在当前 fiber 上一起挂起；
 - 装饰器不能改变方法名或声明签名。
@@ -2374,7 +2404,7 @@ let result = c.get("/api");
 - 方法内部可以使用 `defer`、默认参数和可变参数；
 - 默认值在方法体执行前求值；
 - `self` 是接收者副本；字段中的 userdata 等共享句柄正常共享，普通字段修改不会自动回写调用方；
-- enum 方法和 protocol 默认方法同样适用，所有方法语义一致；
+- enum 方法和 proto 默认方法同样适用，所有方法语义一致；
 - 需要显式 task 句柄时使用 `launch c.get("/api")`，再 `task.wait()`；
 - generator 方法可以挂起后 `yield`，类型仍为 `generator[T]`。
 
@@ -2403,15 +2433,15 @@ let q: lib.P = lib.make();
 ```
 
 - 类型默认只在声明包内可见；`export struct` / `export enum` 后才能通过包路径引用；
-- `export protocol` 已移除；protocol 名称按包解析，不使用 `export` 建立实现关系；
+- `export proto` 已移除；proto 名称按包解析，不使用 `export` 建立实现关系；
 - 限定类型名使用 `.`；
 - 未导出的类型不能通过 `aa.Hidden` 引用，但它的值仍能正常传递和调用方法；
-- 其他包的类型只要方法签名匹配就满足 protocol，不需要声明实现关系。
+- 其他包的类型只要方法签名匹配就满足 proto，不需要声明实现关系。
 
-protocol 定义接口：
+proto 定义接口：
 
 ```text
-protocol Drawable {
+proto Drawable {
   func draw(self);
 }
 ```
@@ -2444,20 +2474,20 @@ render(Point { x: 1, y: 2 });
 
 规则：
 
-- protocol 可以包含方法签名和默认方法体，不包含字段或 protocol 继承；
-- 一致性是结构式的：方法名、参数个数、参数类型、`self` 接收者和返回类型都要匹配，不需要 `impl Protocol for Type`；
+- proto 可以包含方法签名和默认方法体，不包含字段或 proto 继承；
+- 一致性是结构式的：方法名、参数个数、参数类型、`self` 接收者和返回类型都要匹配，不需要 `impl Proto for Type`；
 - 没有默认体的签名必须由 inline 方法或 `impl Type` 方法匹配，否则不满足
-  protocol；
-- inline 方法和 `impl Type` 的同名方法都覆盖 protocol 默认方法；多个 protocol
+  proto；
+- inline 方法和 `impl Type` 的同名方法都覆盖 proto 默认方法；多个 proto
   提供同名默认方法而类型没有自己的实现时报冲突，需要在 `struct` 中直接实现，
   或在 `impl Type` 中显式实现；
-- protocol 方法声明不支持默认值和可变参数；inline 方法和 `impl Type` 方法可以
+- proto 方法声明不支持默认值和可变参数；inline 方法和 `impl Type` 方法可以
   额外提供默认值；
 - enum 上的方法名不能与任意变体字段重名；
-- protocol 可以声明类型参数和默认方法体；不支持 protocol 继承、关联类型和静态方法；`trait`、`impl Protocol for Type`、`export protocol` 和 `with` 协议简写均已移除；
-- struct、enum 和 protocol 名称共享类型命名空间，不能在同一个包中重名；
-- 类型名按包注册，一个包对应一个源文件；不同包可以定义同名结构体或 protocol；
-- 未标注类型的方法调用按运行时能力查找；protocol 标注和 `is Protocol` 是结构式契约；跨包返回的结构体值仍可以通过字段和方法使用。
+- proto 可以声明类型参数和默认方法体；不支持 proto 继承、关联类型和静态方法；`trait`、`impl Proto for Type`、`export proto` 和 `with` 协议简写均已移除；
+- struct、enum 和 proto 名称共享类型命名空间，不能在同一个包中重名；
+- 类型名按包注册，一个包对应一个源文件；不同包可以定义同名结构体或 proto；
+- 未标注类型的方法调用按运行时能力查找；proto 标注和 `is Proto` 是结构式契约；跨包返回的结构体值仍可以通过字段和方法使用。
 
 #### 5.12.3 `ref` / `weak` 与可选链
 
@@ -2532,7 +2562,7 @@ let b = Event.Timeout;
 - 载荷字段只读：`a.text` 可读，`a.text = ...` 会报错；
 - 字段访问按当前变体校验：`Event.Timeout.text` 报错；
 - enum 体不声明方法；方法只能写在 `impl Event` 中；方法内 `self` 只读，修改状态时返回新 enum；
-- enum 方法同样按结构式规则满足 protocol：只要 `impl Event` 的方法签名匹配即可；`Event` 也能用于 `is` 和类型标注；
+- enum 方法同样按结构式规则满足 proto：只要 `impl Event` 的方法签名匹配即可；`Event` 也能用于 `is` 和类型标注；
 - 方法名不能与任意变体的字段重名；
 - `kind_of(e)` → `"enum"`，`type_name(e)` → `"Event"`，`type_package(e)` → 包名；
 - 类型标注：`let e: Event = Event.UserMsg { text: "hi" };`；
@@ -2708,7 +2738,7 @@ include "shared/helpers.skein";
 ```
 
 - 只在声明层允许（顶层或 `package {}` 内）；
-- 只导入声明：`import`、`include`、`func`、`struct`、`enum`、`protocol`、
+- 只导入声明：`import`、`include`、`func`、`struct`、`enum`、`proto`、
   `impl`、`let` / `const`；
 - 被包含文件可 `import std`；相对 import 以被包含文件目录为基准；
 - 被包含文件不能声明 `package` / `module`，不能含顶层可执行代码；
@@ -3332,7 +3362,7 @@ std.io.write_task(stream, data[, timeout_ms])
 - `std.json`：JSON 解析与序列化，object 映射为 `dict`；
 - `std.websocket`：WebSocket 握手与帧编解码；
 - `std.type`：`kind_of`、`name`、`module`、`source`；
-- `std.meta`：只读类型反射，查询字段、变体、方法和 protocol；
+- `std.meta`：只读类型反射，查询字段、变体、方法和 proto；
 - `std.net`：同步和 task 形式异步的 TCP/DNS，底层使用 libuv；
 - `std.http`：基于 llhttp 的 HTTP/1.1 客户端和服务端，客户端支持 sync/task；
 - `std.tls`：基于 OpenSSL 的同步 TLS 流包装（可选）；
@@ -4181,30 +4211,33 @@ let db = b.wait();
 - `launch` 创建新 task 并立即返回 `task[T]`，不阻塞、不自动 `.wait()`；
 - `launch` 作用于其后的完整调用链：`launch make().get()` 启动的是
   `make().get()`；`launch f().wait()` 解析为 `launch (f().wait())`，
-  不会先 launch 再 wait。需要“启动后等待”请写 `wait launch f()` 或
+  不会先 launch 再 wait。需要“启动后等待”请写 `await f()` 或
   `(launch f()).wait()`；
 - `t.wait()` 等待并返回值；`std.task.wait(t)` 保留为兼容别名；
-- `wait t` 是 `t.wait()` 的前缀写法，`wait launch f()` 等价于
-  `(launch f()).wait()`；
+- `wait!(t)` 是 `t.wait()` 的内置宏糖；`await f()` 等价于
+  `wait launch f()`，即启动调用并立即等待；
 - 多个 task 可以先 `launch`，再分别 `wait()`，从而并发执行；
 - task 内部错误会变成 task 失败，在 `wait()` 处抛出；
 - `t.try_wait()` 返回 `result[T]`，可在不抛出的情况下检查结果；
 - `yield` 不用于 task；主动让出使用 `std.task.yield()`；
 - 使用 Boost.Context 提供有栈协程。
 
-`async` / `await` 已移除：
+旧的 `async` 函数颜色与 `await` 任意表达式写法已移除。规划中的 `await` 是新的
+contextual 语法：只接受调用表达式，表示“启动子 fiber 并立即等待”，不引入函数
+颜色，也不等待任意 task 表达式（后者用 `wait!(t)`）：
 
 ```text
 // 旧写法不再解析
 // async func old_fetch(port) { return await ...; }
 
-// 新写法
 func fetch(port) {
   let socket = std.net.tcp_connect_task("127.0.0.1", port, 1000).wait();
   return socket;
 }
 
-let socket = wait launch fetch(8080);
+let socket = await fetch(8080);
+let t = launch fetch(8081);
+let other = wait!(t);
 ```
 
 生成器：
@@ -4624,7 +4657,7 @@ info["methods"][0]["has_defaults"]; // true
 
 ```text
 {
-  "kind": "struct" | "enum" | "protocol" | "builtin",
+  "kind": "struct" | "enum" | "proto" | "builtin",
   "name": "Point",
   "module": "main",
   "source": "main",
@@ -4676,7 +4709,7 @@ enum 变体字段的 `readonly` 为 `true`。变体描述：
 - `method` / `native` / `class` / `struct` / `enum` 是运行时 kind，
   不是类型名；
 - `has_type` 对未知类型返回 `false`；其他函数对未知类型报错；
-- `protocols` / `implements` 按结构式签名匹配返回满足的 protocol；`implements` 要求 protocol 名已知，未知 protocol 报错；
+- `protocols` / `implements` 按结构式签名匹配返回满足的 proto；`implements` 要求 proto 名已知，未知 proto 报错；
 - 不返回值默认值，只提供 `has_default` 标记。
 
 ### std.enum
@@ -5469,8 +5502,8 @@ try/catch
 可变 self
 私有成员
 struct 继承
-protocol 继承
-trait / impl Protocol for Type / export protocol / with 协议简写
+proto 继承
+trait / impl Proto for Type / export proto / with 协议简写
 Option / 匿名联合类型
 ```
 

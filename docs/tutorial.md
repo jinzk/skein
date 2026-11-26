@@ -1419,6 +1419,8 @@ print(std.ref.upgrade(b.prev).value);  // 3
 - 替换目标整体内容写 `a.* = Node { value: 9 }` 或
   `std.ref.set(a, Node { value: 9 })`；
 - `weak T` 保存 `{id, generation}`，目标被 GC 回收后升级为 `null`；
+- `weak` 只在 `weak T` 类型前缀位置是 contextual keyword；其他位置可作为变量、
+  字段或宏名；
 - `?.` 是通用可选字段访问，左侧为 `null` 时结果为 `null`；目前只支持字段，
   不支持 `?.()` 或 `?.[index]`；
 - 不同类型互引用时，`ref T?` 可以指向尚未声明的类型，`weak T?` 用于不保活的反向边；

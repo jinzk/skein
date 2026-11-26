@@ -726,6 +726,29 @@ def run_cases():
           "let b = ref(null);\n",
           stderr="ref expects a struct value, got null")
 
+    check("P5.4 weak is an identifier outside type slots",
+          "import std;\n"
+          "let weak = 7;\n"
+          "struct Box { weak: int; }\n"
+          "let b = Box { weak: weak };\n"
+          "println(str(weak));\n"
+          "println(str(b.weak));\n"
+          "println(str(weak as float));\n",
+          stdout="7\n7\n7")
+
+    check("P5.4 weak type prefix still works",
+          "import std;\n"
+          "struct Node { value: int; }\n"
+          "let n = ref Node { value: 1 };\n"
+          "let w: weak Node = n;\n"
+          "println(str(std.ref.upgrade(w) != null));\n",
+          stdout="true")
+
+    check("P5.4 weak can be a user macro name",
+          "macro weak(x: expr) { #x + 100; }\n"
+          "println(str(weak!(1)));\n",
+          stdout="101")
+
     check("weak accepts a ref handle",
           "import std;\n"
           "struct Node { value: int; }\n"

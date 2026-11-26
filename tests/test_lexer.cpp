@@ -293,6 +293,24 @@ void check_contextual_ref_keyword() {
             "ref! must use the ordinary macro bang path");
 }
 
+void check_contextual_weak_keyword() {
+    std::vector<token> tokens = lex_source(
+        "let weak = 1;\n"
+        "println(weak);\n"
+        "value.weak;\n"
+        "weak!(2);\n"
+        "let a: weak Point = null;\n"
+        "let b = x as weak Point;\n");
+    require(count_kind(tokens, SKEIN_TOK_WEAK) == 2,
+            "weak prefix keyword count mismatch");
+    require(has_text(tokens, SKEIN_TOK_NAME, "weak"),
+            "let weak must stay an identifier");
+    require(has_member_name(tokens, "weak"),
+            ".weak must stay an ordinary member name");
+    require(count_kind(tokens, SKEIN_TOK_MACRO_BANG) == 1,
+            "weak! must use the ordinary macro bang path");
+}
+
 void check_user_macro_tokens() {
     std::vector<token> tokens = lex_source(
         "macro twice(x: expr) { return #x * 2; }\n"
@@ -331,6 +349,7 @@ int main() {
     check_contextual_handler_keywords();
     check_contextual_as_keyword();
     check_contextual_ref_keyword();
+    check_contextual_weak_keyword();
     check_user_macro_tokens();
 
     std::printf("lexer_test: ok\n");

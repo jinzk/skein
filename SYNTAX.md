@@ -31,7 +31,7 @@ let foo变量 = 4;
 let const func yield defer
 if else while do for
 switch case default
-struct impl proto weak
+struct impl proto
 return break continue goto
 fail recover pass
 is
@@ -47,7 +47,10 @@ null true false
 （`case P as p`）位置作为 contextual keyword；其他位置可作为变量、字段或宏名。
 
 `ref` 只在 `ref(x)` 转换、`ref Point { ... }` 字面量和 `ref T` 类型前缀位置作为
-contextual keyword；其他位置可作为变量、字段或宏名。`weak` 目前仍是保留字。
+contextual keyword；其他位置可作为变量、字段或宏名。
+
+`weak` 只在 `weak T` 类型前缀位置作为 contextual keyword；其他位置可作为变量、
+字段或宏名。
 
 `def` 已不再使用，匿名/命名函数统一使用 `func`。
 

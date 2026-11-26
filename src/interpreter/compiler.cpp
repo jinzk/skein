@@ -798,6 +798,11 @@ struct Compiler {
         meta.module = node->module ? node->module : "";
         meta.name = node->name ? node->name : "";
         meta.exported = node->exported != 0;
+        for (struct generic_param *param = node->generic_params; param;
+             param = param->next) {
+            if (param->name && *param->name)
+                meta.generic_params.push_back(param->name);
+        }
         for (struct protocol_method *method = node->methods; method;
              method = method->next) {
             skein::bc::ProtocolMethodMeta method_meta;

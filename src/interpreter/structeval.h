@@ -82,6 +82,7 @@ struct protocol_method_meta {
 bool declare_protocol_meta(
     const char *source, const char *package, const char *module, const char *name,
     bool exported, const std::vector<protocol_method_meta> &methods,
+    const std::vector<std::string> &generic_params,
     const std::shared_ptr<struct scope_t> &closure, std::string &error,
     const std::function<std::shared_ptr<struct upvalue_cell>(
         const std::string &)> &capture_upvalue);

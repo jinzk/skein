@@ -360,6 +360,7 @@ struct ProtocolDeclMeta {
     std::string module;
     std::string name;
     bool exported = false;
+    std::vector<std::string> generic_params;
     std::vector<ProtocolMethodMeta> methods;
 };
 

@@ -1,20 +1,21 @@
 # 用户自定义泛型：设计与开发计划
 
-状态：**核心泛型已实现；泛型 protocol、meta、序列化仍待完成**。
+状态：**核心泛型与泛型 protocol 已实现；`std.meta` 和序列化仍待完成**。
 
 本文记录用户自定义泛型的最终语法、语义决议、实现阶段和测试要求。当前已实现：
 
-- 泛型 `struct` / `enum` / 自由函数声明；
+- 泛型 `struct` / `enum` / `protocol` / 自由函数声明；
 - `Box[int]`、`Option[int]` 类型注解；
 - `Box[int] { ... }`、`Option[int].Some { ... }`、`Option[int].None`；
 - 泛型函数调用推断、`f[int](...)` 和 `let g = f[int]`；
 - `|` 类型集合、`&` protocol/`hashable` 组和约束检查；
 - `type` / `proto` 约束标记；
+- 泛型 protocol 的结构式匹配、类型参数推断、默认方法和 `[T Keyed[int]]` 约束；
 - 泛型 struct 递归和嵌套泛型字段；
 - VM / JIT 类型擦除路径。
 
-尚未完成：泛型 protocol、默认类型参数的完整补全、`std.meta` 泛型入口、
-泛型序列化。实现完成前，`SYNTAX.md` 和 `docs/tutorial.md` 暂不宣称全部能力已可用。
+尚未完成：默认类型参数的完整补全、`std.meta` 泛型入口、泛型序列化。
+实现完成前，`SYNTAX.md` 和 `docs/tutorial.md` 暂不宣称全部能力已可用。
 
 ## 1. 目标
 
@@ -331,7 +332,9 @@ protocol Keyed[K any] {
 - 现有默认方法机制可用，但不能引入方法级类型参数；
 - 不支持 protocol 继承和关联类型；
 - `x is Keyed` 只检查结构；
-- `x is Keyed[int]` 禁止。
+- `x is Keyed[int]` 禁止；
+- 约束位置支持显式 protocol 类型实参，例如 `[T Keyed[int]]`；
+- 未写类型实参时从实现类型的方法签名推断 protocol 类型参数，并要求多个方法一致。
 
 ### 4.7 递归
 

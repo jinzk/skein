@@ -723,6 +723,7 @@ public:
                         diag_current_package_name().c_str(),
                         meta.module.c_str(),
                         meta.name.c_str(), meta.exported, methods,
+                        meta.generic_params,
                         closure, error, [this](const std::string &name) {
                             return capture_upvalue(name);
                         }))

@@ -1086,7 +1086,8 @@ struct Checker : public BuiltinContext {
     }
 
     bool type_satisfies_generic_constraint(
-        const TypeNode *arg, const GenericConstraintMeta &constraint) {        if (!arg || arg->kind == TYPE_ANY || type_contains_vars(arg))
+        const TypeNode *arg, const GenericConstraintMeta &constraint) {
+        if (!arg || arg->kind == TYPE_ANY || type_contains_vars(arg))
             return true;
         if (constraint.items.empty())
             return true;
@@ -1113,6 +1114,32 @@ struct Checker : public BuiltinContext {
             return lookup.structure
                        ? static_cast<const type_def *>(lookup.structure)
                        : static_cast<const type_def *>(lookup.enumeration);
+        };
+        auto protocol_matches = [&](const TypeNode *item,
+                                    const structtype_lookup_result &lookup) {
+            const type_def *actual = actual_type(arg);
+            if (!actual)
+                return false;
+            std::unordered_map<std::string, struct type_constraint> bindings;
+            if (!structtype_satisfies_protocol(actual, lookup.protocol,
+                                               &bindings))
+                return false;
+            if (item->args.empty())
+                return true;
+            if (item->args.size() !=
+                lookup.protocol->generic_params.size())
+                return false;
+            for (std::size_t i = 0; i < item->args.size(); ++i) {
+                auto binding =
+                    bindings.find(lookup.protocol->generic_params[i]);
+                if (binding == bindings.end())
+                    return false;
+                const TypeNode *bound =
+                    type_from_constraint(&binding->second);
+                if (!type_equal(bound, item->args[i]))
+                    return false;
+            }
+            return true;
         };
 
         if (constraint.kind == GENERIC_CONSTRAINT_OR) {
@@ -1146,10 +1173,7 @@ struct Checker : public BuiltinContext {
             }
             structtype_lookup_result protocol;
             if (protocol_lookup(item, protocol)) {
-                const type_def *actual = actual_type(arg);
-                if (!actual ||
-                    !structtype_satisfies_protocol(actual,
-                                                   protocol.protocol))
+                if (!protocol_matches(item, protocol))
                     return false;
                 continue;
             }
@@ -3115,15 +3139,6 @@ struct Checker : public BuiltinContext {
         return ok;
     }
 
-    bool reject_generic_params(struct generic_param *params, int line,
-                               int column) {
-        if (!params)
-            return true;
-        report_error(line, column,
-                     "generic protocols are not supported yet");
-        return false;
-    }
-
     bool check_funcdef(struct funcdef *def, Env &env,
                        const TypeNode *self_type = nullptr) {
         if (!def)
@@ -3693,11 +3708,12 @@ struct Checker : public BuiltinContext {
             case 'H':
                 return check_impl_decl((struct impl_node *)stmt, env);
             case 't': {
-                struct protocol_node *protocol =
-                    (struct protocol_node *)stmt;
-                return reject_generic_params(protocol->generic_params,
-                                             protocol->line,
-                                             protocol->column);
+                /*
+                 * Protocol type parameters are stored with the runtime
+                 * protocol definition and used for structural method
+                 * matching.  Method-level type parameters are not allowed.
+                 */
+                return true;
             }
             case 'J': {
                 struct import_node *imp = (struct import_node *)stmt;

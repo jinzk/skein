@@ -33,6 +33,7 @@ struct protocol_def {
     std::string package;
     std::string module;
     bool exported;
+    std::vector<std::string> generic_params;
     std::vector<method_sig> methods;
     /* Methods with a default body, keyed by method name. */
     std::unordered_map<std::string, std::shared_ptr<function_def>> defaults;
@@ -189,7 +190,8 @@ void structtype_rollback_struct(struct_def *def);
 bool structtype_create_protocol(const char *source, const char *package,
                              const char *module, const char *name, bool exported,
                              std::vector<method_sig> methods,
-                             protocol_def *&out, std::string &error);
+                             protocol_def *&out, std::string &error,
+                             std::vector<std::string> generic_params = {});
 bool structtype_create_enum(const char *source, const char *package,
                             const char *module, const char *name, bool exported,
                             std::vector<variant_def> variants,
@@ -229,8 +231,14 @@ std::shared_ptr<function_def> structtype_protocol_default(
 bool structtype_method_signature_matches(const method_sig &sig,
                                           const struct function_code *code,
                                           std::string &error);
+bool structtype_method_signature_matches(
+    const method_sig &sig, const struct function_code *code,
+    const std::vector<std::string> &generic_params, std::string &error);
 bool structtype_satisfies_protocol(const type_def *def,
                                    const protocol_def *protocol);
+bool structtype_satisfies_protocol(
+    const type_def *def, const protocol_def *protocol,
+    std::unordered_map<std::string, struct type_constraint> *bindings_out);
 std::vector<const protocol_def *> structtype_protocols(const type_def *def);
 bool structtype_refresh_protocol_defaults(type_def *def, std::string &error);
 bool structtype_refresh_all_protocol_defaults(std::string &error);

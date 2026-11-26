@@ -368,10 +368,17 @@ void eval_protocol_decl(struct protocol_node *t) {
 
     std::string error;
     protocol_def *def = NULL;
+    std::vector<std::string> generic_params;
+    for (struct generic_param *param = t->generic_params; param;
+         param = param->next) {
+        if (param->name && *param->name)
+            generic_params.push_back(param->name);
+    }
     if (!structtype_create_protocol(
             t->source, diag_current_package_name().c_str(), t->module,
             t->name,
-            t->exported != 0, std::move(methods), def, error)) {
+            t->exported != 0, std::move(methods), def, error,
+            std::move(generic_params))) {
         yyerror("%s", error.c_str());
         return;
     }
@@ -478,6 +485,7 @@ bool declare_enum_meta(
 bool declare_protocol_meta(
     const char *source, const char *package, const char *module,
     const char *name, bool exported, const std::vector<protocol_method_meta> &methods,
+    const std::vector<std::string> &generic_params,
     const std::shared_ptr<scope_t> &closure, std::string &error,
     const std::function<std::shared_ptr<struct upvalue_cell>(
         const std::string &)> &capture_upvalue) {
@@ -521,9 +529,9 @@ bool declare_protocol_meta(
         }
         if (method.code) {
             std::string signature_error;
-            if (!structtype_method_signature_matches(signature,
-                                                     method.code.get(),
-                                                     signature_error)) {
+            if (!structtype_method_signature_matches(
+                    signature, method.code.get(), generic_params,
+                    signature_error)) {
                 yyerror("%s", signature_error.c_str());
                 return false;
             }
@@ -545,7 +553,8 @@ bool declare_protocol_meta(
 
     protocol_def *def = NULL;
     if (!structtype_create_protocol(source, package, module, name, exported,
-                                 std::move(signatures), def, error)) {
+                                 std::move(signatures), def, error,
+                                 generic_params)) {
         yyerror("%s", error.c_str());
         return false;
     }

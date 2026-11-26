@@ -690,7 +690,8 @@ bool structtype_create_struct(const char *source, const char *package,
 bool structtype_create_protocol(const char *source, const char *package,
                              const char *module, const char *name, bool exported,
                              std::vector<method_sig> methods,
-                             protocol_def *&out, std::string &error) {
+                             protocol_def *&out, std::string &error,
+                             std::vector<std::string> generic_params) {
     std::lock_guard<std::recursive_mutex> lock(type_registry_mutex);
     out = NULL;
     if (!name || !*name) {
@@ -743,12 +744,25 @@ bool structtype_create_protocol(const char *source, const char *package,
         }
     }
 
+    std::unordered_set<std::string> seen_params;
+    for (const std::string &param : generic_params) {
+        if (param.empty()) {
+            error = "invalid protocol type parameter";
+            return false;
+        }
+        if (!seen_params.insert(param).second) {
+            error = "protocol type parameter repeated " + param;
+            return false;
+        }
+    }
+
     std::unique_ptr<protocol_def> def(new protocol_def);
     def->name = name;
     def->source = source ? source : "";
     def->package = package ? package : def->source;
     def->module = module ? module : "";
     def->exported = exported;
+    def->generic_params = std::move(generic_params);
     def->methods = std::move(methods);
     out = def.get();
     logical_protocols.emplace(logical_key, out);
@@ -1056,11 +1070,29 @@ bool constraint_equal(const struct type_constraint *a,
     return type_constraint_equal(a, b);
 }
 
-} // namespace
+bool protocol_constraint_matches(
+    const struct type_constraint &expected,
+    const struct type_constraint &actual,
+    const std::vector<std::string> &generic_params,
+    std::unordered_map<std::string, struct type_constraint> &bindings) {
+    if (expected.kind == TYPE_VAR && expected.name &&
+        std::find(generic_params.begin(), generic_params.end(),
+                  expected.name) != generic_params.end()) {
+        auto it = bindings.find(expected.name);
+        if (it == bindings.end()) {
+            bindings.emplace(expected.name, actual);
+            return true;
+        }
+        return constraint_equal(&it->second, &actual);
+    }
+    return constraint_equal(&expected, &actual);
+}
 
-bool structtype_method_signature_matches(const method_sig &sig,
-                                          const struct function_code *code,
-                                          std::string &error) {
+bool protocol_method_signature_matches(
+    const method_sig &sig, const struct function_code *code,
+    const std::vector<std::string> &generic_params,
+    std::unordered_map<std::string, struct type_constraint> &bindings,
+    std::string &error) {
     if (!code) {
         error = "invalid method signature";
         return false;
@@ -1092,7 +1124,8 @@ bool structtype_method_signature_matches(const method_sig &sig,
                 return false;
             continue;
         }
-        if (!constraint_equal(&expected, &actual)) {
+        if (!protocol_constraint_matches(expected, actual, generic_params,
+                                         bindings)) {
             error = "method " + sig.name +
                     " does not match the protocol signature";
             return false;
@@ -1105,7 +1138,8 @@ bool structtype_method_signature_matches(const method_sig &sig,
 
     if (sig.return_type) {
         if (!code->ret_type ||
-            !constraint_equal(sig.return_type.get(), code->ret_type.get())) {
+            !protocol_constraint_matches(*sig.return_type, *code->ret_type,
+                                         generic_params, bindings)) {
             error = "method " + sig.name +
                     " does not match the protocol return type";
             return false;
@@ -1114,25 +1148,62 @@ bool structtype_method_signature_matches(const method_sig &sig,
     return true;
 }
 
-bool structtype_satisfies_protocol(const type_def *def,
-                                   const protocol_def *protocol) {
+} // namespace
+
+bool structtype_method_signature_matches(const method_sig &sig,
+                                          const struct function_code *code,
+                                          std::string &error) {
+    std::unordered_map<std::string, struct type_constraint> bindings;
+    return protocol_method_signature_matches(sig, code, {}, bindings, error);
+}
+
+bool structtype_method_signature_matches(
+    const method_sig &sig, const struct function_code *code,
+    const std::vector<std::string> &generic_params, std::string &error) {
+    std::unordered_map<std::string, struct type_constraint> bindings;
+    return protocol_method_signature_matches(sig, code, generic_params,
+                                             bindings, error);
+}
+
+bool structtype_satisfies_protocol(
+    const type_def *def, const protocol_def *protocol,
+    std::unordered_map<std::string, struct type_constraint> *bindings_out) {
     std::lock_guard<std::recursive_mutex> lock(type_registry_mutex);
     if (!def || !protocol)
         return false;
+    std::unordered_map<std::string, struct type_constraint> bindings;
     for (const method_sig &sig : protocol->methods) {
-        std::shared_ptr<function_def> method = structtype_method(def, sig.name);
-        if (!method) {
-            method = structtype_protocol_default(protocol, sig.name);
-            if (!method)
-                return false;
+        bool is_default = def->default_methods.count(sig.name) != 0;
+        std::shared_ptr<function_def> method;
+        if (!is_default) {
+            method = structtype_method(def, sig.name);
+            if (!method) {
+                method = structtype_protocol_default(protocol, sig.name);
+                if (!method)
+                    return false;
+                is_default = true;
+            }
+        } else {
+            method = structtype_method(def, sig.name);
         }
+        if (!method || !method->code)
+            return false;
+        if (is_default)
+            continue;
         std::string error;
-        if (!method->code ||
-            !structtype_method_signature_matches(sig, method->code.get(),
-                                                  error))
+        if (!protocol_method_signature_matches(sig, method->code.get(),
+                                               protocol->generic_params,
+                                               bindings, error))
             return false;
     }
+    if (bindings_out)
+        *bindings_out = bindings;
     return true;
+}
+
+bool structtype_satisfies_protocol(const type_def *def,
+                                   const protocol_def *protocol) {
+    return structtype_satisfies_protocol(def, protocol, nullptr);
 }
 
 std::vector<const protocol_def *> structtype_protocols(const type_def *def) {

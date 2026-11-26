@@ -237,6 +237,33 @@ def run_cases():
           "let b: Box[Drawable] = Box { value: 1 };\n",
           stderr="type error: protocol Drawable cannot be used as a type argument")
 
+    check("generic protocol constraint",
+          "protocol Keyed[K any] { func key(self): K; }\n"
+          "struct NoKey { }\n"
+          "func need[T Keyed](x: T): T { return x; }\n"
+          "let a = need(NoKey {});\n",
+          stderr="type error: type argument NoKey does not satisfy generic constraint for need")
+
+    check("generic protocol type parameter consistency",
+          "protocol PairKeyed[K any] {\n"
+          "  func first(self): K;\n"
+          "  func second(self): K;\n"
+          "}\n"
+          "struct Bad {\n"
+          "  func first(self): int { return 1; }\n"
+          "  func second(self): string { return \"x\"; }\n"
+          "}\n"
+          "func need[T PairKeyed](x: T): T { return x; }\n"
+          "let a = need(Bad {});\n",
+          stderr="type error: type argument Bad does not satisfy generic constraint for need")
+
+    check("generic protocol explicit type argument",
+          "protocol Keyed[K any] { func key(self): K; }\n"
+          "struct StringKey { func key(self): string { return \"a\"; } }\n"
+          "func need[T Keyed[int]](x: T): T { return x; }\n"
+          "let a = need(StringKey {});\n",
+          stderr="type error: type argument StringKey does not satisfy generic constraint for need")
+
     check("generic proto marker constraint",
           "protocol Drawable { func draw(self); }\n"
           "struct Box[T proto Drawable] { value: T; }\n"

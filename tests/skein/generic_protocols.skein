@@ -1,0 +1,73 @@
+import std;
+include "_support.skein";
+
+protocol Keyed[K any] {
+  func key(self): K;
+}
+
+protocol PairKeyed[K any] {
+  func first(self): K;
+  func second(self): K;
+}
+
+protocol Badged[K any] {
+  func key(self): K;
+  func badge(self): K {
+    return self.key();
+  }
+}
+
+struct IntKey {
+  func key(self): int { return 1; }
+}
+
+struct StringKey {
+  func key(self): string { return "a"; }
+}
+
+struct GoodPair {
+  func first(self): int { return 2; }
+  func second(self): int { return 3; }
+}
+
+func need_keyed[T Keyed](x: T): T {
+  return x;
+}
+
+func need_pair[T PairKeyed](x: T): T {
+  return x;
+}
+
+func need_badged[T Badged](x: T): T {
+  return x;
+}
+
+func need_int_key[T Keyed[int]](x: T): T {
+  return x;
+}
+
+ts_test("generic protocol constraint", func() {
+  ts_eq(need_keyed(IntKey {}).key(), 1);
+  ts_eq(need_keyed(StringKey {}).key(), "a");
+});
+
+ts_test("generic protocol structural check", func() {
+  ts_eq(IntKey {} is Keyed, true);
+  ts_eq(GoodPair {} is Keyed, false);
+});
+
+ts_test("generic protocol type parameter consistency", func() {
+  ts_eq(need_pair(GoodPair {}).first(), 2);
+  ts_eq(need_pair(GoodPair {}).second(), 3);
+});
+
+ts_test("generic protocol default method", func() {
+  ts_eq(need_badged(IntKey {}).badge(), 1);
+  ts_eq(IntKey {}.badge(), 1);
+});
+
+ts_test("generic protocol explicit type argument", func() {
+  ts_eq(need_int_key(IntKey {}).key(), 1);
+});
+
+ts_finish();

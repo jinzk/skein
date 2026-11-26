@@ -164,12 +164,12 @@ def run_cases():
           "struct A { b: B? = null; }\n"
           "struct B { a: A? = null; }\n",
           stderr="mutually recursive fields require ref B? or weak B?")
-    check("for in without let two vars require dict",
+    check("for in without let two vars require pair or dict",
           "for k, v in [1, 2] { println(k); }\n",
-          stderr="two-variable for-in requires dict")
-    check("for in without let rejects three variables",
+          stderr="two-variable for-in over list[int] requires pair/tuple elements")
+    check("for in without let rejects three variables over dict",
           'for a, b, c in ({"a": 1}) { println(a); }\n',
-          stderr="syntax error")
+          stderr="tuple pattern requires a pair or tuple")
     check("if condition composite literal needs parens",
           'let d = {"a": 1};\n'
           'if d == {"a": 1} { println("yes"); }\n',

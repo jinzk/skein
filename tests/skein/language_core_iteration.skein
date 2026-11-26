@@ -275,4 +275,25 @@ ts_test("for in tuple pattern", func() {
   }
 });
 
+ts_test("for in omitted tuple parentheses", func() {
+  let out = [];
+  for a, b in lang_iter_pairs() {
+    out = std.list.append(out, str(a) + ":" + b);
+  }
+  ts_eq(out, ["1:a", "2:b"]);
+
+  let gen_out = [];
+  for a, b in lang_iter_gen_pairs() {
+    gen_out = std.list.append(gen_out, str(a) + ":" + b);
+  }
+  ts_eq(gen_out, ["3:c", "4:d"]);
+
+  let triples_out = [];
+  for a, b, c in lang_iter_triples() {
+    triples_out = std.list.append(
+      triples_out, str(a) + ":" + b + ":" + str(c));
+  }
+  ts_eq(triples_out, ["1:a:true", "2:b:false"]);
+});
+
 ts_finish();

@@ -15,6 +15,7 @@
 #include "valuetype.h"
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <unordered_map>
@@ -3775,6 +3776,35 @@ struct Checker : public BuiltinContext {
         }
     }
 
+    static char *duplicate_text(const char *text) {
+        const char *source = text ? text : "";
+        std::size_t size = std::strlen(source) + 1;
+        char *copy = (char *)std::malloc(size);
+        if (!copy)
+            return NULL;
+        std::memcpy(copy, source, size);
+        return copy;
+    }
+
+    void rewrite_pair_forin(struct forinloop *f) {
+        static thread_local int pair_id = 0;
+        char hidden[32];
+        std::snprintf(hidden, sizeof(hidden), "#forpair%d", ++pair_id);
+
+        struct ast *pattern = newpatterntuple(append_patternitem(
+            newpatternname(duplicate_text(f->name)),
+            newpatternname(duplicate_text(f->value_name))));
+        struct ast *destructure = newdestructure(
+            pattern, newref(duplicate_text(hidden)), false);
+        destructure->line = f->line;
+        destructure->column = f->column;
+        f->body = newscope(newast('L', destructure, f->body));
+        std::free(f->name);
+        std::free(f->value_name);
+        f->name = duplicate_text(hidden);
+        f->value_name = NULL;
+    }
+
     bool check_stmt(struct ast *stmt, Env &env) {
         if (!stmt)
             return true;
@@ -3897,11 +3927,52 @@ struct Checker : public BuiltinContext {
                 const TypeNode *iterable = infer(f->iterable, env);
                 Env child;
                 child.parent = &env;
+                if (f->value_name) {
+                    if (iterable->kind == TYPE_DICT) {
+                        child.define(f->name ? f->name : "",
+                                     iterable_element(iterable, false),
+                                     fixed);
+                        child.define(f->value_name,
+                                     iterable_element(iterable, true),
+                                     fixed);
+                        return check_stmt(f->body, child);
+                    }
+                    if (iterable->kind == TYPE_ANY) {
+                        child.define(f->name ? f->name : "",
+                                     type_any(), fixed);
+                        child.define(f->value_name, type_any(), fixed);
+                        return check_stmt(f->body, child);
+                    }
+                    const TypeNode *element =
+                        iterable_element(iterable, false);
+                    if (!element ||
+                        (element->kind != TYPE_PAIR &&
+                         element->kind != TYPE_TUPLE)) {
+                        std::string message =
+                            std::string("two-variable for-in over ") +
+                            type_display(iterable) +
+                            " requires pair/tuple elements";
+                        report_error(f->line, f->column, message.c_str());
+                        return false;
+                    }
+                    if (element->args.size() != 2) {
+                        std::string message =
+                            std::string("two-variable for-in requires a "
+                                        "pair or 2-tuple, got ") +
+                            type_display(element);
+                        report_error(f->line, f->column, message.c_str());
+                        return false;
+                    }
+                    child.define(f->name ? f->name : "",
+                                 element->args[0], fixed);
+                    child.define(f->value_name, element->args[1], fixed);
+                    bool ok = check_stmt(f->body, child);
+                    if (ok)
+                        rewrite_pair_forin(f);
+                    return ok;
+                }
                 child.define(f->name ? f->name : "",
                              iterable_element(iterable, false), fixed);
-                if (f->value_name)
-                    child.define(f->value_name,
-                                 iterable_element(iterable, true), fixed);
                 return check_stmt(f->body, child);
             }
             case 'S': {

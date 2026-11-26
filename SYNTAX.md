@@ -1516,9 +1516,17 @@ for x in [1, 2, 3] {
 for key, value in {"a": 1, "b": 2} {
   print(key + "=" + str(value));
 }
+
+for a, b in [(1, "x"), (2, "y")] {
+  print(str(a) + ":" + b);
+}
+
+for a, b, c in [(1, "x", true)] {
+  print(str(a) + ":" + b + ":" + str(c));
+}
 ```
 
-`(a, b, c, ...)` 形式按 tuple 解构每个元素：
+`(a, b, c, ...)` 形式按 tuple 解构每个元素；在没有歧义时括号也可以省略：
 
 ```text
 for (a, b) in [(1, "x"), (2, "y")] {
@@ -1536,20 +1544,26 @@ func triples(): list[tuple[int, string, bool]] {
 for (a, b, c) in triples() {
   print(str(a) + ":" + b + ":" + str(c));
 }
+
+for a, b, c in triples() {
+  print(str(a) + ":" + b + ":" + str(c));
+}
 ```
 
 这种形式与双变量 dict 形式不同：
 
 - `for k, v in dict` 绑定 dict 的 key / value；
-- `for (a, b, ...) in iterable` 对每个元素做 tuple 解构，元素静态类型必须是 pair 或 tuple，元素个数必须一致；
+- `for a, b in pair_iterable` 在 iterable 不是 dict 时做 tuple 解构；
+- `for (a, b, ...) in iterable` 始终按显式 tuple 解构处理；
+- 元素静态类型必须是 pair 或 tuple，元素个数必须一致；
 - 可用于 list、generator 等单值迭代；生成器每个 `yield` 的值会被解构；
 - 循环体必须使用 `{ ... }` 形式。
 
 这种写法等价于对应的 `for (let ... in ...)`。规则：
 
 - 单变量形式：`for (let NAME in exp)` 或 `for NAME in exp`；
-- 双变量形式：`for (let NAME1, NAME2 in exp)` 或 `for NAME1, NAME2 in exp`，只支持 dict；
-- tuple 解构形式：`for (NAME1, NAME2, ...) in exp { ... }`，对每个元素做 pair/tuple 解构，支持 list、generator 等单值迭代；元素静态类型必须是 pair 或 tuple，元素个数必须一致；
+- 双变量形式：`for (let NAME1, NAME2 in exp)` 或 `for NAME1, NAME2 in exp`；iterable 是 dict 时绑定 key/value，非 dict 时按 tuple 解构；静态类型是 `any` 时保留运行时 dict key/value 行为；
+- tuple 解构形式：`for (NAME1, NAME2, ...) in exp { ... }` 或省略括号的 `for NAME1, NAME2, ... in exp { ... }`，对每个元素做 pair/tuple 解构；元素静态类型必须是 pair 或 tuple，元素个数必须一致；
 - 显式惰性迭代使用 `std.list.iter(xs)`、`std.dict.iter_keys(d)`、`std.dict.iter_values(d)`、`std.dict.iter_items(d)` 或 `std.dict.iter(d)`；这些返回 generator，可直接用于 `for` 或 `std.iter.*`；
 - 省略形式中的循环变量是块级新变量，会遮蔽外层同名变量，循环结束后外层变量不变；
 - 省略形式的循环体必须是 `{ ... }`，不支持单条语句；
@@ -1560,8 +1574,8 @@ for (a, b, c) in triples() {
   标识符，例如 `let in = 1;`；
 - 省略形式在顶层要求 `{` 和头部同一行，规则与 `if` / `while` 相同；
 - list 单变量遍历元素；需要下标时用 `range(len(list))` 或 C 风格 `for`；
-- deque / heap / set 单变量遍历元素（heap 按层序，set 按插入顺序）；双变量形式仍只支持 dict；
-- dict 单变量遍历 key，双变量得到 `key, value`；
+- deque / heap / set 单变量遍历元素（heap 按层序，set 按插入顺序）；
+- dict 单变量遍历 key，双变量得到 `key, value`；非 dict 的双变量按 tuple 解构；静态类型是 `any` 时保留运行时 dict key/value 行为；
 - string 单变量遍历 UTF-8 字符，元素是 `char`；
 - bytes 单变量遍历 `0..255` 的字节值；
 - 可以配合 `range()` 做计数循环；

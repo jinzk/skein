@@ -1369,7 +1369,7 @@ static struct ast *new_member_or_enum_literal(struct ast *base, char *field) {
 %type <a> exp value stmt list scope non_empty_scope do_block lambda_block explist arg top_expression top_statement line valuelist pairlist
 %type <a> slice_bound
 %type <str> on_error_name
-%type <a> forinit forcond forend for_pattern_names
+%type <a> forinit forcond forend for_pattern_names for_pattern_names_3
 %type <a> switch_body switch_cases switch_case case_values
 %type <a> match_arms match_arm pattern pattern_list pattern_items tuple_pattern_items value_pattern match_values
 %type <a> tuple_body
@@ -1509,6 +1509,14 @@ stmt: IF HEADER_LPAREN exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, 
                                            { $$ = newforin($2, $4, $6, newscope(NULL)); }
     | FOR NAME ',' NAME for_in exp BODY_LBRACE list '}'
                                            { $$ = newforin($2, $4, $6, newscope($8)); }
+    | FOR for_pattern_names_3 for_in exp BODY_LBRACE EMPTY_BLOCK_CLOSE
+                                           { $$ = build_pattern_forin(
+                                                 newpatterntuple($2), $4,
+                                                 NULL); }
+    | FOR for_pattern_names_3 for_in exp BODY_LBRACE list '}'
+                                           { $$ = build_pattern_forin(
+                                                 newpatterntuple($2), $4,
+                                                 $6); }
     | DEFER exp ';'                       { $$ = newdefer($2); }
     | func_decl
     | decorators func_decl                { $$ = lower_function_decorators($1, (struct funcdef *)$2); }
@@ -2718,6 +2726,16 @@ pairlist: exp ':' exp                     { $$ = newdict($1, $3, NULL); }
 
 for_pattern_names: NAME                  { $$ = newpatternname($1); }
     | for_pattern_names ',' NAME         {
+        $$ = append_patternitem($1, newpatternname($3));
+      }
+    ;
+
+for_pattern_names_3: NAME ',' NAME ',' NAME {
+        struct ast *items = append_patternitem(
+            newpatternname($1), newpatternname($3));
+        $$ = append_patternitem(items, newpatternname($5));
+      }
+    | for_pattern_names_3 ',' NAME       {
         $$ = append_patternitem($1, newpatternname($3));
       }
     ;

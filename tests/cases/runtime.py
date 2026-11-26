@@ -594,19 +594,19 @@ def run_cases():
     check("for in variable scope", "for (let x in [1]) { }\nx\n",
           stderr="symbol not found x")
     check(
-        "for in two variables requires dict list",
+        "for in two variables requires pair or dict list",
         "for (let i, v in [10, 20]) { println(v); }\n",
-        stderr="two-variable for-in requires dict, got list",
+        stderr="two-variable for-in over list[int] requires pair/tuple elements",
     )
     check(
-        "for in two variables requires dict string",
+        "for in two variables requires pair or dict string",
         'for (let i, ch in "ab") { println(ch); }\n',
-        stderr="two-variable for-in requires dict, got string",
+        stderr="two-variable for-in over string requires pair/tuple elements",
     )
     check(
-        "for in two variables requires dict bytes",
+        "for in two variables requires pair or dict bytes",
         'for (let i, b in std.bytes.from_hex("00ff")) { println(b); }\n',
-        stderr="two-variable for-in requires dict, got bytes",
+        stderr="two-variable for-in over bytes requires pair/tuple elements",
     )
     check("for in duplicate loop variables",
           'for (let x, x in {"a": 1}) { }\n',

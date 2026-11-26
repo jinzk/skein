@@ -214,6 +214,11 @@ def run_cases():
           "let b = Box[bool] { value: true };\n",
           stderr="type error: type argument bool does not satisfy generic constraint for Box")
 
+    check("generic union type argument constraint",
+          "struct Box[T int | string] { value: T; }\n"
+          "let b = Box[union[int, bool]] { value: true };\n",
+          stderr="type error: type argument union[int, bool] does not satisfy generic constraint for Box")
+
     check("generic proto marker constraint",
           "protocol Drawable { func draw(self); }\n"
           "struct Box[T proto Drawable] { value: T; }\n"

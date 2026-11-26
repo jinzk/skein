@@ -17,6 +17,10 @@ struct Limited[T int | string] {
   value: T;
 }
 
+struct UnionLimited[T int | string] {
+  value: T;
+}
+
 protocol Drawable {
   func draw(self);
 }
@@ -86,6 +90,14 @@ ts_test("generic struct constraint", func() {
   ts_eq(a.value, 4);
   let b = Limited[string] { value: "c" };
   ts_eq(b.value, "c");
+});
+
+ts_test("generic union type argument", func() {
+  let a = UnionLimited[union[int, string]] { value: 6 };
+  ts_eq(a.value, 6);
+  let b: UnionLimited[union[int, string]] =
+      UnionLimited[union[int, string]] { value: "d" };
+  ts_eq(b.value, "d");
 });
 
 ts_test("generic struct explicit markers", func() {

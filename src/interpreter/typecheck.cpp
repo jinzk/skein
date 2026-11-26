@@ -1074,6 +1074,14 @@ struct Checker : public BuiltinContext {
         if (constraint.items.empty())
             return true;
 
+        if (arg->kind == TYPE_UNION) {
+            for (const TypeNode *member : arg->args) {
+                if (!type_satisfies_generic_constraint(member, constraint))
+                    return false;
+            }
+            return true;
+        }
+
         auto is_hashable = [](const TypeNode *type) {
             return key_contract(type) != KeyContract::No;
         };
@@ -3085,7 +3093,7 @@ struct Checker : public BuiltinContext {
         if (!params)
             return true;
         report_error(line, column,
-                     "user-defined generics are not implemented yet");
+                     "generic protocols are not supported yet");
         return false;
     }
 

@@ -99,12 +99,16 @@ enum for_header_state {
 };
 
 static enum for_header_state for_header = FOR_HEADER_NONE;
+static bool for_paren_header = false;
+static bool expect_paren_for_head = false;
 static bool for_body_pending = false;
 static bool for_operand_started = false;
 static int for_body_indent = 0;
 
 static void reset_for_header_state() {
     for_header = FOR_HEADER_NONE;
+    for_paren_header = false;
+    expect_paren_for_head = false;
     for_body_pending = false;
     for_operand_started = false;
 }
@@ -125,6 +129,10 @@ static bool last_token_package_name = false;
 static bool prev_token_package_name = false;
 
 static void note_for_header_token(int tok) {
+    if (expect_paren_for_head) {
+        expect_paren_for_head = false;
+        for_paren_header = tok != SKEIN_TOK_LET && tok != SKEIN_TOK_EOL;
+    }
     if (for_body_pending && tok != SKEIN_TOK_EOL && !contextual_in_separator)
         for_operand_started = true;
 }
@@ -188,13 +196,15 @@ static bool statement_start_token(int tok) {
 static void note_contextual_in_name(const char *text, int len) {
     contextual_in_separator =
         token_is_in_name(text, len) &&
-        (for_header == FOR_HEADER_ONE || for_header == FOR_HEADER_TWO);
+        (for_header == FOR_HEADER_ONE || for_header == FOR_HEADER_TWO ||
+         for_paren_header);
     if (!contextual_in_separator)
         return;
     for_body_pending = true;
     for_operand_started = false;
     for_body_indent = indent_count;
     c_for_pending = false;
+    for_paren_header = false;
 }
 static bool pending_for_paren = false;
 static bool pending_do_while_skip = false;
@@ -1119,6 +1129,7 @@ UNICODE_NAME ([A-Za-z_]|{UTF8_SEQ})([A-Za-z0-9_]|{UTF8_SEQ})*
         pending_for_skip = false;
         c_for_pending = false;
         for_header = FOR_HEADER_NONE;
+        expect_paren_for_head = true;
         indent_count++;
         YYRET(SKEIN_TOK_HEADER_LPAREN);
     }
@@ -1644,6 +1655,8 @@ struct scanner_checkpoint {
     bool extern_header;
     bool line_has_token;
     int for_header;
+    bool for_paren_header;
+    bool expect_paren_for_head;
     bool for_body_pending;
     bool for_operand_started;
     int for_body_indent;
@@ -1695,6 +1708,8 @@ scanner_checkpoint *scanner_checkpoint_save() {
     checkpoint->extern_header = extern_header;
     checkpoint->line_has_token = line_has_token;
     checkpoint->for_header = for_header;
+    checkpoint->for_paren_header = for_paren_header;
+    checkpoint->expect_paren_for_head = expect_paren_for_head;
     checkpoint->for_body_pending = for_body_pending;
     checkpoint->for_operand_started = for_operand_started;
     checkpoint->for_body_indent = for_body_indent;
@@ -1750,6 +1765,8 @@ void scanner_checkpoint_restore(scanner_checkpoint *checkpoint) {
     extern_header = checkpoint->extern_header;
     line_has_token = checkpoint->line_has_token;
     for_header = (enum for_header_state)checkpoint->for_header;
+    for_paren_header = checkpoint->for_paren_header;
+    expect_paren_for_head = checkpoint->expect_paren_for_head;
     for_body_pending = checkpoint->for_body_pending;
     for_operand_started = checkpoint->for_operand_started;
     for_body_indent = checkpoint->for_body_indent;

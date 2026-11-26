@@ -6,6 +6,15 @@ func lang_iter_gen() {
   yield 2;
 }
 
+func lang_iter_pairs(): list[tuple[int, string]] {
+  return [(1, "a"), (2, "b")];
+}
+
+func lang_iter_gen_pairs(): generator[tuple[int, string]] {
+  yield (3, "c");
+  yield (4, "d");
+}
+
 ts_test("for in without let over list", func() {
   let out = [];
   for x in [1, 2, 3] {
@@ -232,6 +241,22 @@ ts_test("std.iter.for_each return exits callback only", func() {
     out = std.list.append(out, x);
   });
   ts_eq(out, [1, 3]);
+});
+
+ts_test("for in pair pattern over list", func() {
+  let out = [];
+  for (a, b) in lang_iter_pairs() {
+    out = std.list.append(out, str(a) + ":" + b);
+  }
+  ts_eq(out, ["1:a", "2:b"]);
+});
+
+ts_test("for in pair pattern over generator", func() {
+  let out = [];
+  for (a, b) in lang_iter_gen_pairs() {
+    out = std.list.append(out, str(a) + ":" + b);
+  }
+  ts_eq(out, ["3:c", "4:d"]);
 });
 
 ts_finish();

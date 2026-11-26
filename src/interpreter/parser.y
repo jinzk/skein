@@ -748,6 +748,20 @@ static struct type_constraint *type_constraint_from_return_exp(struct ast *exp) 
 }
 
 static int destructure_param_id = 0;
+static int pattern_for_id = 0;
+
+static struct ast *build_pair_forin(char *first, char *second,
+                                    struct ast *iterable,
+                                    struct ast *body) {
+    char hidden[32];
+    std::snprintf(hidden, sizeof(hidden), "#forpair%d", ++pattern_for_id);
+    struct ast *pattern = newpatterntuple(
+        append_patternitem(newpatternname(first), newpatternname(second)));
+    struct ast *destructure = newdestructure(
+        pattern, newref(copy_text(hidden)), false);
+    struct ast *scope = newscope(newast('L', destructure, body));
+    return newforin(copy_text(hidden), NULL, iterable, scope);
+}
 
 static struct symlist *new_destructure_param(struct ast *pattern) {
     char name[32];
@@ -1424,6 +1438,10 @@ stmt: IF HEADER_LPAREN exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, 
                                            { $$ = newforin($4, $6, $8, $10); }
     | FOR NAME for_in exp BODY_LBRACE EMPTY_BLOCK_CLOSE
                                            { $$ = newforin($2, NULL, $4, newscope(NULL)); }
+    | FOR HEADER_LPAREN NAME ',' NAME ')' for_in exp BODY_LBRACE EMPTY_BLOCK_CLOSE
+                                           { $$ = build_pair_forin($3, $5, $8, NULL); }
+    | FOR HEADER_LPAREN NAME ',' NAME ')' for_in exp BODY_LBRACE list '}'
+                                           { $$ = build_pair_forin($3, $5, $8, $10); }
     | FOR NAME for_in exp BODY_LBRACE list '}'
                                            { $$ = newforin($2, NULL, $4, newscope($6)); }
     | FOR NAME ',' NAME for_in exp BODY_LBRACE EMPTY_BLOCK_CLOSE

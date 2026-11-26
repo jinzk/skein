@@ -646,10 +646,30 @@ for key, value in {"a": 1, "b": 2} {
 }
 ```
 
+pair 解构形式：
+
+```text
+for (a, b) in [(1, "x"), (2, "y")] {
+  print(str(a) + ":" + b);
+}
+
+func pairs(): list[tuple[int, string]] {
+  return [(1, "x")];
+}
+
+for (a, b) in pairs() {
+  print(str(a) + ":" + b);
+}
+```
+
+`for (a, b) in iterable` 对每个元素做 pair/tuple 解构；元素静态类型必须是 pair 或 tuple；
+可以用于 list、generator 等单值迭代。它和 `for k, v in dict` 不同，后者绑定 dict 的 key/value。
+
 `for ... in` 规则：
 
 - 单变量：list 遍历元素，dict 遍历键；deque / heap / set 也遍历元素（heap 按层序，set 按插入顺序）；
 - 双变量只能用于 dict，得到 `key, value`；
+- `for (a, b) in iterable` 对每个元素做 pair/tuple 解构，支持 list、generator 等单值迭代；元素静态类型必须是 pair 或 tuple；
 - list 需要下标时用 `range(len(list))` 或 C 风格 `for`；
 - string 遍历 UTF-8 字符；bytes 遍历 `0..255` 的字节值；
 - 迭代遍历对象在循环开始时求值一次，循环期间修改原对象不会改变本次遍历；

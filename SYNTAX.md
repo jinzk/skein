@@ -1482,10 +1482,34 @@ for key, value in {"a": 1, "b": 2} {
 }
 ```
 
+`(a, b)` 形式按 pair 解构每个元素：
+
+```text
+for (a, b) in [(1, "x"), (2, "y")] {
+  print(str(a) + ":" + b);
+}
+
+func pairs(): list[tuple[int, string]] {
+  return [(1, "x")];
+}
+
+for (a, b) in pairs() {
+  print(str(a) + ":" + b);
+}
+```
+
+这种形式与双变量 dict 形式不同：
+
+- `for k, v in dict` 绑定 dict 的 key / value；
+- `for (a, b) in iterable` 对每个元素做 pair/tuple 解构，元素静态类型必须是 pair 或 tuple；
+- 可用于 list、generator 等单值迭代；生成器每个 `yield` 的值会被解构；
+- 循环体必须使用 `{ ... }` 形式。
+
 这种写法等价于对应的 `for (let ... in ...)`。规则：
 
 - 单变量形式：`for (let NAME in exp)` 或 `for NAME in exp`；
 - 双变量形式：`for (let NAME1, NAME2 in exp)` 或 `for NAME1, NAME2 in exp`，只支持 dict；
+- pair 解构形式：`for (NAME1, NAME2) in exp { ... }`，对每个元素做 pair/tuple 解构，支持 list、generator 等单值迭代；元素静态类型必须是 pair 或 tuple；
 - 省略形式中的循环变量是块级新变量，会遮蔽外层同名变量，循环结束后外层变量不变；
 - 省略形式的循环体必须是 `{ ... }`，不支持单条语句；
 - 操作数以 dict 字面量开头时可以省略括号，例如 `for k in {"a": 1}`；

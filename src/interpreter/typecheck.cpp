@@ -30,13 +30,19 @@ namespace {
 
 Mode g_mode = Mode::Warn;
 
-thread_local std::unordered_map<std::string, std::vector<std::string>>
-    g_generic_function_params;
-
 struct GenericConstraintMeta {
     enum generic_constraint_kind kind = GENERIC_CONSTRAINT_SINGLE;
     std::vector<const TypeNode *> items;
 };
+
+struct GenericFunctionMeta {
+    std::string name;
+    std::vector<std::string> params;
+    std::vector<GenericConstraintMeta> constraints;
+};
+
+thread_local std::unordered_map<std::string, GenericFunctionMeta>
+    g_generic_function_params;
 
 struct GenericTypeMeta {
     std::vector<std::string> params;
@@ -96,8 +102,7 @@ struct Checker : public BuiltinContext {
     std::string source;
     std::string package;
     std::unordered_map<std::string, FunctionSig> functions;
-    std::unordered_map<std::string, std::vector<std::string>>
-        generic_functions;
+    std::unordered_map<std::string, GenericFunctionMeta> generic_functions;
     std::unordered_map<std::string, StaticTypeInfo> static_types;
     std::unordered_map<const struct ast *, std::vector<const TypeNode *>>
         generic_literal_args;
@@ -1528,7 +1533,8 @@ struct Checker : public BuiltinContext {
 
     bool check_polymorphic_call(const TypeNode *callee_type,
                                 const std::vector<struct ast *> &args,
-                                Env &env, const TypeNode *&result) {
+                                Env &env, const TypeNode *&result,
+                                const GenericFunctionMeta *generic_meta = nullptr) {
         TypeBindings bindings;
         int count = type_function_param_count(callee_type);
         bool has_spread = false;
@@ -1615,6 +1621,27 @@ struct Checker : public BuiltinContext {
                               type_display(expected_pattern),
                               type_display(actual_types[i]));
                 report_error(arg->line, arg->column, message);
+                return false;
+            }
+        }
+
+        if (generic_meta) {
+            for (std::size_t i = 0; i < generic_meta->params.size(); ++i) {
+                auto binding = bindings.find(generic_meta->params[i]);
+                if (binding == bindings.end() ||
+                    i >= generic_meta->constraints.size())
+                    continue;
+                if (type_satisfies_generic_constraint(
+                        binding->second, generic_meta->constraints[i]))
+                    continue;
+                int line = args.empty() ? 0 : args[0]->line;
+                int column = args.empty() ? 0 : args[0]->column;
+                std::string message =
+                    std::string("type argument ") +
+                    type_display(binding->second) +
+                    " does not satisfy generic constraint for " +
+                    generic_meta->name;
+                report_error(line, column, message.c_str());
                 return false;
             }
         }
@@ -1706,10 +1733,10 @@ struct Checker : public BuiltinContext {
                 free_type_constraint(constraint);
             return false;
         }
-        if (constraints.size() != generic->second.size()) {
+        if (constraints.size() != generic->second.params.size()) {
             std::string message =
                 "function " + name + " expects " +
-                std::to_string(generic->second.size()) +
+                std::to_string(generic->second.params.size()) +
                 " type argument(s), got " +
                 std::to_string(constraints.size());
             report_error(bracket->line, bracket->column, message.c_str());
@@ -1720,9 +1747,19 @@ struct Checker : public BuiltinContext {
 
         TypeBindings bindings;
         for (std::size_t i = 0; i < constraints.size(); ++i) {
-            bindings[generic->second[i]] =
-                type_from_constraint(constraints[i]);
+            const TypeNode *arg = type_from_constraint(constraints[i]);
+            bindings[generic->second.params[i]] = arg;
             free_type_constraint(constraints[i]);
+            if (i < generic->second.constraints.size() &&
+                !type_satisfies_generic_constraint(
+                    arg, generic->second.constraints[i])) {
+                std::string message =
+                    std::string("type argument ") + type_display(arg) +
+                    " does not satisfy generic constraint for " + name;
+                report_error(bracket->line, bracket->column,
+                             message.c_str());
+                return false;
+            }
         }
 
         for (const TypeNode *&param : sig.params)
@@ -1907,8 +1944,22 @@ struct Checker : public BuiltinContext {
                         canonical.rfind("std.deque.", 0) == 0 ||
                         canonical.rfind("std.heap.", 0) == 0;
                     if (!container_builtin_path || allow_builtin_check) {
+                        const GenericFunctionMeta *generic_meta = nullptr;
+                        if (has_path &&
+                            path.find('.') == std::string::npos) {
+                            auto it = g_generic_function_params.find(path);
+                            if (it == g_generic_function_params.end()) {
+                                auto local = generic_functions.find(path);
+                                if (local != generic_functions.end())
+                                    it = g_generic_function_params
+                                             .emplace(path, local->second)
+                                             .first;
+                            }
+                            if (it != g_generic_function_params.end())
+                                generic_meta = &it->second;
+                        }
                         if (!check_polymorphic_call(callee_type, args, env,
-                                                    result))
+                                                    result, generic_meta))
                             return false;
                         return true;
                     }
@@ -3066,15 +3117,19 @@ struct Checker : public BuiltinContext {
         if (def->name) {
             functions[def->name] = sig;
             if (def->generic_params) {
-                std::vector<std::string> params;
+                GenericFunctionMeta meta;
+                meta.name = def->name;
                 for (struct generic_param *param = def->generic_params;
                      param; param = param->next) {
-                    if (param->name)
-                        params.push_back(param->name);
+                    if (param->name) {
+                        meta.params.push_back(param->name);
+                        meta.constraints.push_back(
+                            generic_constraint_meta(param->constraint));
+                    }
                 }
-                if (!params.empty()) {
-                    generic_functions[def->name] = params;
-                    g_generic_function_params[def->name] = params;
+                if (!meta.params.empty()) {
+                    generic_functions[def->name] = meta;
+                    g_generic_function_params[def->name] = meta;
                 }
             }
         }

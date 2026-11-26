@@ -13,6 +13,10 @@ func apply[T any, U any](x: T, f: (T) -> U): U {
   return f(x);
 }
 
+func limited[T int | string](x: T): T {
+  return x;
+}
+
 ts_test("generic identity", func() {
   ts_eq(identity(1), 1);
   ts_eq(identity("a"), "a");
@@ -33,6 +37,12 @@ ts_test("generic explicit type arguments", func() {
   ts_eq(identity[int](1), 1);
   ts_eq(identity[string]("a"), "a");
   ts_eq(choose[int, string](1, "x"), 1);
+});
+
+ts_test("generic function constraints", func() {
+  ts_eq(limited(1), 1);
+  ts_eq(limited("a"), "a");
+  ts_eq(limited[string]("b"), "b");
 });
 
 ts_finish();

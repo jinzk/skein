@@ -199,6 +199,16 @@ def run_cases():
           "let b = Box[int] { value: 1 };\n",
           stderr="type error: type argument int does not satisfy generic constraint for Box")
 
+    check("generic function union constraint",
+          "func pick[T int | string](x: T): T { return x; }\n"
+          "let b = pick(true);\n",
+          stderr="type error: type argument bool does not satisfy generic constraint for pick")
+
+    check("generic function explicit constraint",
+          "func pick[T int | string](x: T): T { return x; }\n"
+          "let b = pick[bool](true);\n",
+          stderr="type error: type argument bool does not satisfy generic constraint for pick")
+
     check("dict builtin key contract",
           "import std;\n"
           "struct Bad { xs: list[int]; }\n"

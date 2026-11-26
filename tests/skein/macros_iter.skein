@@ -24,4 +24,40 @@ ts_test("iter macro canonical path", func() {
   ts_eq(std.iter.collect(std.utils.iter!(xs)), [4, 5]);
 });
 
+ts_test("iter macro let form equivalence", func() {
+  let xs: list[int] = [1, 2, 3];
+  let without_let = [];
+  for x in iter!(xs) {
+    without_let = std.list.append(without_let, x);
+  }
+  let with_let = [];
+  for (let x in iter!(xs)) {
+    with_let = std.list.append(with_let, x);
+  }
+  ts_eq(without_let, with_let);
+  ts_eq(with_let, [1, 2, 3]);
+});
+
+ts_test("iter macro let form equivalence dict", func() {
+  let d: dict[string, int] = {"a": 1, "b": 2};
+  let without_let = [];
+  for k, v in iter!(d) {
+    without_let = std.list.append(without_let, k + "=" + str(v));
+  }
+  let with_let = [];
+  for (let k, v in iter!(d)) {
+    with_let = std.list.append(with_let, k + "=" + str(v));
+  }
+  ts_eq(without_let, with_let);
+  ts_eq(with_let, ["a=1", "b=2"]);
+});
+
+ts_test("iter macro let form scoping", func() {
+  let x = 99;
+  for x in iter!([1, 2]) { }
+  ts_eq(x, 99);
+  for (let x in iter!([1, 2])) { }
+  ts_eq(x, 99);
+});
+
 ts_finish();

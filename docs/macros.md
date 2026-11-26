@@ -201,6 +201,9 @@ for x in iter!([1, 2, 3]) { ... }
 for (k, v) in iter!({"a": 1}) { ... }
 ```
 
+`for x in iter!(xs)` 与 `for (let x in iter!(xs))` 语义等价：两者都使用一个新的
+块级循环变量，外层同名变量不受影响。
+
 ## 4. 边界
 
 第一批不包含：

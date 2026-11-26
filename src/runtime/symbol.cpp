@@ -321,7 +321,8 @@ bool type_constraint_matches(const struct type_constraint *type,
             /* Union membership is enforced by the static checker. */
             return true;
         case TYPE_VAR:
-            return false;
+            /* Type parameters are static-only; erased before runtime. */
+            return true;
         case TYPE_INVALID:
         default:
             return false;

@@ -689,9 +689,17 @@ static const char *builtin_field_name(int functype) {
     }
 }
 
+static bool is_active_type_param(const char *name);
+
 static struct type_constraint *type_constraint_from_name(const char *name) {
     if (!name)
         return new_type_constraint(TYPE_INVALID);
+    if (is_active_type_param(name)) {
+        struct type_constraint *type = new_named_type_constraint(
+            name, diag_current_source_name().c_str());
+        type->kind = TYPE_VAR;
+        return type;
+    }
     enum type_constraint_kind kind;
     if (type_constraint_kind_for_builtin_name(name, kind))
         return new_type_constraint(kind);
@@ -1084,6 +1092,32 @@ static struct type_constraint *runtime_type_or_error(
 }
 
 static std::unordered_set<std::string> g_generic_decl_names;
+static std::vector<std::unordered_set<std::string>> g_generic_type_scopes;
+
+static void push_generic_scope(struct generic_param *params) {
+    std::unordered_set<std::string> names;
+    for (struct generic_param *param = params; param; param = param->next) {
+        if (param->name && *param->name)
+            names.insert(param->name);
+    }
+    g_generic_type_scopes.push_back(std::move(names));
+}
+
+static void pop_generic_scope() {
+    if (!g_generic_type_scopes.empty())
+        g_generic_type_scopes.pop_back();
+}
+
+static bool is_active_type_param(const char *name) {
+    if (!name)
+        return false;
+    for (auto it = g_generic_type_scopes.rbegin();
+         it != g_generic_type_scopes.rend(); ++it) {
+        if (it->count(name) != 0)
+            return true;
+    }
+    return false;
+}
 
 static void note_generic_decl(struct ast *decl) {
     if (!decl)
@@ -1258,36 +1292,42 @@ func_decl: funcstart NAME generic_params '(' symlist ')' func_ret_opt '{' EMPTY_
         $$ = newfunc($2, $5, NULL, false, finish_function(), $7);
         ((struct funcdef *)$$)->generic_params =
             (struct generic_param *)$3;
+        pop_generic_scope();
       }
     | funcstart NAME generic_params '(' symlist ')' func_ret_opt '{' list '}'
                                            {
         $$ = newfunc($2, $5, $9, false, finish_function(), $7);
         ((struct funcdef *)$$)->generic_params =
             (struct generic_param *)$3;
+        pop_generic_scope();
       }
     | funcstart NAME generic_params '(' symlist ')' func_ret_opt RARROW exp ';'
                                            {
         $$ = newfunc($2, $5, newret($9), false, finish_function(), $7);
         ((struct funcdef *)$$)->generic_params =
             (struct generic_param *)$3;
+        pop_generic_scope();
       }
     | EXPORT funcstart NAME generic_params '(' symlist ')' func_ret_opt '{' EMPTY_BLOCK_CLOSE
                                            {
         $$ = newfunc($3, $6, NULL, true, finish_function(), $8);
         ((struct funcdef *)$$)->generic_params =
             (struct generic_param *)$4;
+        pop_generic_scope();
       }
     | EXPORT funcstart NAME generic_params '(' symlist ')' func_ret_opt '{' list '}'
                                            {
         $$ = newfunc($3, $6, $10, true, finish_function(), $8);
         ((struct funcdef *)$$)->generic_params =
             (struct generic_param *)$4;
+        pop_generic_scope();
       }
     | EXPORT funcstart NAME generic_params '(' symlist ')' func_ret_opt RARROW exp ';'
                                            {
         $$ = newfunc($3, $6, newret($10), true, finish_function(), $8);
         ((struct funcdef *)$$)->generic_params =
             (struct generic_param *)$4;
+        pop_generic_scope();
       }
     ;
 
@@ -1356,23 +1396,27 @@ stmt: IF HEADER_LPAREN exp ')' scope %prec NOELSE   { $$ = newflow('I', $3, $5, 
         $$ = lower_struct_inline_methods(newstructdecl(
             $3, copy_text(diag_current_source_name().c_str()),
             (struct generic_param *)$4, NULL, true));
+        pop_generic_scope();
       }
     | EXPORT STRUCT NAME generic_params '{' struct_members '}' {
         $$ = lower_struct_inline_methods(newstructdecl(
             $3, copy_text(diag_current_source_name().c_str()),
             (struct generic_param *)$4,
             (struct struct_member *)$6, true));
+        pop_generic_scope();
       }
     | EXPORT ENUM NAME generic_params '{' empty_body    {
         $$ = newenumdecl($3,
                          copy_text(diag_current_source_name().c_str()),
                          (struct generic_param *)$4, NULL, true);
+        pop_generic_scope();
       }
     | EXPORT ENUM NAME generic_params '{' enum_variants '}' {
         $$ = newenumdecl($3,
                          copy_text(diag_current_source_name().c_str()),
                          (struct generic_param *)$4,
                          (struct enum_variant *)$6, true);
+        pop_generic_scope();
       }
     | LABEL non_empty_scope            { $$ = newlabel($1, $2); }
     | struct_decl
@@ -1646,8 +1690,14 @@ let_pattern: NAME '{' pattern_fields '}'  {
     | '(' tuple_pattern_items ')'          { $$ = $2; }
     ;
 
-generic_params: %empty                   { $$ = NULL; }
-    | '[' generic_param_list ']'         { $$ = $2; }
+generic_params: %empty                   {
+        $$ = NULL;
+        push_generic_scope(NULL);
+      }
+    | '[' generic_param_list ']'         {
+        $$ = $2;
+        push_generic_scope((struct generic_param *)$2);
+      }
     ;
 
 generic_param_list: generic_param        { $$ = $1; }
@@ -1699,12 +1749,14 @@ struct_decl: STRUCT NAME generic_params '{' empty_body  {
         $$ = lower_struct_inline_methods(newstructdecl(
             $2, copy_text(diag_current_source_name().c_str()),
             (struct generic_param *)$3, NULL));
+        pop_generic_scope();
       }
     | STRUCT NAME generic_params '{' struct_members '}' {
         $$ = lower_struct_inline_methods(newstructdecl(
             $2, copy_text(diag_current_source_name().c_str()),
             (struct generic_param *)$3,
             (struct struct_member *)$5));
+        pop_generic_scope();
       }
     ;
 
@@ -1712,12 +1764,14 @@ enum_decl: ENUM NAME generic_params '{' empty_body      {
         $$ = newenumdecl($2,
                          copy_text(diag_current_source_name().c_str()),
                          (struct generic_param *)$3, NULL);
+        pop_generic_scope();
       }
     | ENUM NAME generic_params '{' enum_variants '}'    {
         $$ = newenumdecl($2,
                          copy_text(diag_current_source_name().c_str()),
                          (struct generic_param *)$3,
                          (struct enum_variant *)$5);
+        pop_generic_scope();
       }
     ;
 
@@ -1824,12 +1878,14 @@ protocol_decl: PROTOCOL NAME generic_params '{' empty_body    {
         $$ = newprotocoldecl($2,
                           copy_text(diag_current_source_name().c_str()),
                           (struct generic_param *)$3, NULL);
+        pop_generic_scope();
       }
     | PROTOCOL NAME generic_params '{' protocol_methods '}'   {
         $$ = newprotocoldecl($2,
                           copy_text(diag_current_source_name().c_str()),
                           (struct generic_param *)$3,
                           (struct protocol_method *)$5);
+        pop_generic_scope();
       }
     ;
 

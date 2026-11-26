@@ -1,0 +1,32 @@
+import std;
+include "_support.skein";
+
+func identity[T any](x: T): T {
+  return x;
+}
+
+func choose[T any, U any](a: T, b: U): T {
+  return a;
+}
+
+func apply[T any, U any](x: T, f: (T) -> U): U {
+  return f(x);
+}
+
+ts_test("generic identity", func() {
+  ts_eq(identity(1), 1);
+  ts_eq(identity("a"), "a");
+  ts_eq(identity(true), true);
+});
+
+ts_test("generic multiple type parameters", func() {
+  ts_eq(choose(1, "x"), 1);
+  ts_eq(choose("x", 1), "x");
+});
+
+ts_test("generic callback", func() {
+  ts_eq(apply(2, func(x) { return x * 3; }), 6);
+  ts_eq(apply("a", func(x) { return x + "b"; }), "ab");
+});
+
+ts_finish();

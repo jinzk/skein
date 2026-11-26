@@ -2581,9 +2581,6 @@ struct Checker : public BuiltinContext {
                        const TypeNode *self_type = nullptr) {
         if (!def)
             return true;
-        if (!reject_generic_params(def->generic_params, def->line,
-                                   def->column))
-            return false;
         annotate_decorated_generator(def);
         FunctionSig sig;
         if (def->sl)

@@ -27,6 +27,12 @@ struct method_sig {
     std::shared_ptr<const struct type_constraint> return_type;
 };
 
+enum protocol_builtin_kind {
+    PROTOCOL_BUILTIN_NONE = 0,
+    PROTOCOL_BUILTIN_HASHABLE,
+    PROTOCOL_BUILTIN_ITERABLE,
+};
+
 struct protocol_def {
     std::string name;
     std::string source;
@@ -37,6 +43,13 @@ struct protocol_def {
     std::vector<method_sig> methods;
     /* Methods with a default body, keyed by method name. */
     std::unordered_map<std::string, std::shared_ptr<function_def>> defaults;
+    /*
+     * Non-zero for the built-in traits declared by std.traits.  Their
+     * conformance is supplied by the runtime/typechecker instead of ordinary
+     * structural method matching (Hashable) or by a builtin conformance table
+     * (Iterable).
+     */
+    enum protocol_builtin_kind builtin_kind = PROTOCOL_BUILTIN_NONE;
 };
 
 struct variant_def {
@@ -248,6 +261,19 @@ bool structtype_satisfies_protocol(
     const type_def *def, const protocol_def *protocol,
     std::unordered_map<std::string, struct type_constraint> *bindings_out);
 std::vector<const protocol_def *> structtype_protocols(const type_def *def);
+
+/* Built-in trait conformance for std.traits.Hashable / std.traits.Iterable. */
+bool builtin_type_name_is_hashable(const char *name);
+bool builtin_type_name_is_iterable(const char *name);
+bool builtin_type_satisfies_protocol(const char *name,
+                                     const protocol_def *protocol);
+std::vector<const protocol_def *> builtin_type_protocols(const char *name);
+bool value_satisfies_builtin_protocol(const struct value_t *value,
+                                      const protocol_def *protocol);
+bool value_is_iterable(const struct value_t *value);
+/* Builtin iterator method id for Op::CallMethod fallback: B_iter_items for
+ * dict and B_iter_elements for other iterables; -1 when not applicable. */
+int builtin_iter_method_id(const struct value_t *value);
 bool structtype_refresh_protocol_defaults(type_def *def, std::string &error);
 bool structtype_refresh_all_protocol_defaults(std::string &error);
 bool structtype_has_protocol(const type_def *def, const protocol_def *protocol);

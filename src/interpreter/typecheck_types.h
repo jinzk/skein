@@ -10,6 +10,7 @@
 struct ast;
 struct funcdef;
 struct function_code;
+struct protocol_def;
 struct structtype_lookup_result;
 struct symlist;
 struct value_t;
@@ -69,6 +70,35 @@ enum class KeyContract {
 };
 
 KeyContract key_contract(const TypeNode *type);
+
+/*
+ * Structural/static protocol conformance.  Built-in types participate
+ * through the std.traits conformance table (Hashable/Iterable); user
+ * structs/enums use the normal structural method matching.
+ */
+enum class ProtocolMatch {
+    No,
+    Yes,
+    Unknown,
+};
+
+ProtocolMatch match_protocol(
+    const TypeNode *actual, const struct protocol_def *protocol,
+    std::unordered_map<std::string, struct type_constraint> *bindings =
+        nullptr);
+
+/*
+ * Built-in `iterable` constraint predicate.  This is deliberately broader
+ * than the std.traits.Iterable proto: a user `iter` method may return any
+ * iterable value, not only generator[T].
+ */
+enum class IterableContract {
+    No,
+    Yes,
+    Unknown,
+};
+
+IterableContract iterable_contract(const TypeNode *type);
 
 /*
  * Builtin polymorphic values use static-only type variables (for example

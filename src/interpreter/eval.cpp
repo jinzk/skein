@@ -1882,6 +1882,19 @@ struct value_t *eval(struct ast *a) {
                     break;
                 }
 
+                if (call->args == NULL && key->type == T_string &&
+                    std::strcmp(((struct string_value_t *)key)->value,
+                                "iter") == 0) {
+                    int builtin_id = builtin_iter_method_id(receiver);
+                    if (builtin_id >= 0) {
+                        ret = call_builtin_method_value(receiver, builtin_id,
+                                                        call->args);
+                        freeval(receiver);
+                        freeval(key);
+                        break;
+                    }
+                }
+
                 struct value_t *member =
                     read_member_value(receiver, key, field_access);
                 freeval(receiver);

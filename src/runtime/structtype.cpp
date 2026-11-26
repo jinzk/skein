@@ -1,5 +1,7 @@
 #include "structtype.h"
 
+#include "builtin_ids.h"
+#include "dict.h"
 #include "refvalue.h"
 
 #include <algorithm>
@@ -158,6 +160,148 @@ resolved_type resolve_named(const char *source, const char *name,
     return result;
 }
 
+bool constraint_is_hashable(const struct type_constraint &type,
+                            std::unordered_set<const type_def *> &active,
+                            bool &unknown);
+
+bool type_def_is_hashable_inner(const type_def *def,
+                                std::unordered_set<const type_def *> &active) {
+    if (!def)
+        return false;
+    if (!active.insert(def).second)
+        return false;
+
+    std::shared_ptr<function_def> hash = structtype_method(def, "dict_hash");
+    if (hash) {
+        bool ok = hash->code && !hash->code->variadic &&
+                  hash->code->nparams == 1 && hash->code->ret_type &&
+                  hash->code->ret_type->kind == TYPE_INT &&
+                  !hash->code->ret_type->nullable;
+        if (ok) {
+            std::shared_ptr<function_def> eq =
+                structtype_method(def, "key_eq");
+            if (eq) {
+                ok = eq->code && !eq->code->variadic &&
+                     eq->code->nparams == 2 && eq->code->ret_type &&
+                     eq->code->ret_type->kind == TYPE_BOOL &&
+                     !eq->code->ret_type->nullable;
+            }
+        }
+        active.erase(def);
+        return ok;
+    }
+
+    bool unknown = false;
+    auto inspect_fields = [&](const std::vector<field_def> &fields) {
+        for (const field_def &field : fields) {
+            if (!constraint_is_hashable(field.type, active, unknown))
+                return false;
+        }
+        return true;
+    };
+
+    bool result = true;
+    if (def->kind == TYPE_OWNER_STRUCT) {
+        const struct_def *structure = static_cast<const struct_def *>(def);
+        result = inspect_fields(structure->fields);
+    } else {
+        const enum_def *enumeration = static_cast<const enum_def *>(def);
+        for (const variant_def &variant : enumeration->variants) {
+            if (!inspect_fields(variant.fields)) {
+                result = false;
+                break;
+            }
+        }
+    }
+    active.erase(def);
+    return result;
+}
+
+bool constraint_is_hashable(const struct type_constraint &type,
+                            std::unordered_set<const type_def *> &active,
+                            bool &unknown) {
+    switch (type.kind) {
+        case TYPE_INT:
+        case TYPE_FLOAT:
+        case TYPE_NUMBER:
+        case TYPE_BOOL:
+        case TYPE_STRING:
+        case TYPE_CHAR:
+        case TYPE_BYTE:
+        case TYPE_BYTES:
+        case TYPE_NULL:
+            return true;
+
+        case TYPE_PAIR:
+        case TYPE_TUPLE:
+        case TYPE_UNION:
+            /* Runtime constraints do not retain element/member details.
+             * Treat them as conservatively hashable; the actual dict/set
+             * value check still verifies nested mutable values. */
+            unknown = true;
+            return true;
+
+        case TYPE_ANY:
+        case TYPE_VAR:
+            unknown = true;
+            return true;
+
+        case TYPE_NAMED: {
+            resolved_type resolved =
+                resolve_named(type.source, type.name, true);
+            if (resolved.structure)
+                return type_def_is_hashable_inner(resolved.structure, active);
+            if (resolved.enumeration)
+                return type_def_is_hashable_inner(resolved.enumeration, active);
+            unknown = true;
+            return true;
+        }
+
+        case TYPE_LIST:
+        case TYPE_DICT:
+        case TYPE_SET:
+        case TYPE_DEQUE:
+        case TYPE_HEAP:
+        case TYPE_REF:
+        case TYPE_WEAK:
+        case TYPE_RESULT:
+        case TYPE_ERROR:
+        case TYPE_FUNCTION:
+        case TYPE_BUILTIN:
+        case TYPE_CALLABLE:
+        case TYPE_USERDATA:
+        case TYPE_TASK:
+        case TYPE_GENERATOR:
+        case TYPE_SOCKET:
+        case TYPE_LISTENER:
+        case TYPE_WEBSOCKET:
+        case TYPE_STREAM:
+        case TYPE_VOID:
+        case TYPE_INVALID:
+            return false;
+    }
+    unknown = true;
+    return true;
+}
+
+bool type_def_is_hashable(const type_def *def) {
+    if (!def)
+        return false;
+    std::unordered_set<const type_def *> active;
+    return type_def_is_hashable_inner(def, active);
+}
+
+bool builtin_name_is(const char *name,
+                     std::initializer_list<const char *> candidates) {
+    if (!name)
+        return false;
+    for (const char *candidate : candidates) {
+        if (std::strcmp(name, candidate) == 0)
+            return true;
+    }
+    return false;
+}
+
 static bool named_type_visible_impl(const char *source, const char *name) {
     if (!name) return false;
     std::string key = type_key(source, name);
@@ -291,6 +435,90 @@ struct_def *structtype_find_struct_by_name(const char *package,
         found = entry.second;
     }
     return found;
+}
+
+bool builtin_type_name_is_hashable(const char *name) {
+    return builtin_name_is(name, {"int", "float", "number", "bool", "string",
+                                  "char", "byte", "bytes", "null", "pair",
+                                  "tuple"});
+}
+
+bool builtin_type_name_is_iterable(const char *name) {
+    return builtin_name_is(name, {"list", "dict", "set", "deque", "heap",
+                                  "string", "bytes", "generator", "pair",
+                                  "tuple"});
+}
+
+bool builtin_type_satisfies_protocol(const char *name,
+                                     const protocol_def *protocol) {
+    if (!protocol)
+        return false;
+    if (protocol->builtin_kind == PROTOCOL_BUILTIN_HASHABLE)
+        return builtin_type_name_is_hashable(name);
+    if (protocol->builtin_kind == PROTOCOL_BUILTIN_ITERABLE)
+        return builtin_type_name_is_iterable(name);
+    return false;
+}
+
+std::vector<const protocol_def *> builtin_type_protocols(const char *name) {
+    std::vector<const protocol_def *> result;
+    if (builtin_type_name_is_iterable(name)) {
+        protocol_def *protocol =
+            structtype_find_protocol_by_name(nullptr, "Iterable");
+        if (protocol && protocol->builtin_kind == PROTOCOL_BUILTIN_ITERABLE)
+            result.push_back(protocol);
+    }
+    if (builtin_type_name_is_hashable(name)) {
+        protocol_def *protocol =
+            structtype_find_protocol_by_name(nullptr, "Hashable");
+        if (protocol && protocol->builtin_kind == PROTOCOL_BUILTIN_HASHABLE)
+            result.push_back(protocol);
+    }
+    return result;
+}
+
+bool value_is_iterable(const struct value_t *value) {
+    if (!value)
+        return false;
+    switch (value->type) {
+        case T_list:
+        case T_dict:
+        case T_set:
+        case T_deque:
+        case T_heap:
+        case T_string:
+        case T_bytes:
+            return true;
+        case T_userdata: {
+            const userdata_value_t *userdata =
+                (const userdata_value_t *)value;
+            return userdata->meta && userdata->meta->name &&
+                   std::strcmp(userdata->meta->name, "generator") == 0;
+        }
+        default:
+            return false;
+    }
+}
+
+bool value_satisfies_builtin_protocol(const struct value_t *value,
+                                      const protocol_def *protocol) {
+    if (!value || !protocol)
+        return false;
+    if (protocol->builtin_kind == PROTOCOL_BUILTIN_HASHABLE)
+        return dict_key_allowed(value);
+    if (protocol->builtin_kind == PROTOCOL_BUILTIN_ITERABLE)
+        return value_is_iterable(value);
+    return false;
+}
+
+int builtin_iter_method_id(const struct value_t *value) {
+    if (!value)
+        return -1;
+    if (value->type == T_dict)
+        return B_iter_items;
+    if (value_is_iterable(value))
+        return B_iter_elements;
+    return -1;
 }
 
 type_def *structtype_find_type(const char *source, const char *name) {
@@ -881,6 +1109,15 @@ bool structtype_create_protocol(const char *source, const char *package,
     def->exported = exported;
     def->generic_params = std::move(generic_params);
     def->methods = std::move(methods);
+    const bool std_traits =
+        (def->package == "std.traits") ||
+        (def->source == "<std.traits>") || (def->source == "std.traits");
+    if (std_traits) {
+        if (def->name == "Hashable")
+            def->builtin_kind = PROTOCOL_BUILTIN_HASHABLE;
+        else if (def->name == "Iterable")
+            def->builtin_kind = PROTOCOL_BUILTIN_ITERABLE;
+    }
     out = def.get();
     logical_protocols.emplace(logical_key, out);
     protocol_types.emplace(type_key(source, name), std::move(def));
@@ -1288,6 +1525,11 @@ bool structtype_satisfies_protocol(
     std::lock_guard<std::recursive_mutex> lock(type_registry_mutex);
     if (!def || !protocol)
         return false;
+    if (protocol->builtin_kind == PROTOCOL_BUILTIN_HASHABLE) {
+        if (bindings_out)
+            bindings_out->clear();
+        return type_def_is_hashable(def);
+    }
     std::unordered_map<std::string, struct type_constraint> bindings;
     for (const method_sig &sig : protocol->methods) {
         bool is_default = def->default_methods.count(sig.name) != 0;
@@ -1535,13 +1777,23 @@ bool named_type_matches(const char *source, const char *name,
         return named_type_matches(source, name, (const struct value_t *)&plain);
     }
 
+    resolved_type resolved = resolve_named(source, name, true);
+    if (resolved.protocol &&
+        resolved.protocol->builtin_kind != PROTOCOL_BUILTIN_NONE) {
+        if (resolved.protocol->builtin_kind == PROTOCOL_BUILTIN_HASHABLE)
+            return dict_key_allowed(value);
+        if (resolved.protocol->builtin_kind == PROTOCOL_BUILTIN_ITERABLE &&
+            value->type != T_struct && value->type != T_enum)
+            return value_is_iterable(value);
+        /* Structs/enums still use their real iter method for Iterable. */
+    }
+
     if (value->type == T_enum) {
         const struct enum_value_t *ev = (const struct enum_value_t *)value;
         if (!ev->def)
             return false;
         if (ev->def->source == source && ev->def->name == name)
             return true;
-        resolved_type resolved = resolve_named(source, name, true);
         if (resolved.enumeration)
             return ev->def == resolved.enumeration;
         if (resolved.protocol)
@@ -1559,7 +1811,6 @@ bool named_type_matches(const char *source, const char *name,
     if (sv->def->source == source && sv->def->name == name)
         return true;
 
-    resolved_type resolved = resolve_named(source, name, true);
     if (resolved.structure)
         return sv->def == resolved.structure;
     if (resolved.protocol)

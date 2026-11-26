@@ -2406,6 +2406,22 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_invoke_method(
     value_t *receiver, const char *name, value_t **args, uint32_t argc,
     int line, int column) {
     diag_set_location(line, column);
+    if (receiver && name && argc == 0 && std::strcmp(name, "iter") == 0) {
+        int builtin_id = builtin_iter_method_id(receiver);
+        if (builtin_id >= 0) {
+            value_t *builtin = newbuiltinval(builtin_id);
+            std::vector<value_t *> call_args;
+            call_args.push_back(receiver);
+            value_t *result =
+                skein_vm_call_value_args(builtin, std::move(call_args));
+            freeval(builtin);
+            if (g_interrupted) {
+                freeval(result);
+                return nullptr;
+            }
+            return result;
+        }
+    }
     value_t *callee = nullptr;
     if (receiver && name) {
         const char *private_owner = nullptr;

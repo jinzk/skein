@@ -374,8 +374,12 @@ func identity[T any](x: T): T {
 [K type int | string]     // 具体类型集合
 [V proto Drawable]        // proto 组
 [T hashable]
+[T iterable]
 [T proto hashable & Drawable]
+[T proto iterable & Drawable]
 ```
+
+`std.traits` 提供 `Hashable` marker proto 和 `Iterable[T]` proto；内置容器自动满足它们，用户类型通过 `dict_hash` / `iter(self): generator[T]` 满足。小写 `hashable` / `iterable` 是始终可用的内置约束别名。
 
 实例化：
 

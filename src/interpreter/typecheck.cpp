@@ -1115,26 +1115,18 @@ struct Checker : public BuiltinContext {
         auto is_hashable = [](const TypeNode *type) {
             return key_contract(type) != KeyContract::No;
         };
+        auto is_iterable = [](const TypeNode *type) {
+            return iterable_contract(type) != IterableContract::No;
+        };
         auto protocol_lookup = [&](const TypeNode *item,
                                    structtype_lookup_result &out) {
             return lookup_named_type(item, out) && out.protocol;
         };
-        auto actual_type = [&](const TypeNode *type) {
-            structtype_lookup_result lookup;
-            if (!lookup_named_type(type, lookup))
-                return static_cast<const type_def *>(nullptr);
-            return lookup.structure
-                       ? static_cast<const type_def *>(lookup.structure)
-                       : static_cast<const type_def *>(lookup.enumeration);
-        };
         auto protocol_matches = [&](const TypeNode *item,
                                     const structtype_lookup_result &lookup) {
-            const type_def *actual = actual_type(arg);
-            if (!actual)
-                return false;
             std::unordered_map<std::string, struct type_constraint> bindings;
-            if (!structtype_satisfies_protocol(actual, lookup.protocol,
-                                               &bindings))
+            if (match_protocol(arg, lookup.protocol, &bindings) !=
+                ProtocolMatch::Yes)
                 return false;
             if (item->args.empty())
                 return true;
@@ -1162,7 +1154,8 @@ struct Checker : public BuiltinContext {
                     continue;
                 if (item->kind == TYPE_ANY)
                     return true;
-                if (item->kind == TYPE_NAMED && item->name == "hashable")
+                if (item->kind == TYPE_NAMED &&
+                    (item->name == "hashable" || item->name == "iterable"))
                     return false;
                 structtype_lookup_result protocol;
                 if (protocol_lookup(item, protocol))
@@ -1180,6 +1173,11 @@ struct Checker : public BuiltinContext {
                 continue;
             if (item->kind == TYPE_NAMED && item->name == "hashable") {
                 if (!is_hashable(arg))
+                    return false;
+                continue;
+            }
+            if (item->kind == TYPE_NAMED && item->name == "iterable") {
+                if (!is_iterable(arg))
                     return false;
                 continue;
             }
@@ -1210,7 +1208,8 @@ struct Checker : public BuiltinContext {
                     return false;
                 }
                 if (item->kind == TYPE_NAMED &&
-                    item->name == "hashable")
+                    (item->name == "hashable" ||
+                     item->name == "iterable"))
                     continue;
                 structtype_lookup_result lookup;
                 if (lookup_named_type(item, lookup) && lookup.protocol)
@@ -1232,9 +1231,12 @@ struct Checker : public BuiltinContext {
                     return false;
                 }
                 if (item->kind == TYPE_NAMED &&
-                    item->name == "hashable") {
-                    report_error(line, column,
-                                 "'hashable' cannot be used with '|'");
+                    (item->name == "hashable" ||
+                     item->name == "iterable")) {
+                    std::string message =
+                        std::string("'") + item->name +
+                        "' cannot be used with '|'";
+                    report_error(line, column, message.c_str());
                     return false;
                 }
                 structtype_lookup_result lookup;

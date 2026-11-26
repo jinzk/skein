@@ -217,8 +217,14 @@ bool needs_static_check(const TypeNode *type) {
     if (type->kind == TYPE_SOCKET || type->kind == TYPE_LISTENER ||
         type->kind == TYPE_WEBSOCKET || type->kind == TYPE_STREAM)
         return true;
-    if (type->kind == TYPE_NAMED && !type->args.empty())
-        return true;
+    if (type->kind == TYPE_NAMED) {
+        if (!type->args.empty())
+            return true;
+        structtype_lookup_result lookup;
+        if (lookup_named_type(type, lookup) && lookup.protocol &&
+            lookup.protocol->builtin_kind != PROTOCOL_BUILTIN_NONE)
+            return true;
+    }
     if (has_concrete_container_arg(type))
         return true;
     if (type_is_function_signature(type)) {
@@ -696,6 +702,253 @@ KeyContract key_contract(const TypeNode *type) {
 
 namespace {
 
+struct type_constraint constraint_from_static_type(const TypeNode *type) {
+    struct type_constraint result;
+    result.kind = type ? type->kind : TYPE_ANY;
+    result.name = (type && !type->name.empty()) ? type->name.c_str() : NULL;
+    result.source =
+        (type && !type->source.empty()) ? type->source.c_str() : NULL;
+    result.nullable = type ? type->nullable : false;
+    result.arity = (type && (type->kind == TYPE_PAIR ||
+                             type->kind == TYPE_TUPLE))
+                       ? static_cast<int>(type->args.size())
+                       : 0;
+    result.display = NULL;
+    result.detail = type;
+    return result;
+}
+
+void bind_protocol_param(
+    std::unordered_map<std::string, struct type_constraint> *bindings,
+    const struct protocol_def *protocol, std::size_t index,
+    const TypeNode *type) {
+    if (!bindings || !protocol || index >= protocol->generic_params.size())
+        return;
+    (*bindings)[protocol->generic_params[index]] =
+        constraint_from_static_type(type);
+}
+
+struct IterableContractState {
+    std::unordered_set<const type_def *> active;
+};
+
+IterableContract iterable_contract_inner(const TypeNode *type,
+                                         IterableContractState &state);
+
+IterableContract iterable_contract_named(const TypeNode *type,
+                                         IterableContractState &state) {
+    structtype_lookup_result lookup;
+    if (!lookup_named_type(type, lookup))
+        return IterableContract::Unknown;
+    if (lookup.kind == STRUCTTYPE_LOOKUP_PROTOCOL)
+        return IterableContract::Unknown;
+    const type_def *def =
+        lookup.kind == STRUCTTYPE_LOOKUP_STRUCT
+            ? static_cast<const type_def *>(lookup.structure)
+            : static_cast<const type_def *>(lookup.enumeration);
+    if (!def)
+        return IterableContract::Unknown;
+
+    std::shared_ptr<function_def> method = structtype_method(def, "iter");
+    if (!method || !method->code)
+        return IterableContract::No;
+    const function_code *code = method->code.get();
+    if (code->variadic || code->nparams != 1)
+        return IterableContract::No;
+    if (!code->ret_type) {
+        /* The method exists but has no declared return type.  Treat it as
+         * dynamically iterable; the runtime still performs the real check. */
+        return IterableContract::Unknown;
+    }
+    if (!state.active.insert(def).second)
+        return IterableContract::No;
+
+    TypeBindings bindings;
+    if (!type->args.empty() && !def->generic_params.empty() &&
+        type->args.size() == def->generic_params.size()) {
+        for (std::size_t i = 0; i < def->generic_params.size(); ++i)
+            bindings[def->generic_params[i]] = type->args[i];
+    }
+    const TypeNode *result =
+        type_from_constraint(code->ret_type.get());
+    if (!bindings.empty())
+        result = instantiate_type(result, bindings);
+    IterableContract contract = iterable_contract_inner(result, state);
+    state.active.erase(def);
+    return contract;
+}
+
+IterableContract iterable_contract_inner(const TypeNode *type,
+                                         IterableContractState &state) {
+    if (!type)
+        return IterableContract::Unknown;
+    switch (type->kind) {
+        case TYPE_LIST:
+        case TYPE_DICT:
+        case TYPE_SET:
+        case TYPE_DEQUE:
+        case TYPE_HEAP:
+        case TYPE_STRING:
+        case TYPE_BYTES:
+        case TYPE_GENERATOR:
+        case TYPE_PAIR:
+        case TYPE_TUPLE:
+            return IterableContract::Yes;
+
+        case TYPE_UNION: {
+            bool unknown = false;
+            for (const TypeNode *member : type->args) {
+                IterableContract item = iterable_contract_inner(member, state);
+                if (item == IterableContract::No)
+                    return IterableContract::No;
+                if (item == IterableContract::Unknown)
+                    unknown = true;
+            }
+            return unknown ? IterableContract::Unknown
+                           : IterableContract::Yes;
+        }
+
+        case TYPE_NAMED:
+            return iterable_contract_named(type, state);
+
+        case TYPE_ANY:
+        case TYPE_VAR:
+            return IterableContract::Unknown;
+
+        default:
+            return IterableContract::No;
+    }
+}
+
+ProtocolMatch iterable_protocol_match(
+    const TypeNode *actual, const struct protocol_def *protocol,
+    std::unordered_map<std::string, struct type_constraint> *bindings) {
+    switch (actual->kind) {
+        case TYPE_LIST:
+        case TYPE_SET:
+        case TYPE_DEQUE:
+        case TYPE_HEAP:
+        case TYPE_GENERATOR:
+            bind_protocol_param(bindings, protocol, 0,
+                                !actual->args.empty() ? actual->args[0]
+                                                      : type_any());
+            return ProtocolMatch::Yes;
+
+        case TYPE_DICT: {
+            const TypeNode *key =
+                !actual->args.empty() ? actual->args[0] : type_any();
+            const TypeNode *value =
+                actual->args.size() > 1 ? actual->args[1] : type_any();
+            bind_protocol_param(bindings, protocol, 0,
+                                type_container(TYPE_PAIR, {key, value}));
+            return ProtocolMatch::Yes;
+        }
+
+        case TYPE_STRING:
+            bind_protocol_param(bindings, protocol, 0,
+                                type_builtin(TYPE_CHAR));
+            return ProtocolMatch::Yes;
+
+        case TYPE_BYTES:
+            bind_protocol_param(bindings, protocol, 0,
+                                type_builtin(TYPE_BYTE));
+            return ProtocolMatch::Yes;
+
+        case TYPE_PAIR:
+        case TYPE_TUPLE:
+            bind_protocol_param(bindings, protocol, 0, type_any());
+            return ProtocolMatch::Yes;
+
+        default:
+            break;
+    }
+
+    if (actual->kind != TYPE_NAMED)
+        return ProtocolMatch::No;
+    structtype_lookup_result lookup;
+    if (!lookup_named_type(actual, lookup))
+        return ProtocolMatch::Unknown;
+    if (lookup.kind == STRUCTTYPE_LOOKUP_PROTOCOL)
+        return ProtocolMatch::Unknown;
+    const type_def *def =
+        lookup.kind == STRUCTTYPE_LOOKUP_STRUCT
+            ? static_cast<const type_def *>(lookup.structure)
+            : static_cast<const type_def *>(lookup.enumeration);
+    if (!def)
+        return ProtocolMatch::Unknown;
+    std::unordered_map<std::string, struct type_constraint> local;
+    if (!structtype_satisfies_protocol(def, protocol, &local))
+        return ProtocolMatch::No;
+    if (bindings)
+        *bindings = std::move(local);
+    return ProtocolMatch::Yes;
+}
+
+} // namespace
+
+IterableContract iterable_contract(const TypeNode *type) {
+    IterableContractState state;
+    return iterable_contract_inner(type, state);
+}
+
+ProtocolMatch match_protocol(
+    const TypeNode *actual, const struct protocol_def *protocol,
+    std::unordered_map<std::string, struct type_constraint> *bindings) {
+    if (!actual || !protocol)
+        return ProtocolMatch::No;
+    if (actual->kind == TYPE_ANY || actual->kind == TYPE_VAR)
+        return ProtocolMatch::Unknown;
+    if (actual->kind == TYPE_UNION) {
+        bool unknown = false;
+        for (const TypeNode *member : actual->args) {
+            ProtocolMatch item = match_protocol(member, protocol, nullptr);
+            if (item == ProtocolMatch::No)
+                return ProtocolMatch::No;
+            if (item == ProtocolMatch::Unknown)
+                unknown = true;
+        }
+        return unknown ? ProtocolMatch::Unknown : ProtocolMatch::Yes;
+    }
+
+    switch (protocol->builtin_kind) {
+        case PROTOCOL_BUILTIN_HASHABLE:
+            return key_contract(actual) == KeyContract::No
+                       ? ProtocolMatch::No
+                       : ProtocolMatch::Yes;
+        case PROTOCOL_BUILTIN_ITERABLE:
+            return iterable_protocol_match(actual, protocol, bindings);
+        case PROTOCOL_BUILTIN_NONE:
+            break;
+    }
+
+    if (actual->kind == TYPE_REF || actual->kind == TYPE_WEAK) {
+        const TypeNode *inner = type_element(actual, 0);
+        return inner ? match_protocol(inner, protocol, bindings)
+                     : ProtocolMatch::Unknown;
+    }
+    if (actual->kind != TYPE_NAMED)
+        return ProtocolMatch::No;
+    structtype_lookup_result lookup;
+    if (!lookup_named_type(actual, lookup))
+        return ProtocolMatch::Unknown;
+    if (lookup.kind == STRUCTTYPE_LOOKUP_PROTOCOL)
+        return ProtocolMatch::Unknown;
+    const type_def *def =
+        lookup.kind == STRUCTTYPE_LOOKUP_STRUCT
+            ? static_cast<const type_def *>(lookup.structure)
+            : static_cast<const type_def *>(lookup.enumeration);
+    if (!def)
+        return ProtocolMatch::Unknown;
+    std::unordered_map<std::string, struct type_constraint> local;
+    if (!structtype_satisfies_protocol(def, protocol, &local))
+        return ProtocolMatch::No;
+    if (bindings)
+        *bindings = std::move(local);
+    return ProtocolMatch::Yes;
+}
+
+namespace {
+
 thread_local int g_type_match_depth = 0;
 
 struct TypeMatchDepthGuard {
@@ -870,6 +1123,50 @@ MatchResult match_type(const TypeNode *actual, const TypeNode *expected) {
                            ? MatchResult::Ok
                            : MatchResult::Mismatch;
             }
+        }
+    }
+    if (expected->kind == TYPE_NAMED) {
+        structtype_lookup_result expected_lookup;
+        if (lookup_named_type(expected, expected_lookup) &&
+            expected_lookup.protocol) {
+            if (actual->kind == TYPE_NAMED &&
+                structtype_named_types_equal(
+                    actual->source.c_str(), actual->name.c_str(),
+                    expected->source.c_str(), expected->name.c_str()))
+                return MatchResult::Ok;
+            std::unordered_map<std::string, struct type_constraint> bindings;
+            ProtocolMatch matched = match_protocol(
+                actual, expected_lookup.protocol,
+                expected_lookup.protocol->builtin_kind !=
+                        PROTOCOL_BUILTIN_NONE
+                    ? &bindings
+                    : nullptr);
+            if (matched == ProtocolMatch::No)
+                return MatchResult::Mismatch;
+            if (matched == ProtocolMatch::Unknown)
+                return MatchResult::Unknown;
+            if (expected_lookup.protocol->builtin_kind !=
+                    PROTOCOL_BUILTIN_NONE &&
+                !expected->args.empty()) {
+                if (expected->args.size() !=
+                    expected_lookup.protocol->generic_params.size())
+                    return MatchResult::Mismatch;
+                MatchResult result = MatchResult::Ok;
+                for (std::size_t i = 0; i < expected->args.size(); ++i) {
+                    auto binding = bindings.find(
+                        expected_lookup.protocol->generic_params[i]);
+                    if (binding == bindings.end())
+                        return MatchResult::Unknown;
+                    const TypeNode *bound =
+                        type_from_constraint(&binding->second);
+                    result = combine_result(
+                        result, match_type(bound, expected->args[i]));
+                    if (result == MatchResult::Mismatch)
+                        return result;
+                }
+                return result;
+            }
+            return MatchResult::Ok;
         }
     }
     if (actual->kind != expected->kind)

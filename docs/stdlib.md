@@ -2318,6 +2318,7 @@ std.arena（内嵌 Skein 源码包）
 std.path（内嵌 Skein 源码包）
 std.lru（内嵌 Skein 源码包）
 std.dict_key（内嵌 Skein 源码包）
+std.traits（内嵌 Skein 源码包）
 ```
 
 `std.fsm` 是内嵌 Skein 源码标准库，源码位于 `lib/std/fsm.skein`，构建时嵌入解释器，不需要安装额外文件：
@@ -2517,6 +2518,81 @@ struct User {
 - `key_eq` 只影响 dict/set（以及 unique、group_by、LRU 等内部使用 dict/set 的操作），**不改变普通 `==`**。
 - `key_eq` 必须是纯函数、确定性、无副作用，并且与 `dict_hash` 一致：`a.key_eq(b)` 为 true 时，`dict_hash(a)` 和 `dict_hash(b)` 必须相同。
 - key_eq 期间禁止重入 dict/set key equality。
+
+`std.traits` 是内嵌 Skein 源码包（`lib/std/traits.skein`），提供内置 trait proto：
+
+```text
+import {Hashable, Iterable} from std.traits;
+```
+
+`Hashable` 是 marker proto，conformance 由内置 key contract 计算：
+
+```text
+int / float（NaN 除外）/ bool / string / char / byte / bytes / null
+frozen tuple / pair（元素递归可哈希）
+字段递归可哈希的 struct / enum
+实现合法 dict_hash 的 struct / enum
+```
+
+`Hashable` 不需要用户写 `impl`；也可以继续使用小写内置约束 `hashable`，两者语义一致。`x is Hashable` 是值级检查，`float("nan") is Hashable` 为 false。
+
+`Iterable[T]` 是结构化迭代器 proto：
+
+```text
+proto Iterable[T any] {
+  func iter(self): generator[T];
+}
+```
+
+内置类型自动满足：
+
+```text
+list[T]        -> Iterable[T]
+dict[K, V]     -> Iterable[pair[K, V]]
+set / deque / heap[T] -> Iterable[T]
+string         -> Iterable[char]
+bytes          -> Iterable[byte]
+generator[T]   -> Iterable[T]
+pair / tuple   -> Iterable[any]
+```
+
+用户类型通过匹配签名的方法满足：
+
+```text
+struct Range {
+  start: int;
+  end: int;
+
+  func iter(self): generator[int] {
+    for let i = self.start; i < self.end; i = i + 1 {
+      yield i;
+    }
+  }
+}
+```
+
+`Iterable` 只接受返回 `generator[T]` 的实现。若 `iter` 返回其他可迭代值（例如 `list[int]`），使用小写内置约束 `iterable`：
+
+```text
+struct Box {
+  xs: list[int];
+
+  func iter(self): list[int] {
+    return self.xs;
+  }
+}
+
+func collect[T iterable](x: T) { ... }
+```
+
+`hashable` / `iterable` 是内置约束别名，不依赖 `import std.traits`；`Hashable` / `Iterable` 是 proto 名，需要 selective import。
+
+注意事项：
+
+- `dict.iter()` 产出 entry pair；裸 `for k in dict` 仍然遍历 key，二者语义尚未统一。
+- 裸 `for x in userValue` 不会自动调用 `iter()`；自定义类型请使用 `iter!(userValue)` 或显式 `.iter()`。
+- `std.meta.implements("list", "Iterable")`、`std.meta.protocols("int")` 等反射入口会看到内置 conformance。
+- `std.meta.implements` 的字符串参数目前不接受 `generator[int]` 这类带类型参数的文本，使用 `type_info` 或值本身查询。
 
 `std.set` / `std.deque` / `std.heap` 是原生实现（`import std.set` / `import std.deque` / `import std.heap` 仍然可用，也可以直接使用对应的 `std.*`）：
 

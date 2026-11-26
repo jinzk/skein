@@ -1021,7 +1021,9 @@ func identity[T any](x: T): T {
 [K type int | string]     // 具体类型集合
 [V proto Drawable]        // proto 组
 [T hashable]
+[T iterable]
 [T proto hashable & Drawable]
+[T proto iterable & Drawable]
 ```
 
 `type` / `proto` 在类型参数约束列表中都是 contextual 标记，只在该位置生效；
@@ -1030,7 +1032,8 @@ func identity[T any](x: T): T {
 - `[T]`、`[T type]` 不合法；
 - 一个参数的约束不能混用 `&` 和 `|`；
 - proto 不能作为 `|` 成员；
-- `hashable` 是内置约束，可参与 `&`；
+- `hashable` / `iterable` 是内置约束，可参与 `&`，不能作为 `|` 成员；
+- `std.traits` 提供对应的 `Hashable` marker proto 和 `Iterable[T]` 方法 proto；需要显式接口名时使用 `import {Hashable, Iterable} from std.traits;`；
 - proto 不是类型实参：`Box[Keyed]` 非法。
 
 实例化和推断：
@@ -3015,6 +3018,7 @@ std.arena（内嵌 Skein 源码包）
 std.path（内嵌 Skein 源码包）
 std.lru（内嵌 Skein 源码包）
 std.dict_key（内嵌 Skein 源码包）
+std.traits（内嵌 Skein 源码包）
 ```
 
 常用示例：

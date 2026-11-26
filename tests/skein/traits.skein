@@ -1,0 +1,147 @@
+import std;
+import {Hashable, Iterable} from std.traits;
+include "_support.skein";
+
+struct TraitRange {
+  start: int;
+  end: int;
+  extra: list[int];
+
+  func iter(self): generator[int] {
+    for let i = self.start; i < self.end; i = i + 1 {
+      yield i;
+    }
+  }
+}
+
+struct TraitListIter {
+  xs: list[int];
+
+  func iter(self): list[int] {
+    return self.xs;
+  }
+}
+
+struct TraitUser {
+  id: int;
+  cache: list[int];
+
+  func dict_hash(self): int {
+    return self.id;
+  }
+}
+
+struct TraitPlainKey {
+  id: int;
+}
+
+func trait_need_hash[T Hashable](x: T): T {
+  return x;
+}
+
+func trait_need_iter[T Iterable](x: T): T {
+  return x;
+}
+
+func trait_need_lower_iter[T iterable](x: T): T {
+  return x;
+}
+
+func trait_need_lower_hash[T hashable](x: T): T {
+  return x;
+}
+
+ts_test("traits builtin conformance", func() {
+  ts_true(std.meta.implements("list", "Iterable"));
+  ts_true(std.meta.implements("dict", "Iterable"));
+  ts_true(std.meta.implements("string", "Iterable"));
+  ts_true(std.meta.implements("generator", "Iterable"));
+  ts_true(std.meta.implements("pair", "Iterable"));
+  ts_true(std.meta.implements("tuple", "Hashable"));
+  ts_true(std.meta.implements("int", "Hashable"));
+  ts_true(std.meta.implements("string", "Hashable"));
+  ts_true(std.meta.implements([1, 2], "Iterable"));
+  ts_false(std.meta.implements("list", "Hashable"));
+  ts_false(std.meta.implements("int", "Iterable"));
+});
+
+ts_test("traits is operator", func() {
+  ts_true([1, 2] is Iterable);
+  ts_true("ab" is Iterable);
+  ts_true(("a", 1) is Hashable);
+  ts_true(1 is Hashable);
+  ts_false([1, 2] is Hashable);
+  ts_false(1 is Iterable);
+  ts_false(float("nan") is Hashable);
+});
+
+ts_test("traits generic hashable constraint", func() {
+  ts_eq(trait_need_hash(1), 1);
+  ts_eq(trait_need_hash("x"), "x");
+  ts_eq(trait_need_hash(("a", 1))[0], "a");
+  ts_eq(trait_need_hash(TraitUser { id: 7, cache: [] }).id, 7);
+  ts_eq(trait_need_hash(TraitPlainKey { id: 8 }).id, 8);
+  ts_eq(trait_need_lower_hash(1), 1);
+});
+
+ts_test("traits generic iterable constraint", func() {
+  ts_eq(trait_need_iter([1, 2]).len(), 2);
+  ts_eq(len(trait_need_iter("ab")), 2);
+  ts_eq(trait_need_iter(TraitRange {
+    start: 1, end: 3, extra: []
+  }).start, 1);
+  ts_eq(trait_need_lower_iter(TraitListIter { xs: [5] }).xs[0], 5);
+});
+
+ts_test("traits proto iter dispatch", func() {
+  let xs: Iterable = [3, 4];
+  ts_eq(std.iter.collect(xs.iter()), [3, 4]);
+
+  let chars: Iterable = "xy";
+  let got = std.iter.collect(chars.iter());
+  ts_eq(len(got), 2);
+  ts_eq(str(got[0]), "x");
+  ts_eq(str(got[1]), "y");
+
+  let d: Iterable = {"a": 1, "b": 2};
+  let entries = std.iter.collect(d.iter());
+  ts_eq(len(entries), 2);
+  ts_eq(entries[0][0], "a");
+  ts_eq(entries[0][1], 1);
+
+  let r: Iterable = TraitRange { start: 1, end: 4, extra: [] };
+  ts_eq(std.iter.collect(r.iter()), [1, 2, 3]);
+});
+
+ts_test("traits iter macro on proto value", func() {
+  let xs: Iterable = [7, 8];
+  let out = [];
+  for v in iter!(xs) {
+    out = std.list.append(out, v);
+  }
+  ts_eq(out, [7, 8]);
+});
+
+ts_test("traits meta protocols", func() {
+  ts_eq(std.meta.protocols("int"), ["std.traits.Hashable"]);
+  ts_eq(std.meta.protocols("list"), ["std.traits.Iterable"]);
+  ts_eq(std.meta.protocols("string"),
+        ["std.traits.Hashable", "std.traits.Iterable"]);
+  ts_eq(std.meta.protocols([1, 2]), ["std.traits.Iterable"]);
+  ts_eq(std.meta.protocols(("a", 1)),
+        ["std.traits.Hashable", "std.traits.Iterable"]);
+  ts_eq(std.meta.protocols(TraitUser { id: 1, cache: [] }),
+        ["std.traits.Hashable"]);
+  ts_eq(std.meta.protocols(TraitRange {
+    start: 1, end: 2, extra: []
+  }), ["std.traits.Iterable"]);
+});
+
+ts_test("traits value annotations", func() {
+  let h: Hashable = 1;
+  ts_true(h is Hashable);
+  let xs: Iterable = [9];
+  ts_eq(std.iter.collect(xs.iter()), [9]);
+});
+
+ts_finish();

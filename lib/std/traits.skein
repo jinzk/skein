@@ -1,0 +1,15 @@
+package traits {
+  // Marker protocol for types that can be used as dict keys or set
+  // elements.  Conformance is computed by the built-in key contract:
+  // scalars, recursively hashable structs/enums, and types with a valid
+  // dict_hash method satisfy it.  The runtime still rejects float NaN.
+  proto Hashable {
+  }
+
+  // Structural iterator protocol for explicit iter! / .iter() use.
+  // Built-in containers satisfy it through built-in conformance; user
+  // types satisfy it with a matching iter(self): generator[T] method.
+  proto Iterable[T any] {
+    func iter(self): generator[T];
+  }
+}

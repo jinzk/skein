@@ -375,6 +375,51 @@ struct value_t *type_protocols(const type_def *definition) {
     return (struct value_t *)protocols;
 }
 
+struct value_t *builtin_protocols_list(const char *name) {
+    struct list_value_t *protocols = newlistval();
+    std::vector<const protocol_def *> matched =
+        builtin_type_protocols(name);
+    std::vector<std::string> names;
+    names.reserve(matched.size());
+    for (const protocol_def *protocol : matched) {
+        if (protocol)
+            names.push_back(protocol_name(protocol));
+    }
+    std::sort(names.begin(), names.end());
+    names.erase(std::unique(names.begin(), names.end()), names.end());
+    for (const std::string &protocol : names)
+        list_add(protocols, newstrval(protocol.c_str()));
+    return (struct value_t *)protocols;
+}
+
+struct value_t *value_builtin_protocols(const struct value_t *value) {
+    struct list_value_t *protocols = newlistval();
+    if (!value)
+        return (struct value_t *)protocols;
+    std::vector<const protocol_def *> matched;
+    if (protocol_def *protocol =
+            structtype_find_protocol_by_name(nullptr, "Iterable")) {
+        if (protocol->builtin_kind == PROTOCOL_BUILTIN_ITERABLE &&
+            value_satisfies_builtin_protocol(value, protocol))
+            matched.push_back(protocol);
+    }
+    if (protocol_def *protocol =
+            structtype_find_protocol_by_name(nullptr, "Hashable")) {
+        if (protocol->builtin_kind == PROTOCOL_BUILTIN_HASHABLE &&
+            value_satisfies_builtin_protocol(value, protocol))
+            matched.push_back(protocol);
+    }
+    std::vector<std::string> names;
+    names.reserve(matched.size());
+    for (const protocol_def *protocol : matched)
+        names.push_back(protocol_name(protocol));
+    std::sort(names.begin(), names.end());
+    names.erase(std::unique(names.begin(), names.end()), names.end());
+    for (const std::string &protocol : names)
+        list_add(protocols, newstrval(protocol.c_str()));
+    return (struct value_t *)protocols;
+}
+
 struct value_t *struct_fields(const struct_def *definition) {
     struct list_value_t *fields = newlistval();
     if (!definition)
@@ -421,7 +466,8 @@ struct value_t *make_type_info(const resolved_type &type) {
         case RESOLVED_BUILTIN:
             return new_type_dict("builtin", type.builtin_name, "", "", "",
                                  true, new_string_list(), new_string_list(),
-                                 new_string_list(), new_string_list());
+                                 new_string_list(),
+                                 builtin_protocols_list(type.builtin_name));
         case RESOLVED_STRUCT: {
             const struct_def *def = type.structure;
             return new_type_dict("struct", def->name.c_str(), def->package,
@@ -612,6 +658,8 @@ struct value_t *resolved_methods(const resolved_type &type) {
 }
 
 struct value_t *resolved_protocols(const resolved_type &type) {
+    if (type.kind == RESOLVED_BUILTIN)
+        return builtin_protocols_list(type.builtin_name);
     const type_def *definition = as_type_def(type);
     if (definition)
         return type_protocols(definition);
@@ -701,6 +749,9 @@ struct value_t *typeinfo_protocols(const char *importer_source,
                                                type, error),
                               error))
         return NULL;
+    if (type.kind == RESOLVED_BUILTIN && type_arg &&
+        type_arg->type != T_string)
+        return value_builtin_protocols(type_arg);
     return resolved_protocols(type);
 }
 
@@ -722,6 +773,15 @@ struct value_t *typeinfo_implements(const char *importer_source,
                                                 protocol, error),
                               error))
         return NULL;
+
+    if (type.kind == RESOLVED_BUILTIN) {
+        if (type_arg && type_arg->type != T_string &&
+            protocol->builtin_kind != PROTOCOL_BUILTIN_NONE)
+            return newboolval(
+                value_satisfies_builtin_protocol(type_arg, protocol));
+        return newboolval(
+            builtin_type_satisfies_protocol(type.builtin_name, protocol));
+    }
 
     const type_def *definition = as_type_def(type);
     if (!definition)

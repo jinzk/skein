@@ -1579,6 +1579,45 @@ def run_cases():
         assert proc.returncode == 1, proc.stderr
         assert "expected list[int], got list[string]" in proc.stderr, proc.stderr
 
+    check("traits hashable constraint rejects list",
+          "import {Hashable} from std.traits;\n"
+          "func f[T Hashable](x: T): T { return x; }\n"
+          "f([1, 2]);\n",
+          stderr="does not satisfy generic constraint")
+    check("traits iterable constraint rejects int",
+          "import {Iterable} from std.traits;\n"
+          "func f[T Iterable](x: T): T { return x; }\n"
+          "f(1);\n",
+          stderr="does not satisfy generic constraint")
+    check("lowercase iterable constraint rejects int",
+          "func f[T iterable](x: T): T { return x; }\n"
+          "f(1);\n",
+          stderr="does not satisfy generic constraint")
+    check("hashable cannot be used with union",
+          "func f[T hashable | int](x: T): T { return x; }\n",
+          stderr="cannot be used with '|'")
+    check("iterable cannot be used with union",
+          "func f[T iterable | int](x: T): T { return x; }\n",
+          stderr="cannot be used with '|'")
+    check("iterable proto rejects list-returning iter",
+          "import {Iterable} from std.traits;\n"
+          "struct A { func iter(self): list[int] { return [1]; } }\n"
+          "func f[T Iterable](x: T): T { return x; }\n"
+          "f(A {});\n",
+          stderr="does not satisfy generic constraint")
+    check("hashable let annotation rejects list",
+          "import {Hashable} from std.traits;\n"
+          "let x: Hashable = [1, 2];\n",
+          stderr="expected Hashable, got list[int]")
+    check("iterable let annotation rejects int",
+          "import {Iterable} from std.traits;\n"
+          "let x: Iterable = 1;\n",
+          stderr="expected Iterable, got int")
+    check("iterable let annotation checks element type",
+          "import {Iterable} from std.traits;\n"
+          'let x: Iterable[int] = ["a"];\n',
+          stderr="expected Iterable[int], got list[string]")
+
     proc = run(
         "func f(a: int, b: string) { return a; }\n"
         'f("x", 1);\n')

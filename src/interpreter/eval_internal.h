@@ -64,6 +64,9 @@ struct value_t *callvalue(struct value_t *callee, struct ast *args_ast);
 struct value_t *call_method_value(struct value_t *receiver,
                                   std::shared_ptr<function_def> def,
                                   struct ast *args_ast);
+struct value_t *call_builtin_method_value(struct value_t *receiver,
+                                          int functype,
+                                          struct ast *args_ast);
 
 struct value_t *compound_name(struct symref *ref, int op,
                               struct ast *value_ast);

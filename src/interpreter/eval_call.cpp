@@ -662,6 +662,39 @@ struct value_t *launch_value(struct value_t *callee, struct ast *args_ast,
     return fiber_launch_value(callee, std::move(args), observed);
 }
 
+struct value_t *call_builtin_method_value(struct value_t *receiver,
+                                          int functype,
+                                          struct ast *args_ast) {
+    if (call_depth >= max_call_depth()) {
+        yyerror("maximum recursion depth (%d) exceeded", max_call_depth());
+        return NULL;
+    }
+    call_depth_guard depth_guard;
+
+    std::vector<struct value_t *> args;
+    args.reserve(8);
+    args.push_back(dupval(receiver));
+    struct value_t *control = NULL;
+    try {
+        if (!collect_args(args_ast, args, control)) {
+            free_args(args);
+            return control;
+        }
+    } catch (...) {
+        free_args(args);
+        throw;
+    }
+
+    struct value_t *callee = newbuiltinval(functype);
+    if (!callee) {
+        free_args(args);
+        return NULL;
+    }
+    struct value_t *result = call_value_args(callee, std::move(args));
+    freeval(callee);
+    return result;
+}
+
 struct value_t *call_method_value(struct value_t *receiver,
                                          std::shared_ptr<function_def> def,
                                          struct ast *args_ast) {

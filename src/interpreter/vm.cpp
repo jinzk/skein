@@ -2911,6 +2911,19 @@ public:
                     return finish_call_result(result, control_out);
                 }
 
+                if (argc == 0 && std::strcmp(name, "iter") == 0) {
+                    int builtin_id = builtin_iter_method_id(receiver);
+                    if (builtin_id >= 0) {
+                        value_t *builtin = newbuiltinval(builtin_id);
+                        std::vector<value_t *> call_args;
+                        call_args.push_back(receiver);
+                        value_t *result = skein_vm_call_value_args(
+                            builtin, std::move(call_args));
+                        freeval(builtin);
+                        return finish_call_result(result, control_out);
+                    }
+                }
+
                 value_t *callee =
                     read_field_cached(receiver, name, member_cache(ins.b));
                 freeval(receiver);

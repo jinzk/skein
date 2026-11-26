@@ -330,6 +330,42 @@ let g = identity[int];   // 显式实例化的函数值
 - error / result / userdata；
 - `any`、未约束的类型参数。
 
+### 4.5.1 `iterable` 与 `std.traits`
+
+小写 `iterable` 是内置约束；它接受内置可迭代类型，以及有 `iter(self)` 方法且返回值本身可迭代的用户类型：
+
+```skein
+func collect[T iterable](x: T) {
+  for v in iter!(x) { ... }
+}
+```
+
+内置 `std.traits` 源码包还提供两个 proto 名，用于需要显式接口的场景：
+
+```skein
+import {Hashable, Iterable} from std.traits;
+
+proto Hashable {}
+
+proto Iterable[T any] {
+  func iter(self): generator[T];
+}
+```
+
+- `Hashable` 是 marker proto；conformance 委托给内置 key contract，不是普通方法协议。
+- `Iterable` 是普通结构式 proto；内置容器通过内置 conformance 表满足它，用户类型需要 `iter(self): generator[T]`。
+- `Iterable` 要求返回 generator；返回其他可迭代值的用户类型请使用小写 `iterable`。
+- 小写 `hashable` / `iterable` 始终可用，不依赖 import。
+- `std.meta.implements` / `std.meta.protocols` 能看到内置 conformance。
+
+`hashable` / `iterable` 可以出现在 `&` 组中，不能作为 `|` 成员：
+
+```skein
+[T hashable & Drawable]
+[T iterable & Drawable]
+[T hashable | int]   // error
+```
+
 ### 4.6 泛型 proto
 
 支持：

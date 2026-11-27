@@ -2695,7 +2695,6 @@ def run_cases():
           'f(std.bytes.from_hex("00ff"))\n',
           stdout="= 2")
     check("typed callable",
-          "import {Callable} from std.traits;\n"
           "func apply(fn: Callable, x: int) { return fn(x); }\n"
           "apply(std.math.sqrt, 9)\n",
           stdout="= 3.0")
@@ -2709,7 +2708,6 @@ def run_cases():
           "apply(std.math.sqrt, 16)\n",
           stdout="= 4.0")
     check("typed callable rejects int",
-          "import {Callable} from std.traits;\n"
           "func apply(fn: Callable) { return fn; }\napply(1)\n",
           stderr="type error: expected Callable, got int")
     check("typed function rejects builtin",
@@ -2766,7 +2764,6 @@ def run_cases():
     check("typed variable builtin",
           "let f: builtin = std.math.sqrt;\nf(16)\n", stdout="= 4.0")
     check("typed variable callable",
-          "import {Callable} from std.traits;\n"
           "let f: Callable = std.math.sqrt;\nf(9)\n", stdout="= 3.0")
     check("typed variable requires initializer for function",
           "let f: function;\n",
@@ -2904,7 +2901,6 @@ def run_cases():
           "a[1].x++;\na[1].x\n",
           stdout="= 3")
     check("struct function field",
-          "import {Callable} from std.traits;\n"
           "struct Handler { callback: Callable; }\n"
           "let h = Handler { callback: func(x) { return x + 1; } };\n"
           "h.callback(41)\n",
@@ -2969,7 +2965,6 @@ def run_cases():
           "print(S { x: 2 }.y);\n",
           stdout="1")
     check("struct field default allows local function shadowing",
-          "import {Callable} from std.traits;\n"
           "struct S { x: int; f: Callable = func() { let x = 1; "
           "return x; }; }\n"
           "print(S { x: 2 }.f());\n",

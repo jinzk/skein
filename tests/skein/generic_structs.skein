@@ -1,5 +1,4 @@
 import std;
-import {Hashable} from std.traits;
 include "_support.skein";
 
 struct Box[T any] {

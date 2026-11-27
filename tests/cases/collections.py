@@ -598,7 +598,6 @@ def run_cases():
 
     check("enum closure survives cycle collection",
           'import std;\n'
-          'import {Callable} from std.traits;\n'
           'enum Box { B { f: Callable; }; }\n'
           'func make() {\n'
           '  let n = 41;\n'

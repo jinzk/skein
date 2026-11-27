@@ -188,6 +188,7 @@ static void install_prelude_symbols(const std::shared_ptr<scope_t> &prelude) {
 
 void initscope(scope_context &context) {
     if (context.current) return;
+    structtype_install_builtin_protocols();
     std::shared_ptr<scope_t> prelude = std::make_shared<scope_t>();
     prelude->parent.reset();
     prelude->is_function = false;

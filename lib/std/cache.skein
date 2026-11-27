@@ -1,6 +1,5 @@
 package cache {
   import std;
-  import {Callable} from std.traits;
 
   let _CRLF = std.bytes.from_string("\r\n");
   let _DEFAULT_PORT = 6379;

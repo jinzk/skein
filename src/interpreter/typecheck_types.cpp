@@ -787,8 +787,30 @@ ProtocolMatch iterable_protocol_match(
     std::unordered_map<std::string, struct type_constraint> local;
     if (!structtype_satisfies_protocol(def, protocol, &local))
         return ProtocolMatch::No;
-    if (bindings)
+    if (bindings) {
         *bindings = std::move(local);
+        std::shared_ptr<function_def> method =
+            structtype_method(def, "iter");
+        if (method && method->code && method->code->ret_type) {
+            const TypeNode *result =
+                type_from_constraint(method->code->ret_type.get());
+            if (result && result->kind == TYPE_GENERATOR &&
+                !result->args.empty()) {
+                const TypeNode *element = result->args[0];
+                if (!actual->args.empty() &&
+                    !def->generic_params.empty() &&
+                    actual->args.size() == def->generic_params.size()) {
+                    TypeBindings type_bindings;
+                    for (std::size_t i = 0;
+                         i < def->generic_params.size(); ++i)
+                        type_bindings[def->generic_params[i]] =
+                            actual->args[i];
+                    element = instantiate_type(element, type_bindings);
+                }
+                bind_protocol_param(bindings, protocol, 0, element);
+            }
+        }
+    }
     return ProtocolMatch::Yes;
 }
 

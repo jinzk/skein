@@ -133,6 +133,17 @@ resolved_type resolve_named(const char *source, const char *name,
         }
     }
 
+    if (std::strcmp(name, "Callable") == 0 ||
+        std::strcmp(name, "Hashable") == 0 ||
+        std::strcmp(name, "Iterable") == 0) {
+        auto prelude = logical_protocols.find(type_key("std.traits", name));
+        if (prelude != logical_protocols.end() && prelude->second &&
+            prelude->second->builtin_kind != PROTOCOL_BUILTIN_NONE) {
+            result.protocol = prelude->second;
+            return result;
+        }
+    }
+
     std::string prefix;
     std::string base;
     if (!split_qualified_name(name, prefix, base))
@@ -1064,6 +1075,20 @@ bool structtype_create_protocol(const char *source, const char *package,
         error = "invalid proto name";
         return false;
     }
+    const bool std_traits_source =
+        (package && std::strcmp(package, "std.traits") == 0) ||
+        (source && (std::strcmp(source, "<std.traits>") == 0 ||
+                    std::strcmp(source, "std.traits") == 0));
+    if (std_traits_source &&
+        (std::strcmp(name, "Callable") == 0 ||
+         std::strcmp(name, "Hashable") == 0 ||
+         std::strcmp(name, "Iterable") == 0)) {
+        if (protocol_def *existing =
+                structtype_find_protocol_by_name("std.traits", name)) {
+            out = existing;
+            return true;
+        }
+    }
     if (structtype_type_exists(source, name)) {
         error = std::string("type repeated ") + name;
         return false;
@@ -1145,6 +1170,35 @@ bool structtype_create_protocol(const char *source, const char *package,
     logical_protocols.emplace(logical_key, out);
     protocol_types.emplace(type_key(source, name), std::move(def));
     return true;
+}
+
+void structtype_install_builtin_protocols() {
+    std::lock_guard<std::recursive_mutex> lock(type_registry_mutex);
+    auto install = [](const char *name,
+                      std::vector<method_sig> methods,
+                      std::vector<std::string> generic_params) {
+        if (structtype_find_protocol_by_name("std.traits", name))
+            return;
+        protocol_def *out = NULL;
+        std::string error;
+        structtype_create_protocol("<std.traits>", "std.traits", "", name,
+                                   true, std::move(methods), out, error,
+                                   std::move(generic_params));
+    };
+
+    install("Hashable", {}, {});
+    install("Callable", {}, {});
+
+    method_sig iter;
+    iter.name = "iter";
+    type_constraint self;
+    self.kind = TYPE_ANY;
+    iter.params.push_back(self);
+    iter.required_params = 1;
+    type_constraint result;
+    result.kind = TYPE_GENERATOR;
+    iter.return_type = std::make_shared<const type_constraint>(result);
+    install("Iterable", {iter}, {"T"});
 }
 
 bool structtype_prepare_enum(const char *source, const char *package,

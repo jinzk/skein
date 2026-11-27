@@ -126,6 +126,8 @@ struct enum_value_t {
 };
 
 void structtype_shutdown();
+/* Register prelude protocols (Hashable, Iterable, Callable).  Idempotent. */
+void structtype_install_builtin_protocols();
 
 /*
  * Visit long-lived function definitions owned by the type registry (impl

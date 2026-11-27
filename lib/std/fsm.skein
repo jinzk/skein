@@ -1,6 +1,5 @@
 package fsm {
   import std;
-  import {Callable} from std.traits;
 
   const _NIL = -1;
   const _MASK = (1 << 32) - 1;

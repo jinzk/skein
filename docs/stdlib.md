@@ -2519,11 +2519,7 @@ struct User {
 - `key_eq` 必须是纯函数、确定性、无副作用，并且与 `dict_hash` 一致：`a.key_eq(b)` 为 true 时，`dict_hash(a)` 和 `dict_hash(b)` 必须相同。
 - key_eq 期间禁止重入 dict/set key equality。
 
-`std.traits` 是内嵌 Skein 源码包（`lib/std/traits.skein`），提供内置 trait proto：
-
-```text
-import {Hashable, Iterable} from std.traits;
-```
+`std.traits` 是内嵌 Skein 源码包（`lib/std/traits.skein`），提供内置 trait proto。`Hashable`、`Iterable`、`Callable` 都是默认导入的 prelude proto，无需显式 import。
 
 `Hashable` 是 marker proto，conformance 由内置 key contract 计算：
 
@@ -2536,15 +2532,13 @@ frozen tuple / pair（元素递归可哈希）
 
 `Hashable` 不需要用户写 `impl`。`x is Hashable` 是值级检查，`float("nan") is Hashable` 为 false。
 
-`Callable` 是 marker proto，用户可见值包括：
+`Callable` 是默认导入的 prelude proto，无需 import。用户可见值包括：
 
 ```text
 function、builtin、bound method、native callable
 ```
 
 ```text
-import {Callable} from std.traits;
-
 func apply(fn: Callable, x: int) {
   return fn(x);
 }
@@ -2613,7 +2607,7 @@ for x in (Range { start: 1, end: 4 }) {
 }
 ```
 
-`Hashable` / `Iterable` 是 proto 名，使用前需要 import `std.traits` 或 selective import。`Hashable` 没有泛型参数；`Hashable[T]` 不是有效写法。
+`Hashable` / `Iterable` / `Callable` 都是默认导入的 prelude proto。`Hashable` 没有泛型参数；`Hashable[T]` 不是有效写法。
 
 注意事项：
 

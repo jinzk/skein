@@ -379,7 +379,7 @@ func identity[T any](x: T): T {
 [T Iterable & Drawable]
 ```
 
-`std.traits` 提供 `Hashable` marker proto 和 `Iterable[T]` proto；内置容器自动满足它们，用户类型通过 `dict_hash` / `iter(self): generator[T]` 满足。使用这些 proto 前需要 import `std.traits`。
+`Hashable`、`Iterable[T]`、`Callable` 都是默认导入的 prelude proto；内置容器自动满足 `Hashable` / `Iterable`，用户类型通过 `dict_hash` / `iter(self): generator[T]` 满足。
 
 实例化：
 
@@ -838,7 +838,7 @@ let sum = match point {
 - 支持字面量、绑定、`_`、dict（开放匹配 + `...rest`）、list（定长 + `...rest`）、tuple（固定长度，只匹配 pair/tuple，禁止 `...rest`）、struct（按字段）；
 - 支持 or-pattern：`case 1 | 2 | 3`、`case E.A | E.B`；
 - 支持整数范围模式：`case 1..9`（包含两端）；
-- `case is Type` 是类型模式，例如 `case is int`、`case is Point`、`case is Callable`（需要 import `std.traits`）；
+- `case is Type` 是类型模式，例如 `case is int`、`case is Point`、`case is Callable`；`Callable` 是默认导入的 prelude proto；
 - enum 匹配在没有 `default` 且缺少变体时报告 `match is not exhaustive`；
 - `case pattern as name` 把整个匹配值绑定到 `name`；
 - `case == IDLE` 匹配常量、名字或无载荷枚举变体；
@@ -1042,7 +1042,6 @@ c()
 
 ```text
 import std;
-import {Callable} from std.traits;
 
 func apply(fn: Callable, x: int) {
   return fn(x);
@@ -1295,7 +1294,6 @@ p.sum()
 - 字段可以保存函数值，作为普通回调使用，不会自动绑定 `self`：
 
 ```text
-import {Callable} from std.traits;
 
 struct Handler {
   callback: Callable;

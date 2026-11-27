@@ -97,10 +97,11 @@ ts_test("meta protocol info", func() {
   ts_true(std.meta.implements("MetaProtocolP", "MetaProtocolD"));
   ts_false(std.meta.implements(MetaNoProtocolP { x: 1 }, "MetaProtocolD"));
   ts_false(std.meta.implements("MetaNoProtocolP", "MetaProtocolD"));
-  ts_eq(std.meta.protocols("MetaProtocolP"), ["main.MetaProtocolD"]);
-  ts_eq(std.meta.protocols("MetaNoProtocolP"), []);
+  ts_eq(std.meta.protocols("MetaProtocolP"),
+        ["main.MetaProtocolD", "std.traits.Hashable"]);
+  ts_eq(std.meta.protocols("MetaNoProtocolP"), ["std.traits.Hashable"]);
   ts_eq(std.meta.type_info("MetaProtocolP")["protocols"],
-        ["main.MetaProtocolD"]);
+        ["main.MetaProtocolD", "std.traits.Hashable"]);
   ts_eq(std.meta.type_info("MetaProtocolD")["kind"], "proto");
   ts_eq(len(std.meta.type_info("MetaProtocolD")["methods"][0]["params"]), 0);
   ts_eq(std.meta.fields("MetaProtocolD"), []);
@@ -119,7 +120,7 @@ ts_test("meta builtin types", func() {
   ts_eq(std.meta.fields("int"), []);
   ts_eq(std.meta.variants("int"), []);
   ts_eq(std.meta.methods("int"), []);
-  ts_eq(std.meta.protocols("int"), []);
+  ts_eq(std.meta.protocols("int"), ["std.traits.Hashable"]);
 });
 
 ts_test("meta builtin descriptor fields", func() {
@@ -130,7 +131,7 @@ ts_test("meta builtin descriptor fields", func() {
   ts_eq(info["fields"], []);
   ts_eq(info["variants"], []);
   ts_eq(info["methods"], []);
-  ts_eq(info["protocols"], []);
+  ts_eq(info["protocols"], ["std.traits.Hashable"]);
 });
 
 ts_test("meta builtin name table", func() {

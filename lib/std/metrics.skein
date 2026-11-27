@@ -1,6 +1,5 @@
 package metrics {
   import std;
-  import {Callable} from std.traits;
 
   func _escape_label(text) {
     text = std.string.replace(text, "\\", "\\\\");

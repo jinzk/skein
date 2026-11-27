@@ -84,8 +84,6 @@ impl Box {
 约束使用 `name constraint`：
 
 ```skein
-import {Hashable} from std.traits;
-
 [T any]
 [T Hashable]
 [T Drawable]
@@ -318,11 +316,7 @@ let g = identity[int];   // 显式实例化的函数值
 
 ### 4.5 `Hashable`
 
-`Hashable` 是 `std.traits` 提供的 marker proto：
-
-```skein
-import {Hashable} from std.traits;
-```
+`Hashable` 是默认导入的 prelude proto（marker proto），可直接使用。
 
 语义复用内置 key 契约：
 
@@ -345,11 +339,9 @@ import {Hashable} from std.traits;
 
 ### 4.5.1 `Iterable`
 
-`Iterable[T]` 是 `std.traits` 提供的结构式迭代器 proto：
+`Iterable[T]` 是默认导入的 prelude proto（结构式迭代器 proto）：
 
 ```skein
-import {Iterable} from std.traits;
-
 proto Iterable[T any] {
   func iter(self): generator[T];
 }

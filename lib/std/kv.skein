@@ -1,6 +1,5 @@
 package kv {
   import std;
-  import {Callable} from std.traits;
 
   export struct Store {
     put: Callable;

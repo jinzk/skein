@@ -1,5 +1,4 @@
 import std;
-import {Hashable} from std.traits;
 include "_support.skein";
 
 func identity[T any](x: T): T {

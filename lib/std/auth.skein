@@ -1,6 +1,5 @@
 package auth {
   import std;
-  import {Callable} from std.traits;
 
   func _b64url_encode_bytes(data) {
     let encoded = std.encoding.base64_encode(data);

@@ -1039,9 +1039,7 @@ func identity[T any](x: T): T {
 
 - `[T]`、`[T type]` 不合法；
 - 一个参数的约束不能混用 `&` 和 `|`；
-- proto 不能作为 `|` 成员；
-- `Hashable` / `Iterable` 是 `std.traits` 提供的 proto，可参与 `&`，不能作为 `|` 成员；使用前需要 `import std.traits;` 或 selective import；
-- `std.traits` 提供对应的 `Hashable` marker proto 和 `Iterable[T]` 方法 proto；需要显式接口名时使用 `import {Hashable, Iterable} from std.traits;`；
+- `Hashable` / `Iterable` / `Callable` 是默认导入的 prelude proto，可参与 `&`，不能作为 `|` 成员；
 - proto 不是类型实参：`Box[Keyed]` 非法。
 
 实例化和推断：
@@ -2075,7 +2073,6 @@ list dict deque heap set function builtin null userdata result error task genera
 
 ```text
 import std;
-import {Callable} from std.traits;
 
 func apply(fn: Callable, x: int) {
   return fn(x);

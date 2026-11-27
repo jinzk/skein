@@ -1,6 +1,5 @@
 package route {
   import std;
-  import {Callable} from std.traits;
 
   const _STATIC = 0;
   const _PARAM = 1;

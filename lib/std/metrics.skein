@@ -1,5 +1,6 @@
 package metrics {
   import std;
+  import {Callable} from std.traits;
 
   func _escape_label(text) {
     text = std.string.replace(text, "\\", "\\\\");
@@ -66,11 +67,11 @@ package metrics {
   // Operations live in private callable fields; RegistryApi is the public
   // structural contract.  Copies of a Registry share the same metric tables.
   export struct Registry {
-    _counter: callable;
-    _gauge: callable;
-    _observe: callable;
-    _render: callable;
-    _reset: callable;
+    _counter: Callable;
+    _gauge: Callable;
+    _observe: Callable;
+    _render: Callable;
+    _reset: Callable;
   }
 
   proto RegistryApi {

@@ -820,6 +820,15 @@ ProtocolMatch match_protocol(
                        : ProtocolMatch::Yes;
         case PROTOCOL_BUILTIN_ITERABLE:
             return iterable_protocol_match(actual, protocol, bindings);
+        case PROTOCOL_BUILTIN_CALLABLE:
+            switch (actual->kind) {
+                case TYPE_FUNCTION:
+                case TYPE_BUILTIN:
+                case TYPE_CALLABLE:
+                    return ProtocolMatch::Yes;
+                default:
+                    return ProtocolMatch::No;
+            }
         case PROTOCOL_BUILTIN_NONE:
             break;
     }

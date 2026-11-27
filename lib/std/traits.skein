@@ -12,4 +12,9 @@ package traits {
   proto Iterable[T any] {
     func iter(self): generator[T];
   }
+
+  // Marker protocol for values that can be called: functions, builtins,
+  // bound methods, and native callables.
+  proto Callable {
+  }
 }

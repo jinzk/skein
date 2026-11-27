@@ -1,15 +1,16 @@
 package kv {
   import std;
+  import {Callable} from std.traits;
 
   export struct Store {
-    put: callable;
-    get: callable;
-    delete: callable;
-    has: callable;
-    scan: callable;
-    count: callable;
-    clear: callable;
-    close: callable;
+    put: Callable;
+    get: Callable;
+    delete: Callable;
+    has: Callable;
+    scan: Callable;
+    count: Callable;
+    clear: Callable;
+    close: Callable;
     backend: string;
   }
 

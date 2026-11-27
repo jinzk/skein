@@ -581,7 +581,8 @@ def run_cases():
           env=WARN_ENV)
 
     check("return annotation callable accepts builtin",
-          "func get_fn(): callable { return std.math.sqrt; }\n"
+          "import {Callable} from std.traits;\n"
+          "func get_fn(): Callable { return std.math.sqrt; }\n"
           "println(get_fn()(9));\n",
           stdout_all=["3"])
 

@@ -2536,6 +2536,26 @@ frozen tuple / pair（元素递归可哈希）
 
 `Hashable` 不需要用户写 `impl`。`x is Hashable` 是值级检查，`float("nan") is Hashable` 为 false。
 
+`Callable` 是 marker proto，用户可见值包括：
+
+```text
+function、builtin、bound method、native callable
+```
+
+```text
+import {Callable} from std.traits;
+
+func apply(fn: Callable, x: int) {
+  return fn(x);
+}
+
+let f: Callable = std.math.sqrt;
+f is Callable;                 // true
+std.meta.implements("builtin", "Callable"); // true
+```
+
+`Callable` 不是内置类型名，`callable` 不再作为类型使用。
+
 `Iterable[T]` 是结构化迭代器 proto：
 
 ```text

@@ -1,5 +1,6 @@
 package web {
   import std;
+  import {Callable} from std.traits;
 
   func _list_has(values, target) {
     if (kind_of(values) != "list") {
@@ -326,10 +327,10 @@ package web {
   // Operations live in private callable fields; LimiterApi is the public
   // structural contract.  limit and window_ms remain public data.
   export struct Limiter {
-    _check: callable;
-    _middleware: callable;
-    _reset: callable;
-    _cleanup: callable;
+    _check: Callable;
+    _middleware: Callable;
+    _reset: Callable;
+    _cleanup: Callable;
     limit: int;
     window_ms: int;
   }

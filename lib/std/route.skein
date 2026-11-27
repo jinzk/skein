@@ -1,5 +1,6 @@
 package route {
   import std;
+  import {Callable} from std.traits;
 
   const _STATIC = 0;
   const _PARAM = 1;
@@ -9,15 +10,15 @@ package route {
   // The operations live in private callable fields; the public interface is
   // the protocol below.  Copies of a Router still share the same state.
   export struct Router {
-    _add: callable;
-    _get: callable;
-    _post: callable;
-    _put: callable;
-    _delete: callable;
-    _use: callable;
-    _use_after: callable;
-    _dispatch: callable;
-    _inspect: callable;
+    _add: Callable;
+    _get: Callable;
+    _post: Callable;
+    _put: Callable;
+    _delete: Callable;
+    _use: Callable;
+    _use_after: Callable;
+    _dispatch: Callable;
+    _inspect: Callable;
   }
 
   proto RouterApi {
@@ -69,7 +70,7 @@ package route {
   // insert avoids COW-copying a table that grows to thousands of entries.
   struct _Node {
     kids: any;
-    kids_ops: callable;
+    kids_ops: Callable;
     param: ref _Node? = null;
     pname: string = "";
     wild: ref _Node? = null;

@@ -1,5 +1,6 @@
 package fsm {
   import std;
+  import {Callable} from std.traits;
 
   const _NIL = -1;
   const _MASK = (1 << 32) - 1;
@@ -23,7 +24,7 @@ package fsm {
 
   export struct Machine {
     initial: any;
-    step: callable;
+    step: Callable;
     on_transition: any;
     kind: string;
     name: string;
@@ -208,8 +209,8 @@ package fsm {
 
     return Machine {
       initial: initial,
-      step: step,
-      on_transition: on_transition,
+      step: step as Callable,
+      on_transition: on_transition as Callable,
       kind: kind_of(initial),
       name: type_name(initial),
       package_name: type_package(initial)

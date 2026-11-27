@@ -449,6 +449,10 @@ bool builtin_type_name_is_iterable(const char *name) {
                                   "tuple"});
 }
 
+bool builtin_type_name_is_callable(const char *name) {
+    return builtin_name_is(name, {"function", "builtin", "callable"});
+}
+
 bool builtin_type_satisfies_protocol(const char *name,
                                      const protocol_def *protocol) {
     if (!protocol)
@@ -457,6 +461,8 @@ bool builtin_type_satisfies_protocol(const char *name,
         return builtin_type_name_is_hashable(name);
     if (protocol->builtin_kind == PROTOCOL_BUILTIN_ITERABLE)
         return builtin_type_name_is_iterable(name);
+    if (protocol->builtin_kind == PROTOCOL_BUILTIN_CALLABLE)
+        return builtin_type_name_is_callable(name);
     return false;
 }
 
@@ -472,6 +478,12 @@ std::vector<const protocol_def *> builtin_type_protocols(const char *name) {
         protocol_def *protocol =
             structtype_find_protocol_by_name(nullptr, "Hashable");
         if (protocol && protocol->builtin_kind == PROTOCOL_BUILTIN_HASHABLE)
+            result.push_back(protocol);
+    }
+    if (builtin_type_name_is_callable(name)) {
+        protocol_def *protocol =
+            structtype_find_protocol_by_name(nullptr, "Callable");
+        if (protocol && protocol->builtin_kind == PROTOCOL_BUILTIN_CALLABLE)
             result.push_back(protocol);
     }
     return result;
@@ -500,6 +512,13 @@ bool value_is_iterable(const struct value_t *value) {
     }
 }
 
+bool value_is_callable(const struct value_t *value) {
+    if (!value)
+        return false;
+    return value->type == T_func || value->type == T_builtin ||
+           value->type == T_method || value->type == T_native;
+}
+
 bool value_satisfies_builtin_protocol(const struct value_t *value,
                                       const protocol_def *protocol) {
     if (!value || !protocol)
@@ -508,6 +527,8 @@ bool value_satisfies_builtin_protocol(const struct value_t *value,
         return dict_key_allowed(value);
     if (protocol->builtin_kind == PROTOCOL_BUILTIN_ITERABLE)
         return value_is_iterable(value);
+    if (protocol->builtin_kind == PROTOCOL_BUILTIN_CALLABLE)
+        return value_is_callable(value);
     return false;
 }
 
@@ -1117,6 +1138,8 @@ bool structtype_create_protocol(const char *source, const char *package,
             def->builtin_kind = PROTOCOL_BUILTIN_HASHABLE;
         else if (def->name == "Iterable")
             def->builtin_kind = PROTOCOL_BUILTIN_ITERABLE;
+        else if (def->name == "Callable")
+            def->builtin_kind = PROTOCOL_BUILTIN_CALLABLE;
     }
     out = def.get();
     logical_protocols.emplace(logical_key, out);
@@ -1546,6 +1569,11 @@ bool structtype_satisfies_protocol(
             bindings_out->clear();
         return type_def_is_hashable(def);
     }
+    if (protocol->builtin_kind == PROTOCOL_BUILTIN_CALLABLE) {
+        if (bindings_out)
+            bindings_out->clear();
+        return false;
+    }
     std::unordered_map<std::string, struct type_constraint> bindings;
     for (const method_sig &sig : protocol->methods) {
         bool is_default = def->default_methods.count(sig.name) != 0;
@@ -1798,6 +1826,8 @@ bool named_type_matches(const char *source, const char *name,
         resolved.protocol->builtin_kind != PROTOCOL_BUILTIN_NONE) {
         if (resolved.protocol->builtin_kind == PROTOCOL_BUILTIN_HASHABLE)
             return dict_key_allowed(value);
+        if (resolved.protocol->builtin_kind == PROTOCOL_BUILTIN_CALLABLE)
+            return value_is_callable(value);
         if (resolved.protocol->builtin_kind == PROTOCOL_BUILTIN_ITERABLE &&
             value->type != T_struct && value->type != T_enum)
             return value_is_iterable(value);

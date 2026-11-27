@@ -1,5 +1,6 @@
 package cache {
   import std;
+  import {Callable} from std.traits;
 
   let _CRLF = std.bytes.from_string("\r\n");
   let _DEFAULT_PORT = 6379;
@@ -413,17 +414,17 @@ package cache {
   // Operations live in private callable fields; ClientApi is the public
   // structural contract.  Copies of a Client share the same connection state.
   export struct Client {
-    _get: callable;
-    _set: callable;
-    _delete: callable;
-    _exists: callable;
-    _incr: callable;
-    _expire: callable;
-    _ttl: callable;
-    _pttl: callable;
-    _incr_window: callable;
-    _ping: callable;
-    _close: callable;
+    _get: Callable;
+    _set: Callable;
+    _delete: Callable;
+    _exists: Callable;
+    _incr: Callable;
+    _expire: Callable;
+    _ttl: Callable;
+    _pttl: Callable;
+    _incr_window: Callable;
+    _ping: Callable;
+    _close: Callable;
   }
 
   proto ClientApi {

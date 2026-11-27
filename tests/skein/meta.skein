@@ -137,7 +137,7 @@ ts_test("meta builtin name table", func() {
   let names = [
     "any", "int", "float", "number", "bool", "string", "str",
     "char", "byte", "bytes", "list", "dict", "deque", "heap", "set",
-    "function", "func", "builtin", "callable", "null", "userdata",
+    "function", "func", "builtin", "null", "userdata",
     "result", "error"
   ];
   let missing = [];

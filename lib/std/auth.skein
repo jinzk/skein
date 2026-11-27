@@ -1,5 +1,6 @@
 package auth {
   import std;
+  import {Callable} from std.traits;
 
   func _b64url_encode_bytes(data) {
     let encoded = std.encoding.base64_encode(data);
@@ -83,12 +84,12 @@ package auth {
   // Operations live in private callable fields; SessionStoreApi is the
   // public structural contract.  cookie_name and ttl remain public data.
   export struct SessionStore {
-    _create: callable;
-    _get: callable;
-    _set: callable;
-    _delete: callable;
-    _rotate: callable;
-    _cleanup: callable;
+    _create: Callable;
+    _get: Callable;
+    _set: Callable;
+    _delete: Callable;
+    _rotate: Callable;
+    _cleanup: Callable;
     cookie_name: string;
     ttl: int;
   }

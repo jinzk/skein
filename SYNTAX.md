@@ -906,8 +906,10 @@ const limit: int = 10;
 
 ```text
 any int float number bool string char byte bytes
-list dict deque heap set function builtin callable null userdata result error task generator socket listener websocket stream pair tuple union
+list dict deque heap set function builtin null userdata result error task generator socket listener websocket stream pair tuple union
 ```
+
+`std.traits.Callable` 是独立的 proto，不是内置类型名。
 
 任意类型可以加 `?` 变成可空类型，例如 `int?`、`char?`、`Node?`。`T?` 是
 `union[T, null]` 的简写，两者在类型检查、赋值、函数类型和默认值上完全等价：
@@ -940,7 +942,7 @@ let d: char?;                  // 默认 null
 | `any` / `null` | `null` |
 | `T?` / 包含 `null` 的 `union` | `null` |
 
-`function`、`builtin`、`callable`、`userdata`、`heap`、`task`、`generator`、`socket`、`listener`、`websocket`、`stream`、`pair`、`tuple`，以及不包含 `null` 的 `union` 没有默认值，必须提供初始值。
+`function`、`builtin`、`userdata`、`heap`、`task`、`generator`、`socket`、`listener`、`websocket`、`stream`、`pair`、`tuple`，以及不包含 `null` 的 `union` 没有默认值，必须提供初始值。proto 类型（包括 `Callable`）也没有默认值。
 
 已声明的 `struct` / `proto` 类型也可以用于类型标注，但没有默认值，必须提供初始值：
 
@@ -2062,15 +2064,18 @@ func double(x) -> x * 2;
 
 ```text
 any int float number bool string char byte bytes
-list dict deque heap set function builtin callable null userdata result error task generator socket listener websocket stream pair tuple union
+list dict deque heap set function builtin null userdata result error task generator socket listener websocket stream pair tuple union
 ```
+
+`std.traits.Callable` 是独立的 proto，不是内置类型名。
 
 示例：
 
 ```text
 import std;
+import {Callable} from std.traits;
 
-func apply(fn: callable, x: int) {
+func apply(fn: Callable, x: int) {
   return fn(x);
 }
 
@@ -2362,7 +2367,7 @@ let d = Point { ...p, x: 9 };
 - 字段类型必须是已声明的类型；支持自引用，例如 `struct Node { value: int; next: Node?; }`；
   两个 `struct` 的普通值互递归字段不支持，需使用 `ref T?` / `weak T?`（见 5.12.3）；
 - 普通值不允许创建环：`a.next = b; b.next = a;` 会报 `recursive value would create a cycle`；共享子结构（DAG）允许；使用 `ref` 字段的强引用环由 GC 回收，见 5.12.3；
-- 字段可以保存 `callable` / `function` 值，作为普通回调使用，不会自动绑定 `self`；
+- 字段可以保存 `Callable` / `function` 值，作为普通回调使用，不会自动绑定 `self`；
 - 不支持继承、静态方法、动态添加方法或运算符重载；唯一例外是构造函数，见 5.12.4；泛型 `struct` / `enum` / `proto` / 函数见“用户自定义泛型”；
 - 内建容器的类型参数见变量类型标注章节。
 
@@ -4853,7 +4858,7 @@ enum 变体字段的 `readonly` 为 `true`。变体描述：
   `"func"` 规范化为 `"function"`；
 - 内建类型的内建类型名包括 `any` / `int` / `float` / `number` / `bool` /
   `string` / `char` / `byte` / `bytes` / `list` / `dict` / `deque` / `heap` /
-  `set` / `function` / `builtin` / `callable` / `null` / `userdata` /
+  `set` / `function` / `builtin` / `null` / `userdata` /
   `result` / `error`；
 - `method` / `native` / `class` / `struct` / `enum` 是运行时 kind，
   不是类型名；

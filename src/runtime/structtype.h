@@ -31,6 +31,7 @@ enum protocol_builtin_kind {
     PROTOCOL_BUILTIN_NONE = 0,
     PROTOCOL_BUILTIN_HASHABLE,
     PROTOCOL_BUILTIN_ITERABLE,
+    PROTOCOL_BUILTIN_CALLABLE,
 };
 
 struct protocol_def {
@@ -271,6 +272,7 @@ std::vector<const protocol_def *> builtin_type_protocols(const char *name);
 bool value_satisfies_builtin_protocol(const struct value_t *value,
                                       const protocol_def *protocol);
 bool value_is_iterable(const struct value_t *value);
+bool value_is_callable(const struct value_t *value);
 /* Builtin iterator method id for Op::CallMethod fallback: B_iter_items for
  * dict and B_iter_elements for other iterables; -1 when not applicable. */
 int builtin_iter_method_id(const struct value_t *value);

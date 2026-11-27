@@ -237,7 +237,7 @@ struct Holder[T Keyed] {
 ```
 
 `T any` 可以绑定到 struct / enum / function 等具体类型，但不自动拥有
-`callable` 或 proto 方法；需要时使用约束。
+`Callable` 或 proto 方法；需要时使用约束。
 
 ### 3.6 显式类型实例化
 
@@ -336,7 +336,7 @@ import {Hashable} from std.traits;
 
 - `list` / `dict` / `set` / `deque` / `heap`；
 - `ref` / `weak`；
-- function / builtin / callable；
+- function / builtin；
 - task / generator；
 - error / result / userdata；
 - `any`、未约束的类型参数。

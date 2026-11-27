@@ -155,7 +155,6 @@ const builtin_type_name kBuiltinTypeNames[] = {
     {"function", "function", TYPE_FUNCTION},
     {"func", "function", TYPE_FUNCTION},
     {"builtin", "builtin", TYPE_BUILTIN},
-    {"callable", "callable", TYPE_CALLABLE},
     {"null", "null", TYPE_NULL},
     {"void", "void", TYPE_VOID},
     {"userdata", "userdata", TYPE_USERDATA},

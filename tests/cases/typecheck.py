@@ -188,7 +188,8 @@ def run_cases():
           stderr="type error: type argument bool does not satisfy generic constraint for Box")
 
     check("generic struct hashable constraint",
-          "struct Box[T hashable] { value: T; }\n"
+          "import {Hashable} from std.traits;\n"
+          "struct Box[T Hashable] { value: T; }\n"
           "let b = Box[list[int]] { value: [1] };\n",
           stderr="type error: type argument list[int] does not satisfy generic constraint for Box")
 
@@ -302,12 +303,14 @@ def run_cases():
           stderr="type error: default type bool does not satisfy the constraint for T")
 
     check("generic constraint rejects concrete type in and-group",
-          "struct Bad[T int & hashable] { }\n",
+          "import {Hashable} from std.traits;\n"
+          "struct Bad[T int & Hashable] { }\n",
           stderr="type error: concrete type int cannot be used with '&' in the constraint for T")
 
     check("generic constraint rejects hashable union",
-          "struct Bad[T hashable | int] { }\n",
-          stderr="type error: 'hashable' cannot be used with '|'")
+          "import {Hashable} from std.traits;\n"
+          "struct Bad[T Hashable | int] { }\n",
+          stderr="type error: proto Hashable cannot be used with '|'")
 
     check("bare generic type uses default arguments",
           "struct Box[T = any] { value: T; }\n"
@@ -1618,25 +1621,18 @@ def run_cases():
           "func f[T Iterable](x: T): T { return x; }\n"
           "f(1);\n",
           stderr="does not satisfy generic constraint")
-    check("lowercase iterable constraint rejects int",
-          "func f[T iterable](x: T): T { return x; }\n"
-          "f(1);\n",
-          stderr="does not satisfy generic constraint")
     check("hashable cannot be used with union",
-          "func f[T hashable | int](x: T): T { return x; }\n",
+          "import {Hashable} from std.traits;\n"
+          "func f[T Hashable | int](x: T): T { return x; }\n",
           stderr="cannot be used with '|'")
     check("iterable cannot be used with union",
-          "func f[T iterable | int](x: T): T { return x; }\n",
+          "import {Iterable} from std.traits;\n"
+          "func f[T Iterable | int](x: T): T { return x; }\n",
           stderr="cannot be used with '|'")
     check("iterable proto rejects list-returning iter",
           "import {Iterable} from std.traits;\n"
           "struct A { func iter(self): list[int] { return [1]; } }\n"
           "func f[T Iterable](x: T): T { return x; }\n"
-          "f(A {});\n",
-          stderr="does not satisfy generic constraint")
-    check("lowercase iterable rejects list-returning iter",
-          "struct A { func iter(self): list[int] { return [1]; } }\n"
-          "func f[T iterable](x: T): T { return x; }\n"
           "f(A {});\n",
           stderr="does not satisfy generic constraint")
     check("hashable let annotation rejects list",
@@ -1647,6 +1643,15 @@ def run_cases():
           "import {Iterable} from std.traits;\n"
           "let x: Iterable = 1;\n",
           stderr="expected Iterable, got int")
+    check("for in user iterable requires generator return",
+          "struct B { xs: list[int]; "
+          "func iter(self): list[int] { return self.xs; } }\n"
+          "for x in (B { xs: [1] }) { }\n",
+          stderr="does not implement Iterable; iter must return generator[T]")
+    check("for in user type without iter",
+          "struct N { x: int; }\n"
+          "for x in (N { x: 1 }) { }\n",
+          stderr="is not iterable")
     check("iterable let annotation checks element type",
           "import {Iterable} from std.traits;\n"
           'let x: Iterable[int] = ["a"];\n',

@@ -88,18 +88,6 @@ ProtocolMatch match_protocol(
         nullptr);
 
 /*
- * Built-in `iterable` constraint predicate.  This mirrors the strict
- * std.traits.Iterable[T] proto: user `iter` methods must return generator[T].
- */
-enum class IterableContract {
-    No,
-    Yes,
-    Unknown,
-};
-
-IterableContract iterable_contract(const TypeNode *type);
-
-/*
  * Builtin polymorphic values use static-only type variables (for example
  * list.append has type (list[T], T) -> list[T]).  bind_type unifies an
  * inferred concrete type with a template, and instantiate_type replaces

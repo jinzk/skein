@@ -1323,6 +1323,22 @@ bool structtype_is_constructor(const function_def *method) {
     return method && method->code && !method->code->is_method;
 }
 
+bool structtype_find_iter_method(const type_def *def,
+                                 std::shared_ptr<function_def> &out) {
+    if (!def)
+        return false;
+    std::shared_ptr<function_def> method = structtype_method(def, "iter");
+    if (!method || !method->code)
+        return false;
+    const function_code *code = method->code.get();
+    if (code->variadic || code->nparams != 1 || !code->ret_type)
+        return false;
+    if (code->ret_type->kind != TYPE_GENERATOR)
+        return false;
+    out = std::move(method);
+    return true;
+}
+
 std::shared_ptr<function_def> structtype_constructor(const type_def *def) {
     if (!def || def->kind != TYPE_OWNER_STRUCT)
         return NULL;

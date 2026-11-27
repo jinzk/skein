@@ -2534,7 +2534,7 @@ frozen tuple / pair（元素递归可哈希）
 实现合法 dict_hash 的 struct / enum
 ```
 
-`Hashable` 不需要用户写 `impl`；也可以继续使用小写内置约束 `hashable`，两者语义一致。`x is Hashable` 是值级检查，`float("nan") is Hashable` 为 false。
+`Hashable` 不需要用户写 `impl`。`x is Hashable` 是值级检查，`float("nan") is Hashable` 为 false。
 
 `Iterable[T]` 是结构化迭代器 proto：
 
@@ -2571,7 +2571,7 @@ struct Range {
 }
 ```
 
-`Iterable` 和 `iterable` 现在使用同一套严格 conformance：用户类型的 `iter` 必须返回 `generator[T]`。返回 `list[int]` 等值的类型不再满足该约束；请改为 `return std.list.iter(self.xs);` 或使用 `yield`。
+`Iterable` 使用严格 conformance：用户类型的 `iter` 必须返回 `generator[T]`。返回 `list[int]` 等值的类型不满足该约束；请改为 `return std.list.iter(self.xs);` 或使用 `yield`。
 
 ```text
 struct Box {
@@ -2582,15 +2582,23 @@ struct Box {
   }
 }
 
-func collect[T iterable](x: T) { ... }   // 等价于 [T Iterable]
+func collect[T Iterable](x: T) { ... }
 ```
 
-`hashable` / `iterable` 是内置约束别名，不依赖 `import std.traits`；`Hashable` / `Iterable` 是 proto 名，需要 selective import。`Hashable` 没有泛型参数；`Hashable[T]` 不是有效写法。
+用户类型满足 `Iterable` 后，可以直接用于 `for in`：
+
+```text
+for x in (Range { start: 1, end: 4 }) {
+  print(x);
+}
+```
+
+`Hashable` / `Iterable` 是 proto 名，使用前需要 import `std.traits` 或 selective import。`Hashable` 没有泛型参数；`Hashable[T]` 不是有效写法。
 
 注意事项：
 
 - `dict.iter()` 产出 entry pair；裸 `for x in dict` 也遍历 entry pair，二者语义一致。遍历 key 使用 `dict.keys()` 或 `dict.iter_keys(d)`。
-- 裸 `for x in userValue` 不会自动调用 `iter()`；自定义类型请使用 `iter!(userValue)` 或显式 `.iter()`。
+- 裸 `for x in userValue` 要求 `userValue` 满足 `Iterable`；满足时 `for` 会使用其 `iter()`。不满足的用户类型会报错，`iter!(userValue)` 仍可作为显式写法。
 - `std.meta.implements("list", "Iterable")`、`std.meta.protocols("int")` 等反射入口会看到内置 conformance。
 - `std.meta.implements` 的字符串参数目前不接受 `generator[int]` 这类带类型参数的文本，使用 `type_info` 或值本身查询。
 

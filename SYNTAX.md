@@ -1024,10 +1024,10 @@ func identity[T any](x: T): T {
 [T = any]                 // 默认类型实参
 [K type int | string]     // 具体类型集合
 [V proto Drawable]        // proto 组
-[T hashable]
-[T iterable]
-[T proto hashable & Drawable]
-[T proto iterable & Drawable]
+[T Hashable]
+[T Iterable]
+[T Hashable & Drawable]
+[T Iterable & Drawable]
 ```
 
 `type` / `proto` 在类型参数约束列表中都是 contextual 标记，只在该位置生效；
@@ -1036,7 +1036,7 @@ func identity[T any](x: T): T {
 - `[T]`、`[T type]` 不合法；
 - 一个参数的约束不能混用 `&` 和 `|`；
 - proto 不能作为 `|` 成员；
-- `hashable` / `iterable` 是内置约束，可参与 `&`，不能作为 `|` 成员；
+- `Hashable` / `Iterable` 是 `std.traits` 提供的 proto，可参与 `&`，不能作为 `|` 成员；使用前需要 `import std.traits;` 或 selective import；
 - `std.traits` 提供对应的 `Hashable` marker proto 和 `Iterable[T]` 方法 proto；需要显式接口名时使用 `import {Hashable, Iterable} from std.traits;`；
 - proto 不是类型实参：`Box[Keyed]` 非法。
 
@@ -1611,6 +1611,7 @@ for a, b, c in triples() {
 - dict 单变量遍历 entry pair，双变量得到 `key, value`；遍历 key 使用 `dict.keys()` 或 `dict.iter_keys(d)`；非 dict 的双变量按 tuple 解构；静态类型是 `any` 的双变量保留运行时 dict key/value 行为；
 - string 单变量遍历 UTF-8 字符，元素是 `char`；
 - bytes 单变量遍历 `0..255` 的字节值；
+- 用户类型必须满足 `std.traits.Iterable`（`iter(self): generator[T]`）才能被 `for` 遍历；不满足时编译期报错；静态类型是 `any` 时运行时检查；
 - 可以配合 `range()` 做计数循环；
 - 被遍历对象在循环开始时求值一次；
 - 循环变量只存在于循环作用域；

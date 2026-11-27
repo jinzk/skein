@@ -1121,12 +1121,6 @@ struct Checker : public BuiltinContext {
             return true;
         }
 
-        auto is_hashable = [](const TypeNode *type) {
-            return key_contract(type) != KeyContract::No;
-        };
-        auto is_iterable = [](const TypeNode *type) {
-            return iterable_contract(type) != IterableContract::No;
-        };
         auto protocol_lookup = [&](const TypeNode *item,
                                    structtype_lookup_result &out) {
             return lookup_named_type(item, out) && out.protocol;
@@ -1163,9 +1157,6 @@ struct Checker : public BuiltinContext {
                     continue;
                 if (item->kind == TYPE_ANY)
                     return true;
-                if (item->kind == TYPE_NAMED &&
-                    (item->name == "hashable" || item->name == "iterable"))
-                    return false;
                 structtype_lookup_result protocol;
                 if (protocol_lookup(item, protocol))
                     return false;
@@ -1180,16 +1171,6 @@ struct Checker : public BuiltinContext {
                 continue;
             if (item->kind == TYPE_ANY)
                 continue;
-            if (item->kind == TYPE_NAMED && item->name == "hashable") {
-                if (!is_hashable(arg))
-                    return false;
-                continue;
-            }
-            if (item->kind == TYPE_NAMED && item->name == "iterable") {
-                if (!is_iterable(arg))
-                    return false;
-                continue;
-            }
             structtype_lookup_result protocol;
             if (protocol_lookup(item, protocol)) {
                 if (!protocol_matches(item, protocol))
@@ -1216,10 +1197,6 @@ struct Checker : public BuiltinContext {
                                  "'any' cannot be used with '&'");
                     return false;
                 }
-                if (item->kind == TYPE_NAMED &&
-                    (item->name == "hashable" ||
-                     item->name == "iterable"))
-                    continue;
                 structtype_lookup_result lookup;
                 if (lookup_named_type(item, lookup) && lookup.protocol)
                     continue;
@@ -1237,15 +1214,6 @@ struct Checker : public BuiltinContext {
                 if (item->kind == TYPE_ANY) {
                     report_error(line, column,
                                  "'any' cannot be used with '|'");
-                    return false;
-                }
-                if (item->kind == TYPE_NAMED &&
-                    (item->name == "hashable" ||
-                     item->name == "iterable")) {
-                    std::string message =
-                        std::string("'") + item->name +
-                        "' cannot be used with '|'";
-                    report_error(line, column, message.c_str());
                     return false;
                 }
                 structtype_lookup_result lookup;
@@ -3780,6 +3748,49 @@ struct Checker : public BuiltinContext {
         }
     }
 
+    void rewrite_iterable_call(struct forinloop *f) {
+        struct ast *member = newast('j', f->iterable, newstr("iter"));
+        member->line = f->line;
+        member->column = f->column;
+        struct ast *call = newcall(member, NULL);
+        call->line = f->line;
+        call->column = f->column;
+        f->iterable = call;
+    }
+
+    bool user_iterable_element(const TypeNode *iterable,
+                               const type_def *def,
+                               const TypeNode **element,
+                               bool *has_method) {
+        *has_method = false;
+        if (!def)
+            return false;
+        std::shared_ptr<function_def> method =
+            structtype_method(def, "iter");
+        if (!method || !method->code)
+            return false;
+        *has_method = true;
+        const function_code *code = method->code.get();
+        if (code->variadic || code->nparams != 1 || !code->ret_type)
+            return false;
+        const TypeNode *result =
+            type_from_constraint(code->ret_type.get());
+        if (!result)
+            return false;
+        if (iterable && iterable->kind == TYPE_NAMED &&
+            !iterable->args.empty() && !def->generic_params.empty() &&
+            iterable->args.size() == def->generic_params.size()) {
+            TypeBindings bindings;
+            for (std::size_t i = 0; i < def->generic_params.size(); ++i)
+                bindings[def->generic_params[i]] = iterable->args[i];
+            result = instantiate_type(result, bindings);
+        }
+        if (result->kind != TYPE_GENERATOR)
+            return false;
+        *element = iterable_element(result, false);
+        return true;
+    }
+
     static char *duplicate_text(const char *text) {
         const char *source = text ? text : "";
         std::size_t size = std::strlen(source) + 1;
@@ -3929,10 +3940,76 @@ struct Checker : public BuiltinContext {
                 struct forinloop *f = (struct forinloop *)stmt;
                 bool fixed = expr_fixed(f->iterable, env);
                 const TypeNode *iterable = infer(f->iterable, env);
+                const TypeNode *element = NULL;
+                bool user_iterable = false;
+
+                if (iterable && iterable->kind == TYPE_NAMED) {
+                    structtype_lookup_result lookup;
+                    if (lookup_named_type(iterable, lookup)) {
+                        if (lookup.protocol &&
+                            lookup.protocol->builtin_kind ==
+                                PROTOCOL_BUILTIN_ITERABLE) {
+                            element = iterable->args.empty()
+                                          ? type_any()
+                                          : iterable->args[0];
+                            rewrite_iterable_call(f);
+                            infer(f->iterable, env);
+                            user_iterable = true;
+                        } else if (lookup.protocol) {
+                            std::string message =
+                                std::string("proto ") +
+                                type_display(iterable) +
+                                " is not iterable; use an Iterable value";
+                            report_error(f->line, f->column, message.c_str());
+                            return false;
+                        } else {
+                            const type_def *def =
+                                lookup.structure
+                                    ? static_cast<const type_def *>(
+                                          lookup.structure)
+                                    : static_cast<const type_def *>(
+                                          lookup.enumeration);
+                            if (def) {
+                                const TypeNode *user_element = NULL;
+                                bool has_method = false;
+                                if (user_iterable_element(
+                                        iterable, def, &user_element,
+                                        &has_method)) {
+                                    element = user_element;
+                                    rewrite_iterable_call(f);
+                                    infer(f->iterable, env);
+                                    user_iterable = true;
+                                } else if (has_method) {
+                                    std::string message =
+                                        std::string("type ") +
+                                        type_display(iterable) +
+                                        " does not implement Iterable; "
+                                        "iter must return generator[T]";
+                                    report_error(f->line, f->column,
+                                                 message.c_str());
+                                    return false;
+                                } else {
+                                    std::string message =
+                                        std::string("type ") +
+                                        type_display(iterable) +
+                                        " is not iterable";
+                                    report_error(f->line, f->column,
+                                                 message.c_str());
+                                    return false;
+                                }
+                            }
+                        }
+                    }
+                }
+                if (!user_iterable)
+                    element = iterable_element(iterable, false);
+                if (!element)
+                    element = type_any();
+
                 Env child;
                 child.parent = &env;
                 if (f->value_name) {
-                    if (iterable->kind == TYPE_DICT) {
+                    if (!user_iterable && iterable->kind == TYPE_DICT) {
                         const TypeNode *key =
                             iterable->args.empty() ? type_any()
                                                    : iterable->args[0];
@@ -3943,17 +4020,19 @@ struct Checker : public BuiltinContext {
                         child.define(f->value_name, value, fixed);
                         return check_stmt(f->body, child);
                     }
-                    if (iterable->kind == TYPE_ANY) {
+                    if (!user_iterable &&
+                        (iterable->kind == TYPE_ANY ||
+                         iterable->kind == TYPE_VAR)) {
                         child.define(f->name ? f->name : "",
                                      type_any(), fixed);
                         child.define(f->value_name, type_any(), fixed);
-                        return check_stmt(f->body, child);
+                        bool ok = check_stmt(f->body, child);
+                        if (ok)
+                            rewrite_pair_forin(f);
+                        return ok;
                     }
-                    const TypeNode *element =
-                        iterable_element(iterable, false);
-                    if (!element ||
-                        (element->kind != TYPE_PAIR &&
-                         element->kind != TYPE_TUPLE)) {
+                    if (element->kind != TYPE_PAIR &&
+                        element->kind != TYPE_TUPLE) {
                         std::string message =
                             std::string("two-variable for-in over ") +
                             type_display(iterable) +
@@ -3977,8 +4056,7 @@ struct Checker : public BuiltinContext {
                         rewrite_pair_forin(f);
                     return ok;
                 }
-                child.define(f->name ? f->name : "",
-                             iterable_element(iterable, false), fixed);
+                child.define(f->name ? f->name : "", element, fixed);
                 return check_stmt(f->body, child);
             }
             case 'S': {

@@ -1,4 +1,5 @@
 import std;
+import {Hashable} from std.traits;
 include "_support.skein";
 
 func identity[T any](x: T): T {
@@ -21,7 +22,7 @@ func marked_type[T type int | string](x: T): T {
   return x;
 }
 
-func marked_hash[T type hashable](x: T): T {
+func marked_hash[T Hashable](x: T): T {
   return x;
 }
 

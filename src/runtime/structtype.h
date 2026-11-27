@@ -274,6 +274,10 @@ bool value_is_iterable(const struct value_t *value);
 /* Builtin iterator method id for Op::CallMethod fallback: B_iter_items for
  * dict and B_iter_elements for other iterables; -1 when not applicable. */
 int builtin_iter_method_id(const struct value_t *value);
+/* Look up the std.traits.Iterable-compatible iter method on a user type.
+ * Returns false when the method is missing or does not return generator[T]. */
+bool structtype_find_iter_method(const type_def *def,
+                                 std::shared_ptr<function_def> &out);
 bool structtype_refresh_protocol_defaults(type_def *def, std::string &error);
 bool structtype_refresh_all_protocol_defaults(std::string &error);
 bool structtype_has_protocol(const type_def *def, const protocol_def *protocol);

@@ -1605,6 +1605,37 @@ public:
                 state.generator = false;
                 state.two_vars = desc.two_vars;
 
+                if (iterable->type == T_struct || iterable->type == T_enum) {
+                    const type_def *def =
+                        iterable->type == T_struct
+                            ? static_cast<const type_def *>(
+                                  ((struct struct_value_t *)iterable)->def)
+                            : static_cast<const type_def *>(
+                                  ((struct enum_value_t *)iterable)->def);
+                    std::shared_ptr<function_def> method;
+                    if (!def ||
+                        !structtype_find_iter_method(def, method)) {
+                        yyerror("type %s does not implement Iterable",
+                                def ? def->name.c_str() : "value");
+                        freeval(iterable);
+                        return OpResult::Abort;
+                    }
+                    struct func_value_t function;
+                    function.type = T_func;
+                    function.def = method;
+                    std::vector<value_t *> call_args;
+                    call_args.push_back(iterable);
+                    value_t *result = skein_vm_call_value_args(
+                        (value_t *)&function, std::move(call_args));
+                    if (!result || g_interrupted ||
+                        context_.control != EVAL_CONTROL_NONE ||
+                        context_.runtime_error_count != errors_before_) {
+                        freeval(result);
+                        return OpResult::Abort;
+                    }
+                    iterable = result;
+                }
+
                 if (fiber_is_generator(iterable)) {
                     if (desc.two_vars) {
                         yyerror("two-variable for-in requires dict, "

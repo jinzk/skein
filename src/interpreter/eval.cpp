@@ -1324,6 +1324,28 @@ struct value_t *eval(struct ast *a) {
                 break;
             }
 
+            if (iter->type == T_struct || iter->type == T_enum) {
+                const type_def *def =
+                    iter->type == T_struct
+                        ? static_cast<const type_def *>(
+                              ((struct struct_value_t *)iter)->def)
+                        : static_cast<const type_def *>(
+                              ((struct enum_value_t *)iter)->def);
+                std::shared_ptr<function_def> method;
+                if (!def || !structtype_find_iter_method(def, method)) {
+                    yyerror("type %s does not implement Iterable",
+                            def ? def->name.c_str() : "value");
+                    freeval(iter);
+                    break;
+                }
+                value_t *next = call_method_value(iter, method, NULL);
+                freeval(iter);
+                if (!next) {
+                    break;
+                }
+                iter = next;
+            }
+
             if (fiber_is_generator(iter)) {
                 if (f->value_name) {
                     yyerror("two-variable for-in requires dict, got generator");

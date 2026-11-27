@@ -14,6 +14,14 @@ struct TraitRange {
   }
 }
 
+struct TraitPairs {
+  items: list[pair[string, int]];
+
+  func iter(self): generator[pair[string, int]] {
+    return std.list.iter(self.items);
+  }
+}
+
 struct TraitListIter {
   xs: list[int];
 
@@ -40,14 +48,6 @@ func trait_need_hash[T Hashable](x: T): T {
 }
 
 func trait_need_iter[T Iterable](x: T): T {
-  return x;
-}
-
-func trait_need_lower_iter[T iterable](x: T): T {
-  return x;
-}
-
-func trait_need_lower_hash[T hashable](x: T): T {
   return x;
 }
 
@@ -81,7 +81,6 @@ ts_test("traits generic hashable constraint", func() {
   ts_eq(trait_need_hash(("a", 1))[0], "a");
   ts_eq(trait_need_hash(TraitUser { id: 7, cache: [] }).id, 7);
   ts_eq(trait_need_hash(TraitPlainKey { id: 8 }).id, 8);
-  ts_eq(trait_need_lower_hash(1), 1);
 });
 
 ts_test("traits generic iterable constraint", func() {
@@ -90,7 +89,6 @@ ts_test("traits generic iterable constraint", func() {
   ts_eq(trait_need_iter(TraitRange {
     start: 1, end: 3, extra: []
   }).start, 1);
-  ts_eq(trait_need_lower_iter([5]).len(), 1);
 });
 
 ts_test("traits iter macro accepts list-returning iter", func() {
@@ -144,6 +142,21 @@ ts_test("traits meta protocols", func() {
   ts_eq(std.meta.protocols(TraitRange {
     start: 1, end: 2, extra: []
   }), ["std.traits.Iterable"]);
+});
+
+ts_test("traits for in custom iterable", func() {
+  let out = [];
+  for x in (TraitRange { start: 1, end: 4, extra: [] }) {
+    out = std.list.append(out, x);
+  }
+  ts_eq(out, [1, 2, 3]);
+
+  let pair_out = [];
+  let pairs = TraitPairs { items: [("a", 1), ("b", 2)] };
+  for k, v in pairs {
+    pair_out = std.list.append(pair_out, k + "=" + str(v));
+  }
+  ts_eq(pair_out, ["a=1", "b=2"]);
 });
 
 ts_test("traits value annotations", func() {

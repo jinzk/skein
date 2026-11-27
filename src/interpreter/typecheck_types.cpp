@@ -728,74 +728,6 @@ void bind_protocol_param(
         constraint_from_static_type(type);
 }
 
-IterableContract iterable_contract_inner(const TypeNode *type) {
-    if (!type)
-        return IterableContract::Unknown;
-    switch (type->kind) {
-        case TYPE_LIST:
-        case TYPE_DICT:
-        case TYPE_SET:
-        case TYPE_DEQUE:
-        case TYPE_HEAP:
-        case TYPE_STRING:
-        case TYPE_BYTES:
-        case TYPE_GENERATOR:
-        case TYPE_PAIR:
-        case TYPE_TUPLE:
-            return IterableContract::Yes;
-
-        case TYPE_UNION: {
-            bool unknown = false;
-            for (const TypeNode *member : type->args) {
-                IterableContract item = iterable_contract_inner(member);
-                if (item == IterableContract::No)
-                    return IterableContract::No;
-                if (item == IterableContract::Unknown)
-                    unknown = true;
-            }
-            return unknown ? IterableContract::Unknown
-                           : IterableContract::Yes;
-        }
-
-        case TYPE_NAMED: {
-            structtype_lookup_result lookup;
-            if (!lookup_named_type(type, lookup))
-                return IterableContract::Unknown;
-            if (lookup.kind == STRUCTTYPE_LOOKUP_PROTOCOL)
-                return IterableContract::Unknown;
-            const type_def *def =
-                lookup.kind == STRUCTTYPE_LOOKUP_STRUCT
-                    ? static_cast<const type_def *>(lookup.structure)
-                    : static_cast<const type_def *>(lookup.enumeration);
-            if (!def)
-                return IterableContract::Unknown;
-
-            std::shared_ptr<function_def> method =
-                structtype_method(def, "iter");
-            if (!method || !method->code)
-                return IterableContract::No;
-            const function_code *code = method->code.get();
-            if (code->variadic || code->nparams != 1 || !code->ret_type)
-                return IterableContract::No;
-            const TypeNode *result =
-                type_from_constraint(code->ret_type.get());
-            /* Unified with std.traits.Iterable[T]: the method must return
-             * generator[T].  Returning list/string/etc. is no longer treated
-             * as satisfying the iterable constraint. */
-            return result && result->kind == TYPE_GENERATOR
-                       ? IterableContract::Yes
-                       : IterableContract::No;
-        }
-
-        case TYPE_ANY:
-        case TYPE_VAR:
-            return IterableContract::Unknown;
-
-        default:
-            return IterableContract::No;
-    }
-}
-
 ProtocolMatch iterable_protocol_match(
     const TypeNode *actual, const struct protocol_def *protocol,
     std::unordered_map<std::string, struct type_constraint> *bindings) {
@@ -861,10 +793,6 @@ ProtocolMatch iterable_protocol_match(
 }
 
 } // namespace
-
-IterableContract iterable_contract(const TypeNode *type) {
-    return iterable_contract_inner(type);
-}
 
 ProtocolMatch match_protocol(
     const TypeNode *actual, const struct protocol_def *protocol,

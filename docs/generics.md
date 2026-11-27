@@ -12,7 +12,7 @@
 - `Box[int]`、`Option[int]` 类型注解；
 - `Box[int] { ... }`、`Option[int].Some { ... }`、`Option[int].None`；
 - 泛型函数调用推断、`f[int](...)` 和 `let g = f[int]`；
-- `|` 类型集合、`&` proto/`hashable` 组和约束检查；
+- `|` 类型集合、`&` proto 组和约束检查；
 - `type` / `proto` 约束标记；
 - 泛型 proto 的结构式匹配、类型参数推断、默认方法和 `[T Keyed[int]]` 约束；
 - 默认类型参数的声明、尾部/约束校验和推断缺失时的补全；
@@ -32,7 +32,7 @@
 
 - 支持泛型 `struct` / `enum` / `proto` / 自由函数；
 - 类型参数只参与静态检查，运行时擦除；
-- 支持 proto 约束、内置 `hashable` 约束和有限类型集合约束；
+- 支持 proto 约束（含 `Hashable` / `Iterable`）和有限类型集合约束；
 - 保持现有非泛型 struct 的值语义、COW、递归和序列化边界；
 - 不引入泛型特化、泛型方法、运行时泛型标签或隐式泛型转换。
 
@@ -84,8 +84,10 @@ impl Box {
 约束使用 `name constraint`：
 
 ```skein
+import {Hashable} from std.traits;
+
 [T any]
-[T hashable]
+[T Hashable]
 [T Drawable]
 [T Drawable & std.dict_key.DictKey]
 [T int | string | Box[int]]
@@ -96,7 +98,7 @@ impl Box {
 ```skein
 [K type int | string]
 [V proto Drawable]
-[T proto hashable & Drawable]
+[T Hashable & Drawable]
 [K type int | string, V proto Drawable]
 ```
 
@@ -142,7 +144,7 @@ TypeUnion     := ConcreteType ('|' ConcreteType)*
 ```
 
 `type` 标记用于 `TypeUnion`，`proto` 标记用于 `ProtoGroup`；
-不写标记时由编译器根据名字和已有声明推断。`hashable` 可出现在 `&` 组中。
+不写标记时由编译器根据名字和已有声明推断。`Hashable` 可出现在 `&` 组中。
 
 `ProtoGroup`：
 
@@ -151,8 +153,8 @@ TypeUnion     := ConcreteType ('|' ConcreteType)*
 [T Drawable & std.dict_key.DictKey]
 ```
 
-- `&` 两侧必须是 proto 或内置约束；
-- `hashable` 是内置约束，可参与 `&`；
+- `&` 两侧必须是 proto；
+- `Hashable` 是 `std.traits` 提供的 proto，可参与 `&`；
 - 不允许具体类型出现在 `&` 中。
 
 `TypeUnion`：
@@ -165,7 +167,7 @@ TypeUnion     := ConcreteType ('|' ConcreteType)*
 - `|` 两侧必须是具体类型或已实例化的泛型类型；
 - proto 不能作为 `|` 成员；
 - `any` 不能作为 `|` 成员；
-- `hashable` 不能作为 `|` 成员。
+- `Hashable` 不能作为 `|` 成员。
 
 禁止：
 
@@ -173,7 +175,7 @@ TypeUnion     := ConcreteType ('|' ConcreteType)*
 [T Drawable | Keyed[int]]
 [T A & B | int]
 [T int & string]
-[T hashable | int]
+[T Hashable | int]
 ```
 
 ### 3.4 类型实参 union
@@ -235,7 +237,7 @@ struct Holder[T Keyed] {
 ```
 
 `T any` 可以绑定到 struct / enum / function 等具体类型，但不自动拥有
-`callable`、`hashable` 或 proto 方法；需要时使用约束。
+`callable` 或 proto 方法；需要时使用约束。
 
 ### 3.6 显式类型实例化
 
@@ -314,15 +316,21 @@ let g = identity[int];   // 显式实例化的函数值
 - `any` 不能自动满足更窄约束；
 - 无法证明时直接报类型错误，不做运行时降级。
 
-### 4.5 `hashable`
+### 4.5 `Hashable`
 
-`hashable` 是内置约束，不是普通 proto。语义复用现有 key 契约：
+`Hashable` 是 `std.traits` 提供的 marker proto：
+
+```skein
+import {Hashable} from std.traits;
+```
+
+语义复用内置 key 契约：
 
 满足：
 
 - `int`、非 NaN `float`、`bool`、`string`、`char`、`byte`、`bytes`、`null`；
 - frozen tuple/pair，且元素递归满足；
-- struct/enum，字段或载荷递归满足，或实现合法 `DictKey`。
+- struct/enum，字段或载荷递归满足，或实现合法 `dict_hash`。
 
 不满足：
 
@@ -333,39 +341,32 @@ let g = identity[int];   // 显式实例化的函数值
 - error / result / userdata；
 - `any`、未约束的类型参数。
 
-### 4.5.1 `iterable` 与 `std.traits`
+`Hashable` 没有泛型参数；`Hashable[T]` 不是有效写法。
 
-`iterable` / `hashable` 是内置约束别名，语义与对应 proto 一致：
+### 4.5.1 `Iterable`
 
-```skein
-func collect[T iterable](x: T) { ... }   // 等价于 [T Iterable]
-func keyed[T hashable](x: T) { ... }     // 等价于 [T Hashable]
-```
-
-内置 `std.traits` 源码包提供规范 proto 名：
+`Iterable[T]` 是 `std.traits` 提供的结构式迭代器 proto：
 
 ```skein
-import {Hashable, Iterable} from std.traits;
-
-proto Hashable {}
+import {Iterable} from std.traits;
 
 proto Iterable[T any] {
   func iter(self): generator[T];
 }
 ```
 
-- `Hashable` 是 marker proto；conformance 委托给内置 key contract，不是普通方法协议。它没有元素类型参数。
-- `Iterable` 是普通结构式 proto；内置容器通过内置 conformance 表满足它，用户类型需要 `iter(self): generator[T]`。
-- `iterable` 与 `Iterable` 使用同一套 conformance：用户类型的 `iter` 必须返回 `generator[T]`；返回 `list[...]` 等值的类型不再满足约束。
-- 小写 `hashable` / `iterable` 始终可用，不依赖 import；大写 proto 名需要 selective import。
-- `std.meta.implements` / `std.meta.protocols` 能看到内置 conformance。
+- 内置容器通过内置 conformance 表满足它；
+- 用户类型需要 `iter(self): generator[T]`；
+- 返回 `list[...]` 等值的类型不满足 `Iterable`；
+- `std.meta.implements` / `std.meta.protocols` 能看到内置 conformance；
+- `for in` 接受内置容器和满足 `Iterable` 的用户类型；具体用户类型在编译期检查，`any` 在运行时检查。
 
-`hashable` / `iterable` 可以出现在 `&` 组中，不能作为 `|` 成员：
+`Hashable` / `Iterable` 可以出现在 `&` 组中，不能作为 `|` 成员：
 
 ```skein
-[T hashable & Drawable]
-[T iterable & Drawable]
-[T hashable | int]   // error
+[T Hashable & Drawable]
+[T Iterable & Drawable]
+[T Hashable | int]   // error
 ```
 
 ### 4.6 泛型 proto
@@ -503,7 +504,7 @@ std.meta.type_params("Box[int]")
 - union 类型实参；
 - 默认类型参数实例化；
 - 约束包含检查；
-- `hashable` 与 `key_contract()` 集成；
+- `Hashable` 与 `key_contract()` 集成；
 - 类型参数作用域、重复参数和可见性诊断。
 
 验收：
@@ -529,7 +530,7 @@ std.meta.type_params("Box[int]")
 - 泛型 proto 的结构式匹配；
 - `impl Box` 方法签名使用 struct 的类型参数；
 - `|` 实例化成员检查，不做共同能力强制；
-- `&` proto 组和内置 `hashable` 检查；
+- `&` proto 组和内置 `Hashable` 检查；
 - 泛型实例不可隐式转换；
 - `is Box` / `is Keyed` 的静态限制；
 - 诊断信息和错误位置。
@@ -669,7 +670,7 @@ std.meta.type_params("Box[int]")
 - `Box[int]` 不能赋给 `Box[int|string]`；
 - proto 约束包含检查；
 - `any` 不能传给更窄约束；
-- `hashable` 正反例；
+- `Hashable` 正反例；
 - `is Box` / `is Keyed`；
 - `is Box[int]` / `is Keyed[int]` 报错。
 

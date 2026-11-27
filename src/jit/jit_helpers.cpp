@@ -1821,6 +1821,34 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_iter_new(
     state[1] = 0;
     state[2] = 0;
 
+    if (iterable->type == T_struct || iterable->type == T_enum) {
+        const type_def *def =
+            iterable->type == T_struct
+                ? static_cast<const type_def *>(
+                      ((struct struct_value_t *)iterable)->def)
+                : static_cast<const type_def *>(
+                      ((struct enum_value_t *)iterable)->def);
+        std::shared_ptr<function_def> method;
+        if (!def || !structtype_find_iter_method(def, method)) {
+            yyerror("type %s does not implement Iterable",
+                    def ? def->name.c_str() : "value");
+            freeval(iterable);
+            return nullptr;
+        }
+        struct func_value_t function;
+        function.type = T_func;
+        function.def = method;
+        std::vector<value_t *> call_args;
+        call_args.push_back(iterable);
+        value_t *result = skein_vm_call_value_args(
+            (value_t *)&function, std::move(call_args));
+        if (!result || g_interrupted) {
+            freeval(result);
+            return nullptr;
+        }
+        iterable = result;
+    }
+
     if (skein::jit::generator_test() &&
         skein::jit::generator_test()(iterable)) {
         if (desc->two_vars) {

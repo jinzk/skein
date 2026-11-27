@@ -1,4 +1,5 @@
 import std;
+import {Hashable} from std.traits;
 include "_support.skein";
 
 struct Box[T any] {
@@ -33,7 +34,7 @@ struct MarkedSet[T type int | string] {
   value: T;
 }
 
-struct MarkedHash[T type hashable] {
+struct MarkedHash[T Hashable] {
   value: T;
 }
 
@@ -41,7 +42,7 @@ struct MarkedProto[T proto Drawable] {
   value: T;
 }
 
-struct MarkedCombo[T type hashable & Drawable] {
+struct MarkedCombo[T Hashable & Drawable] {
   value: T;
 }
 

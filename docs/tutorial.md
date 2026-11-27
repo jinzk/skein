@@ -373,13 +373,13 @@ func identity[T any](x: T): T {
 [T = any]                 // 默认类型实参
 [K type int | string]     // 具体类型集合
 [V proto Drawable]        // proto 组
-[T hashable]
-[T iterable]
-[T proto hashable & Drawable]
-[T proto iterable & Drawable]
+[T Hashable]
+[T Iterable]
+[T Hashable & Drawable]
+[T Iterable & Drawable]
 ```
 
-`std.traits` 提供 `Hashable` marker proto 和 `Iterable[T]` proto；内置容器自动满足它们，用户类型通过 `dict_hash` / `iter(self): generator[T]` 满足。小写 `hashable` / `iterable` 是始终可用的内置约束别名。
+`std.traits` 提供 `Hashable` marker proto 和 `Iterable[T]` proto；内置容器自动满足它们，用户类型通过 `dict_hash` / `iter(self): generator[T]` 满足。使用这些 proto 前需要 import `std.traits`。
 
 实例化：
 
@@ -739,6 +739,7 @@ for a, b, c in triples() {
 - 显式惰性迭代使用 `std.list.iter(xs)`、`std.dict.iter_keys(d)`、`std.dict.iter_values(d)`、`std.dict.iter_items(d)` 或 `std.dict.iter(d)`；这些返回 generator，可直接用于 `for` 或 `std.iter.*`；
 - list 需要下标时用 `range(len(list))` 或 C 风格 `for`；
 - string 遍历 UTF-8 字符；bytes 遍历 `0..255` 的字节值；
+- 用户类型必须满足 `std.traits.Iterable`（`iter(self): generator[T]`）才能被 `for` 遍历；不满足时编译期报错；`any` 在运行时检查；
 - 迭代遍历对象在循环开始时求值一次，循环期间修改原对象不会改变本次遍历；
 - 循环变量只在循环作用域内有效；省略 `let` 时同样是块级新变量，会遮蔽外层同名变量；
 - 省略 `let` 和圆括号时，循环体必须是 `{ ... }`；操作数以 dict 字面量开头时可以省略括号（如 `for k, v in {"a": 1}`），但 struct / 函数 / match 等复合字面量作操作数时仍要加括号；
@@ -1627,7 +1628,7 @@ func apply(fn, x) { return fn(x); }
 apply(std.math.sqrt, 16)
 ```
 
-`std.iter.for_each(iterable, fn)` 逐个调用 `fn`，忽略返回值并返回 `null`。回调可以写 1 个或 2 个参数：1 个参数时接收元素（dict 为 key）；2 个参数时 list / string / bytes / set / deque / heap / generator 接收 `(index, value)`，dict 接收 `(key, value)`。回调里的 `break` / `continue` 不可用，`return` 只退出回调本身；返回 task 的回调不会被自动等待。
+`std.iter.for_each(iterable, fn)` 逐个调用 `fn`，忽略返回值并返回 `null`。回调可以写 1 个或 2 个参数：1 个参数时接收元素（dict 为 entry pair）；2 个参数时 list / string / bytes / set / deque / heap / generator 接收 `(index, value)`，dict 接收 `(key, value)`。回调里的 `break` / `continue` 不可用，`return` 只退出回调本身；返回 task 的回调不会被自动等待。
 
 函数调用会先按从左到右的顺序求值参数，再检查被调用者类型和参数个数，因此参数中的副作用总会执行。
 

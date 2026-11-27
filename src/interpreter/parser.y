@@ -826,7 +826,6 @@ static const char *builtin_field_name(int functype) {
         case B_file_flush: return "file_flush";
         case B_input: return "input";
         case B_split: return "split";
-        case B_split_ws: return "split_ws";
         case B_trim: return "trim";
         case B_find: return "find";
         case B_substr: return "substr";

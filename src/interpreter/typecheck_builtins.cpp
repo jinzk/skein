@@ -1324,10 +1324,6 @@ const TypeNode *builtin_function_type(int functype) {
             return poly_builtin(
                 {text(), text()},
                 type_container(TYPE_LIST, {text()}), 1);
-        case B_split_ws:
-            return builtin_sig(
-                {text()},
-                type_container(TYPE_LIST, {text()}));
         case B_find:
             return builtin_sig({text(), text()}, integer());
         case B_bytes_from_string:

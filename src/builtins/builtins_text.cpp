@@ -91,15 +91,6 @@ struct value_t *call_text_builtin(
             ret = (struct value_t *)parts;
             break;
         }
-        case B_split_ws: {
-            if (arg->type != T_string) {
-                yyerror("split_ws expects a string, got %s", typename_of(arg));
-                break;
-            }
-            const char *text = ((struct string_value_t *)arg)->value;
-            ret = (struct value_t *)split_whitespace(text);
-            break;
-        }
         case B_trim: {
             if (arg->type != T_string) {
                 yyerror("trim expects a string, got %s", typename_of(arg));

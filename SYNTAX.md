@@ -5580,11 +5580,11 @@ std.fs.seek std.fs.tell std.fs.eof std.fs.close std.fs.flush
 
 ```text
 input
-std.string.split std.string.split_ws std.string.trim
+std.string.split std.string.trim
 std.string.find std.string.substr
 ```
 
-`std.string.split(text)` 按连续空白切分；`std.string.split(text, separator)` 按精确分隔符切分。`std.string.split_ws(text)` 是 `std.string.split(text)` 的兼容别名。
+`std.string.split(text)` 按连续空白切分；`std.string.split(text, separator)` 按精确分隔符切分。
 
 ### bytes
 

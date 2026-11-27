@@ -3735,7 +3735,6 @@ std.string.len
 std.string.find
 std.string.substr
 std.string.split
-std.string.split_ws
 std.string.trim
 std.string.trim_start
 std.string.trim_end

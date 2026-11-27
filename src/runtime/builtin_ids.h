@@ -105,7 +105,7 @@ enum bifs {
     B_file_flush,
     B_input,
     B_split,
-    B_split_ws,
+    B_split_ws_reserved, // retired std.string.split_ws alias; keep numbering
     B_trim,
     B_find,
     B_substr,

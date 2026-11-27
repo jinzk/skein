@@ -150,7 +150,6 @@ value_t *build_namespace_impl() {
             {"find", B_find},
             {"substr", B_substr},
             {"split", B_split},
-            {"split_ws", B_split_ws},
             {"trim", B_trim},
             {"join", B_string_join},
             {"replace", B_string_replace},

@@ -1847,7 +1847,6 @@ import std;
 
 std.string.trim(text)                     → 去掉首尾空白
 std.string.split(text[, separator])       → list<string>
-std.string.split_ws(text)                 → list<string>（同 split(text)）
 std.string.find(text, substring)          → 码点下标 / -1
 std.string.substr(text, start[, length])  → string
 ```
@@ -1874,7 +1873,6 @@ std.string.substr("你好世界", 1, 2)      → "好世"
 - `std.string.split(text, separator)` 按精确分隔符切分，保留首尾空字段；
 - `separator` 不能为空字符串；
 - `std.string.split("")` 返回 `[]`，`std.string.split("", ",")` 返回 `[""]`；
-- `std.string.split_ws(text)` 是 `split(text)` 的兼容别名；
 - `std.string.find` 返回 **UTF-8 码点下标**，找不到返回 `-1`，空子串返回 `0`；
 - `std.string.substr` 的 `start` 和 `length` 都是码点单位；`start` 超出长度返回空字符串，`length` 超出末尾会截断；
 - `start` 和 `length` 不能为负数。

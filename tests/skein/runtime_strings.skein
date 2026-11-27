@@ -115,25 +115,12 @@ ts_test("string split empty text", func() {
   ts_true(std.string.split("", ",") == [""]);
 });
 
-ts_test("string split whitespace", func() {
-  ts_eq(std.string.split_ws("  a  b\tc\n d "), ["a", "b", "c", "d"]);
-});
-
-ts_test("string split whitespace empty", func() {
-  ts_eq(std.string.split_ws(""), []);
-});
-
 ts_test("string split default whitespace", func() {
   ts_eq(std.string.split("  a  b\tc\n d "), ["a", "b", "c", "d"]);
 });
 
 ts_test("string split default whitespace empty", func() {
   ts_eq(std.string.split(""), []);
-});
-
-ts_test("string split_ws matches default split", func() {
-  let text = "  a  b\tc\n d ";
-  ts_eq(std.string.split_ws(text), std.string.split(text));
 });
 
 ts_test("string find", func() {

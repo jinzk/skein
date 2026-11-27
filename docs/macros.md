@@ -260,7 +260,9 @@ typechecker 已直接使用 AST 中的泛型实参（roadmap G1），不再从�
 G6 允许它填充泛型实参（`f[#T](...)` / `Box[#T] { ... }` / `Box[list[#T]]`），
 展开时对捕获的类型图递归替换。G3 在定义期拒绝模板生成声明
 （`struct` / `enum` / `proto` / `impl` / 具名 `func`）；类型片段不能进入反射
-builtin。调用点已有的泛型值仍可作为 `expr` 片段传入。
+builtin。调用点已有的泛型值仍可作为 `expr` 片段传入。宏生成的显式泛型应用仍走
+普通 typechecker 约束检查：类型实参不满足声明的约束时照常报错，宏本身不创建或改变
+约束。
 
 G4 只补齐工具链与双后端覆盖，不改变语义：formatter 无损往返类型片段及其
 nullable / `ref` / `weak` / `as` / `is` / 函数签名形态；lint 报告未使用片段与

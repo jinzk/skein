@@ -486,6 +486,27 @@ def run_cases():
         stdout="7",
     )
     check(
+        "user macro literal generic call checks constraint",
+        'func pick[T int | string](x: T): T { return x; }\n'
+        'macro bad(v: expr) { return pick[float](#v); }\n'
+        'func test(): float { return bad!(1.5); }\n',
+        stderr="type error: type argument float does not satisfy generic constraint for pick",
+    )
+    check(
+        "user macro type-fragment generic call checks constraint",
+        'func pick[T int | string](x: T): T { return x; }\n'
+        'macro bad(T: type, v: expr) { return pick[#T](#v); }\n'
+        'func test(): float { return bad!(float, 1.5); }\n',
+        stderr="type error: type argument float does not satisfy generic constraint for pick",
+    )
+    check(
+        "user macro generic function value checks constraint",
+        'func pick[T int | string](x: T): T { return x; }\n'
+        'macro bad(v: expr) { let g = pick[float]; return g(#v); }\n'
+        'func test(): float { return bad!(1.5); }\n',
+        stderr="type error: type argument float does not satisfy generic constraint for pick",
+    )
+    check(
         "user macro can generate literal generic struct literals",
         'struct Box[T any] { value: T; }\n'
         'macro make(v: expr) { let b = Box[int] { value: #v }; return b.value; }\n'

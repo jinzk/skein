@@ -5109,6 +5109,15 @@ struct Checker : public BuiltinContext {
             case 'X':
                 check_stmt(((struct nscope *)expr)->ast, env);
                 return type_any();
+            /* Macro expansion can splice a nested return or statement list into
+             * an expression position.  Traverse those statement nodes so their
+             * calls still go through normal checking (including explicit
+             * generic constraints); they keep the same `any` result as before. */
+            case 'R':
+            case 'L':
+            case NODE_FUNCTION_BODY:
+                check_stmt(expr, env);
+                return type_any();
             case NODE_MATCH: {
                 const struct match_node *match =
                     (const struct match_node *)expr;
@@ -5145,8 +5154,6 @@ struct Checker : public BuiltinContext {
                 }
                 return type_any();
             }
-            case 'L':
-                return type_any();
             default:
                 return type_any();
         }

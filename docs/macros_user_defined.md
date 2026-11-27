@@ -120,7 +120,9 @@ G3 边界在定义期执行：模板体不得生成 `struct` / `enum` / `proto` 
 `macro fragment cannot be used here`。匿名函数表达式 `func(x) {...}` 是普通表达式，
 仍然允许。这些限制只作用于模板体：调用点传入的表达式片段可以是 `identity[int]`
 这类已绑定泛型值，宏会原样克隆。类型片段不能进入反射 builtin，`kind_of(#T)` /
-`type_name(#T)` 等报 `type fragment cannot be used as a value or name`。
+`type_name(#T)` 等报 `type fragment cannot be used as a value or name`。宏生成的显式
+泛型应用仍走普通 typechecker 约束检查，类型实参不满足声明的约束时报错；宏不创建或
+改变约束。
 
 ### 3.3 调用
 

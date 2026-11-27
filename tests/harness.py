@@ -992,6 +992,65 @@ def check_extended_stdlib():
             stdout_all=["n=2", "result=1", "error=1", "served=2",
                         "errors=1", "protocol=jsonl"],
         )
+        check(
+            "std.rpc connection client",
+            "import std;\n"
+            "import std.rpc;\n"
+            f'let conn = rpc.spawn("{binary_path}", '
+            f'{{"args": ["{rpc_worker_path}"]}});\n'
+            'print("rpc=" + str(conn is RpcClient));\n'
+            'print("pid=" + str(conn.pid() > 0));\n'
+            'print("call=" + str(std.result.unwrap('
+            'conn.call("add", [2, 3]))));\n'
+            'let job = conn.submit("add", [4, 5]);\n'
+            'print("jobrpc=" + str(job is RpcJob));\n'
+            'print("job=" + str(job.wait(5000)));\n'
+            'print("done=" + str(job.done()));\n'
+            'print("timeout=" + str(std.result.unwrap('
+            'conn.call_timeout("add", [1, 1], 1000))));\n'
+            'let reply = std.result.unwrap(conn.call_bytes('
+            '"add", [5, 6], std.bytes.from_string("")));\n'
+            'print("bytes=" + str(reply["value"]));\n'
+            'print("calls=" + str(conn.stats()["calls"]));\n'
+            'print("errors=" + str(conn.stats()["errors"]));\n'
+            "conn.close();\n"
+            'print("closed=" + str(conn.stats()["closed"]));\n'
+            'print("after=" + str(std.result.is_err('
+            'conn.call("add", [1, 2]))));\n',
+            stdout_all=["rpc=true", "pid=true", "call=5", "jobrpc=true",
+                        "job=ok(9)", "done=true", "timeout=2", "bytes=11",
+                        "calls=4", "errors=0", "closed=true",
+                        "after=true"],
+        )
+        check(
+            "std.rpc connection error result",
+            "import std;\n"
+            "import std.rpc;\n"
+            f'let conn = rpc.spawn("{binary_path}", '
+            f'{{"args": ["{rpc_worker_path}"]}});\n'
+            'let bad = conn.call("nope", []);\n'
+            'print("err=" + str(std.result.is_err(bad)));\n'
+            'print("kind=" + std.error.kind(std.result.error(bad)));\n'
+            'print("msg=" + std.error.message(std.result.error(bad)));\n'
+            'print("errors=" + str(conn.stats()["errors"]));\n'
+            "conn.close();\n",
+            stdout_all=["err=true", "kind=worker",
+                        "msg=unknown method nope", "errors=1"],
+        )
+        check(
+            "std.rpc connect existing pipe hybrid",
+            "import std;\n"
+            "import std.rpc;\n"
+            f'let io = std.process.spawn_pipe("{binary_path}", '
+            f'{{"args": ["{rpc_hybrid_path}"]}});\n'
+            'let conn = rpc.connect(io, {"protocol": "hybrid"});\n'
+            'let reply = std.result.unwrap(conn.call_bytes('
+            '"echo", ["ok"], std.bytes.from_string("payload")));\n'
+            'print("value=" + reply["value"]);\n'
+            'print("body=" + std.bytes.to_string(reply["body"]));\n'
+            "conn.close();\n",
+            stdout_all=["value=ok", "body=payload"],
+        )
         restart_script = os.path.join(worker_tmp, "restart.skein")
         with open(restart_script, "w", encoding="utf-8") as handle:
             handle.write(

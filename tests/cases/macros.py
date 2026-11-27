@@ -342,6 +342,30 @@ def run_cases():
         stdout="7",
     )
     check(
+        "user macro type fragment explicit generic type",
+        'macro make(T: type, v: expr) { let x = #v as #T; return x; }\n'
+        'func test(): list[int] { return make!(type(list[int]), [1, 2, 3]); }\n'
+        'println(str(test()[1]));\n',
+        stdout="2",
+    )
+    check(
+        "user macro type fragment explicit function type",
+        'macro make(T: type, v: expr) { let x = #v as #T; return x; }\n'
+        'func test(): (int) -> int {\n'
+        '  return make!(type((int) -> int), func(x: int): int -> x * 2);\n'
+        '}\n'
+        'println(str(test()(5)));\n',
+        stdout="10",
+    )
+    check(
+        "user macro type fragment explicit nested type",
+        'macro inner(T: type) { let x = 1 as #T; return x; }\n'
+        'macro outer(T: type) { return inner!(type(#T)); }\n'
+        'func test(): int { return outer!(int); }\n'
+        'println(str(test()));\n',
+        stdout="1",
+    )
+    check(
         "user macro type fragment must be a type name",
         'macro bad(T: type) { return 1; }\n'
         'func test(): int { return bad!(1 + 2); }\n'
@@ -361,6 +385,26 @@ def run_cases():
         'func test(): int { return bad!(int, 7); }\n'
         'println(str(test()));\n',
         stderr="macro fragment cannot be used here",
+    )
+    check(
+        "user macro type argument requires a type fragment",
+        'macro bad(v: expr) { return #v; }\n'
+        'func test(): int { return bad!(type(int)); }\n'
+        'println(str(test()));\n',
+        stderr="type argument requires a type fragment",
+    )
+    check(
+        "user macro type argument rejects expression syntax",
+        'macro bad(T: type) { let x = 1 as #T; return x; }\n'
+        'func test(): int { return bad!(type(1 + 2)); }\n'
+        'println(str(test()));\n',
+        stderr="syntax error",
+    )
+    check(
+        "builtin macro rejects type argument",
+        'info!(type(int));\n'
+        'println("ok");\n',
+        stderr="does not accept type arguments",
     )
     check(
         "user macro type fragment rejects variadic",

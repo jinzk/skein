@@ -923,6 +923,15 @@ struct ast *clone_node(const struct ast *node, expansion_state &state,
                               : NULL;
             return (struct ast *)copy;
         }
+        case NODE_MACRO_TYPE_ARG: {
+            const struct macro_type_arg_node *source =
+                (const struct macro_type_arg_node *)node;
+            struct macro_type_arg_node *copy =
+                copy_node((struct macro_type_arg_node *)source);
+            copy->type = substitute_type(source->type, state, node->line,
+                                         node->column);
+            return (struct ast *)copy;
+        }
         case NODE_USER_MACRO_CALL: {
             const struct user_macro_call_node *source =
                 (const struct user_macro_call_node *)node;
@@ -1392,10 +1401,19 @@ struct ast *expand_user_macro(macro_entry *entry, struct ast *args,
         value.kind = param.kind;
         if (param.kind == user_macro_param_kind::expr_list) {
             for (std::size_t j = i; j < arg_values.size(); ++j) {
+                if (arg_values[j] &&
+                    arg_values[j]->nodetype == NODE_MACRO_TYPE_ARG) {
+                    report_at(line, column,
+                              "type argument cannot be used as an expression");
+                    ok = false;
+                    break;
+                }
                 struct ast *copy = clone_node(arg_values[j], fragment_state,
                                               clone_context::expr);
                 value.exprs.push_back(copy);
             }
+            if (!ok)
+                break;
         } else if (i < arg_values.size()) {
             struct ast *arg = arg_values[i];
             if (arg->nodetype == 'x') {
@@ -1405,7 +1423,22 @@ struct ast *expand_user_macro(macro_entry *entry, struct ast *args,
                 ok = false;
                 break;
             }
-            if (param.kind == user_macro_param_kind::ident) {
+            if (arg->nodetype == NODE_MACRO_TYPE_ARG) {
+                if (param.kind != user_macro_param_kind::type) {
+                    report_at(line, column,
+                              "type argument requires a type fragment");
+                    ok = false;
+                    break;
+                }
+                value.type = macro_type_arg_take(arg);
+                treefree(arg);
+                arg_values[i] = NULL;
+                if (!value.type) {
+                    report_at(line, column, "type fragment expects a type name");
+                    ok = false;
+                    break;
+                }
+            } else if (param.kind == user_macro_param_kind::ident) {
                 if (arg->nodetype != 'N' || is_internal_name(
                         ((const struct symref *)arg)->name)) {
                     report_at(line, column,

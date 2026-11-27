@@ -66,7 +66,7 @@ macro name(param: expr, label: ident, body: block) {
 | 标识符 | `n: ident` | 名字位置，如 `let #n = ...` | 保留调用点拼写，故意不参与 hygiene 重命名 |
 | 表达式序列 | `xs: expr...` | 最后一个表达式参数 | 展开为逗号分隔的表达式列表 |
 | 块 | `b: block` | 语句列表位置，写成 `#b` 且不带分号 | 必须是最后一个参数；克隆调用点语句列表 |
-| 类型 | `T: type` | 类型位置，如 `let x: #T`、`#v is #T` | 传入类型命名空间中已有的类型名；调用点拼写与 import 别名保留 |
+| 类型 | `T: type` | 类型位置，如 `let x: #T`、`#v is #T` | 传入类型名；复合类型用 `type(...)` 包装；调用点拼写与 import 别名保留 |
 
 约束：
 
@@ -95,6 +95,19 @@ macro call_all(f: expr, args: expr...) {
 约束标记 `hashable` / `iterable`、内部占位符拼写都会被拒绝；当前约束写作
 `Hashable` / `Iterable` proto，它们作为类型名可以传入，但 `type` 片段不提供
 专用约束语义。
+复合类型不能只靠普通括号表达；`T: type` 实参使用显式的 `type(...)` 包装：
+
+```text
+make!(type(list[int]), xs)
+make!(type((int) -> int), f)
+```
+
+`type(...)` 内只允许类型语法，可以写泛型类型、函数类型、`T?`、`ref T` 等；
+不能写 `1 + 2` 或函数调用。它只告诉 parser 按类型片段解析，不引入编译期执行、
+类型计算或一等类型值。简单类型名仍可裸写，`type(int)` 与 `int` 等价。表达式片段
+保持普通表达式语法和括号优先级，不提供 `expr(...)` 包装。把 `type(...)` 传给非
+`type` 参数会报 `type argument requires a type fragment`，内置宏也不接受类型实参。
+
 传入的名字保留调用点拼写和 import 别名，因此 `is #T` 能识别调用点可见的 proto；
 模板内部写出的字面类型名仍按定义点解析。类型片段可出现在变量/函数参数类型、
 `as` 与 `is` 的类型位置，以及 `#T?` / `ref #T` / `weak #T` 前缀或后缀包装中。

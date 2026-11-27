@@ -55,6 +55,9 @@ constexpr int NODE_BRACKET_APPLY = 0x152;
 /* Deferred macro call stored inside a user macro template body.  It is
  * expanded before typechecking and never reaches the runtime. */
 constexpr int NODE_USER_MACRO_CALL = 0x160;
+/* Explicit `type(...)` argument at a macro call site.  This node never reaches
+ * typechecking; the expander consumes it as a type fragment. */
+constexpr int NODE_MACRO_TYPE_ARG = 0x170;
 constexpr int BRACKET_SUFFIX_NONE = 0;
 constexpr int BRACKET_SUFFIX_CALL = 1;
 constexpr int BRACKET_SUFFIX_STRUCT = 2;
@@ -109,6 +112,13 @@ struct user_macro_call_node {
     struct ast *args;
     struct ast *block;
     int generator;
+};
+
+struct macro_type_arg_node {
+    int nodetype;
+    int line;
+    int column;
+    struct type_constraint *type;
 };
 
 struct fnret {
@@ -793,6 +803,9 @@ struct ast *newindex(struct ast *container, struct ast *index,
 struct ast *new_user_macro_call(struct ast *callee, struct ast *args,
                                 struct ast *block, int line, int column,
                                 bool generator);
+struct ast *new_macro_type_arg(struct type_constraint *type, int line,
+                               int column);
+struct type_constraint *macro_type_arg_take(struct ast *node);
 struct ast *newenumdecl(char *name, char *source,
                         struct generic_param *generic_params,
                         struct enum_variant *variants,

@@ -1623,6 +1623,29 @@ struct ast *new_user_macro_call(struct ast *callee, struct ast *args,
     return (struct ast *)a;
 }
 
+struct ast *new_macro_type_arg(struct type_constraint *type, int line,
+                               int column) {
+    struct macro_type_arg_node *a = (struct macro_type_arg_node *)
+        ast_node_alloc(sizeof(struct macro_type_arg_node));
+    if (!a) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    a->nodetype = NODE_MACRO_TYPE_ARG;
+    set_loc(a, line, column);
+    a->type = type;
+    return (struct ast *)a;
+}
+
+struct type_constraint *macro_type_arg_take(struct ast *node) {
+    if (!node || node->nodetype != NODE_MACRO_TYPE_ARG)
+        return NULL;
+    struct macro_type_arg_node *arg = (struct macro_type_arg_node *)node;
+    struct type_constraint *type = arg->type;
+    arg->type = NULL;
+    return type;
+}
+
 struct ast *newoptionalchain(struct ast *base, char *name) {
     struct optional_chain_node *a =
         (struct optional_chain_node *)
@@ -1845,6 +1868,12 @@ void treefree(struct ast *a) {
             treefree(call->callee);
             treefree(call->args);
             treefree(call->block);
+            break;
+        }
+        case NODE_MACRO_TYPE_ARG: {
+            struct macro_type_arg_node *arg =
+                (struct macro_type_arg_node *)a;
+            free_type_constraint(arg->type);
             break;
         }
         case 'M':

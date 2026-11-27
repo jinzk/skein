@@ -887,7 +887,8 @@ capture! { statements }
 `capture! { ... }` 展开成 `std.result.capture(func() { ... })`。
 
 宏在 typecheck 前展开成普通 AST，不提供类型内省、编译期执行、递归展开或专用
-opcode。用户宏另有受限 `type` 片段，只把调用点已有的类型名放进类型位置；
+opcode。用户宏另有受限 `type` 片段，把调用点的类型放进类型位置；简单类型名可裸写，
+复合类型（如 `list[int]`、`(int) -> int`）用 `type(...)` 包装；
 详细规则见 [`docs/macros.md`](docs/macros.md) 与
 [`docs/macros_user_defined.md`](docs/macros_user_defined.md)。
 

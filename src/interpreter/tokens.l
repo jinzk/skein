@@ -306,6 +306,10 @@ static int pending_match_indent = 0;
 static int pending_decl_kind = 0;
 static bool pending_decl_skip = false;
 static int generic_param_depth = 0;
+/* Parenthesis nesting inside a parenthesized macro invocation.  `type(...)`
+ * is a type-fragment marker only here, so ordinary calls to a value named
+ * `type` keep their normal identifier spelling. */
+static int macro_arg_depth = 0;
 static std::vector<int> do_stack;
 
 /*
@@ -1307,6 +1311,11 @@ TYPE_PREFIX_NEXT ([A-Za-z_]|{UTF8_SEQ}|#)
     YYRET(']');
 }
 "(" {
+    const bool type_arg_open = last_token == SKEIN_TOK_TYPE_ARG_MARK;
+    if (last_token == SKEIN_TOK_MACRO_BANG)
+        macro_arg_depth = 1;
+    else if (macro_arg_depth > 0)
+        ++macro_arg_depth;
     if (pending_match_paren) {
         header_stack.push_back(
             header_context{SKEIN_TOK_MATCH, pending_match_indent});
@@ -1339,9 +1348,16 @@ TYPE_PREFIX_NEXT ([A-Za-z_]|{UTF8_SEQ}|#)
     if (for_header != FOR_HEADER_NONE)
         for_header = FOR_HEADER_NONE;
     indent_count++;
-    YYRET('(');
+    int paren_token = type_arg_open
+                          ? static_cast<int>(SKEIN_TOK_TYPE_ARG_LPAREN)
+                          : static_cast<int>('(');
+    YYRET(paren_token);
 }
-")" { if (indent_count > 0) indent_count--; YYRET(')'); }
+")" {
+    if (macro_arg_depth > 0) macro_arg_depth--;
+    if (indent_count > 0) indent_count--;
+    YYRET(')');
+}
 
 ">" { yylval.fn = 1; YYRET(SKEIN_TOK_CMP); }
 "<" { yylval.fn = 2; YYRET(SKEIN_TOK_CMP); }
@@ -1626,6 +1642,16 @@ TYPE_PREFIX_NEXT ([A-Za-z_]|{UTF8_SEQ}|#)
     YYRET(SKEIN_TOK_LABEL);
 }
 
+"type"/"(" {
+    MEMBER_NAME_AFTER_DOT();
+    if (macro_arg_depth > 0)
+        YYRET(SKEIN_TOK_TYPE_ARG_MARK);
+    int tok = make_name_token(yytext, yyleng);
+    if (tok == 0)
+        return 0;
+    note_for_name_token();
+    YYRET(tok);
+}
 "type" {
     MEMBER_NAME_AFTER_DOT();
     if (generic_param_depth > 0 && last_token == SKEIN_TOK_NAME)
@@ -1886,6 +1912,7 @@ static void reset_scanner_common() {
     pending_decl_kind = 0;
     pending_decl_skip = false;
     generic_param_depth = 0;
+    macro_arg_depth = 0;
     do_stack.clear();
     brace_stack.clear();
     reset_for_header_state();
@@ -1958,6 +1985,7 @@ struct scanner_checkpoint {
     int pending_decl_kind;
     bool pending_decl_skip;
     int generic_param_depth;
+    int macro_arg_depth;
     std::vector<int> do_indents;
     std::vector<int> func_signature_indents;
     std::vector<brace_frame> braces;
@@ -2011,6 +2039,7 @@ scanner_checkpoint *scanner_checkpoint_save() {
     checkpoint->pending_decl_kind = pending_decl_kind;
     checkpoint->pending_decl_skip = pending_decl_skip;
     checkpoint->generic_param_depth = generic_param_depth;
+    checkpoint->macro_arg_depth = macro_arg_depth;
     checkpoint->do_indents = do_stack;
     checkpoint->func_signature_indents = func_signature_indents;
     checkpoint->braces = brace_stack;
@@ -2068,6 +2097,7 @@ void scanner_checkpoint_restore(scanner_checkpoint *checkpoint) {
     pending_decl_kind = checkpoint->pending_decl_kind;
     pending_decl_skip = checkpoint->pending_decl_skip;
     generic_param_depth = checkpoint->generic_param_depth;
+    macro_arg_depth = checkpoint->macro_arg_depth;
     do_stack = checkpoint->do_indents;
     func_signature_indents = checkpoint->func_signature_indents;
     brace_stack = checkpoint->braces;

@@ -1524,6 +1524,8 @@ static struct ast *new_member_or_enum_literal(struct ast *base, char *field) {
 %token STRUCT "struct" IMPL "impl" PROTOCOL "proto" ENUM "enum"
 %token MACRO "macro"
 %token TYPE_MARK PROTO_MARK
+%token TYPE_ARG_MARK "macro type argument"
+%token TYPE_ARG_LPAREN "macro type argument ("
 %token REF "ref" WEAK "weak" QUESTION_DOT "?."
 %token EXTERN "extern"
 %token SWITCH "switch" CASE "case" DEFAULT "default" ARROW "=>"
@@ -1581,7 +1583,7 @@ static struct ast *new_member_or_enum_literal(struct ast *base, char *field) {
 %precedence ELSE
 %precedence MACRO_BANG
 
-%type <a> exp value stmt list scope non_empty_scope do_block lambda_block explist arg top_expression top_statement line valuelist pairlist
+%type <a> exp value stmt list scope non_empty_scope do_block lambda_block explist arg macro_explist macro_arg top_expression top_statement line valuelist pairlist
 %type <a> slice_bound
 %type <str> on_error_name
 %type <a> forinit forcond forend for_pattern_names for_pattern_names_3
@@ -2720,16 +2722,16 @@ exp: exp '+' exp                          { $$ = newarith('+', $1, $3); }
     | exp SHL_ASSIGN exp                  { $$ = newcompound($1, 's', $3); }
     | exp SHR_ASSIGN exp                  { $$ = newcompound($1, 'r', $3); }
     | exp '(' explist ')'      { $$ = new_call_with_placeholders($1, $3); }
-    | exp MACRO_BANG '(' explist ')' %prec PRIMARY {
+    | exp MACRO_BANG '(' macro_explist ')' %prec PRIMARY {
         $$ = expand_macro($1, $4, NULL,
                                   @2.first_line, @2.first_column, false);
       }
-    | exp MACRO_BANG '(' explist ')' '{' macro_block_start EMPTY_BLOCK_CLOSE %prec PRIMARY {
+    | exp MACRO_BANG '(' macro_explist ')' '{' macro_block_start EMPTY_BLOCK_CLOSE %prec PRIMARY {
         bool generator = finish_function();
         $$ = expand_macro($1, $4, newscope(NULL),
                                   @2.first_line, @2.first_column, generator);
       }
-    | exp MACRO_BANG '(' explist ')' '{' macro_block_start list '}' %prec PRIMARY {
+    | exp MACRO_BANG '(' macro_explist ')' '{' macro_block_start list '}' %prec PRIMARY {
         bool generator = finish_function();
         $$ = expand_macro($1, $4, newscope($8),
                                   @2.first_line, @2.first_column, generator);
@@ -3186,6 +3188,20 @@ tuple_body: exp ',' exp                   {
 explist: %empty                            { $$ = NULL; }
     | arg
     | arg ',' explist                     { $$ = newast('L', $1, $3); }
+    ;
+
+/* Only macro invocations accept an explicit `type(...)` fragment.  Other
+ * calls keep the ordinary expression grammar, so `type(x)` remains a normal
+ * function call outside a macro argument list. */
+macro_explist: %empty                       { $$ = NULL; }
+    | macro_arg
+    | macro_arg ',' macro_explist          { $$ = newast('L', $1, $3); }
+    ;
+
+macro_arg: arg                              { $$ = $1; }
+    | TYPE_ARG_MARK TYPE_ARG_LPAREN type ')' {
+        $$ = new_macro_type_arg($3, @1.first_line, @1.first_column);
+      }
     ;
 
 arg: exp                                   { $$ = $1; }

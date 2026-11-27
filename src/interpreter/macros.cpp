@@ -271,15 +271,22 @@ struct ast *expand_builtin_macro(struct ast *callee, struct ast *args,
         treefree(block);
         return NULL;
     }
-    treefree(callee);
     name = canonical_macro_name(name);
 
-    const std::size_t arg_count =
-        [&]() -> std::size_t {
-        std::vector<struct ast *> ignored;
-        collect_args(args, ignored);
-        return ignored.size();
-    }();
+    std::vector<struct ast *> checked_args;
+    collect_args(args, checked_args);
+    for (struct ast *value : checked_args) {
+        if (value && value->nodetype == NODE_MACRO_TYPE_ARG) {
+            yyerror("macro %s does not accept type arguments", name.c_str());
+            treefree(callee);
+            treefree(args);
+            treefree(block);
+            return NULL;
+        }
+    }
+    const std::size_t arg_count = checked_args.size();
+
+    treefree(callee);
 
     if (name == "std.utils.iter") {
         if (block)

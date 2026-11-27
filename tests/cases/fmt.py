@@ -356,6 +356,13 @@ def run_cases():
             " return f(#v); }\n",
             "function type fragments",
         ),
+        (
+            "macro wrap(T:type,v:expr){let x=#v as #T;return x;}\n"
+            "func f():list[int]{return wrap!(type(list[int]),[1,2]);}\n",
+            "macro wrap(T: type, v: expr) { let x = #v as #T; return x; }\n"
+            "func f(): list[int] { return wrap!(type(list[int]), [1, 2]); }\n",
+            "explicit composite type argument",
+        ),
     ]
     for source, expected, label in type_fragment_positions:
         path = write_temp(source)

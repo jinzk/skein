@@ -563,6 +563,8 @@ M11 继续保持“宏不生成泛型语法”的边界。当前可用组合是�
     类型标注与 `is #T`；`[V proto Drawable]` 在普通源码继续可用，但宏模板仍
     不得生成泛型声明或实参，因此 `Box[#P]` / `f[#T](...)` 明确拒绝。
     `Hashable` / `Iterable` 等 proto 约束仍需专用约束片段，不混入 `type` 片段。
+     复合类型实参用显式 `type(...)` 包装（`type(list[int])`、`type((int) -> int)`）；
+     它只切换 parser 到类型语法，不扩展为表达式包装或编译期执行。
 3. **G3 宏类型参数边界（已完成）**：在定义期固化“宏不替代泛型”的边界，不新增
    语法。模板体不得生成 `struct` / `enum` / `proto` / `impl` 或具名 `func` 声明
    （`macro template cannot generate declarations`），也不得生成显式泛型应用，

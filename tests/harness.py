@@ -909,6 +909,31 @@ def check_extended_stdlib():
             'pool.shutdown();\n',
             stdout_all=["5", "true"],
         )
+        rpc_hybrid_script = os.path.join(worker_tmp, "rpc_hybrid_worker.skein")
+        with open(rpc_hybrid_script, "w", encoding="utf-8") as handle:
+            handle.write(
+                "import std;\n"
+                "import std.rpc;\n"
+                "rpc.serve(func(method, params, body) {\n"
+                "  if (method == \"echo\") {\n"
+                "    return {\"value\": params[0], \"body\": body};\n"
+                "  }\n"
+                "  fail(\"unknown method \" + method);\n"
+                "}, {\"protocol\": \"hybrid\"});\n"
+            )
+        rpc_hybrid_path = rpc_hybrid_script.replace("\\", "\\\\")
+        check(
+            "std.rpc hybrid serve",
+            "import std;\n"
+            f'let pool = std.worker.pool(1, "{rpc_hybrid_path}", '
+            '{"protocol": "hybrid"});\n'
+            'let reply = std.result.unwrap(pool.call_bytes('
+            '"echo", ["ok"], std.bytes.from_string("payload")));\n'
+            'print(reply["value"]);\n'
+            'print(std.bytes.to_string(reply["body"]));\n'
+            'pool.shutdown();\n',
+            stdout_all=["ok", "payload"],
+        )
         restart_script = os.path.join(worker_tmp, "restart.skein")
         with open(restart_script, "w", encoding="utf-8") as handle:
             handle.write(

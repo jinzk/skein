@@ -1,23 +1,33 @@
 package rpc {
   import std;
 
-  // Minimal JSON Lines RPC server loop for std.worker.pool workers.
+  // Minimal JSON Lines / hybrid RPC server loop for std.worker.pool workers.
   //
-  // The handler receives (method, params) and returns the result value.
+  // jsonl:
+  //   handler(method, params) -> result
+  //
+  // hybrid:
+  //   handler(method, params, body) -> result | {value, body}
+  //
   // A throwing handler is reported as an ok:false response and the loop
   // continues with the next request.
   export func serve(handler, options = {}) {
     if (kind_of(handler) != "function" && kind_of(handler) != "builtin") {
-      fail("std.rpc.serve handler must be callable");
+      fail("rpc.serve handler must be callable");
     }
     let protocol = std.dict.get(options, "protocol", "jsonl");
-    if (protocol != "jsonl") {
-      fail("std.rpc.serve only supports protocol \"jsonl\"");
+    if (protocol != "jsonl" && protocol != "hybrid") {
+      fail("rpc.serve supports protocol \"jsonl\" or \"hybrid\"");
     }
+    let hybrid = protocol == "hybrid";
 
+    let ready = {"ready": true, "version": 1};
+    if (hybrid) {
+      ready["protocol"] = "hybrid";
+    }
     std.io.write_all(
       std.io.stdout,
-      std.bytes.from_string("{\"ready\":true,\"version\":1}\n"));
+      std.bytes.from_string(std.json.stringify(ready) + "\n"));
     std.io.flush(std.io.stdout);
 
     let served = 0;
@@ -35,17 +45,39 @@ package rpc {
       let method = std.dict.get(request, "method", "");
       let params = std.dict.get(request, "params", []);
 
+      let body = std.bytes.from_string("");
+      if (hybrid) {
+        let body_len = std.dict.get(request, "body_len", 0);
+        if (body_len > 0) {
+          body = std.io.read_exact(std.io.stdin, body_len);
+        }
+      }
+
       let call = std.result.capture(func() {
+        if (hybrid) {
+          return handler(method, params, body);
+        }
         return handler(method, params);
       });
 
       let response = null;
+      let response_body = std.bytes.from_string("");
       if (std.result.is_ok(call)) {
-        response = {
-          "id": id,
-          "ok": true,
-          "result": std.result.unwrap(call)
-        };
+        let value = std.result.unwrap(call);
+        response = {"id": id, "ok": true};
+        if (hybrid) {
+          if (kind_of(value) == "dict" && std.dict.has(value, "value")) {
+            response["result"] = value["value"];
+            if (std.dict.has(value, "body")) {
+              response_body = value["body"];
+            }
+          } else {
+            response["result"] = value;
+          }
+          response["body_len"] = len(response_body);
+        } else {
+          response["result"] = value;
+        }
       } else {
         let error = std.result.error(call);
         response = {
@@ -56,11 +88,17 @@ package rpc {
             "message": std.error.message(error)
           }
         };
+        if (hybrid) {
+          response["body_len"] = 0;
+        }
       }
 
       std.io.write_all(
         std.io.stdout,
         std.bytes.from_string(std.json.stringify(response) + "\n"));
+      if (len(response_body) > 0) {
+        std.io.write_all(std.io.stdout, response_body);
+      }
       std.io.flush(std.io.stdout);
       served = served + 1;
     }

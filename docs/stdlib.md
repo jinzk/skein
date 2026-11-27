@@ -2623,7 +2623,7 @@ job.id
 job.done
 ```
 
-`std.rpc` 提供 JSON Lines worker 服务端循环：
+`std.rpc` 提供 worker 服务端循环，支持 `jsonl` 和 `hybrid`：
 
 ```text
 import std.rpc;
@@ -2636,9 +2636,21 @@ rpc.serve(func(method, params) {
 }) -> served
 ```
 
-- 自动发送 `{"ready":true,"version":1}`；
+hybrid：
+
+```text
+rpc.serve(func(method, params, body) {
+  if (method == "echo") {
+    return {"value": params[0], "body": body};
+  }
+  fail("unknown method " + method);
+}, {"protocol": "hybrid"}) -> served
+```
+
+- 自动发送 ready 帧；hybrid 额外带 `"protocol":"hybrid"`；
 - 从 stdin 读取请求，从 stdout 写响应；
-- handler 参数为 `(method, params)`；
+- jsonl handler 参数为 `(method, params)`；
+- hybrid handler 参数为 `(method, params, body)`，可返回普通值或 `{value, body}`；
 - handler 抛错时返回 `ok:false`，循环继续；
 - stdin 关闭时返回已处理请求数。
 

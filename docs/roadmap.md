@@ -813,6 +813,9 @@ VM 会丢失全局定义；该开关仅用于对比调试，默认路径不受�
   显式登记，否则 cycle collector 会清掉其闭包 scope
 - `call_value_args` 统一把 callee 与实参登记为根，覆盖 compose/pipe/partial、
   `std.result.capture`、log writer、heap comparator 等回调入口
+- AST 直接调用路径（`callvalue`、`launch_value`、builtin/method 调用）也在
+  实参求值期间登记 callee 与 growing arg vector，避免嵌套 VM/JIT 调用触发的
+  cycle collection 清掉尚未传入的闭包实参
 - `std.list.map/filter/reduce/unique_by/group_by/sort_by/top_k/sort` 的累加器
   与 key 缓存登记为根（`result` list、accumulator、keys、working copy）
 - lazy iterator / generator 参数这类只存在于 C++ 捕获里的值通过

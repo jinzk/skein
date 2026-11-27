@@ -36,6 +36,13 @@ func slow_cmp(a, b) {
   if (a > b) { return 1; }
   return 0;
 }
+func make_one(n) { return func(pad) { return n + pad; }; }
+func slow_make_one(v) {
+  let t = 0;
+  for (let i in range(2000)) { t = t + i; }
+  return make_one(v);
+}
+func apply_pair(a, b, pad) { return a(pad) + b(pad); }
 let i = 0;
 let total = 0;
 while (i < 2000) {
@@ -190,6 +197,11 @@ let gen = gen_echo(slow_make(5));
 let gen_first = std.generator.next(gen);
 println("generator " + str(gen_first["value"]()));
 std.generator.next(gen);
+/* Direct AST calls collect arguments into C++ locals. A nested VM/JIT call
+ * must not clear the scope of an earlier closure argument. */
+let pair_total = apply_pair(make_one(1), slow_make_one(2), 0);
+println("pair " + str(pair_total));
+
 let churn = slow_true(0);
 println("churn " + str(churn));
 """
@@ -213,6 +225,7 @@ EXPECTED = [
     "defer 1275",
     "lazy 336",
     "generator 5",
+    "pair 3",
     "churn true",
 ]
 

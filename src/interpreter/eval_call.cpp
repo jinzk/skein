@@ -629,13 +629,24 @@ struct value_t *callvalue(struct value_t *callee, struct ast *args_ast) {
     }
     call_depth_guard depth_guard;
 
+    /*
+     * Argument evaluation can enter the VM/JIT and trigger cycle collection.
+     * The callee and the growing argument vector live only in C++ locals, so
+     * register them for the whole call.
+     */
+    gc_root_scope roots(active_scope_context());
+    roots.add(callee);
+
     std::vector<struct value_t *> args;
+    roots.add_vector(&args);
     struct value_t *control = NULL;
     try {
         if (!collect_args(args_ast, args, control)) {
+            roots.add(control);
             free_args(args);
             return control;
         }
+        roots.add_all(args);
     } catch (...) {
         free_args(args);
         throw;
@@ -648,13 +659,20 @@ struct value_t *launch_value(struct value_t *callee, struct ast *args_ast,
                              bool observed) {
     if (!callee)
         return NULL;
+
+    gc_root_scope roots(active_scope_context());
+    roots.add(callee);
+
     std::vector<struct value_t *> args;
+    roots.add_vector(&args);
     struct value_t *control = NULL;
     try {
         if (!collect_args(args_ast, args, control)) {
+            roots.add(control);
             free_args(args);
             return control;
         }
+        roots.add_all(args);
     } catch (...) {
         free_args(args);
         throw;
@@ -671,15 +689,20 @@ struct value_t *call_builtin_method_value(struct value_t *receiver,
     }
     call_depth_guard depth_guard;
 
+    gc_root_scope roots(active_scope_context());
     std::vector<struct value_t *> args;
     args.reserve(8);
     args.push_back(dupval(receiver));
+    roots.add_vector(&args);
+    roots.add_all(args);
     struct value_t *control = NULL;
     try {
         if (!collect_args(args_ast, args, control)) {
+            roots.add(control);
             free_args(args);
             return control;
         }
+        roots.add_all(args);
     } catch (...) {
         free_args(args);
         throw;
@@ -704,24 +727,32 @@ struct value_t *call_method_value(struct value_t *receiver,
     }
     call_depth_guard depth_guard;
 
+    struct func_value_t callee;
+    callee.type = T_func;
+    callee.def = std::move(def);
+
+    gc_root_scope roots(active_scope_context());
+    roots.add((struct value_t *)&callee);
+
     std::vector<struct value_t *> args;
     args.reserve(8);
     args.push_back(dupval(receiver));
+    roots.add_vector(&args);
+    roots.add_all(args);
     struct value_t *control = NULL;
     try {
         if (!collect_args(args_ast, args, control)) {
+            roots.add(control);
             free_args(args);
             return control;
         }
+        roots.add_all(args);
     } catch (...) {
         free_args(args);
         throw;
     }
 
     private_package_guard private_guard(
-        def && def->code ? &def->code->package : nullptr);
-    struct func_value_t callee;
-    callee.type = T_func;
-    callee.def = std::move(def);
+        callee.def && callee.def->code ? &callee.def->code->package : nullptr);
     return invoke_value((struct value_t *)&callee, args);
 }

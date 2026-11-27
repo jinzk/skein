@@ -334,6 +334,20 @@ def run_cases():
           "compare(NoCmp {}, NoCmp {});\n",
           stderr="type error: type argument NoCmp does not satisfy generic constraint for compare")
 
+    check("std.ops arithmetic bundle constraint mismatch",
+          "import {Arithmetic} from std.ops;\n"
+          "struct PartialArith { func op_add(self, rhs: PartialArith): PartialArith { return self; } }\n"
+          "func arithmetic[T Arithmetic[T, T]](a: T, b: T): T { return a.op_add(b); }\n"
+          "arithmetic(PartialArith {}, PartialArith {});\n",
+          stderr="type error: type argument PartialArith does not satisfy generic constraint for arithmetic")
+
+    check("std.ops ordered bundle constraint mismatch",
+          "import {Ordered} from std.ops;\n"
+          "struct PartialOrdered { func op_eq(self, rhs: PartialOrdered): bool { return true; } }\n"
+          "func ordered[T Ordered[T]](a: T, b: T): bool { return a.op_eq(b); }\n"
+          "ordered(PartialOrdered {}, PartialOrdered {});\n",
+          stderr="type error: type argument PartialOrdered does not satisfy generic constraint for ordered")
+
     check("arithmetic overload rejects wrong rhs type",
           "struct Op { func op_add(self, rhs: Op): Op { return self; } }\n"
           "let x = Op {} + 1;\n",

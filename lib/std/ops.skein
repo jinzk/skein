@@ -23,6 +23,17 @@ package ops {
     func op_mod(self, rhs: R): O;
   }
 
+  // Convenience bundle for algorithms that need the whole arithmetic family.
+  // Conformance is structural: a type must define all five op_* methods.
+  // The individual Add / Sub / Mul / Div / Mod protocols are unchanged.
+  proto Arithmetic[R any, O any] {
+    func op_add(self, rhs: R): O;
+    func op_sub(self, rhs: R): O;
+    func op_mul(self, rhs: R): O;
+    func op_div(self, rhs: R): O;
+    func op_mod(self, rhs: R): O;
+  }
+
   // Custom value equality for explicit generic constraints.  This is not
   // std.dict_key.KeyEquatable and does not affect dict/set key semantics.
   proto Equatable[R any] {
@@ -33,6 +44,13 @@ package ops {
   // positive when self > rhs.  A single method keeps ordering consistent.
   // std.list.sort / sort_desc and std.math.min / max also use op_cmp.
   proto Comparable[R any] {
+    func op_cmp(self, rhs: R): int;
+  }
+
+  // Convenience bundle for algorithms that need both value equality and
+  // ordering.  It does not change dict/set key semantics.
+  proto Ordered[R any] {
+    func op_eq(self, rhs: R): bool;
     func op_cmp(self, rhs: R): int;
   }
 }

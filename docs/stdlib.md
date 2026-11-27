@@ -2525,7 +2525,9 @@ struct User {
 
 `std.ops` 是内嵌 Skein 源码包（`lib/std/ops.skein`），提供操作符相关 proto：
 `Add[R, O]` / `Sub[R, O]` / `Mul[R, O]` / `Div[R, O]` / `Mod[R, O]`、
-`Equatable[R]` 和 `Comparable[R]`。它们是普通结构式 proto，可用在泛型约束中。
+组合协议 `Arithmetic[R, O]`、`Equatable[R]`、`Comparable[R]` 和组合协议
+`Ordered[R]`。它们是普通结构式 proto，可用在泛型约束中；组合协议只是把已有
+`op_*` 方法收在一起，不改变运算符分派、key 相等或 dict/set 语义。
 对应的 `op_*` 方法也已接入运算符表达式：当左操作数是静态已知的 struct/enum 且
 定义了匹配方法时，表达式会在类型检查期改写为普通方法调用；内置类型仍走原有
 fast path，泛型类型变量仍使用显式方法调用。
@@ -2550,10 +2552,19 @@ let c = a + b;    // Counter { value: 3 }
 a == b            // false
 a < b             // true
 
-import {Add} from std.ops;
+import {Add, Arithmetic, Ordered} from std.ops;
 
 func add[T Add[T, T]](a: T, b: T): T {
   return a.op_add(b);
+}
+
+// 需要整套算术能力时可用组合协议：
+func arithmetic[T Arithmetic[T, T]](a: T, b: T): T {
+  return a.op_add(b);
+}
+
+func ordered_eq[T Ordered[T]](a: T, b: T): bool {
+  return a.op_eq(b) && a.op_cmp(b) == 0;
 }
 ```
 

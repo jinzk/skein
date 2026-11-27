@@ -1,5 +1,5 @@
 import std;
-import {Add, Sub, Mul, Div, Mod, Equatable, Comparable} from std.ops;
+import {Add, Sub, Mul, Div, Mod, Arithmetic, Equatable, Comparable, Ordered} from std.ops;
 include "_support.skein";
 
 struct OpNum {
@@ -35,6 +35,10 @@ func do_div[T Div[T, T]](a: T, b: T): T { return a.op_div(b); }
 func do_mod[T Mod[T, T]](a: T, b: T): T { return a.op_mod(b); }
 func do_eq[T Equatable[T]](a: T, b: T): bool { return a.op_eq(b); }
 func do_cmp[T Comparable[T]](a: T, b: T): int { return a.op_cmp(b); }
+func do_arith[T Arithmetic[T, T]](a: T, b: T): T { return a.op_add(b); }
+func do_ordered[T Ordered[T]](a: T, b: T): bool {
+  return a.op_eq(b) && a.op_cmp(b) == 0;
+}
 
 ts_test("std.ops structural protocols", func() {
   let a = OpNum { value: 12 };
@@ -47,6 +51,8 @@ ts_test("std.ops structural protocols", func() {
   ts_eq(do_mod(a, b).value, 2);
   ts_eq(do_eq(a, OpNum { value: 12 }), true);
   ts_eq(do_cmp(a, b) > 0, true);
+  ts_eq(do_arith(a, b).value, 17);
+  ts_eq(do_ordered(a, OpNum { value: 12 }), true);
 });
 
 ts_test("std.ops arithmetic operators", func() {

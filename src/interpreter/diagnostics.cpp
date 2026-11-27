@@ -287,7 +287,8 @@ void diag_mark_script_failure() {
 
 static void diag_report_at(const std::string &source, int line, int column,
                            const char *category, const char *message,
-                           const std::vector<error_frame> &trace) {
+                           const std::vector<error_frame> &trace,
+                           const std::vector<diagnostic_related> &related) {
     if (g_interrupted)
         return;
 
@@ -310,6 +311,10 @@ static void diag_report_at(const std::string &source, int line, int column,
         record.code = diag_code_for_category(category);
         record.category = category ? category : "";
         record.message = message ? message : "";
+        record.related = related;
+        for (diagnostic_related &item : record.related)
+            diagnostic_offsets(item.line, item.column, item.byte_offset,
+                               item.utf16_offset);
         diag_collect_push(record);
         if (diag_collect_suppress_text())
             return;
@@ -334,6 +339,20 @@ static void diag_report_at(const std::string &source, int line, int column,
        the error was raised in a different source. */
     if (source == source_name)
         print_snippet(line, column);
+    for (const diagnostic_related &item : related) {
+        if (item.line <= 0)
+            continue;
+        if (item.source.empty() || item.source == source_name) {
+            std::fprintf(stderr, "  defined at %d:%d: %s\n", item.line,
+                         item.column, item.message.c_str());
+            if (item.source == source_name)
+                print_snippet(item.line, item.column);
+        } else {
+            std::fprintf(stderr, "  defined at %s:%d:%d: %s\n",
+                         item.source.c_str(), item.line, item.column,
+                         item.message.c_str());
+        }
+    }
     print_trace(trace);
     std::fflush(stderr);
 }
@@ -342,7 +361,16 @@ void diag_report(int line, int column, const char *category,
                  const char *message) {
     std::vector<error_frame> trace;
     diag_snapshot_trace(trace);
-    diag_report_at(source_name, line, column, category, message, trace);
+    diag_report_at(source_name, line, column, category, message, trace, {});
+}
+
+void diag_report_with_related(
+    int line, int column, const char *category, const char *message,
+    const std::vector<diagnostic_related> &related) {
+    std::vector<error_frame> trace;
+    diag_snapshot_trace(trace);
+    diag_report_at(source_name, line, column, category, message, trace,
+                   related);
 }
 
 void diag_report_error(const struct error_value_t &error, const char *category,
@@ -352,7 +380,7 @@ void diag_report_error(const struct error_value_t &error, const char *category,
         error.source.empty() ? source_name : error.source;
     diag_report_at(source, has_location ? error.line : g_error_line,
                    has_location ? error.column : g_error_column, category,
-                   message, error.trace);
+                   message, error.trace, {});
 }
 
 void diag_warning(const char *message) {
@@ -368,8 +396,9 @@ void diag_warning(const char *message) {
     std::fflush(stderr);
 }
 
-void diag_report_warning(int line, int column, const char *category,
-                         const char *message) {
+static void diag_report_warning_at(
+    int line, int column, const char *category, const char *message,
+    const std::vector<diagnostic_related> &related) {
     if (g_interrupted)
         return;
 
@@ -389,6 +418,10 @@ void diag_report_warning(int line, int column, const char *category,
         record.code = diag_code_for_category(category);
         record.category = category && *category ? category : "warning";
         record.message = message ? message : "";
+        record.related = related;
+        for (diagnostic_related &item : record.related)
+            diagnostic_offsets(item.line, item.column, item.byte_offset,
+                               item.utf16_offset);
         diag_collect_push(record);
         if (diag_collect_suppress_text())
             return;
@@ -409,7 +442,29 @@ void diag_report_warning(int line, int column, const char *category,
     } else {
         std::fprintf(stderr, "%d: %s: %s\n", line, kind, message);
     }
+    for (const diagnostic_related &item : related) {
+        if (item.line <= 0)
+            continue;
+        if (item.source.empty() || item.source == source_name)
+            std::fprintf(stderr, "  defined at %d:%d: %s\n", item.line,
+                         item.column, item.message.c_str());
+        else
+            std::fprintf(stderr, "  defined at %s:%d:%d: %s\n",
+                         item.source.c_str(), item.line, item.column,
+                         item.message.c_str());
+    }
     std::fflush(stderr);
+}
+
+void diag_report_warning(int line, int column, const char *category,
+                         const char *message) {
+    diag_report_warning_at(line, column, category, message, {});
+}
+
+void diag_report_warning_with_related(
+    int line, int column, const char *category, const char *message,
+    const std::vector<diagnostic_related> &related) {
+    diag_report_warning_at(line, column, category, message, related);
 }
 
 void diag_report_lexical(int line, int column, const char *fmt, ...) {

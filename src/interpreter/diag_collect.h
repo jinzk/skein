@@ -6,6 +6,17 @@
 
 enum class DiagnosticSeverity { Error, Warning, Information, Hint };
 
+/* Secondary location attached to a diagnostic, e.g. the definition point of
+ * a macro whose expansion failed at the call site. */
+struct diagnostic_related {
+    std::string source;
+    int line = 0;
+    int column = 0;
+    std::size_t byte_offset = 0;
+    std::size_t utf16_offset = 0;
+    std::string message;
+};
+
 struct diagnostic_record {
     std::string source;
     int line = 0;
@@ -16,6 +27,7 @@ struct diagnostic_record {
     std::string code;
     std::string category;
     std::string message;
+    std::vector<diagnostic_related> related;
 };
 
 /* Start collecting structured diagnostics.  When suppress_text is true,

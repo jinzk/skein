@@ -4,6 +4,18 @@
 #include "eval_context.h"
 
 #include <cstring>
+#include <utility>
+
+static thread_local std::vector<diagnostic_related> pending_related;
+
+void runtime_error_set_related(
+    const std::vector<diagnostic_related> &related) {
+    pending_related = related;
+}
+
+void runtime_error_clear_related() {
+    pending_related.clear();
+}
 
 void runtime_error_report(const char *message) {
     const char *text = message ? message : "";
@@ -16,6 +28,9 @@ void runtime_error_report(const char *message) {
         if (*text == '\0')
             text = "invalid syntax";
     }
+
+    std::vector<diagnostic_related> related;
+    related.swap(pending_related);
 
     eval_context &context = active_eval_context();
     ++context.runtime_error_count;
@@ -32,5 +47,6 @@ void runtime_error_report(const char *message) {
         return;
     }
 
-    diag_report(g_error_line, g_error_column, category, text);
+    diag_report_with_related(g_error_line, g_error_column, category, text,
+                             related);
 }

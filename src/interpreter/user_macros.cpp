@@ -1,6 +1,7 @@
 #include "user_macros.h"
 
 #include "diagnostics.h"
+#include "error_report.h"
 #include "macros.h"
 #include "static_type.h"
 #include "structeval.h"
@@ -152,13 +153,49 @@ struct generic_type_arg *dup_generic_type_args(
     return head;
 }
 
+struct related_scope;
+thread_local const related_scope *g_related_scope = NULL;
+
+/* Errors raised while expanding a template are reported at the call site.
+ * Attach the macro definition point so lint and LSP can show both locations.
+ * Definition-time validation reports at the definition point already and
+ * deliberately leaves this scope inactive. */
+struct related_scope {
+    std::vector<diagnostic_related> items;
+
+    explicit related_scope(const user_macro_template *macro) {
+        if (!macro || macro->line <= 0)
+            return;
+        diagnostic_related related;
+        related.source = macro->source;
+        related.line = macro->line;
+        related.column = macro->column;
+        related.message = "macro " + macro->name + " defined here";
+        items.push_back(std::move(related));
+        previous_ = g_related_scope;
+        g_related_scope = this;
+    }
+    ~related_scope() {
+        if (g_related_scope == this)
+            g_related_scope = previous_;
+    }
+
+private:
+    const related_scope *previous_ = NULL;
+};
+
 void report_at(int line, int column, const char *message,
                const char *detail = NULL) {
     diag_set_location(line > 0 ? line : 0, column > 0 ? column : 0);
+    const bool attach = g_related_scope && !g_related_scope->items.empty();
+    if (attach)
+        runtime_error_set_related(g_related_scope->items);
     if (detail)
         yyerror("%s: %s", message, detail);
     else
         yyerror("%s", message);
+    if (attach)
+        runtime_error_clear_related();
 }
 
 /* `hashable` / `iterable` are generic constraint markers, not ordinary type
@@ -1294,6 +1331,7 @@ struct ast *expand_macro_impl(struct ast *callee, struct ast *args,
 struct ast *expand_user_macro(macro_entry *entry, struct ast *args,
                               struct ast *block, int line, int column) {
     const user_macro_template &macro = entry->body;
+    related_scope related(&macro);
     expansion_state state;
     state.macro = &macro;
     state.expansion_id = g_next_expansion_id++;
@@ -1544,6 +1582,7 @@ bool user_macro_define(const char *name,
 
     user_macro_template macro;
     macro.name = name;
+    macro.source = diag_current_source_name();
     macro.params = params;
     macro.body = body;
     macro.line = line;

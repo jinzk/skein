@@ -641,6 +641,12 @@ value_t *location_value(const std::string &uri, const lsp_position &start,
     return location;
 }
 
+std::string uri_for_source(const std::string &source) {
+    if (starts_with(source, "file://"))
+        return source;
+    return "file://" + source;
+}
+
 } // namespace
 
 class lsp_server_impl {
@@ -902,6 +908,23 @@ private:
             json::set(diagnostic, "code", json::string(record.code));
             json::set(diagnostic, "source", json::string("skein"));
             json::set(diagnostic, "message", json::string(record.message));
+            if (!record.related.empty()) {
+                value_t *related = json::array();
+                for (const diagnostic_related &item : record.related) {
+                    const int line = std::max(0, item.line - 1);
+                    const int character =
+                        std::max(0, (int)item.utf16_offset);
+                    value_t *entry = json::object();
+                    json::set(
+                        entry, "location",
+                        location_value(uri_for_source(item.source),
+                                       lsp_position{line, character},
+                                       lsp_position{line, character + 1}));
+                    json::set(entry, "message", json::string(item.message));
+                    json::push(related, entry);
+                }
+                json::set(diagnostic, "relatedInformation", related);
+            }
             json::push(diagnostics, diagnostic);
         }
 

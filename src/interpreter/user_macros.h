@@ -35,6 +35,7 @@ struct user_macro_param {
 
 struct user_macro_template {
     std::string name;
+    std::string source;
     std::vector<user_macro_param> params;
     struct ast *body = NULL;
     int line = 0;

@@ -64,13 +64,27 @@ void print_json(const std::vector<diagnostic_record> &records) {
                      "{\"file\":\"%s\",\"line\":%d,\"column\":%d,"
                      "\"byteOffset\":%zu,\"utf16Offset\":%zu,"
                      "\"severity\":\"%s\",\"code\":\"%s\","
-                     "\"category\":\"%s\",\"message\":\"%s\"}",
+                     "\"category\":\"%s\",\"message\":\"%s\","
+                     "\"related\":[",
                      json_escape(d.source).c_str(), d.line, d.column,
                      d.byte_offset, d.utf16_offset,
                      severity_name(d.severity),
                      json_escape(d.code).c_str(),
                      json_escape(d.category).c_str(),
                      json_escape(d.message).c_str());
+        for (std::size_t j = 0; j < d.related.size(); ++j) {
+            if (j)
+                std::fputc(',', stdout);
+            const diagnostic_related &r = d.related[j];
+            std::fprintf(stdout,
+                         "{\"file\":\"%s\",\"line\":%d,\"column\":%d,"
+                         "\"byteOffset\":%zu,\"utf16Offset\":%zu,"
+                         "\"message\":\"%s\"}",
+                         json_escape(r.source).c_str(), r.line, r.column,
+                         r.byte_offset, r.utf16_offset,
+                         json_escape(r.message).c_str());
+        }
+        std::fputs("]}", stdout);
     }
     std::fputs("]}\n", stdout);
     std::fflush(stdout);

@@ -5,6 +5,7 @@
 #include <string_view>
 #include <vector>
 
+#include "diag_collect.h"
 #include "error_info.h"
 
 struct error_value_t;
@@ -48,6 +49,11 @@ void diag_start_input_line();
 /* Report an error and print the source snippet and call stack. */
 void diag_report(int line, int column, const char *category,
                  const char *message);
+/* Like diag_report(), but carries secondary locations (for example a macro
+ * definition point) through structured diagnostics and printed output. */
+void diag_report_with_related(
+    int line, int column, const char *category, const char *message,
+    const std::vector<diagnostic_related> &related);
 
 /* Report an error value using the location and call stack captured when it
  * was raised.  Falls back to the live location when the error carries none. */
@@ -59,6 +65,9 @@ void diag_warning(const char *message);
 /* Location-aware warning used by the static type checker. */
 void diag_report_warning(int line, int column, const char *category,
                          const char *message);
+void diag_report_warning_with_related(
+    int line, int column, const char *category, const char *message,
+    const std::vector<diagnostic_related> &related);
 void diag_set_source_name(const std::string &name);
 const std::string &diag_current_source_name();
 void diag_set_package_name(const std::string &name);

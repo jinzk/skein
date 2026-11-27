@@ -509,6 +509,25 @@ def run_cases():
                 "func f() { return t!(1); }\n"
             ), repr(edits[0]["newText"])
 
+            # Macro diagnostics point to both the call site and definition.
+            did_change(
+                session,
+                uri,
+                11,
+                "macro bad(T: type) { let x: #T = 1; return x; }\n"
+                "func test(): int { return bad!(1 + 2); }\n",
+            )
+            diagnostics = session.wait_for_diagnostics(uri)
+            macro_error = next(
+                item for item in diagnostics
+                if item["message"] == "type fragment expects a type name"
+            )
+            assert macro_error["range"]["start"]["line"] == 1, macro_error
+            related = macro_error["relatedInformation"]
+            assert len(related) == 1, macro_error
+            assert related[0]["location"]["range"]["start"]["line"] == 0, related
+            assert "macro bad defined here" in related[0]["message"], related
+
             stderr = session.stop()
             assert "SKEIN_LSP_SIDE_EFFECT" not in stderr, stderr
             assert session.process.returncode == 0, session.process.returncode

@@ -192,3 +192,34 @@ def run_cases():
             timeout=harness.DEFAULT_TIMEOUT,
         )
         assert resolved.returncode == 0, resolved.stderr
+
+    macro_locations = run_lint(
+        "macro bad(T: type) { let x: #T = 1; return x; }\n"
+        "func test(): int { return bad!(1 + 2); }\n",
+        "--typecheck=strict",
+        "--format=json",
+    )
+    assert macro_locations.returncode == 1, macro_locations.stderr
+    payload = json.loads(macro_locations.stdout)
+    error = next(
+        item for item in payload["diagnostics"]
+        if item["message"] == "type fragment expects a type name"
+    )
+    assert error["line"] == 2, error
+    assert len(error["related"]) == 1, error
+    assert error["related"][0]["line"] == 1, error
+    assert "macro bad defined here" in error["related"][0]["message"], error
+
+    definition_location = run_lint(
+        "macro bad(T: type) { let x = #T; return 1; }\n",
+        "--typecheck=strict",
+        "--format=json",
+    )
+    assert definition_location.returncode == 1, definition_location.stderr
+    payload = json.loads(definition_location.stdout)
+    error = next(
+        item for item in payload["diagnostics"]
+        if "type fragment cannot be used as a value" in item["message"]
+    )
+    assert error["line"] == 1, error
+    assert error["related"] == [], error

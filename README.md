@@ -352,7 +352,7 @@ let folded = std.unicode.casefold("Straße");
 | [docs/architecture.md](docs/architecture.md) | 运行时、解释器和 builtins 的分层架构 |
 | [docs/bytecode.md](docs/bytecode.md) | 字节码 VM、指令和 AST 回退策略 |
 | [docs/ffi.md](docs/ffi.md) | FFI 契约、类型映射和示例 |
-| [contrib/mysql/README.md](contrib/mysql/README.md) | 用真实 MySQL client 验证 native module / plugin ABI 的示例 |
+| [examples/README.md](examples/README.md) | 各类特性用法示例，当前包含 MySQL native module / plugin ABI 示例 |
 | [docs/encoding.md](docs/encoding.md) | 源文件编码、转码和编码表 |
 | [docs/unicode.md](docs/unicode.md) | Unicode 标识符和归一化 |
 | [docs/logging.md](docs/logging.md) | `std.log` 的 API、格式和写入语义 |
@@ -409,7 +409,7 @@ src/
   app/           L4  main.cpp（参数、入口、hook 装配）
 docs/            架构、编码、FFI、Unicode、字节码与 JIT 计划文档
 lib/std/         以 Skein 编写的标准库包（构建时嵌入）
-contrib/mysql/   可选的 MySQL native plugin 示例与 Skein 封装
+examples/         各类特性用法示例（当前：mysql/ native module / plugin ABI）
 tests/           自动化回归测试（test_skein.py + cases/ + skein/）
 tools/           生成器与一致性检查脚本
 third_party/     llhttp、utf8proc、asmjit

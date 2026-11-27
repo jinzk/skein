@@ -140,10 +140,10 @@ opaque 类型的函数、变量和 struct 会被跳过并记录 warning。它适
   `SKEIN_ALLOW_NATIVE=1` 显式 opt-in；
   `0` / `false` / `off` / `no` 会全局禁用原生加载。源码形式发布的 module
   用 `skein build` 显式编译，详见 `docs/tutorial.md`；
-- `contrib/mysql` 是用真实 MySQL C client 验证上述 ABI 的可选示例插件，
+- `examples/mysql` 是用真实 MySQL C client 验证上述 ABI 的示例插件，
   也演示源码形式 native module 的 `skein get` / `skein build` 流程、
   ABI v2 异步 `query_task` 和 ABI v3 `new_string_len` 的安全文本传输，见
-  [`contrib/mysql/README.md`](../contrib/mysql/README.md)。
+  [`examples/mysql/README.md`](../examples/mysql/README.md)。
 
 ## 7. 稳定性策略
 
@@ -219,7 +219,7 @@ task 完成队列被 drain，因此 worker "先投递再返回" 能保证回调�
   通过 `size` 检查安全忽略；
 - `post_callback` 需要 v4 描述符或至少 v4 的 `api->size`；v1–v3 模块继续按
   现有方式加载，不受影响；
-- ABI 变更必须同步更新 `contrib/mysql/native/skein_module.h` 副本，并保持
+- ABI 变更必须同步更新 `examples/mysql/native/skein_module.h` 副本，并保持
   `tests/mysql_plugin.py` 的 vendored header 一致性检查通过；
 - 在无真实用例驱动前不新增 ABI 字段，避免为假设需求扩大契约。
 

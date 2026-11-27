@@ -107,7 +107,7 @@
 - 数据库支持 SQLite、PostgreSQL、MySQL 和 MariaDB；四个驱动都通过
   `std.db` 统一 API，MySQL / MariaDB 共用一个后端实现；
 - MySQL / MariaDB 优先使用 MariaDB Connector/C，兼容 libmysqlclient；
-  `contrib/mysql` 只保留为 native module ABI 示例；
+  `examples/mysql` 只保留为 native module ABI 示例；
 - Metrics 先输出 Prometheus 文本格式，OpenTelemetry 后续评估。
 
 当前状态：P1-0、认证 / 会话基础、限流 / 安全、可观测性基础与 P1-D 数据库
@@ -999,7 +999,7 @@ RelWithDebInfo 下空脚本 `main()` 约 0.4 ms，`import std` 约 0.85 ms，
 - MySQL / MariaDB 纳入 `std.db`（2026-11-22），共用一个 `db_internal` 后端，
   优先 MariaDB Connector/C，兼容 libmysqlclient；支持 `mysql://` /
   `mariadb://` URI、prepared statement、`?` 参数和基础类型映射。
-  `contrib/mysql` 保留为 native module ABI 示例。
+  `examples/mysql` 保留为 native module ABI 示例。
 - 嵌入式 KV（2026-11-23）：新增 `std.kv`，默认 SQLite 单文件后端；
   key/value 使用 BLOB，支持 prefix scan。LevelDB / RocksDB 只保留为未来
   可选目录后端。

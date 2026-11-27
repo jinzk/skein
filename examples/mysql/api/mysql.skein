@@ -1,7 +1,7 @@
 // Thin Skein wrapper around the optional native plugin in native/mysql_module.cpp.
 //
 // In a module project, the plugin path comes from the source-native module
-// skein.contrib/mysql.  For direct/plugin-path testing, set SKEIN_MYSQL_PLUGIN
+// skein.examples/mysql.  For direct/plugin-path testing, set SKEIN_MYSQL_PLUGIN
 // to a built shared library instead.  The native plugin exports only
 // unboxed functions and opaque userdata; the friendly Connection/Result API
 // lives here.
@@ -10,7 +10,7 @@ package mysql {
 
   let plugin_path = std.env.get("SKEIN_MYSQL_PLUGIN", "");
   if (plugin_path == "") {
-    plugin_path = std.module.native("skein.contrib/mysql");
+    plugin_path = std.module.native("skein.examples/mysql");
   }
   std.native.load(plugin_path);
   import skein.mysql as native;

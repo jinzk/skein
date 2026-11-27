@@ -2271,7 +2271,7 @@ static skein_status twice_async(skein_context *ctx,
 `finish` 和 `destroy` 在 owner 线程执行，由事件循环泵（`fiber_pump`）驱动，
 因此 `finish` 创建的 userdata 仍持有插件引用。`call_task` 立即返回 task，
 不会阻塞调用纤维；`fini`/`dlclose` 会等到所有未完成任务结束。
-`contrib/mysql` 的 `Connection.query_task()` 是连接真实 C 客户端的完整示例，
+`examples/mysql` 的 `Connection.query_task()` 是连接真实 C 客户端的完整示例，
 包括取消检查、连接 userdata 保活和 SQL 结果转换。
 
 `std.native.load` 和 `std.ffi.open` 在 `lint` / `fmt` / `lsp` 的 check-only

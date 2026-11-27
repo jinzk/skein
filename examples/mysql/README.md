@@ -18,12 +18,12 @@
 
 ## 源码 native module 流程
 
-把 `contrib/mysql` 单独发布成 git 仓库，模块路径使用
-`skein.contrib/mysql`。在应用项目里：
+把 `examples/mysql` 单独发布成 git 仓库，模块路径使用
+`skein.examples/mysql`。在应用项目里：
 
 ```bash
-skein get skein.contrib/mysql@v0.1.0
-skein build skein.contrib/mysql@v0.1.0
+skein get skein.examples/mysql@v0.1.0
+skein build skein.examples/mysql@v0.1.0
 SKEIN_ALLOW_NATIVE=1 ./skein main.skein
 ```
 
@@ -31,14 +31,14 @@ SKEIN_ALLOW_NATIVE=1 ./skein main.skein
 
 ```text
 import std;
-import "skein.contrib/mysql" as mysql;
+import "skein.examples/mysql" as mysql;
 std.io.println(mysql.VERSION);
 std.io.println(mysql.library_version());
 ```
 
 第三方 module 内的 `std.native.load` 默认禁止，因此运行脚本时必须设置
 `SKEIN_ALLOW_NATIVE=1`。`skein build` 会在缓存目录旁生成动态库，封装包通过
-`std.module.native("skein.contrib/mysql")` 取得路径，不绑定固定 `.so` 位置。
+`std.module.native("skein.examples/mysql")` 取得路径，不绑定固定 `.so` 位置。
 
 本地验证时可以用 URL override 指向仓库副本：
 
@@ -71,7 +71,7 @@ export SKEIN_TEST_MYSQL_PORT=3306
 export SKEIN_TEST_MYSQL_USER=root
 export SKEIN_TEST_MYSQL_PASSWORD=
 export SKEIN_TEST_MYSQL_DATABASE=skein_test
-./build/skein contrib/mysql/example.skein
+./build/skein examples/mysql/example.skein
 ```
 
 ## API

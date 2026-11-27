@@ -16,9 +16,9 @@ import tempfile
 BIN = os.path.abspath(sys.argv[1])
 PLUGIN = os.path.abspath(sys.argv[2])
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-MODULE_ROOT = os.path.join(ROOT, "contrib", "mysql")
+MODULE_ROOT = os.path.join(ROOT, "examples", "mysql")
 WRAPPER = os.path.join(MODULE_ROOT, "api", "mysql.skein")
-MODULE_PATH = "skein.contrib/mysql"
+MODULE_PATH = "skein.examples/mysql"
 MODULE_TAG = "v0.1.0"
 
 
@@ -244,7 +244,7 @@ def test_vendored_abi_header():
     with open(os.path.join(MODULE_ROOT, "native", "skein_module.h"),
               encoding="utf-8") as handle:
         actual = handle.read()
-    assert actual == expected, "contrib/mysql/native/skein_module.h is stale"
+    assert actual == expected, "examples/mysql/native/skein_module.h is stale"
 
 
 def test_source_module():
@@ -319,7 +319,7 @@ def test_source_module():
         main = os.path.join(project, "main.skein")
         with open(main, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(
-                'import std;\nimport "skein.contrib/mysql" as mysql;\n'
+                'import std;\nimport "skein.examples/mysql" as mysql;\n'
                 "std.io.println(mysql.VERSION);\n"
                 'std.io.println(mysql.library_version() != "");\n'
                 "std.io.println(mysql.wrap_result != null);\n"

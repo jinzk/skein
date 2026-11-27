@@ -827,7 +827,7 @@ if(SKEIN_BUILD_MYSQL_PLUGIN AND UNIX)
   find_library(MYSQL_CLIENT_LIBRARY NAMES mysqlclient mariadb libmysql)
   if(MYSQL_INCLUDE_DIR AND MYSQL_CLIENT_LIBRARY)
     add_library(skein_mysql_module SHARED
-      contrib/mysql/native/mysql_module.cpp
+      examples/mysql/native/mysql_module.cpp
     )
     target_include_directories(skein_mysql_module PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}/src/runtime

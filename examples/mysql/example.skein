@@ -1,5 +1,5 @@
 import std;
-import "skein.contrib/mysql" as mysql;
+import "skein.examples/mysql" as mysql;
 
 func env(name, fallback = "") {
   return std.env.get(name, fallback);

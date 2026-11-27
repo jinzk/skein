@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -69,6 +70,10 @@ struct expansion_state {
     const user_macro_template *macro = NULL;
     std::unordered_map<std::string, param_value> values;
     std::unordered_set<std::string> declared;
+    /* Shared with fragment copies so usage inside a spliced argument still
+     * counts as a use of that parameter. */
+    std::shared_ptr<std::unordered_set<std::string>> used =
+        std::make_shared<std::unordered_set<std::string>>();
     int expansion_id = 0;
     bool failed = false;
     bool validate_only = false;
@@ -183,6 +188,11 @@ struct related_scope {
 private:
     const related_scope *previous_ = NULL;
 };
+
+void mark_used(expansion_state &state, const std::string &name) {
+    if (state.used)
+        state.used->insert(name);
+}
 
 void report_at(int line, int column, const char *message,
                const char *detail = NULL) {
@@ -325,6 +335,7 @@ struct type_constraint *substitute_type(const struct type_constraint *type,
             state.failed = true;
             return new_type_constraint(TYPE_ANY);
         }
+        mark_used(state, param_name);
         struct type_constraint *copy = dup_type(it->second.type);
         if (type->kind == TYPE_REF || type->kind == TYPE_WEAK)
             copy = skein::typecheck::type_apply_prefix(type->kind, copy);
@@ -377,6 +388,7 @@ std::string resolve_placeholder_or_name(const char *name, expansion_state &state
             return param_name;
         }
         const param_value &value = it->second;
+        mark_used(state, param_name);
         if (value.kind == user_macro_param_kind::ident)
             return value.ident;
         if (context == clone_context::name ||
@@ -405,6 +417,7 @@ struct ast *splice_arg_expansion(const char *param_name,
         state.failed = true;
         return NULL;
     }
+    mark_used(state, param_name ? param_name : "");
     expansion_state fragment_state = fragment_state_for(state);
     struct ast *result = NULL;
     struct ast **tail = &result;
@@ -571,6 +584,7 @@ struct ast *clone_node(const struct ast *node, expansion_state &state,
                     return newref(copy_string(param_name.c_str()));
                 }
                 const param_value &value = it->second;
+                mark_used(state, param_name);
                 switch (value.kind) {
                     case user_macro_param_kind::ident: {
                         struct ast *result =
@@ -1649,6 +1663,14 @@ bool user_macro_define(const char *name,
     if (validation.failed) {
         treefree(body);
         return false;
+    }
+    for (const user_macro_param &param : params) {
+        if (validation.used->find(param.name) != validation.used->end())
+            continue;
+        std::string message =
+            "unused macro fragment '" + param.name + "'";
+        diag_report_warning_with_related(param.line, param.column, "warning",
+                                         message.c_str(), {});
     }
 
     std::vector<std::string> calls;

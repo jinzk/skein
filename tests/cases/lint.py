@@ -223,3 +223,56 @@ def run_cases():
     )
     assert error["line"] == 1, error
     assert error["related"] == [], error
+
+    unused = run_lint(
+        "macro wrap(T: type) { return 1; }\n",
+        "--typecheck=strict",
+        "--format=json",
+    )
+    assert unused.returncode == 0, unused.stderr
+    payload = json.loads(unused.stdout)
+    warnings = [
+        item for item in payload["diagnostics"]
+        if "unused macro fragment" in item["message"]
+    ]
+    assert len(warnings) == 1, payload
+    assert "T" in warnings[0]["message"], warnings[0]
+    assert warnings[0]["line"] == 1, warnings[0]
+    assert warnings[0]["severity"] == "warning", warnings[0]
+
+    mixed_usage = run_lint(
+        "macro wrap(T: type, v: expr) { let x: #T = 1; return x; }\n",
+        "--typecheck=strict",
+        "--format=json",
+    )
+    assert mixed_usage.returncode == 0, mixed_usage.stderr
+    payload = json.loads(mixed_usage.stdout)
+    warnings = [
+        item for item in payload["diagnostics"]
+        if "unused macro fragment" in item["message"]
+    ]
+    assert len(warnings) == 1, payload
+    assert "v" in warnings[0]["message"], warnings[0]
+
+    illegal_positions = [
+        (
+            "macro bad(T: type) { let x = #T; return 1; }\n",
+            "type fragment cannot be used as a value or name",
+        ),
+        (
+            "macro bad(T: expr) { let x: #T = 1; return x; }\n",
+            "macro fragment cannot be used here",
+        ),
+        (
+            "struct Box[T any] { value: T; }\n"
+            "macro bad(P: type) { let x: Box[#P] = 1; return 1; }\n",
+            "type fragment cannot be used inside a generic type",
+        ),
+    ]
+    for source, expected in illegal_positions:
+        result = run_lint(source, "--typecheck=strict", "--format=json")
+        assert result.returncode == 1, result.stderr
+        payload = json.loads(result.stdout)
+        assert any(
+            expected in item["message"] for item in payload["diagnostics"]
+        ), payload

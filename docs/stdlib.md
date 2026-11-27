@@ -3193,6 +3193,7 @@ API：
 
 ```text
 kv.drivers() -> list[string]
+kv.open_options([table[, busy_timeout_ms]]) -> OpenOptions
 kv.open(path[, options]) -> Store
 store.put(key, value) -> bool
 store.get(key) -> bytes / null
@@ -3213,7 +3214,9 @@ store.backend -> string
 - key / value 支持 string 或 bytes，内部按 BLOB 存储；
 - 表结构为 `(key BLOB PRIMARY KEY, value BLOB NOT NULL) WITHOUT ROWID`；
 - `scan` 按 key 字典序返回，prefix 和 limit 可选；
-- 选项：`table`（默认 `skein_kv`）、`busy_timeout_ms`；
+- 选项推荐写 `kv.open_options(table, busy_timeout_ms)` 得到 `kv.OpenOptions`；旧的字面量
+  dict `{"table": ..., "busy_timeout_ms": ...}` 仍被接受；字段为 `table`（默认 `skein_kv`）
+  和 `busy_timeout_ms`（默认 `5000`）；
 - 当前只有 SQLite 后端；LevelDB / RocksDB 目录后端仅保留为未来能力；
 - 不等同于 `std.cache`：`std.kv` 是本地持久化，`std.cache` 是 Redis/Valkey。
 

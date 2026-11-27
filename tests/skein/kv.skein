@@ -52,8 +52,16 @@ ts_test("kv scan and clear", func() {
   store.close();
 });
 
-ts_test("kv custom table", func() {
-  let store = kv.open(path, {"table": "custom_kv"});
+ts_test("kv typed open options", func() {
+  let store = kv.open(path, kv.open_options("custom_kv"));
+  ts_eq(store.put("x", "y"), true);
+  ts_eq(std.bytes.to_string(store.get("x")), "y");
+  store.clear();
+  store.close();
+});
+
+ts_test("kv dict open options still accepted", func() {
+  let store = kv.open(path, {"table": "custom_kv", "busy_timeout_ms": 5000});
   ts_eq(store.put("x", "y"), true);
   ts_eq(std.bytes.to_string(store.get("x")), "y");
   store.clear();

@@ -184,6 +184,32 @@ package kv {
     };
   }
 
+  export struct OpenOptions {
+    table: string;
+    busy_timeout_ms: int;
+  }
+
+  export func open_options(table: string = "skein_kv",
+                           busy_timeout_ms: int = 5000) {
+    return OpenOptions {
+      table: table,
+      busy_timeout_ms: busy_timeout_ms
+    };
+  }
+
+  func _open_options(options) {
+    if (kind_of(options) == "dict") {
+      return options;
+    }
+    if (options is OpenOptions) {
+      return {
+        "table": options.table,
+        "busy_timeout_ms": options.busy_timeout_ms
+      };
+    }
+    fail("std.kv.open options must be a dict or kv.OpenOptions");
+  }
+
   export func drivers() {
     return ["sqlite"];
   }
@@ -199,11 +225,12 @@ package kv {
     if (!std.dict.has(std, "db")) {
       fail("std.kv requires the std.db SQLite backend");
     }
-    let table = std.dict.get(options, "table", "skein_kv");
+    let opts = _open_options(options);
+    let table = std.dict.get(opts, "table", "skein_kv");
     if (!_valid_table(table)) {
       fail("std.kv table must be a valid identifier");
     }
-    let db = std.db.open(path, options);
+    let db = std.db.open(path, opts);
     std.db.exec(db,
       "CREATE TABLE IF NOT EXISTS " + table +
       " (key BLOB PRIMARY KEY, value BLOB NOT NULL) WITHOUT ROWID");

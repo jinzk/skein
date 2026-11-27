@@ -506,7 +506,7 @@ struct symlist *clone_symlist(const struct symlist *list,
         const char *raw = item->sym && item->sym->name ? item->sym->name : "";
         std::string name = resolve_placeholder_or_name(
             raw, state, clone_context::name, 0, 0);
-        struct symbol *sym = newsym(copy_string(name.c_str()));
+        struct symbol *sym = newsym(name.c_str()); /* newsym copies the name */
         struct symlist *copy =
             newsymlist(sym, substitute_type(item->type, state, 0, 0), NULL,
                        item->variadic);

@@ -1,5 +1,7 @@
 #include "builtins_internal.h"
 
+#include "builtins_ordering.h"
+
 const char *math_builtin_name(int functype) {
     switch (functype) {
         case B_sin: return "sin";
@@ -292,35 +294,63 @@ struct value_t *call_math_builtin(
         }
         case B_min:
         case B_max: {
+            const char *name = math_builtin_name(functype);
             bool all_int = true;
+            bool all_numeric = true;
+            bool all_comparable = true;
+            const struct value_t *bad = NULL;
             for (const struct value_t *value : args) {
-                if (!is_numeric(value)) {
-                    yyerror("%s expects numbers, got %s",
-                            math_builtin_name(functype), typename_of(value));
-                    return NULL;
+                if (is_numeric(value)) {
+                    all_comparable = false;
+                    if (value->type != T_int)
+                        all_int = false;
+                    continue;
                 }
-                if (value->type != T_int)
-                    all_int = false;
+                all_numeric = false;
+                if (!bad)
+                    bad = value;
+                if (value_has_op_cmp(value))
+                    continue;
+                all_comparable = false;
             }
-            if (all_int) {
-                long long best = ((struct int_value_t *)args[0])->value;
-                for (size_t i = 1; i < args.size(); ++i) {
-                    long long value =
-                        ((struct int_value_t *)args[i])->value;
-                    if ((functype == B_min && value < best) ||
-                        (functype == B_max && value > best))
-                        best = value;
+            if (!all_numeric && !all_comparable) {
+                yyerror("%s expects numbers, or Comparable values, got %s",
+                        name, typename_of(bad));
+                return NULL;
+            }
+            if (all_numeric) {
+                if (all_int) {
+                    long long best = ((struct int_value_t *)args[0])->value;
+                    for (size_t i = 1; i < args.size(); ++i) {
+                        long long value =
+                            ((struct int_value_t *)args[i])->value;
+                        if ((functype == B_min && value < best) ||
+                            (functype == B_max && value > best))
+                            best = value;
+                    }
+                    ret = newintval(best);
+                } else {
+                    double best = as_double(args[0]);
+                    for (size_t i = 1; i < args.size(); ++i) {
+                        double value = as_double(args[i]);
+                        if ((functype == B_min && value < best) ||
+                            (functype == B_max && value > best))
+                            best = value;
+                    }
+                    ret = newfloatval(best);
                 }
-                ret = newintval(best);
             } else {
-                double best = as_double(args[0]);
+                size_t best = 0;
                 for (size_t i = 1; i < args.size(); ++i) {
-                    double value = as_double(args[i]);
-                    if ((functype == B_min && value < best) ||
-                        (functype == B_max && value > best))
-                        best = value;
+                    long long order = 0;
+                    if (!compare_with_op_cmp(args[best], args[i], order,
+                                             name))
+                        return NULL;
+                    if ((functype == B_min && order > 0) ||
+                        (functype == B_max && order < 0))
+                        best = i;
                 }
-                ret = newfloatval(best);
+                ret = dupval(args[best]);
             }
             break;
         }

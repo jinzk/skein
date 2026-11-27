@@ -436,6 +436,7 @@ add_dependencies(skein_interpreter skein_embedded_sources)
 add_library(skein_builtins STATIC
   src/builtins/builtins.cpp
   src/builtins/builtins_math.cpp
+  src/builtins/builtins_ordering.cpp
   src/builtins/builtins_list.cpp
   src/builtins/builtins_dict.cpp
   src/builtins/builtins_string.cpp

@@ -403,9 +403,10 @@ a == b    // false
 a < b     // true
 ```
 
-`op_eq` 必须返回 `bool`，`op_cmp` 必须返回 `int`（负数 / 0 / 正数）。自定义
-相等不改变 dict/set key 判定、`list.contains` 或模式匹配；这些路径仍使用各自的
-既有相等逻辑。
+`op_eq` 必须返回 `bool`，`op_cmp` 必须返回 `int`（负数 / 0 / 正数）。
+`std.list.sort` / `std.list.sort_desc` 和 `std.math.min` / `std.math.max` 在全部
+参数为 Comparable 用户值时也会调用 `op_cmp`。自定义相等不改变 dict/set key 判定、
+`list.contains` 或模式匹配；这些路径仍使用各自的既有相等逻辑。
 
 ### 4.3 逻辑运算
 
@@ -5488,7 +5489,7 @@ std.math.tau    // 6.283185307179586
 - `std.math.sqrt`、`std.math.exp`、`std.math.log`、三角函数、`std.math.pow`、`std.math.log2`、`std.math.log10`、`std.math.hypot` 返回 `float`；
 - `std.math.floor`、`std.math.ceil`、`std.math.round`、`std.math.trunc` 返回 `int`，超出整数范围会报错；
 - `std.math.round` 按远离零的方向处理半值，例如 `std.math.round(-1.5) == -2`；
-- `std.math.min` / `std.math.max` 至少需要一个数值参数；全为 `int` 时返回 `int`，否则返回 `float`；
+- `std.math.min` / `std.math.max` 至少需要一个参数；全为数值时保持原规则（全 `int` 返回 `int`，否则返回 `float`），全部实现 `std.ops.Comparable.op_cmp` 的用户值按 `op_cmp` 符号选出原值；`op_cmp` 必须返回 `int`；
 - `std.math.sqrt(-1)`、`std.math.log(0)`、`std.math.log2(0)`、`std.math.log10(<=0)` 返回 `nan`；
 - `std.math.sign(x)` 返回 `-1` / `0` / `1`；`std.math.sign(nan)` 返回 `nan`；
 - `std.math.clamp(x, lo, hi)` 要求 `lo <= hi`，全为 `int` 时返回 `int`，否则返回 `float`；

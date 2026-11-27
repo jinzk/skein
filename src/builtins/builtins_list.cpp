@@ -1,5 +1,6 @@
 #include "builtins_internal.h"
 
+#include "builtins_ordering.h"
 #include "gc_roots.h"
 #include "scopestack.h"
 
@@ -145,6 +146,47 @@ static struct value_t *list_sort_with_cmp(struct list_value_t *list,
         return NULL;
     }
     return (struct value_t *)out;
+}
+
+static struct value_t *list_sort_comparable(struct list_value_t *list,
+                                            bool desc, const char *name) {
+    struct list_value_t *out = newlistval();
+    out->payload->items.reserve(list->payload->items.size());
+    for (struct value_t *item : list->payload->items)
+        out->payload->items.push_back(dupval(item));
+
+    gc_root_scope roots(active_scope_context());
+    roots.add((struct value_t *)out);
+
+    bool failed = false;
+    std::stable_sort(
+        out->payload->items.begin(), out->payload->items.end(),
+        [&](struct value_t *a, struct value_t *b) {
+            if (failed)
+                return false;
+            long long order = 0;
+            if (!compare_with_op_cmp(a, b, order, name)) {
+                failed = true;
+                return false;
+            }
+            return desc ? order > 0 : order < 0;
+        });
+
+    if (failed) {
+        roots.reset();
+        freeval((struct value_t *)out);
+        return NULL;
+    }
+    return (struct value_t *)out;
+}
+
+static struct value_t *list_sort_default_or_comparable(
+    struct list_value_t *list, bool desc, const char *name) {
+    std::vector<struct value_t *> items(list->payload->items.begin(),
+                                       list->payload->items.end());
+    if (values_have_op_cmp(items))
+        return list_sort_comparable(list, desc, name);
+    return list_sort_default(list, desc, name);
 }
 
 static struct value_t *list_top_k_impl(struct list_value_t *list, long long k,
@@ -792,7 +834,8 @@ struct value_t *call_list_builtin(
             }
             struct list_value_t *source = (struct list_value_t *)args[0];
             if (args.size() == 1) {
-                ret = list_sort_default(source, false, "std.list.sort");
+                ret = list_sort_default_or_comparable(source, false,
+                                                      "std.list.sort");
             } else {
                 ret = list_sort_with_cmp(source, args[1], "std.list.sort");
             }
@@ -804,8 +847,8 @@ struct value_t *call_list_builtin(
                         typename_of(args[0]));
                 break;
             }
-            ret = list_sort_default((struct list_value_t *)args[0], true,
-                                    "std.list.sort_desc");
+            ret = list_sort_default_or_comparable(
+                (struct list_value_t *)args[0], true, "std.list.sort_desc");
             break;
         }
         case B_list_sort_by: {

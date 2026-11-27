@@ -162,4 +162,35 @@ ts_test("std.ops enum overload", func() {
   ts_eq(left + right, 9);
 });
 
+ts_test("std.ops Comparable in stdlib algorithms", func() {
+  let a = OpNum { value: 12 };
+  let b = OpNum { value: 5 };
+  let c = OpNum { value: 8 };
+  let xs = [a, b, c];
+
+  let asc = std.list.sort(xs);
+  ts_eq(asc[0].value, 5);
+  ts_eq(asc[1].value, 8);
+  ts_eq(asc[2].value, 12);
+  ts_eq(xs[0].value, 12);
+
+  let desc = std.list.sort_desc(xs);
+  ts_eq(desc[0].value, 12);
+  ts_eq(desc[1].value, 8);
+  ts_eq(desc[2].value, 5);
+
+  // An explicit comparator still overrides op_cmp.
+  let custom = std.list.sort(xs, func(l, r) { return r.value - l.value; });
+  ts_eq(custom[0].value, 12);
+  ts_eq(custom[2].value, 5);
+
+  ts_eq(std.math.min(a, b, c).value, 5);
+  ts_eq(std.math.max(a, b, c).value, 12);
+
+  // Built-in algorithm behavior is unchanged.
+  ts_eq(std.list.sort([3, 1, 2]), [1, 2, 3]);
+  ts_eq(std.math.min(3, 1, 2), 1);
+  ts_eq(std.math.max(2.5, 1), 2.5);
+});
+
 ts_finish();

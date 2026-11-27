@@ -39,7 +39,7 @@
 | 用户自定义泛型（M9） | 已完成 | 泛型 struct/enum/函数/proto、显式实例化、约束、默认类型参数、裸 `Box` 补全、递归、VM/JIT 擦除、`std.meta` 泛型入口和 JSON envelope 已完成；通用二进制值格式不在当前范围，按需再评估 |
 | 断言与内置语法宏（M10） | 已完成 | 第一批已完成：`std.assert` / `std.log.enabled` 与 assert、日志、`capture!` 内置 AST 宏已落地并通过全量验证；`list!` / `dict!` / `try!` 已决定不实现；用户自定义宏不在 M10 |
 | 用户自定义宏与保留字清理（M11，P1 / P2 / P3.1 / P4 含跨包 / P5.1–P5.5 / G1–G5 已完成） | 已完成 | AST 级静态模板、受限片段、hygienic、声明先于使用。`proto`、`import {name} from pkg`、prelude 默认 import、`list` / `dict` 构造器、`fail!` / `recover!` / `pass!` / `wait!` 宏、`launch` / `wait` / `await` 表达式起始 contextual、用户宏 v1 与跨包 `export macro` / `import {name!} from pkg;`，以及 `on` / `error` handler-scoped contextual、`as` / `ref` / `weak` / `is` contextual 均已落地；G1–G5 完成泛型实参 AST 化、受限 `type` 片段、定义期边界强化、formatter / lint / LSP / VM-JIT 同步与核心约束验收；设计见 [`docs/macros_user_defined.md`](macros_user_defined.md) |
-| 操作符重载（O0–O4） | O0–O3 已完成 | 自引用 proto 约束、`std.ops` 协议、算术与相等/比较运算符重写已落地；下一步评估标准库算法，见 2.9 |
+| 操作符重载（O0–O4） | O0–O4 已完成 | 自引用 proto 约束、`std.ops` 协议、算术/相等/比较运算符重写，以及标准库算法接入 `Comparable` 均已落地，见 2.9 |
 | `std.cache`（M7）/ `std.kv` | 已完成 | 维护；Valkey 独立 CI 服务可按需补 |
 | FFI 平台 CI / fuzz | 按需 | Windows x64（MinGW/MSVC）进入正式发布；32 位 / ARM 与 fuzz 按需，见 `architecture.md` |
 
@@ -587,10 +587,11 @@ M11 继续保持“宏不生成泛型语法”的边界。当前可用组合是�
    声明、`type_name` 反射入口与片段位置误用；与已有的 hygiene、声明先于使用、
    递归禁止、泛型语法/声明禁止、类型片段非法位置测试一起构成 G5 验收矩阵。
 
-### 2.9 操作符重载（O0–O3 已完成，O4 待决策）
+### 2.9 操作符重载（O0–O4 已完成）
 
-状态：**O0–O3 已完成，O4 待决策**。当前语言已支持用户类型的算术、相等与比较运算符
-重载；本节记录已确认的分阶段设计，下一步评估标准库算法。
+状态：**O0–O4 已完成**。当前语言已支持用户类型的算术、相等与比较运算符重载，
+标准库默认排序与 `min` / `max` 也会使用 `Comparable.op_cmp`。本节记录已确认的
+分阶段设计。
 
 方向：先补 proto 约束基础设施和标准协议，再把运算符在 typecheck 期重写为普通方法
 调用。保持 parser 的优先级/结合性不变，不新增 AST 节点或 opcode；AST eval、VM、JIT
@@ -605,6 +606,9 @@ M11 继续保持“宏不生成泛型语法”的边界。当前可用组合是�
 - `std.ops.Equatable` 与算术协议同批定义，但相等/比较运算符晚于算术运算符接线；
   它与 `std.dict_key.KeyEquatable` 是不同协议；
 - `KeyEquatable.key_eq` 继续只服务 dict/set，且不改变普通 `==`；
+- 标准库 `std.list.sort` / `std.list.sort_desc` 和 `std.math.min` / `std.math.max`
+  在全部参数为 Comparable 用户值时使用 `op_cmp`；显式比较器仍然优先，内置数值、
+  字符串与 NaN 语义不变；
 - 不支持 `any` 动态重载、复合赋值、下标、`++` / `--`、链式比较或宏生成重载方法。
 
 阶段：
@@ -625,8 +629,10 @@ M11 继续保持“宏不生成泛型语法”的边界。当前可用组合是�
    （`!=` 取反），`< <= > >=` 由 `Comparable.op_cmp` 的符号推导；类型检查要求
    `op_eq` 返回 `bool`、`op_cmp` 返回 `int`。内置数值、字符串和 NaN 语义保持
    不变；`pattern`、`list.contains`、dict/set key 判定继续使用各自的既有相等逻辑。
-5. **O4 标准库算法接线（待决策）**：再评估 `sort` / `min` / `max` 等是否使用
-   `Comparable`。在明确前，用户比较协议只影响运算符表达式，不改变标准库算法。
+5. **O4 标准库算法接线（已完成）**：`std.list.sort` / `std.list.sort_desc` 和
+   `std.math.min` / `std.math.max` 在全部参数为 Comparable 用户值时调用
+   `op_cmp`，运行时要求它返回 `int`；显式比较器优先。内置数值、字符串与 NaN
+   语义保持不变，AST / VM / JIT 通过同一 builtin 路径保持一致。
 
 验收：每阶段保持全量测试与 VM/JIT differential 全绿，`tools/check_docs_sync.py`
 与 `git diff --check` 通过；新增文档需同步 `SYNTAX.md`、`docs/tutorial.md`、

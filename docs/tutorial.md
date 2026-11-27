@@ -446,6 +446,8 @@ a < b             // true
 ```
 
 自定义 `op_eq` 不改变 dict/set key、`list.contains` 或模式匹配的既有相等逻辑。
+`std.list.sort` / `std.list.sort_desc` 和 `std.math.min` / `std.math.max` 在全部
+参数为 Comparable 用户值时也会调用 `op_cmp`；显式比较器仍然优先。
 
 元数据和序列化：
 
@@ -1349,8 +1351,8 @@ let b = Config { port: 8080 };
 let c = Config { ...a, port: 9090 };
 ```
 
-- 不支持继承、动态添加方法或静态方法；算术运算符可通过 `std.ops` 对应的
-  `op_*` 方法重载，其他运算符重载尚未接线；泛型 struct/enum/proto/函数见“用户自定义泛型”，内建容器类型参数见变量类型标注章节。
+- 不支持继承、动态添加方法或静态方法；算术、相等与比较运算符可通过
+  `std.ops` 对应的 `op_*` 方法重载；泛型 struct/enum/proto/函数见“用户自定义泛型”，内建容器类型参数见变量类型标注章节。
 
 `proto` 定义结构式接口：
 

@@ -2561,8 +2561,9 @@ func add[T Add[T, T]](a: T, b: T): T {
 后者只服务 dict/set key。`==` / `!=` 在用户类型上走 `op_eq`（`!=` 取反），
 `< <= > >=` 走 `op_cmp` 返回值的符号；`op_eq` 不改变 dict/set key、
 `list.contains` 或模式匹配的既有相等逻辑。数值、字符串和 NaN 的内置比较语义
-保持不变。`Comparable` 使用单一 `op_cmp` 返回负数 / 0 / 正数，标准库算法当前
-也不使用它。
+保持不变。`Comparable` 使用单一 `op_cmp` 返回负数 / 0 / 正数；
+`std.list.sort` / `std.list.sort_desc` 和 `std.math.min` / `std.math.max`
+在全部参数为 Comparable 用户值时也使用它，显式比较器仍然优先。
 
 `std.traits` 是内嵌 Skein 源码包（`lib/std/traits.skein`），提供内置 trait proto。`Hashable`、`Iterable`、`Callable` 都是默认导入的 prelude proto，无需显式 import。
 
@@ -3895,7 +3896,8 @@ std.thread.capabilities
 - `s = s + "..."` / `s = s + 'c'` 在 VM 与 AST 下使用 COW 原地追加（100k 次约 20–26ms，改前约 680ms）；
 - `std.list.builder()` 提供 O(1) 摊销的 `push` / `extend`，`build()` 每次返回独立 list；
 - `std.string.builder()` 提供 O(1) 摊销的字符串拼接，`push` 接受 string 或 char；
-- 排序稳定；`std.list.sort(xs)` 接受全数字、全字符串或全 `char`；`std.list.sort(xs, cmp)` 接受自定义比较器；
+- 排序稳定；`std.list.sort(xs)` / `std.list.sort_desc(xs)` 接受全数字、全字符串、全 `char`，或全部实现 `std.ops.Comparable.op_cmp` 的用户 struct/enum；`std.list.sort(xs, cmp)` 的显式比较器优先；
+- 使用 `op_cmp` 排序时它必须返回 `int`，取负值表示小于、零表示相等、正值表示大于；
 - 默认排序和 `sort_by` 中，`NaN` 永远排在最后；`char` / `byte` 按码点 / 数值排序；
 - `std.list.sort_by(xs, key[, {"desc": true}])` 的 key 每个元素只调用一次；
 - `std.list.is_sorted(xs[, cmp])` 返回 bool；

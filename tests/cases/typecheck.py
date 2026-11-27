@@ -364,6 +364,21 @@ def run_cases():
           "let x = Cmp {} >= Cmp {};\n",
           stderr="type error: op_cmp must return int, got bool")
 
+    check("sort requires numbers or Comparable values",
+          "struct NoCmp { value: int; }\n"
+          "std.list.sort([NoCmp { value: 1 }]);\n",
+          stderr="std.list.sort expects all numbers, strings, chars, or bytes")
+
+    check("sort rejects non-int op_cmp result",
+          "struct BadCmp { func op_cmp(self, rhs: BadCmp): bool { return true; } }\n"
+          "std.list.sort([BadCmp {}, BadCmp {}]);\n",
+          stderr="std.list.sort comparator must return int, got bool")
+
+    check("min rejects non-int op_cmp result",
+          "struct BadCmp { func op_cmp(self, rhs: BadCmp): bool { return true; } }\n"
+          "std.math.min(BadCmp {}, BadCmp {});\n",
+          stderr="min comparator must return int, got bool")
+
     check("generic default type must be trailing",
           "struct Bad[T = int, U any] { }\n",
           stderr="type error: default type parameters must be trailing")

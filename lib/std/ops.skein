@@ -31,6 +31,7 @@ package ops {
 
   // Three-way comparison: negative when self < rhs, zero when equal, and
   // positive when self > rhs.  A single method keeps ordering consistent.
+  // std.list.sort / sort_desc and std.math.min / max also use op_cmp.
   proto Comparable[R any] {
     func op_cmp(self, rhs: R): int;
   }

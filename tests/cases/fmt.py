@@ -368,6 +368,11 @@ def run_cases():
             "macro make(v: expr) { let b = Box[int] { value: #v}; return b.value; }\n",
             "literal generic application in macro template",
         ),
+        (
+            "macro make(T:type,v:expr){let b=Box[#T]{value:#v};return b.value;}\n",
+            "macro make(T: type, v: expr) { let b = Box[#T] { value: #v}; return b.value; }\n",
+            "type fragment in generic argument",
+        ),
     ]
     for source, expected, label in type_fragment_positions:
         path = write_temp(source)

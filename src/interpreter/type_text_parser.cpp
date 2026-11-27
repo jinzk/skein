@@ -2,6 +2,7 @@
 
 #include "static_type.h"
 #include "symbol.h"
+#include "user_macros.h"
 
 #include <cstddef>
 #include <cstdio>
@@ -199,11 +200,22 @@ private:
 
     bool parse_type_name(struct type_constraint *&out) {
         std::string first;
+        skip_space();
+        bool macro_parameter = false;
+        if (peek() == '#') {
+            ++pos_;
+            macro_parameter = true;
+        }
         if (!parse_identifier(first)) {
             return fail("expected type name");
         }
 
-        std::string name = first;
+        /* Source spans keep the user-facing `#T` spelling, while the lexer and
+         * macro expansion use an internal prefix.  Normalise it here so a type
+         * argument captured from a macro template can be substituted later. */
+        std::string name = macro_parameter
+                               ? std::string(USER_MACRO_PARAM_PREFIX) + first
+                               : first;
         skip_space();
         while (peek() == '.') {
             ++pos_;

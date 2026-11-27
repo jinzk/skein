@@ -372,6 +372,23 @@ CASES = [
         expect_debug="[jit] enter hot",
     ),
     case(
+        "macro-generic-type-fragment-application",
+        "func id[T any](x: T): T { return x; }\n"
+        "struct Box[T any] { value: T; }\n"
+        "macro call(T: type, v: expr) {\n"
+        "  let b = Box[#T] { value: id[#T](#v) };\n"
+        "  return b.value;\n"
+        "}\n"
+        "func hot(n) {\n"
+        "  let total = 0;\n"
+        "  let i = 0;\n"
+        "  while (i < n) { total = total + call!(int, i); i = i + 1; }\n"
+        "  return total;\n"
+        "}\n"
+        "println(str(hot(100)));\n",
+        expect_debug="[jit] enter hot",
+    ),
+    case(
         "range-forin-fast-path",
         "import std;\n"
         "func hot(n) {\n"

@@ -50,6 +50,13 @@ const TypeNode *make_function_type(
     bool variadic = false, bool nullable = false,
     const TypeNode *rest = nullptr);
 const TypeNode *type_nullable(const TypeNode *type);
+/* Rebuild an interned node with substituted generic arguments.  Used when a
+ * user macro expands a captured type fragment containing placeholders. */
+const TypeNode *type_rebuild(const TypeNode *node,
+                             const std::vector<const TypeNode *> &args,
+                             const TypeNode *rest = nullptr);
+/* Own a flat constraint whose detail graph is an existing interned node. */
+struct type_constraint *type_constraint_from_node(const TypeNode *node);
 
 bool type_is_any(const TypeNode *type);
 bool type_is_container(const TypeNode *type);

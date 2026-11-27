@@ -414,12 +414,15 @@ def run_cases():
         stderr="only expr parameters support '...'",
     )
     check(
-        "user macro type fragment rejects generic arguments",
+        "user macro type fragment can fill generic annotations",
         'struct Box[T any] { value: T; }\n'
-        'macro bad(P: type) { let x: Box[#P] = 1; return 1; }\n'
-        'func test(): int { return bad!(int); }\n'
+        'macro make(P: type, v: expr) {\n'
+        '  let x: Box[#P] = Box[#P] { value: #v };\n'
+        '  return x.value;\n'
+        '}\n'
+        'func test(): int { return make!(int, 7); }\n'
         'println(str(test()));\n',
-        stderr="type fragment cannot be used inside a generic type",
+        stdout="7",
     )
     check(
         "user macro cannot generate declarations",
@@ -467,12 +470,20 @@ def run_cases():
         stdout="7",
     )
     check(
-        "user macro cannot generate generic calls with type fragments",
+        "user macro can generate generic calls with type fragments",
         'func id[T any](x: T) { return x; }\n'
-        'macro bad(T: type, v: expr) { return id[#T](#v); }\n'
-        'func test(): int { return bad!(int, 7); }\n'
+        'macro call(T: type, v: expr) { return id[#T](#v); }\n'
+        'func test(): int { return call!(int, 7); }\n'
         'println(str(test()));\n',
-        stderr="macro template cannot generate generic syntax",
+        stdout="7",
+    )
+    check(
+        "user macro can generate generic function values with type fragments",
+        'func id[T any](x: T) { return x; }\n'
+        'macro get(T: type) { let g = id[#T]; return g(7); }\n'
+        'func test(): int { return get!(int); }\n'
+        'println(str(test()));\n',
+        stdout="7",
     )
     check(
         "user macro can generate literal generic struct literals",
@@ -521,31 +532,53 @@ def run_cases():
         stdout="1",
     )
     check(
-        "user macro cannot generate generic struct literals with type fragments",
+        "user macro can generate generic struct literals with type fragments",
         'struct Box[T any] { value: T; }\n'
-        'macro bad(T: type) { let b = Box[#T] { value: 1 }; return 1; }\n'
-        'func test(): int { return bad!(int); }\n'
-        'println(str(test()));\n',
-        stderr="macro template cannot generate generic syntax",
-    )
-    check(
-        "user macro cannot generate generic enum literals with type fragments",
-        'enum Option[T any] { None; Some { value: T; } }\n'
-        'macro bad(T: type) { let o = Option[#T].None; return 1; }\n'
-        'func test(): int { return bad!(int); }\n'
-        'println(str(test()));\n',
-        stderr="macro template cannot generate generic syntax",
-    )
-    check(
-        "user macro cannot nest type fragments in literal generic arguments",
-        'struct Box[T any] { value: T; }\n'
-        'macro bad(T: type) {\n'
-        '  let b = Box[list[#T]] { value: [1] };\n'
-        '  return 1;\n'
+        'macro make(T: type, v: expr) {\n'
+        '  let b = Box[#T] { value: #v };\n'
+        '  return b.value;\n'
         '}\n'
+        'func test(): int { return make!(int, 7); }\n'
+        'println(str(test()));\n',
+        stdout="7",
+    )
+    check(
+        "user macro can generate generic enum literals with type fragments",
+        'enum Option[T any] { None; Some { value: T; } }\n'
+        'macro make(T: type, v: expr) {\n'
+        '  let o = Option[#T].Some { value: #v };\n'
+        '  return o.value;\n'
+        '}\n'
+        'func test(): int { return make!(int, 7); }\n'
+        'println(str(test()));\n',
+        stdout="7",
+    )
+    check(
+        "user macro can nest type fragments in literal generic arguments",
+        'struct Box[T any] { value: T; }\n'
+        'macro make(T: type, v: expr) {\n'
+        '  let b = Box[list[#T]] { value: [#v] };\n'
+        '  return b.value[0];\n'
+        '}\n'
+        'func test(): int { return make!(int, 7); }\n'
+        'println(str(test()));\n',
+        stdout="7",
+    )
+    check(
+        "user macro expr fragment cannot fill generic arguments",
+        'struct Box[T any] { value: T; }\n'
+        'macro bad(T: expr) { let b = Box[#T] { value: 1 }; return 1; }\n'
         'func test(): int { return bad!(int); }\n'
         'println(str(test()));\n',
-        stderr="macro template cannot generate generic syntax",
+        stderr="macro fragment cannot be used here",
+    )
+    check(
+        "user macro unknown placeholder in generic argument is rejected",
+        'struct Box[T any] { value: T; }\n'
+        'macro bad(T: type) { let b = Box[#Z] { value: 1 }; return 1; }\n'
+        'func test(): int { return bad!(int); }\n'
+        'println(str(test()));\n',
+        stderr="unknown macro placeholder",
     )
     check(
         "user macro type fragment cannot reach introspection",

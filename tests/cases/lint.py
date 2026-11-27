@@ -265,8 +265,8 @@ def run_cases():
         ),
         (
             "struct Box[T any] { value: T; }\n"
-            "macro bad(P: type) { let x: Box[#P] = 1; return 1; }\n",
-            "type fragment cannot be used inside a generic type",
+            "macro bad(P: expr) { let x: Box[#P] = 1; return 1; }\n",
+            "macro fragment cannot be used here",
         ),
     ]
     for source, expected in illegal_positions:
@@ -276,3 +276,19 @@ def run_cases():
         assert any(
             expected in item["message"] for item in payload["diagnostics"]
         ), payload
+
+    type_generic_usage = run_lint(
+        "struct Box[T any] { value: T; }\n"
+        "macro make(P: type, v: expr) {\n"
+        "  let x: Box[#P] = Box[#P] { value: #v };\n"
+        "  return x.value;\n"
+        "}\n",
+        "--typecheck=strict",
+        "--format=json",
+    )
+    assert type_generic_usage.returncode == 0, type_generic_usage.stderr
+    payload = json.loads(type_generic_usage.stdout)
+    assert not any(
+        "unused macro fragment" in item["message"]
+        for item in payload["diagnostics"]
+    ), payload

@@ -38,7 +38,7 @@
 | 对象抽象 / `proto` / `ref` / Channel 模型（M8） | 功能已完成 | Channel 端点对、结构化 `proto`、struct 内联方法、`_` 包私有成员，以及 `ref` / `weak` / GC / channel payload 拒绝已落地；文档同步完成，仅剩 Windows x64 MinGW/MSVC CI 发布门槛 |
 | 用户自定义泛型（M9） | 已完成 | 泛型 struct/enum/函数/proto、显式实例化、约束、默认类型参数、裸 `Box` 补全、递归、VM/JIT 擦除、`std.meta` 泛型入口和 JSON envelope 已完成；通用二进制值格式不在当前范围，按需再评估 |
 | 断言与内置语法宏（M10） | 已完成 | 第一批已完成：`std.assert` / `std.log.enabled` 与 assert、日志、`capture!` 内置 AST 宏已落地并通过全量验证；`list!` / `dict!` / `try!` 已决定不实现；用户自定义宏不在 M10 |
-| 用户自定义宏与保留字清理（M11，P1 / P2 / P3.1 / P4 含跨包 / P5.1–P5.5 / G1–G5 已完成） | 已完成 | AST 级静态模板、受限片段、hygienic、声明先于使用。`proto`、`import {name} from pkg`、prelude 默认 import、`list` / `dict` 构造器、`fail!` / `recover!` / `pass!` / `wait!` 宏、`launch` / `wait` / `await` 表达式起始 contextual、用户宏 v1 与跨包 `export macro` / `import {name!} from pkg;`，以及 `on` / `error` handler-scoped contextual、`as` / `ref` / `weak` / `is` contextual 均已落地；G1–G5 完成泛型实参 AST 化、受限 `type` 片段、定义期边界强化、formatter / lint / LSP / VM-JIT 同步与核心约束验收；设计见 [`docs/macros_user_defined.md`](macros_user_defined.md) |
+| 用户自定义宏与保留字清理（M11，P1 / P2 / P3.1 / P4 含跨包 / P5.1–P5.5 / G1–G6 已完成） | 已完成 | AST 级静态模板、受限片段、hygienic、声明先于使用。`proto`、`import {name} from pkg`、prelude 默认 import、`list` / `dict` 构造器、`fail!` / `recover!` / `pass!` / `wait!` 宏、`launch` / `wait` / `await` 表达式起始 contextual、用户宏 v1 与跨包 `export macro` / `import {name!} from pkg;`，以及 `on` / `error` handler-scoped contextual、`as` / `ref` / `weak` / `is` contextual 均已落地；G1–G6 完成泛型实参 AST 化、受限 `type` 片段、占位符泛型实参、定义期边界强化、formatter / lint / LSP / VM-JIT 同步与核心约束验收；设计见 [`docs/macros_user_defined.md`](macros_user_defined.md) |
 | 操作符重载（O0–O4） | O0–O4 已完成 | 自引用 proto 约束、`std.ops` 协议、算术/相等/比较运算符重写，以及标准库算法接入 `Comparable` 均已落地，见 2.9 |
 | 标准库 API 清理（P0–P4） | 已完成 | prelude 默认 import 文档、`kv.StoreApi`、`std.ops` 组合协议、`kv.OpenOptions` 与 `graph` 的 `result` envelope 已落地；下一轮按实际使用数据再评估 |
 | `std.cache`（M7）/ `std.kv` | 已完成 | 维护；Valkey 独立 CI 服务可按需补 |
@@ -59,9 +59,9 @@
 - P5.3：`ref` contextual；`ref(x)`、`ref Point { ... }` 与 `ref T` 前缀保持，其他位置是普通标识符
 - P5.4：`weak` contextual；只在 `weak T` 类型前缀位置作为关键字，其他位置是普通标识符
 - P5.5：`is` contextual；只在 `expr is T` / `case is T` 类型测试位置作为运算符，其他位置是普通标识符
-- G1–G5：泛型实参 AST 化、用户宏受限 `type` 片段与定义期边界强化；formatter /
-  lint / LSP 覆盖、调用点与定义点双位置诊断、VM/JIT differential 同步，以及
-  核心约束验收
+- G1–G6：泛型实参 AST 化、用户宏受限 `type` 片段、占位符泛型实参与定义期边界强化；
+  formatter / lint / LSP 覆盖、调用点与定义点双位置诊断、VM/JIT differential 同步，
+  以及核心约束验收
 - 标准库 API 清理 P0–P4：文档对齐默认 import 语义、`kv.StoreApi` 门面、
   `std.ops` 组合约束、`kv.OpenOptions` 具名选项，以及 `graph` 的内置泛型
   `result` envelope 入口；旧调用形状保持兼容
@@ -551,12 +551,13 @@ keyword（`in` / `export` / `import` / `package` / `include`）已完成。其�
 空间保持独立。
 设计细节见 [`docs/macros_user_defined.md`](macros_user_defined.md)。
 
-#### 后续计划：宏与泛型结合（G1–G5 已完成）
+#### 后续计划：宏与泛型结合（G1–G6 已完成）
 
-M11 继续保持“类型片段不进入泛型实参”的边界。当前可用组合是：模板里可以写
-字面显式泛型应用（`Box[int] { ... }` / `f[int](...)`），parser 在宏定义点捕获实参；
-宏也可以接收已绑定泛型值或生成普通调用交给类型推断。仍不允许用 `type` 片段生成
-`Box[#T]` / `f[#T](...)`。G1–G5 按以下顺序推进：
+M11 继续保持“宏不替代泛型声明”的边界。当前可用组合是：模板里可以写字面显式泛型
+应用（`Box[int] { ... }` / `f[int](...)`），parser 在宏定义点捕获实参；宏也可以用
+`type` 片段填充这些实参（`Box[#T]` / `f[#T](...)` / `Box[list[#T]]`），展开时把
+调用点已有类型名替换进捕获的 AST。宏仍不得生成类型参数、类型约束或泛型声明，
+也不做类型计算或类型内省。G1–G6 按以下顺序推进：
 
 1. **G1 AST 化泛型实参（已完成）**：parser 一次解析显式类型实参并存入 AST；
    typechecker 不再从原始源码文本恢复 `Box[int]` / `f[int](...)` / `let g = f[int]`
@@ -565,8 +566,8 @@ M11 继续保持“类型片段不进入泛型实参”的边界。当前可用�
    增加只出现在类型位置的 `T: type`；片段按类型命名空间解析并参与 hygiene：
    调用点传入的名字保留调用点拼写与 import 别名，模板内字面类型名按定义点解析。
    `proto` 名称（`Drawable`、`pkg.Keyed`）作为类型命名空间实体一并支持：可用于
-    类型标注与 `is #T`；`[V proto Drawable]` 在普通源码继续可用，但宏模板仍
-    不得生成泛型声明或实参，因此 `Box[#P]` / `f[#T](...)` 明确拒绝。
+    类型标注与 `is #T`；`[V proto Drawable]` 在普通源码继续可用。G2 自身不引入
+    泛型实参片段，`Box[#P]` / `f[#T](...)` 在 G6 中按类型位置替换规则放开。
     `Hashable` / `Iterable` 等 proto 约束仍需专用约束片段，不混入 `type` 片段。
      复合类型实参用显式 `type(...)` 包装（`type(list[int])`、`type((int) -> int)`）；
      它只切换 parser 到类型语法，不扩展为表达式包装或编译期执行。
@@ -574,8 +575,8 @@ M11 继续保持“类型片段不进入泛型实参”的边界。当前可用�
    语法。模板体不得生成 `struct` / `enum` / `proto` / `impl` 或具名 `func` 声明
    （`macro template cannot generate declarations`）。字面显式泛型应用
    （`f[int](...)` / `let g = f[int]` / `Box[int] { ... }`）允许，实参由 parser 在
-   定义点捕获并通过 AST clone 复制；把 `type` 片段放进泛型实参
-   （`f[#T](...)` / `Box[list[#T]]`）仍报 `macro template cannot generate generic syntax`。
+   定义点捕获并通过 AST clone 复制。此时 `type` 片段放进泛型实参仍被拒绝，
+   该限制由 G6 放开。
    `impl Box[int]` 本身在 parser 阶段就是语法错误。类型片段不能进入反射 builtin
    （`kind_of(#T)` 等报
    `type fragment cannot be used as a value or name`），不做类型计算或类型内省。
@@ -594,7 +595,13 @@ M11 继续保持“类型片段不进入泛型实参”的边界。当前可用�
    或宏递归。新增负例确认字符串/注释里的宏调用文本不会被替换、未调用模板既不会
    执行也不会触发类型检查、宏名不能作为一等值使用，并补齐 `enum` / `proto`
    声明、`type_name` 反射入口与片段位置误用；与已有的 hygiene、声明先于使用、
-   递归禁止、泛型语法/声明禁止、类型片段非法位置测试一起构成 G5 验收矩阵。
+   递归禁止、模板声明与非法泛型语法禁止、类型片段非法位置测试一起构成 G5 验收矩阵。
+6. **G6 `type` 片段进入泛型实参（已完成）**：宏模板可以把调用点已有的类型名放进
+   显式泛型实参：`f[#T](...)` / `let g = f[#T]` / `Box[#T] { ... }` /
+   `Option[#T].Some` / `let x: Box[#T]`，包括 `Box[list[#T]]` 这类嵌套组合。
+   实参仍由 parser 在宏定义点捕获进 AST；展开时对捕获的类型图递归替换占位符，
+   不回读源码，也不生成类型参数、约束、泛型声明或类型计算。错误片段位置和非
+   `type` 片段仍报 `macro fragment cannot be used here`。
 
 ### 2.9 操作符重载（O0–O4 已完成）
 

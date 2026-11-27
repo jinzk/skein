@@ -144,21 +144,6 @@ struct type_constraint *dup_type(const struct type_constraint *type) {
     return copy;
 }
 
-struct generic_type_arg *dup_generic_type_args(
-    const struct generic_type_arg *args) {
-    struct generic_type_arg *head = NULL;
-    struct generic_type_arg *tail = NULL;
-    for (const struct generic_type_arg *arg = args; arg; arg = arg->next) {
-        struct generic_type_arg *copy = newgenerictypearg(dup_type(arg->type));
-        if (tail)
-            tail->next = copy;
-        else
-            head = copy;
-        tail = copy;
-    }
-    return head;
-}
-
 struct related_scope;
 thread_local const related_scope *g_related_scope = NULL;
 
@@ -287,30 +272,59 @@ bool macro_type_placeholder(const struct type_constraint *type,
     return placeholder_of(type->name, param);
 }
 
-bool type_constraint_contains_placeholder(const struct type_constraint *type) {
-    if (!type)
-        return false;
-    if (placeholder_of(type->name, NULL))
-        return true;
-    /* Generic and function types keep their arguments in the interned detail
-     * graph; their display string is the stable user-facing spelling of those
-     * names. */
-    return type->display &&
-           std::strstr(type->display, USER_MACRO_PARAM_PREFIX) != NULL;
-}
-
-bool generic_type_args_contain_placeholder(
-    const struct generic_type_arg *args) {
-    for (const struct generic_type_arg *arg = args; arg; arg = arg->next) {
-        if (type_constraint_contains_placeholder(arg->type))
-            return true;
-    }
-    return false;
-}
-
 bool invalid_template_generic_args(const struct generic_type_arg *args,
                                    const char *error) {
-    return error != NULL || generic_type_args_contain_placeholder(args);
+    (void)args;
+    return error != NULL;
+}
+
+/* Replace `#T` nodes anywhere inside an interned type graph with the
+ * call-site type.  Generic arguments are captured in the graph rather than in
+ * the flat constraint, so nested forms such as `Box[list[#T]]` need recursive
+ * substitution before typechecking sees the expanded AST. */
+const skein::typecheck::TypeNode *substitute_type_node(
+    const skein::typecheck::TypeNode *node, expansion_state &state, int line,
+    int column, bool &changed) {
+    if (!node)
+        return skein::typecheck::type_any();
+    std::string param_name;
+    if (placeholder_of(node->name.c_str(), &param_name)) {
+        auto it = state.values.find(param_name);
+        if (it == state.values.end()) {
+            report_at(line, column, "unknown macro placeholder",
+                      param_name.c_str());
+            state.failed = true;
+            return skein::typecheck::type_any();
+        }
+        if (it->second.kind != user_macro_param_kind::type ||
+            !it->second.type) {
+            report_at(line, column, "macro fragment cannot be used here",
+                      param_name.c_str());
+            state.failed = true;
+            return skein::typecheck::type_any();
+        }
+        mark_used(state, param_name);
+        changed = true;
+        const skein::typecheck::TypeNode *substituted =
+            skein::typecheck::type_from_constraint(it->second.type);
+        return node->nullable
+                   ? skein::typecheck::type_nullable(substituted)
+                   : substituted;
+    }
+
+    bool nested = false;
+    std::vector<const skein::typecheck::TypeNode *> args;
+    args.reserve(node->args.size());
+    for (const skein::typecheck::TypeNode *arg : node->args)
+        args.push_back(substitute_type_node(arg, state, line, column, nested));
+    const skein::typecheck::TypeNode *rest =
+        node->rest ? substitute_type_node(node->rest, state, line, column,
+                                          nested)
+                   : NULL;
+    changed = changed || nested;
+    if (!nested)
+        return node;
+    return skein::typecheck::type_rebuild(node, args, rest);
 }
 
 /* Replace `#T` type placeholders with the call-site constraint.  Literal
@@ -345,12 +359,32 @@ struct type_constraint *substitute_type(const struct type_constraint *type,
             copy = skein::typecheck::type_apply_nullable(copy);
         return copy;
     }
-    if (type_constraint_contains_placeholder(type)) {
-        report_at(line, column,
-                  "type fragment cannot be used inside a generic type");
-        state.failed = true;
+
+    bool changed = false;
+    const skein::typecheck::TypeNode *node =
+        skein::typecheck::type_from_constraint(type);
+    const skein::typecheck::TypeNode *rebuilt =
+        substitute_type_node(node, state, line, column, changed);
+    if (!changed)
+        return dup_type(type);
+    return skein::typecheck::type_constraint_from_node(rebuilt);
+}
+
+struct generic_type_arg *substitute_generic_type_args(
+    const struct generic_type_arg *args, expansion_state &state, int line,
+    int column) {
+    struct generic_type_arg *head = NULL;
+    struct generic_type_arg *tail = NULL;
+    for (const struct generic_type_arg *arg = args; arg; arg = arg->next) {
+        struct generic_type_arg *copy = newgenerictypearg(
+            substitute_type(arg->type, state, line, column));
+        if (tail)
+            tail->next = copy;
+        else
+            head = copy;
+        tail = copy;
     }
-    return dup_type(type);
+    return head;
 }
 
 template <typename T>
@@ -550,9 +584,9 @@ struct ast *clone_node(const struct ast *node, expansion_state &state,
     }
 
     /* Literal generic applications are ordinary template syntax: their type
-     * arguments were captured by the parser at the definition point.  A type
-     * fragment inside a generic argument list still crosses the boundary and
-     * stays rejected. */
+     * arguments were captured by the parser at the definition point.  Type
+     * fragments may now appear inside those arguments and are substituted as
+     * ordinary type positions; parser errors captured in the AST still fail. */
     if (state.template_body && node->nodetype == 'y') {
         const struct struct_lit_node *lit =
             (const struct struct_lit_node *)node;
@@ -707,8 +741,16 @@ struct ast *clone_node(const struct ast *node, expansion_state &state,
             }
             struct index_node *copy = copy_node(source);
             copy->l = clone_node(node->l, state, clone_context::expr);
-            copy->r = clone_node(node->r, state, clone_context::expr);
-            copy->type_args = dup_generic_type_args(source->type_args);
+            /* The bracket expression is syntax only for an explicit generic
+             * application.  It may contain a `#T` placeholder; cloning it as
+             * an expression would reject a valid type argument, so keep the
+             * captured type_args and drop the unneeded index expression. */
+            copy->r =
+                (source->generic_candidate || source->generic_function_value)
+                    ? NULL
+                    : clone_node(node->r, state, clone_context::expr);
+            copy->type_args = substitute_generic_type_args(
+                source->type_args, state, node->line, node->column);
             copy->type_args_error = source->type_args_error
                                         ? copy_string(source->type_args_error)
                                         : NULL;
@@ -959,7 +1001,8 @@ struct ast *clone_node(const struct ast *node, expansion_state &state,
             struct struct_lit_node *copy = copy_node(source);
             copy->name = source->name ? copy_string(source->name) : NULL;
             copy->source = source->source ? copy_string(source->source) : NULL;
-            copy->type_args = dup_generic_type_args(source->type_args);
+            copy->type_args = substitute_generic_type_args(
+                source->type_args, state, node->line, node->column);
             copy->type_args_error = source->type_args_error
                                         ? copy_string(source->type_args_error)
                                         : NULL;
@@ -976,7 +1019,8 @@ struct ast *clone_node(const struct ast *node, expansion_state &state,
             copy->source = source->source ? copy_string(source->source) : NULL;
             copy->variant = source->variant ? copy_string(source->variant)
                                             : NULL;
-            copy->type_args = dup_generic_type_args(source->type_args);
+            copy->type_args = substitute_generic_type_args(
+                source->type_args, state, node->line, node->column);
             copy->type_args_error = source->type_args_error
                                         ? copy_string(source->type_args_error)
                                         : NULL;

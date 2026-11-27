@@ -389,6 +389,28 @@ const TypeNode *type_nullable(const TypeNode *type) {
     return type_container(TYPE_UNION, members);
 }
 
+const TypeNode *type_rebuild(const TypeNode *node,
+                             const std::vector<const TypeNode *> &args,
+                             const TypeNode *rest) {
+    if (!node)
+        return type_any();
+    return intern_type(node->kind, node->name, node->source, node->nullable,
+                       args, node->optional_params, node->variadic, rest);
+}
+
+struct type_constraint *type_constraint_from_node(const TypeNode *node) {
+    if (!node)
+        return NULL;
+    struct type_constraint *type = new_named_type_constraint(
+        node->name.empty() ? NULL : node->name.c_str(),
+        node->source.empty() ? NULL : node->source.c_str());
+    type->kind = node->kind;
+    type->nullable = node->nullable;
+    type->display = node->display.c_str();
+    attach_type_detail(type, node);
+    return type;
+}
+
 static const TypeNode *expand_generic_defaults(const TypeNode *node) {
     if (!node || node->kind != TYPE_NAMED || !node->args.empty())
         return node;

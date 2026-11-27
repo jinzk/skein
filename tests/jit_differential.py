@@ -309,6 +309,51 @@ CASES = [
         "println(str(sum(2000)));\n",
         expect_debug="[jit] enter sum",
     ),
+    case(
+        "macro-type-fragment-annotation",
+        "macro pick(T: type, v: expr) { let x: #T = #v; return x; }\n"
+        "func hot(n) {\n"
+        "  let total = 0;\n"
+        "  let i = 0;\n"
+        "  while (i < n) { total = total + pick!(int, i); i = i + 1; }\n"
+        "  return total;\n"
+        "}\n"
+        "println(str(hot(100)));\n",
+        expect_debug="[jit] enter hot",
+    ),
+    case(
+        "macro-type-fragment-wrappers",
+        "macro wrappers(T: type) {\n"
+        "  let r: ref #T? = null;\n"
+        "  let w: weak #T? = null;\n"
+        "  return 1;\n"
+        "}\n"
+        "func hot(n) {\n"
+        "  let total = 0;\n"
+        "  let i = 0;\n"
+        "  while (i < n) { total = total + wrappers!(int); i = i + 1; }\n"
+        "  return total;\n"
+        "}\n"
+        "println(str(hot(100)));\n",
+        expect_debug="[jit] enter hot",
+    ),
+    case(
+        "macro-type-fragment-cast-is",
+        "macro cast_it(T: type, v: expr) { let x = #v as #T; return x; }\n"
+        "macro is_it(T: type, v: expr) { return #v is #T; }\n"
+        "func hot(n) {\n"
+        "  let total = 0;\n"
+        "  let i = 0;\n"
+        "  while (i < n) {\n"
+        "    let x = cast_it!(int, i);\n"
+        "    if is_it!(int, x) { total = total + x; }\n"
+        "    i = i + 1;\n"
+        "  }\n"
+        "  return total;\n"
+        "}\n"
+        "println(str(hot(100)));\n",
+        expect_debug="[jit] enter hot",
+    ),
 ]
 
 

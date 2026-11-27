@@ -314,6 +314,34 @@ def run_cases():
         stdout="true",
     )
     check(
+        "user macro type fragment nullable",
+        "macro nullable(T: type, v: expr) { let x: #T? = #v; return x == null; }\n"
+        "func test(): bool { return nullable!(int, 7); }\n"
+        "println(str(test()));\n",
+        stdout="false",
+    )
+    check(
+        "user macro type fragment ref and weak",
+        "macro wrappers(T: type) {\n"
+        "  let r: ref #T? = null;\n"
+        "  let w: weak #T? = null;\n"
+        "  return 1;\n"
+        "}\n"
+        "func test(): int { return wrappers!(int); }\n"
+        "println(str(test()));\n",
+        stdout="1",
+    )
+    check(
+        "user macro type fragment function parameter and return",
+        "macro mkfn(T: type) {\n"
+        "  let f = func(x: #T): #T { return x; };\n"
+        "  return f(7);\n"
+        "}\n"
+        "func test(): int { return mkfn!(int); }\n"
+        "println(str(test()));\n",
+        stdout="7",
+    )
+    check(
         "user macro type fragment must be a type name",
         'macro bad(T: type) { return 1; }\n'
         'func test(): int { return bad!(1 + 2); }\n'

@@ -15,6 +15,13 @@ package graph {
     next_edge: int;
   }
 
+  // Typed payload for the built-in generic result envelope.  The original
+  // dict-shaped graph results remain unchanged.
+  export struct PathResult {
+    path: list[int];
+    cost: number;
+  }
+
   export func new() {
     return Graph { nodes: {}, edges: {}, next_node: 1, next_edge: 1 };
   }
@@ -503,6 +510,33 @@ package graph {
       "path": std.deque.to_list(path),
       "cost": dist[to]
     };
+  }
+
+  export func topo_sort_result(g): result[list[int], error] {
+    let raw = topo_sort(g);
+    if (!raw["ok"]) {
+      return std.result.err(raw["error"]);
+    }
+    return std.result.ok(raw["order"]);
+  }
+
+  export func path_result(g, from, to): result[list[int], error] {
+    let raw = path(g, from, to);
+    if (!raw["ok"]) {
+      return std.result.err(raw["error"]);
+    }
+    return std.result.ok(raw["path"]);
+  }
+
+  export func shortest_path_result(g, from, to, weight_fn = null): result[PathResult, error] {
+    let raw = shortest_path(g, from, to, weight_fn);
+    if (!raw["ok"]) {
+      return std.result.err(raw["error"]);
+    }
+    return std.result.ok(PathResult {
+      path: raw["path"],
+      cost: raw["cost"]
+    });
   }
 
   export func components(g) {

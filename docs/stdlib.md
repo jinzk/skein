@@ -3398,11 +3398,18 @@ graph.subgraph(g, [a])        // 指定节点子图
 graph.to_dot(g)               // Graphviz 文本
 ```
 
-API：`new` / `add_node` / `add_nodes` / `remove_node` / `has_node` / `get_node` / `set_node` / `node_count` / `edge_count` / `node_ids` / `nodes` / `add_edge` / `add_edges` / `from_edges` / `remove_edge` / `edges` / `neighbors` / `bfs` / `dfs` / `topo_sort` / `has_cycle` / `path` / `shortest_path` / `components` / `reverse` / `subgraph` / `to_dot`。
+API：`new` / `add_node` / `add_nodes` / `remove_node` / `has_node` / `get_node` / `set_node` / `node_count` / `edge_count` / `node_ids` / `nodes` / `add_edge` / `add_edges` / `from_edges` / `remove_edge` / `edges` / `neighbors` / `bfs` / `dfs` / `topo_sort` / `topo_sort_result` / `has_cycle` / `path` / `path_result` / `shortest_path` / `shortest_path_result` / `components` / `reverse` / `subgraph` / `to_dot`。
 
 `add_nodes(g, values)` 返回 `{graph, ids}`；`add_edges(g, edges)` 批量添加 `[from, to[, tag[, weight]]]`；`from_edges(count, edges)` 直接构造 1..count 节点的图。批量入口只触发一次 COW，O(V+E)。
 
 `add_node` / `add_edge` 返回 `{graph, id}`；`add_edge(g, from, to, tag = "", weight = 1)`，`weight` 必须非负；删除节点会级联删除相关边；边标签字段是 `tag`。`shortest_path(g, from, to, weight_fn = null)` 默认用边权重，也可传 `func(edge) -> number`。
+
+`topo_sort` / `path` / `shortest_path` 的旧 dict envelope 形式保持不变。另提供返回内置泛型
+`result[T, error]` 的入口：`topo_sort_result(g)` 与 `path_result(g, from, to)` 返回
+`result[list[int], error]`，`shortest_path_result(g, from, to[, weight_fn])` 返回
+`result[PathResult, error]`（`PathResult { path: list[int], cost: number }`）。用
+`std.result.is_ok` / `std.result.value` / `std.result.error` 访问；只在内嵌包里增加包装，不改变
+运行时 ABI。
 
 性能提示：`add_node` / `add_edge` 每次为值语义复制对应 dict（O(V) / O(E)/次），大图请用 `add_nodes` / `add_edges` / `from_edges` 批量构造；`bfs` / `dfs` / `topo_sort` / `path` / `components` / `shortest_path` 会先构建一次邻接表，遍历为 O(V+E)，单次 `neighbors` 仍扫描全部边 O(E)。
 

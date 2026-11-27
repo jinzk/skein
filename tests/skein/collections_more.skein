@@ -218,6 +218,40 @@ ts_test("graph shortest_path missing node", func() {
   ts_eq(found["error"], "node not found");
 });
 
+ts_test("graph generic result envelopes", func() {
+  let g = graph.from_edges(3, [[1, 2], [2, 3]]);
+  let topo = graph.topo_sort_result(g);
+  ts_true(std.result.is_ok(topo));
+  ts_eq(std.result.value(topo), [1, 2, 3]);
+  let found = graph.path_result(g, 1, 3);
+  ts_true(std.result.is_ok(found));
+  ts_eq(std.result.value(found), [1, 2, 3]);
+  let missing = graph.path_result(g, 3, 1);
+  ts_false(std.result.is_ok(missing));
+  ts_eq(std.result.error(missing), "not found");
+
+  let shortest = graph.shortest_path_result(g, 1, 3);
+  ts_true(std.result.is_ok(shortest));
+  let route = std.result.value(shortest);
+  ts_eq(route.path, [1, 2, 3]);
+  ts_eq(route.cost, 2);
+
+  let cyclic = graph.new();
+  let r = graph.add_node(cyclic, "a");
+  cyclic = r["graph"];
+  let a = r["id"];
+  r = graph.add_node(cyclic, "b");
+  cyclic = r["graph"];
+  let b = r["id"];
+  r = graph.add_edge(cyclic, a, b);
+  cyclic = r["graph"];
+  r = graph.add_edge(cyclic, b, a);
+  cyclic = r["graph"];
+  let invalid = graph.topo_sort_result(cyclic);
+  ts_false(std.result.is_ok(invalid));
+  ts_eq(std.result.error(invalid), "cycle");
+});
+
 ts_test("lru basics", func() {
   let l = lru.new(2);
   let r = lru.put(l, "a", 1);

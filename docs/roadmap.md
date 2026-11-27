@@ -40,6 +40,7 @@
 | 断言与内置语法宏（M10） | 已完成 | 第一批已完成：`std.assert` / `std.log.enabled` 与 assert、日志、`capture!` 内置 AST 宏已落地并通过全量验证；`list!` / `dict!` / `try!` 已决定不实现；用户自定义宏不在 M10 |
 | 用户自定义宏与保留字清理（M11，P1 / P2 / P3.1 / P4 含跨包 / P5.1–P5.5 / G1–G5 已完成） | 已完成 | AST 级静态模板、受限片段、hygienic、声明先于使用。`proto`、`import {name} from pkg`、prelude 默认 import、`list` / `dict` 构造器、`fail!` / `recover!` / `pass!` / `wait!` 宏、`launch` / `wait` / `await` 表达式起始 contextual、用户宏 v1 与跨包 `export macro` / `import {name!} from pkg;`，以及 `on` / `error` handler-scoped contextual、`as` / `ref` / `weak` / `is` contextual 均已落地；G1–G5 完成泛型实参 AST 化、受限 `type` 片段、定义期边界强化、formatter / lint / LSP / VM-JIT 同步与核心约束验收；设计见 [`docs/macros_user_defined.md`](macros_user_defined.md) |
 | 操作符重载（O0–O4） | O0–O4 已完成 | 自引用 proto 约束、`std.ops` 协议、算术/相等/比较运算符重写，以及标准库算法接入 `Comparable` 均已落地，见 2.9 |
+| 标准库 API 清理（P0–P4） | 已完成 | prelude 默认 import 文档、`kv.StoreApi`、`std.ops` 组合协议、`kv.OpenOptions` 与 `graph` 的 `result` envelope 已落地；下一轮按实际使用数据再评估 |
 | `std.cache`（M7）/ `std.kv` | 已完成 | 维护；Valkey 独立 CI 服务可按需补 |
 | FFI 平台 CI / fuzz | 按需 | Windows x64（MinGW/MSVC）进入正式发布；32 位 / ARM 与 fuzz 按需，见 `architecture.md` |
 
@@ -61,6 +62,9 @@
 - G1–G5：泛型实参 AST 化、用户宏受限 `type` 片段与定义期边界强化；formatter /
   lint / LSP 覆盖、调用点与定义点双位置诊断、VM/JIT differential 同步，以及
   核心约束验收
+- 标准库 API 清理 P0–P4：文档对齐默认 import 语义、`kv.StoreApi` 门面、
+  `std.ops` 组合约束、`kv.OpenOptions` 具名选项，以及 `graph` 的内置泛型
+  `result` envelope 入口；旧调用形状保持兼容
 
 ### 1.2 推荐执行顺序
 

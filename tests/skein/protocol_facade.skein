@@ -5,6 +5,7 @@ import std.metrics;
 import std.auth;
 import std.web;
 import std.kv;
+import std.fsm;
 include "_support.skein";
 
 struct FacadeCacheStub {
@@ -53,6 +54,13 @@ func facade_web(l: web.LimiterApi) {
   l.cleanup();
 }
 
+func facade_fsm(m: fsm.MachineApi) {
+  ts_eq(m.initial(), 0);
+  let ctx = m.start();
+  ctx = m.step(ctx, 2);
+  return m.run(ctx, [3, 4]);
+}
+
 ts_test("protocol facade implements", func() {
   ts_true(std.meta.implements("route.Router", "route.RouterApi"));
   ts_true(std.meta.implements("cache.Client", "cache.ClientApi"));
@@ -60,6 +68,7 @@ ts_test("protocol facade implements", func() {
   ts_true(std.meta.implements("auth.SessionStore", "auth.SessionStoreApi"));
   ts_true(std.meta.implements("web.Limiter", "web.LimiterApi"));
   ts_true(std.meta.implements("kv.Store", "kv.StoreApi"));
+  ts_true(std.meta.implements("fsm.Machine", "fsm.MachineApi"));
   ts_true(FacadeCacheStub {} is cache.ClientApi);
 });
 
@@ -81,6 +90,13 @@ ts_test("protocol facade auth", func() {
 
 ts_test("protocol facade web", func() {
   facade_web(web.rate_limit({"limit": 1}));
+});
+
+ts_test("protocol facade fsm", func() {
+  let m = fsm.define(0, func(state, event) { return state + event; });
+  let ctx = facade_fsm(m);
+  ts_eq(ctx.state, 9);
+  ts_eq(fsm.history(ctx), [0, 2, 5, 9]);
 });
 
 ts_test("protocol method values", func() {

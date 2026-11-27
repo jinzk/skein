@@ -2341,6 +2341,11 @@ ctx = fsm.redo(ctx);       // state 6
 
 API：`define` / `initial` / `start` / `step` / `run` / `history` / `undo` / `redo` / `snapshot` / `restore`。
 
+`Machine` 的操作是满足 `fsm.MachineApi` 的方法：`initial` / `start` / `step` / `run`。
+函数参数可标注 `m: fsm.MachineApi` 做类型检查；原来的 callable 字段已改为包私有 `_`
+字段，包级同名函数 `fsm.step(m, ctx, event)` 仍可用。`Context` 的 `history` / `undo` /
+`redo` / `snapshot` / `restore` 保持包级函数形式。
+
 `define(initial, step[, on_transition])` 支持可选的转换回调；enum / struct 状态会校验 `step` 返回值仍是同一类型。单步 `step` 每次 O(history)；批量 `run` 在单次调用内完成，整体 O(events)。
 
 `snapshot` 返回普通 dict，可 JSON 持久化；`restore` 重建历史并校验。枚举状态在 JSON 往返时通过 `std.enum.decode` 自动恢复：

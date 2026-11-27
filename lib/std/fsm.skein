@@ -22,12 +22,12 @@ package fsm {
   }
 
   export struct Machine {
-    initial: any;
-    step: Callable;
-    on_transition: any;
-    kind: string;
-    name: string;
-    package_name: string;
+    _initial: any;
+    _step: Callable;
+    _on_transition: any;
+    _kind: string;
+    _name: string;
+    _package_name: string;
   }
 
   export struct Context {
@@ -35,6 +35,30 @@ package fsm {
     _history: any;
     _head: int;
     _redo: list;
+  }
+
+  // Operations live in private callable fields; MachineApi is the public
+  // structural contract.  Package-level helpers keep their existing names.
+  proto MachineApi {
+    func initial(self);
+    func start(self);
+    func step(self, ctx: Context, event: any);
+    func run(self, ctx: Context, events: any);
+  }
+
+  impl Machine {
+    func initial(self) {
+      return self._initial;
+    }
+    func start(self) {
+      return fsm.start(self);
+    }
+    func step(self, ctx: Context, event: any) {
+      return fsm.step(self, ctx, event);
+    }
+    func run(self, ctx: Context, events: any) {
+      return fsm.run(self, ctx, events);
+    }
   }
 
   func _t_new() {
@@ -207,23 +231,23 @@ package fsm {
     }
 
     return Machine {
-      initial: initial,
-      step: step as Callable,
-      on_transition: on_transition as Callable,
-      kind: kind_of(initial),
-      name: type_name(initial),
-      package_name: type_package(initial)
+      _initial: initial,
+      _step: step as Callable,
+      _on_transition: on_transition as Callable,
+      _kind: kind_of(initial),
+      _name: type_name(initial),
+      _package_name: type_package(initial)
     };
   }
 
   export func initial(m) {
-    return m.initial;
+    return m._initial;
   }
 
   export func start(m) {
-    let r = _t_add(_t_new(), m.initial, _NIL);
+    let r = _t_add(_t_new(), m._initial, _NIL);
     return Context {
-      state: m.initial,
+      state: m._initial,
       _history: r.table,
       _head: r.id,
       _redo: []
@@ -231,19 +255,19 @@ package fsm {
   }
 
   export func step(m, ctx, event) {
-    let next = m.step(ctx.state, event);
+    let next = m._step(ctx.state, event);
 
-    if (m.kind == "enum" || m.kind == "struct") {
-      if (kind_of(next) != m.kind ||
-          type_name(next) != m.name ||
-          type_package(next) != m.package_name) {
-        fail("step must return " + m.name + ", got " +
+    if (m._kind == "enum" || m._kind == "struct") {
+      if (kind_of(next) != m._kind ||
+          type_name(next) != m._name ||
+          type_package(next) != m._package_name) {
+        fail("step must return " + m._name + ", got " +
              kind_of(next) + " " + type_name(next));
       }
     }
 
-    if (m.on_transition != null) {
-      m.on_transition(ctx.state, event, next);
+    if (m._on_transition != null) {
+      m._on_transition(ctx.state, event, next);
     }
 
     let r = _t_add(ctx._history, next, ctx._head);
@@ -257,19 +281,19 @@ package fsm {
 
   export func run(m, ctx, events) {
     for (let event in events) {
-      let next = m.step(ctx.state, event);
+      let next = m._step(ctx.state, event);
 
-      if (m.kind == "enum" || m.kind == "struct") {
-        if (kind_of(next) != m.kind ||
-            type_name(next) != m.name ||
-            type_package(next) != m.package_name) {
-          fail("step must return " + m.name + ", got " +
+      if (m._kind == "enum" || m._kind == "struct") {
+        if (kind_of(next) != m._kind ||
+            type_name(next) != m._name ||
+            type_package(next) != m._package_name) {
+          fail("step must return " + m._name + ", got " +
                kind_of(next) + " " + type_name(next));
         }
       }
 
-      if (m.on_transition != null) {
-        m.on_transition(ctx.state, event, next);
+      if (m._on_transition != null) {
+        m._on_transition(ctx.state, event, next);
       }
 
       // Inline _t_add: after the first COW fork inside this call, the history

@@ -494,6 +494,65 @@ def run_cases():
         stdout="6",
     )
 
+    # G5 core constraints: no text expansion, no compile-time execution, no
+    # first-class macro values.  Hygiene, declaration-before-use, recursion,
+    # generics boundaries and type introspection are covered above.
+    check(
+        "G5 macro call text is not textually expanded",
+        'macro twice(x: expr) { return #x * 2; }\n'
+        'let s = "twice!(21)";\n'
+        '// twice!(99)\n'
+        'let twice = 7;\n'
+        'println(s);\n'
+        'println(str(twice));\n',
+        stdout="twice!(21)\n7",
+    )
+    check(
+        "G5 unused macro is neither executed nor typechecked",
+        'macro side() {\n'
+        '  let x: int = "not checked before expansion";\n'
+        '  println("TEMPLATE RAN");\n'
+        '  return x;\n'
+        '}\n'
+        'println("DONE");\n',
+        stdout="DONE",
+    )
+    check(
+        "G5 macro is not a first-class value",
+        'macro twice(x: expr) { return #x * 2; }\n'
+        'let f = twice;\n'
+        'println(str(f(2)));\n',
+        stderr="symbol not found twice",
+    )
+    check(
+        "user macro cannot generate enum declarations",
+        'macro bad() { enum E { A; } return 1; }\n'
+        'func test(): int { return bad!(); }\n',
+        stderr="macro template cannot generate declarations",
+    )
+    check(
+        "user macro cannot generate proto declarations",
+        'macro bad() { proto P { func f(self); } return 1; }\n'
+        'func test(): int { return bad!(); }\n',
+        stderr="macro template cannot generate declarations",
+    )
+    check(
+        "user macro type fragment cannot reach type_name",
+        'macro bad(T: type) { let k = type_name(#T); return 1; }\n'
+        'func test(): int { return bad!(int); }\n',
+        stderr="type fragment cannot be used as a value or name",
+    )
+    check(
+        "user macro expr list cannot be used as a value",
+        'macro bad(xs: expr...) { return #xs; }\n',
+        stderr="expr... fragment must be used in an argument list",
+    )
+    check(
+        "user macro block fragment cannot be used as an expression",
+        'macro bad(b: block) { let x = #b; return 1; }\n',
+        stderr="unexpected macro block fragment",
+    )
+
     # Cross-package user macros (P4.3).
     with tempfile.TemporaryDirectory() as tmp:
         def write(rel, text):

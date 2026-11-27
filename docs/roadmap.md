@@ -38,7 +38,7 @@
 | 对象抽象 / `proto` / `ref` / Channel 模型（M8） | 功能已完成 | Channel 端点对、结构化 `proto`、struct 内联方法、`_` 包私有成员，以及 `ref` / `weak` / GC / channel payload 拒绝已落地；文档同步完成，仅剩 Windows x64 MinGW/MSVC CI 发布门槛 |
 | 用户自定义泛型（M9） | 已完成 | 泛型 struct/enum/函数/proto、显式实例化、约束、默认类型参数、裸 `Box` 补全、递归、VM/JIT 擦除、`std.meta` 泛型入口和 JSON envelope 已完成；通用二进制值格式不在当前范围，按需再评估 |
 | 断言与内置语法宏（M10） | 已完成 | 第一批已完成：`std.assert` / `std.log.enabled` 与 assert、日志、`capture!` 内置 AST 宏已落地并通过全量验证；`list!` / `dict!` / `try!` 已决定不实现；用户自定义宏不在 M10 |
-| 用户自定义宏与保留字清理（M11，P1 / P2 / P3.1 / P4 含跨包 / P5.1–P5.5 / G1–G4 已完成） | 已完成，待最终验收 | AST 级静态模板、受限片段、hygienic、声明先于使用。`proto`、`import {name} from pkg`、prelude 默认 import、`list` / `dict` 构造器、`fail!` / `recover!` / `pass!` / `wait!` 宏、`launch` / `wait` / `await` 表达式起始 contextual、用户宏 v1 与跨包 `export macro` / `import {name!} from pkg;`，以及 `on` / `error` handler-scoped contextual、`as` / `ref` / `weak` / `is` contextual 均已落地；G1–G4 进一步完成泛型实参 AST 化、受限 `type` 片段、定义期边界强化与 formatter / lint / LSP / VM-JIT 同步；设计见 [`docs/macros_user_defined.md`](macros_user_defined.md) |
+| 用户自定义宏与保留字清理（M11，P1 / P2 / P3.1 / P4 含跨包 / P5.1–P5.5 / G1–G5 已完成） | 已完成 | AST 级静态模板、受限片段、hygienic、声明先于使用。`proto`、`import {name} from pkg`、prelude 默认 import、`list` / `dict` 构造器、`fail!` / `recover!` / `pass!` / `wait!` 宏、`launch` / `wait` / `await` 表达式起始 contextual、用户宏 v1 与跨包 `export macro` / `import {name!} from pkg;`，以及 `on` / `error` handler-scoped contextual、`as` / `ref` / `weak` / `is` contextual 均已落地；G1–G5 完成泛型实参 AST 化、受限 `type` 片段、定义期边界强化、formatter / lint / LSP / VM-JIT 同步与核心约束验收；设计见 [`docs/macros_user_defined.md`](macros_user_defined.md) |
 | `std.cache`（M7）/ `std.kv` | 已完成 | 维护；Valkey 独立 CI 服务可按需补 |
 | FFI 平台 CI / fuzz | 按需 | Windows x64（MinGW/MSVC）进入正式发布；32 位 / ARM 与 fuzz 按需，见 `architecture.md` |
 
@@ -57,8 +57,9 @@
 - P5.3：`ref` contextual；`ref(x)`、`ref Point { ... }` 与 `ref T` 前缀保持，其他位置是普通标识符
 - P5.4：`weak` contextual；只在 `weak T` 类型前缀位置作为关键字，其他位置是普通标识符
 - P5.5：`is` contextual；只在 `expr is T` / `case is T` 类型测试位置作为运算符，其他位置是普通标识符
-- G1–G4：泛型实参 AST 化、用户宏受限 `type` 片段与定义期边界强化；formatter /
-  lint / LSP 覆盖、调用点与定义点双位置诊断，以及 VM/JIT differential 同步
+- G1–G5：泛型实参 AST 化、用户宏受限 `type` 片段与定义期边界强化；formatter /
+  lint / LSP 覆盖、调用点与定义点双位置诊断、VM/JIT differential 同步，以及
+  核心约束验收
 
 ### 1.2 推荐执行顺序
 
@@ -545,7 +546,7 @@ keyword（`in` / `export` / `import` / `package` / `include`）已完成。其�
 空间保持独立。
 设计细节见 [`docs/macros_user_defined.md`](macros_user_defined.md)。
 
-#### 后续计划：宏与泛型结合（G1–G4 已完成，G5 未排期）
+#### 后续计划：宏与泛型结合（G1–G5 已完成）
 
 M11 继续保持“宏不生成泛型语法”的边界。当前可用组合是：泛型实例化写在宏外，
 宏只接收已绑定泛型值；宏体生成对泛型函数的普通调用并交给类型推断。不要依靠宏
@@ -578,8 +579,12 @@ M11 继续保持“宏不生成泛型语法”的边界。当前可用组合是�
    本地宏名补全、签名 hover、调用点到声明的跳转，以及 selective import 宏别名的
    补全与 hover。新增运行时测试覆盖 `#T?` / `ref #T` / `weak #T` / 函数参数与返回
    类型，并补齐三条 VM/JIT differential case。
-5. **G5 保持核心约束**：继续 parse-before-typecheck、AST 级受限模板、hygienic、
-   声明先于使用；不引入文本宏、编译期任意执行、反射/类型内省、一等宏值或宏递归。
+5. **G5 保持核心约束（已完成）**：继续 parse-before-typecheck、AST 级受限模板、
+   hygienic、声明先于使用；不引入文本宏、编译期任意执行、反射/类型内省、一等宏值
+   或宏递归。新增负例确认字符串/注释里的宏调用文本不会被替换、未调用模板既不会
+   执行也不会触发类型检查、宏名不能作为一等值使用，并补齐 `enum` / `proto`
+   声明、`type_name` 反射入口与片段位置误用；与已有的 hygiene、声明先于使用、
+   递归禁止、泛型语法/声明禁止、类型片段非法位置测试一起构成 G5 验收矩阵。
 
 ---
 

@@ -1,7 +1,7 @@
 # Skein 宏（第一批：内置语法宏）
 
 - 状态：第一批内置宏已完成；用户自定义宏 v1、G1 AST 泛型实参、G2 受限
-  `type` 片段、G3 边界强化、G4 工具链与双后端同步已落地（见
+  `type` 片段、G3 边界强化、G4 工具链与双后端同步、G5 核心约束验收已落地（见
   [`docs/macros_user_defined.md`](macros_user_defined.md)）
 - 相关模块：`std.assert`、`std.log`、`std.result`
 - 实现位置：`src/interpreter/macros.cpp`、`src/interpreter/user_macros.cpp`、
@@ -266,6 +266,12 @@ nullable / `ref` / `weak` / `as` / `is` / 函数签名形态；lint 报告未使
 非法片段位置，宏展开错误同时显示调用点和模板定义点；LSP 提供宏补全、签名
 hover、跳转与 `relatedInformation`；新增 VM/JIT differential 覆盖。
 
+G5 只做核心约束验收，不增加语法或语义：字符串与注释里的 `name!(...)` 文本不会
+被展开，未调用的模板既不执行也不触发类型检查，宏名不能作为一等值使用；另补齐
+`enum` / `proto` 声明、`type_name` 反射入口与片段位置误用负例。这些用例与已有的
+hygiene、声明先于使用、递归禁止、泛型语法禁止和反射边界用例共同锁定
+“AST 级受限模板”的边界。
+
 ## 6. 测试
 
 第一批测试位于：
@@ -276,5 +282,8 @@ tests/skein/macros_assert.skein
 tests/skein/macros_capture.skein
 tests/cases/macros.py
 tests/cases/logging.py
+tests/cases/fmt.py
+tests/cases/lint.py
+tests/cases/lsp.py
 tests/jit_differential.py
 ```

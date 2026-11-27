@@ -1,7 +1,7 @@
 # 用户自定义宏设计（设计方案）
 
 - 状态：P1 / P2 / P3.1 / P4 同文件 v1、跨包宏、G1 AST 泛型实参、G2 受限
-  `type` 片段、G3 边界强化、G4 工具链与双后端同步已完成；G5 待实施
+  `type` 片段、G3 边界强化、G4 工具链与双后端同步、G5 核心约束验收已完成
 - 关联：[`docs/macros.md`](macros.md)、[`docs/roadmap.md`](roadmap.md)
 - 建议里程碑：M11，不回写已完成的 M10
 - 拟改动：`src/interpreter/tokens.l`、`src/interpreter/parser.y`、新增
@@ -327,8 +327,10 @@ wrap!(2) {
 - 片段类型不匹配，例如把 `expr` 放进 `ident` 位置，或把 `expr` / `ident` /
   `block` 放进类型位置；
 - `type` 片段收到表达式、约束标记或泛型实参位置；
-- `expr...` 不是最后一个表达式参数；
-- `block` 不是最后一个参数，或出现在括号内；
+- `expr...` 不是最后一个表达式参数，或作为普通值使用
+  （`expr... fragment must be used in an argument list`）；
+- `block` 不是最后一个参数、出现在括号内，或在表达式位置使用
+  （`unexpected macro block fragment`）；
 - 同文件宏重名；遮蔽内置裸名不是错误，但需说明实际命中的来源；
 - 自递归 / 未注册宏调用；
 - 模板中出现声明定义：`macro template cannot generate declarations`；
@@ -378,6 +380,8 @@ wrap!(2) {
 - `ident` 片段引入调用点绑定；
 - `expr` 优先级保持，例如 `#value + 1` 不会改变结合性；
 - 展开结果与手写代码行为一致；
+- G5 核心约束负例：字符串/注释中的宏调用文本不展开、未调用模板既不执行也不做
+  类型检查、宏名不能作为一等值使用；
 - 第一批内置宏继续通过原有测试，不被用户宏路径影响。
 
 ### 9.3 工具链
@@ -448,9 +452,10 @@ wrap!(2) {
 13. **P5.5（已完成）**：`is` contextual；只在 `expr is T` / `case is T` 类型测试
     位置作为运算符，其他位置是普通标识符。
 
-宏与泛型结合阶段 G1–G4（已完成）紧随 P5.5：parser 先把显式泛型实参存入 AST，
+宏与泛型结合阶段 G1–G5（已完成）紧随 P5.5：parser 先把显式泛型实参存入 AST，
 用户宏随后获得只用于类型位置的受限 `type` 片段，定义期拒绝生成声明和泛型语法；
-G4 补齐 formatter / lint / LSP 的片段覆盖、双位置诊断与 VM/JIT differential，
+G4 补齐 formatter / lint / LSP 的片段覆盖、双位置诊断与 VM/JIT differential；
+G5 用负例验收非文本展开、无编译期执行/类型检查、非一等宏值等核心边界，
 语义边界保持不变。
 
 每个阶段都要保持第一批宏与全量测试全绿；用户宏不得改变第一批宏的行为；每阶段

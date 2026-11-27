@@ -348,7 +348,21 @@ false
 - 整数取模结果符号随被除数；
 - 浮点取模使用 `fmod` 语义；
 - 除零和模零会报运行时错误；
-- `+` 支持字符串拼接和列表拼接。
+- `+` 支持字符串拼接和列表拼接；
+- 静态已知的用户 struct/enum 可以通过 `op_add` / `op_sub` / `op_mul` /
+  `op_div` / `op_mod` 重载对应运算符；表达式在类型检查期改写为普通方法调用，
+  内置类型不受影响。
+
+```text
+struct Counter {
+  value: int;
+  func op_add(self, rhs: Counter): Counter {
+    return Counter { value: self.value + rhs.value };
+  }
+}
+
+let c = Counter { value: 1 } + Counter { value: 2 };
+```
 
 ### 4.2 比较
 
@@ -2368,10 +2382,12 @@ let d = Point { ...p, x: 9 };
   两个 `struct` 的普通值互递归字段不支持，需使用 `ref T?` / `weak T?`（见 5.12.3）；
 - 普通值不允许创建环：`a.next = b; b.next = a;` 会报 `recursive value would create a cycle`；共享子结构（DAG）允许；使用 `ref` 字段的强引用环由 GC 回收，见 5.12.3；
 - 字段可以保存 `Callable` / `function` 值，作为普通回调使用，不会自动绑定 `self`；
-- 不支持继承、静态方法、动态添加方法或运算符重载；`std.ops` 已定义 `Add` /
-  `Sub` / `Mul` / `Div` / `Mod` / `Equatable` / `Comparable` proto，但当前只用于
-  显式方法调用，不改变运算符表达式；唯一例外是构造函数，见 5.12.4；泛型
-  `struct` / `enum` / `proto` / 函数见“用户自定义泛型”；
+- 不支持继承、静态方法或动态添加方法；`std.ops` 定义的 `Add` / `Sub` / `Mul` /
+  `Div` / `Mod` proto 对应的 `op_*` 方法可用于用户类型重载算术运算符：当左操作数
+  是静态已知的 struct/enum 且定义了匹配方法时，`a + b` 会在类型检查阶段改写为
+  `a.op_add(b)`，内置类型仍走原有 fast path；`Equatable` / `Comparable` 的运算符
+  尚未接线。唯一例外是构造函数，见 5.12.4；泛型 `struct` / `enum` / `proto` / 函数
+  见“用户自定义泛型”；
 - 内建容器的类型参数见变量类型标注章节。
 
 #### 5.12.4 构造函数

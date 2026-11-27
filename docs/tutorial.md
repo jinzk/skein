@@ -419,7 +419,20 @@ x is Keyed[int]   // 错误
 ```
 
 `std.ops` 提供 `Add` / `Sub` / `Mul` / `Div` / `Mod` / `Equatable` / `Comparable`
-等结构式 proto，可用于泛型约束；当前只支持显式方法调用，运算符重载尚未接线。
+等结构式 proto，可用于泛型约束。算术协议对应的 `op_*` 方法也已接入 `+` / `-` /
+`*` / `/` / `%`：静态已知的用户 struct/enum 定义方法后即可重载，内置类型不变。
+相等与比较运算符尚未接线。
+
+```text
+struct Counter {
+  value: int;
+  func op_add(self, rhs: Counter): Counter {
+    return Counter { value: self.value + rhs.value };
+  }
+}
+
+let c = Counter { value: 1 } + Counter { value: 2 };  // Counter { value: 3 }
+```
 
 元数据和序列化：
 
@@ -1323,7 +1336,8 @@ let b = Config { port: 8080 };
 let c = Config { ...a, port: 9090 };
 ```
 
-- 不支持继承、动态添加方法、静态方法或运算符重载；泛型 struct/enum/proto/函数见“用户自定义泛型”，内建容器类型参数见变量类型标注章节。
+- 不支持继承、动态添加方法或静态方法；算术运算符可通过 `std.ops` 对应的
+  `op_*` 方法重载，其他运算符重载尚未接线；泛型 struct/enum/proto/函数见“用户自定义泛型”，内建容器类型参数见变量类型标注章节。
 
 `proto` 定义结构式接口：
 

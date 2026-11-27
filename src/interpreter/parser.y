@@ -2579,11 +2579,11 @@ list: %empty                              { $$ = NULL; }
       }
     ;
 
-exp: exp '+' exp                          { $$ = newast('+', $1, $3); }
-    | exp '-' exp                         { $$ = newast('-', $1, $3); }
-    | exp '*' exp                         { $$ = newast('*', $1, $3); }
-    | exp '/' exp                         { $$ = newast('/', $1, $3); }
-    | exp '%' exp                         { $$ = newast('%', $1, $3); }
+exp: exp '+' exp                          { $$ = newarith('+', $1, $3); }
+    | exp '-' exp                         { $$ = newarith('-', $1, $3); }
+    | exp '*' exp                         { $$ = newarith('*', $1, $3); }
+    | exp '/' exp                         { $$ = newarith('/', $1, $3); }
+    | exp '%' exp                         { $$ = newarith('%', $1, $3); }
     | exp LOGAND exp                      { $$ = newast('A', $1, $3); }
     | exp LOGOR exp                       { $$ = newast('Q', $1, $3); }
     | exp '&' exp                         { $$ = newast('&', $1, $3); }

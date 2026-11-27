@@ -334,11 +334,15 @@ def run_cases():
           "compare(NoCmp {}, NoCmp {});\n",
           stderr="type error: type argument NoCmp does not satisfy generic constraint for compare")
 
-    check("std.ops does not overload plus",
-          "import {Add} from std.ops;\n"
+    check("arithmetic overload rejects wrong rhs type",
           "struct Op { func op_add(self, rhs: Op): Op { return self; } }\n"
-          "let x = Op {} + Op {};\n",
-          stderr="runtime error: cannot add Op and Op")
+          "let x = Op {} + 1;\n",
+          stderr="type error: expected Op, got int")
+
+    check("arithmetic without overload keeps builtin error",
+          "struct NoOp { }\n"
+          "let x = NoOp {} + NoOp {};\n",
+          stderr="runtime error: cannot add NoOp and NoOp")
 
     check("generic default type must be trailing",
           "struct Bad[T = int, U any] { }\n",

@@ -308,6 +308,26 @@ struct ast *newnullast() {
     return (struct ast *)a;
 }
 
+struct ast *newarith(int nodetype, struct ast *l, struct ast *r) {
+    struct ufncall *a =
+        (struct ufncall *)ast_node_alloc(sizeof(struct ufncall));
+    if (!a) {
+        yyerror("out of space");
+        std::exit(0);
+    }
+    a->nodetype = nodetype;
+    set_loc_from(a, l);
+    /* The l/r slots alias the future callee/args slots of a method call. */
+    a->callee = NULL;
+    a->args = NULL;
+    a->launch = 0;
+    a->awaited = 0;
+    a->wait_sugar = 0;
+    ((struct ast *)a)->l = l;
+    ((struct ast *)a)->r = r;
+    return (struct ast *)a;
+}
+
 struct ast *newcmp(int cmptype, struct ast *l, struct ast *r) {
     struct ast *a = (struct ast *)ast_node_alloc(sizeof(struct ast));
     if (!a) {

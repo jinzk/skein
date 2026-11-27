@@ -3789,6 +3789,60 @@ struct Checker : public BuiltinContext {
         }
     }
 
+    static const char *arithmetic_method_name(int nodetype) {
+        switch (nodetype) {
+            case '+': return "op_add";
+            case '-': return "op_sub";
+            case '*': return "op_mul";
+            case '/': return "op_div";
+            case '%': return "op_mod";
+            default: return NULL;
+        }
+    }
+
+    bool has_user_arithmetic_method(const TypeNode *type,
+                                    const char *method_name) {
+        type = unwrap_ref_type(type);
+        structtype_lookup_result lookup;
+        if (!lookup_type_node(type, lookup))
+            return false;
+        const type_def *def =
+            lookup.structure
+                ? static_cast<const type_def *>(lookup.structure)
+                : (lookup.enumeration
+                       ? static_cast<const type_def *>(lookup.enumeration)
+                       : nullptr);
+        if (!def)
+            return false;
+        std::shared_ptr<function_def> method =
+            structtype_method(def, method_name);
+        return method && method->code != NULL;
+    }
+
+    /* Rewrite a binary arithmetic expression into a method call in place.
+     * Arithmetic nodes are allocated with call-node storage, so the original
+     * node identity (and every parent pointer) stays valid. */
+    const TypeNode *rewrite_arithmetic_call(struct ast *expr, Env &env,
+                                             const char *method_name) {
+        struct ast *member = newast('j', expr->l, newstr(method_name));
+        member->line = expr->line;
+        member->column = expr->column;
+        struct ast *args = newast('L', expr->r, NULL);
+        args->line = expr->line;
+        args->column = expr->column;
+        struct ufncall *call = (struct ufncall *)expr;
+        call->callee = member;
+        call->args = args;
+        call->launch = 0;
+        call->awaited = 0;
+        call->wait_sugar = 0;
+        call->nodetype = 'C';
+        const TypeNode *result = type_any();
+        if (!check_call(expr, type_any(), env, result))
+            return type_any();
+        return result;
+    }
+
     void rewrite_iterable_call(struct forinloop *f) {
         struct ast *member = newast('j', f->iterable, newstr("iter"));
         member->line = f->line;
@@ -4683,6 +4737,10 @@ struct Checker : public BuiltinContext {
             case '+': {
                 const TypeNode *left = infer(expr->l, env);
                 const TypeNode *right = infer(expr->r, env);
+                const char *method = arithmetic_method_name(expr->nodetype);
+                if (method && expr->r &&
+                    has_user_arithmetic_method(left, method))
+                    return rewrite_arithmetic_call(expr, env, method);
                 if (left->kind == TYPE_LIST && right->kind == TYPE_LIST) {
                     const TypeNode *a = left->args.empty()
                                             ? type_any()
@@ -4717,6 +4775,10 @@ struct Checker : public BuiltinContext {
                 const TypeNode *left = infer(expr->l, env);
                 const TypeNode *right =
                     expr->r ? infer(expr->r, env) : NULL;
+                const char *method = arithmetic_method_name(expr->nodetype);
+                if (method && expr->r &&
+                    has_user_arithmetic_method(left, method))
+                    return rewrite_arithmetic_call(expr, env, method);
                 if ((left->kind == TYPE_INT || left->kind == TYPE_FLOAT ||
                      left->kind == TYPE_NUMBER) &&
                     (!right || right->kind == TYPE_INT ||

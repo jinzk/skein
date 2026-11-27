@@ -488,9 +488,12 @@ struct symlist *clone_symlist(const struct symlist *list,
 
 struct ast *clone_pair(const struct ast *node, expansion_state &state,
                        clone_context context) {
-    struct ast *copy = newast(node->nodetype,
-                              clone_node(node->l, state, context),
-                              clone_node(node->r, state, context));
+    struct ast *l = clone_node(node->l, state, context);
+    struct ast *r = clone_node(node->r, state, context);
+    const int op = node->nodetype;
+    const bool arithmetic = op == '+' || op == '-' || op == '*' ||
+                            op == '/' || op == '%';
+    struct ast *copy = arithmetic ? newarith(op, l, r) : newast(op, l, r);
     copy->line = node->line;
     copy->column = node->column;
     return copy;

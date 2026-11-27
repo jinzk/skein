@@ -49,4 +49,44 @@ ts_test("std.ops structural protocols", func() {
   ts_eq(do_cmp(a, b) > 0, true);
 });
 
+ts_test("std.ops arithmetic operators", func() {
+  let a = OpNum { value: 12 };
+  let b = OpNum { value: 5 };
+
+  ts_eq((a + b).value, 17);
+  ts_eq((a - b).value, 7);
+  ts_eq((a * b).value, 60);
+  ts_eq((a / b).value, 2);
+  ts_eq((a % b).value, 2);
+
+  // Built-in arithmetic keeps the original fast path.
+  ts_eq(3 + 4, 7);
+  ts_eq(7 - 3, 4);
+  ts_eq(3 * 4, 12);
+  ts_eq(7 / 3, 2);
+  ts_eq(7 % 3, 1);
+  ts_eq("a" + "b", "ab");
+});
+
+struct OpText {
+  func op_add(self, rhs: OpText): string { return "text"; }
+}
+
+ts_test("std.ops overload result type", func() {
+  let value = OpText {} + OpText {};
+  ts_eq(value, "text");
+});
+
+enum OpChoice { Left; Right; }
+
+impl OpChoice {
+  func op_add(self, rhs: OpChoice): int { return 9; }
+}
+
+ts_test("std.ops enum overload", func() {
+  let left: OpChoice = OpChoice.Left;
+  let right: OpChoice = OpChoice.Right;
+  ts_eq(left + right, 9);
+});
+
 ts_finish();

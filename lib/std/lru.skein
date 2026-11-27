@@ -139,6 +139,8 @@ package lru {
     return (l.order).length();
   }
 
+  export let length = size;
+
   export func capacity(l) {
     return l.cap;
   }

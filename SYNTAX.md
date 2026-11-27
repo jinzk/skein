@@ -66,13 +66,16 @@ contextual keyword，不是全局保留字：`launch f()` 启动 task，`await f
 为 `"proto"`。
 
 `std` 是语言级默认根绑定，无需 `import std;` 即可使用；显式 `import std;` 仍然
-合法且幂等。默认裸值只有 `list` / `dict` / `input` / `print` / `println`；
+合法且幂等。默认裸值只有 `list` / `dict` / `tuple` / `input` / `print` / `println`；
 `len` / `iter!` 已完全移除，`range` 与类型内省使用规范路径 `std.utils.range`、
 `std.type.kind_of` / `std.type.name` / `std.type.package_name` /
 `std.type.module_name` / `std.type.source`。
 容器长度用 `x.length()` 或 `std.list.length(x)` 等规范路径，迭代器用
-`x.iter()` 或 `std.iter.*`。
-裸 `list(x)` / `dict(x)` 等价于 `std.list.new(x)` / `std.dict.new(x)`；
+`x.iter()` 或 `std.iter.*`；`deque` / `heap` / `set` 保留 `size()` 与
+`std.*.size` 兼容别名。tuple / pair 也支持 `(t).length()` / `std.tuple.length(t)`
+与 `(t).iter()` / `std.tuple.iter(t)`。
+裸 `list(x)` / `dict(x)` / `tuple(x)` 等价于 `std.list.new(x)` /
+`std.dict.new(x)` / `std.tuple.new(x)`；
 类型注解里的 `list[T]` / `dict[K, V]` 始终按独立的类型命名空间解析。
 `int` / `float` / `bool` / `str` / `char` / `byte`
 目前仍由类型命名空间处理。`str` 在类型位置是 `string` 的短别名，两者是同一个
@@ -1200,7 +1203,7 @@ ys[0] = "a";                        // 错误
 
 #### 内置容器方法
 
-内置容器支持与 `std.list` / `std.dict` / `std.set` / `std.deque` / `std.heap` 对应的值方法调用：
+内置容器支持与 `std.list` / `std.tuple` / `std.dict` / `std.set` / `std.deque` / `std.heap` 对应的值方法调用：
 
 ```text
 import std;
@@ -1220,9 +1223,13 @@ for k in d.iter_keys() { ... }
 for (k, v) in d.iter() { ... }
 
 let q: deque[int] = std.deque.from_list([1, 2]);
-q.size();
+q.length();          // 与 q.size() 等价
 q = q.push_back(3);
 q.to_list();
+
+let t = tuple([1, 2, 3]);
+t.length();
+for x in t.iter() { ... }
 
 ("ab").length();
 std.bytes.from_hex("00ff").length();
@@ -1237,6 +1244,7 @@ for x in (1, 2).iter() { ... }
 ```text
 import std;
 xs.length()     == std.list.length(xs)
+t.length()      == std.tuple.length(t)
 d.iter_keys()   == std.dict.iter_keys(d)
 q.push_back(3)  == std.deque.push_back(q, 3)
 ```
@@ -3085,6 +3093,7 @@ import std;
 ```text
 import std;
 std.list
+std.tuple
 std.fn
 std.iter
 std.dict

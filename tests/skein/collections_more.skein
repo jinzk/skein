@@ -272,6 +272,7 @@ ts_test("lru basics", func() {
   l = r["lru"];
   ts_true(r["removed"]);
   ts_eq(lru.size(l), 1);
+  ts_eq(lru.length(l), 1);
   ts_eq(lru.capacity(l), 2);
   ts_eq(lru.keys(lru.clear(l)), []);
 });

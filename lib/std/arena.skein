@@ -133,6 +133,8 @@ package arena {
     return s.alive;
   }
 
+  export let length = size;
+
   export func capacity(s) {
     return (s.slots).length();
   }

@@ -57,6 +57,11 @@ value_t *build_namespace_impl() {
         {"binary_search", B_list_binary_search},
         {"builder", B_list_builder},
     });
+    value_t *tuple_module = builtin_module({
+        {"new", B_tuple},
+        {"length", B_len},
+        {"iter", B_iter_elements},
+    });
     value_t *fn_module = builtin_module({
         {"compose", B_fn_compose},
         {"pipe", B_fn_pipe},
@@ -126,6 +131,8 @@ value_t *build_namespace_impl() {
         newstrval("bytes"), copy_module(bytes_module)));
     root->payload->items.push_back(std::make_pair(
         newstrval("list"), list_module));
+    root->payload->items.push_back(std::make_pair(
+        newstrval("tuple"), tuple_module));
     root->payload->items.push_back(std::make_pair(
         newstrval("fn"), fn_module));
     root->payload->items.push_back(std::make_pair(
@@ -495,6 +502,7 @@ value_t *build_namespace_impl() {
             {"from_list", B_deque_from_list},
             {"iter", B_iter_elements},
             {"size", B_deque_size},
+            {"length", B_len},
             {"push_front", B_deque_push_front},
             {"push_back", B_deque_push_back},
             {"peek_front", B_deque_peek_front},
@@ -510,6 +518,7 @@ value_t *build_namespace_impl() {
             {"from_list", B_heap_from_list},
             {"iter", B_iter_elements},
             {"size", B_heap_size},
+            {"length", B_len},
             {"peek", B_heap_peek},
             {"push", B_heap_push},
             {"pop", B_heap_pop},
@@ -525,6 +534,7 @@ value_t *build_namespace_impl() {
             {"remove", B_set_remove},
             {"has", B_set_has},
             {"size", B_set_size},
+            {"length", B_len},
             {"values", B_set_values},
             {"union", B_set_union},
             {"intersect", B_set_intersect},

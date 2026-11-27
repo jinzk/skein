@@ -7,7 +7,9 @@ package deque {
 
   export let new = std.deque.new;
   export let from_list = std.deque.from_list;
+  export let iter = std.deque.iter;
   export let size = std.deque.size;
+  export let length = std.deque.length;
   export let push_front = std.deque.push_front;
   export let push_back = std.deque.push_back;
   export let peek_front = std.deque.peek_front;

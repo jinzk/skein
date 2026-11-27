@@ -7,7 +7,9 @@ package heap {
 
   export let new = std.heap.new;
   export let from_list = std.heap.from_list;
+  export let iter = std.heap.iter;
   export let size = std.heap.size;
+  export let length = std.heap.length;
   export let peek = std.heap.peek;
   export let push = std.heap.push;
   export let pop = std.heap.pop;

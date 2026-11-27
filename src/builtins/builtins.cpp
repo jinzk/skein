@@ -728,6 +728,21 @@ struct value_t *call_builtin(int functype,
                                     : dict_new_from_value(args[0]);
     }
 
+    if (functype == B_tuple) {
+        if (args.size() > 1) {
+            yyerror("std.tuple.new expects 0 or 1 arguments, got %d",
+                    (int)args.size());
+            return NULL;
+        }
+        if (args.empty())
+            return (struct value_t *)newtupleval();
+        struct value_t *collected = list_new_from_value(args[0]);
+        if (!collected)
+            return NULL;
+        ((struct list_value_t *)collected)->payload->frozen = true;
+        return collected;
+    }
+
     if (functype == B_format || functype == B_print ||
         functype == B_println) {
         bool is_print = functype == B_print || functype == B_println;

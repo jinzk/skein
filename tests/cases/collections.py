@@ -111,6 +111,18 @@ def run_cases():
           "std.io.println(s);\nstd.io.println(d[0]);\n",
           stdout_all=["1000150000", "5"])
 
+    check("native containers expose length aliases",
+          "let s = std.set.from_list([1, 2]);\n"
+          "let q = std.deque.from_list([1, 2]);\n"
+          "let h = std.heap.from_list([1, 2], "
+          "func(a, b) { return a < b; });\n"
+          "std.io.println(str(std.set.length(s)));\n"
+          "std.io.println(str(std.deque.length(q)));\n"
+          "std.io.println(str(std.heap.length(h)));\n"
+          "std.io.println(str((s).length()));\n"
+          "std.io.println(str((q).length()));\n"
+          "std.io.println(str((h).length()));\n",
+          stdout_all=["2", "2", "2", "2", "2", "2"])
 
     check("custom struct dict hash",
           'import std;\nimport std.dict_key;\n'

@@ -12,6 +12,31 @@ OFF_ENV = dict(os.environ, SKEIN_TYPECHECK="off")
 def run_cases():
     run_skein("tuple_semantics.skein")
 
+    check("tuple constructor exposes length and iter",
+          "let t = tuple([1, 2, 3]);\n"
+          "std.io.println(str((t).length()));\n"
+          "std.io.println(str(std.tuple.length(t)));\n"
+          "let total = 0;\n"
+          "for x in (t).iter() { total = total + x; }\n"
+          "std.io.println(str(total));\n",
+          stdout_all=["3", "3", "6"])
+
+    check("std.tuple.new copies iterables",
+          "let t = std.tuple.new([1, 2]);\n"
+          "let u = std.tuple.new(t);\n"
+          "std.io.println(str((u).length()));\n"
+          "std.io.println(str((u)[0]));\n"
+          "std.io.println(str((std.tuple.new()).length()));\n",
+          stdout_all=["2", "1", "0"])
+
+    check("tuple constructor rejects extra arguments",
+          "tuple([1], [2])\n",
+          stderr="function expects at most 1 argument(s), got 2")
+    check("tuple constructor reports runtime arity without typecheck",
+          "tuple([1], [2])\n",
+          env=OFF_ENV,
+          stderr="std.tuple.new expects 0 or 1 arguments")
+
     check("tuple pattern rejects list literal",
           "let (a, b) = [1, 2];\n"
           "std.io.print(a);\n",

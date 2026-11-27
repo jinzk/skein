@@ -504,7 +504,8 @@ enum bifs {
     B_ref_wrap,
     B_assert_that,
     B_assert_schema,
-    B_log_enabled
+    B_log_enabled,
+    B_tuple
 };
 
 #endif

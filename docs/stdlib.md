@@ -2334,6 +2334,7 @@ skein --check-ffi ./libshape.so shape.ffi.json
 ```text
 import std;
 std.list
+std.tuple
 std.fn
 std.iter
 std.dict
@@ -2574,7 +2575,7 @@ r = lru.put(l, "c", 3);    // 淘汰 b
 r["evicted"]               // {key: b, value: 2}
 ```
 
-API：`new` / `get` / `peek` / `put` / `delete` / `has` / `keys` / `values` / `size` / `capacity` / `clear`。key 必须是合法 dict key（包括由合法 key 元素组成的 tuple/pair，以及字段递归可哈希或实现 `std.dict_key.DictHashable` 的 struct/enum）；`keys` / `values` 从最久未使用到最近使用排列。
+API：`new` / `get` / `peek` / `put` / `delete` / `has` / `keys` / `values` / `length` / `size` / `capacity` / `clear`。key 必须是合法 dict key（包括由合法 key 元素组成的 tuple/pair，以及字段递归可哈希或实现 `std.dict_key.DictHashable` 的 struct/enum）；`keys` / `values` 从最久未使用到最近使用排列。
 
 `Lru` 是普通 struct（字段 `cap` / `map` / `order`），保持值语义：每次更新返回新值，旧值不变。因为不再是原生不透明类型，`kind_of` 返回 `"struct"`，JSON 会编码内部字段；跨线程传输按普通 struct 处理，函数 / heap 等特殊值不能嵌套在 LRU 字段中传输。单次更新 O(n)。
 
@@ -3540,7 +3541,7 @@ arena.remove(s, a)     // {arena, removed: true}
 arena.has(s, a)        // false
 ```
 
-API：`new` / `from_list` / `add` / `get` / `set` / `remove` / `has` / `size` / `capacity` / `ids` / `values` / `clear`。槽位复用时 generation 递增，旧句柄永久失效。`from_list` 批量构造 O(n)；逐条 `add` / `set` / `remove` 每次 O(capacity)，适合中小规模。
+API：`new` / `from_list` / `add` / `get` / `set` / `remove` / `has` / `length` / `size` / `capacity` / `ids` / `values` / `clear`。槽位复用时 generation 递增，旧句柄永久失效。`from_list` 批量构造 O(n)；逐条 `add` / `set` / `remove` 每次 O(capacity)，适合中小规模。
 
 `std.path` 是纯词法的跨平台路径库，不访问文件系统；`style` 可以显式指定
 `"posix"` 或 `"windows"`，因此可以在 Linux 上完整测试 Windows 路径：
@@ -3625,6 +3626,11 @@ drive-relative 的 `C:foo` 和普通相对路径为 `false`。
 可迭代对象）。裸 `list(x)` / `dict(x)` 是默认根绑定，等价于规范路径
 `std.list.new(x)` / `std.dict.new(x)`；类型注解中的 `list[T]` / `dict[K, V]`
 始终按类型命名空间解析。
+
+`std.tuple.new()` 返回空 tuple，`std.tuple.new(x)` 从可迭代对象复制元素并冻结为
+tuple；裸 `tuple(...)` 是默认根绑定，等价于规范路径 `std.tuple.new(...)`。
+tuple / pair 统一支持 `(t).length()` / `std.tuple.length(t)` 与
+`(t).iter()` / `std.tuple.iter(t)`。
 
 `std.list` 新增常用算法：
 
@@ -3764,6 +3770,10 @@ std.list.top_k
 std.list.binary_search
 std.list.builder
 
+std.tuple.new
+std.tuple.length
+std.tuple.iter
+
 std.fn.compose
 std.fn.pipe
 std.fn.partial
@@ -3808,6 +3818,7 @@ std.deque.new
 std.deque.from_list
 std.deque.iter
 std.deque.size
+std.deque.length
 std.deque.push_front
 std.deque.push_back
 std.deque.peek_front
@@ -3820,6 +3831,7 @@ std.heap.new
 std.heap.from_list
 std.heap.iter
 std.heap.size
+std.heap.length
 std.heap.peek
 std.heap.push
 std.heap.pop
@@ -3832,6 +3844,7 @@ std.set.add
 std.set.remove
 std.set.has
 std.set.size
+std.set.length
 std.set.values
 std.set.union
 std.set.intersect
@@ -4299,8 +4312,8 @@ std.thread.capabilities
 - `std` 名称保留，不能通过源码包覆盖；
 - `std` 是语言级默认根绑定，无需 `import std;` 即可使用；显式 `import std;` 仍然合法且幂等；
 - `std.*` 是规范形式；通过 `std.list`、`std.string` 等方式访问；
-- 默认裸值只有 `list` / `dict` / `input` / `print` / `println`；`len` / `iter!` 已完全移除，`range` 与类型内省裸名也不再提供，分别使用 `std.utils.range` / `std.type.*`；
-- 容器长度统一使用 `length()` 或 `std.*.length`；迭代器统一使用 `iter()` 或 `std.iter.*`，不再提供 `.len()` / `std.utils.len` / `std.utils.iter!`；
+- 默认裸值只有 `list` / `dict` / `tuple` / `input` / `print` / `println`；`len` / `iter!` 已完全移除，`range` 与类型内省裸名也不再提供，分别使用 `std.utils.range` / `std.type.*`；
+- 容器长度统一使用 `length()` 或 `std.*.length`，包括 `deque` / `heap` / `set`、`arena` / `lru` 与 tuple / pair；`size()` 保留为这些类型的兼容别名；迭代器统一使用 `iter()` 或 `std.iter.*`，不再提供 `.len()` / `std.utils.len` / `std.utils.iter!`；
 - 数学、字符串、格式化、文件与 bytes 的旧全局函数（如 `find`、`split`、`bytes_*`、`file_*`）已移除，请改用对应的 `std.math` / `std.string` / `std.fs` / `std.bytes` 函数；
 - `std` 导入得到的是命名空间副本，修改自己的副本不会污染内置缓存；
 - 新函数只通过 `std.*` 提供，不再增加全局函数名；

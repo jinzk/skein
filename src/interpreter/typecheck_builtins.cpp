@@ -903,6 +903,14 @@ const TypeNode *builtin_polymorphic_type(const std::string &path) {
 
     if (path == "std.list.new")
         return poly_builtin({any_type()}, list_t, 1);
+    if (path == "std.tuple.new")
+        return poly_builtin(
+            {any_type()},
+            type_container(TYPE_TUPLE, {any_type(), any_type()}), 1);
+    if (path == "std.tuple.length")
+        return poly_builtin({any_type()}, integer_type);
+    if (path == "std.tuple.iter")
+        return poly_builtin({any_type()}, poly_generator(any_type()));
     if (path == "std.list.length")
         return poly_builtin({list_t}, integer_type);
     if (path == "std.list.iter")
@@ -1292,6 +1300,10 @@ const TypeNode *builtin_function_type(int functype) {
         case B_dict:
             return poly_builtin({any_type()},
                                 poly_dict(any_type(), any_type()), 1);
+        case B_tuple:
+            return poly_builtin(
+                {any_type()},
+                type_container(TYPE_TUPLE, {any_type(), any_type()}), 1);
         case B_int:
             return builtin_sig({any_type()}, integer());
         case B_float:

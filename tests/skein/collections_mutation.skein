@@ -11,6 +11,7 @@ ts_test("arena add get set remove", func() {
   s = r["arena"];
   let b = r["id"];
   ts_eq(arena.size(s), 2);
+  ts_eq(arena.length(s), 2);
   ts_eq(arena.values(s), ["a", "b"]);
   ts_eq(arena.get(s, a)["value"], "a");
   r = arena.set(s, a, "A");

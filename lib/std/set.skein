@@ -7,10 +7,12 @@ package set {
 
   export let new = std.set.new;
   export let from_list = std.set.from_list;
+  export let iter = std.set.iter;
   export let add = std.set.add;
   export let remove = std.set.remove;
   export let has = std.set.has;
   export let size = std.set.size;
+  export let length = std.set.length;
   export let values = std.set.values;
   export let union = std.set.union;
   export let intersect = std.set.intersect;

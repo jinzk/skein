@@ -47,7 +47,7 @@ def run_case(tmp, name, worker_source, expected, gc_stress):
         "let total = 0;\n"
         "for (let f in futures) {\n"
         '  let r = f.wait();\n'
-        '  if (!r["ok"]) { fail r["error"]; }\n'
+        '  if (!r["ok"]) { std.error.fail!(r["error"]); }\n'
         '  total = total + r["value"]["v"];\n'
         "}\n"
         "pool.close();\n"

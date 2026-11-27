@@ -138,7 +138,7 @@ package auth {
       let id = _session_id();
       let encoded = std.json.stringify(value);
       if (!cache_client.set(key(id), encoded, {"ttl_ms": ttl * 1000})) {
-        fail("auth: failed to store session");
+        std.error.fail!("auth: failed to store session");
       }
       return id;
     };
@@ -193,20 +193,20 @@ package auth {
   export func new_store(options = {}) {
     let ttl = std.dict.get(options, "ttl", 3600);
     if (std.type.kind_of(ttl) != "int" || ttl <= 0) {
-      fail("auth.new_store ttl must be a positive integer");
+      std.error.fail!("auth.new_store ttl must be a positive integer");
     }
     let cookie_name = std.dict.get(options, "cookie_name", "sid");
     if (std.type.kind_of(cookie_name) != "string" || cookie_name == "") {
-      fail("auth.new_store cookie_name must be a non-empty string");
+      std.error.fail!("auth.new_store cookie_name must be a non-empty string");
     }
     let cache_client = std.dict.get(options, "cache", null);
     if (cache_client != null) {
       if (std.type.kind_of(cache_client) != "struct") {
-        fail("auth.new_store cache must be a std.cache client");
+        std.error.fail!("auth.new_store cache must be a std.cache client");
       }
       let prefix = std.dict.get(options, "prefix", "skein:session:");
       if (std.type.kind_of(prefix) != "string" || prefix == "") {
-        fail("auth.new_store prefix must be a non-empty string");
+        std.error.fail!("auth.new_store prefix must be a non-empty string");
       }
       return _cache_store(cache_client, prefix, ttl, cookie_name);
     }
@@ -371,13 +371,13 @@ package auth {
 
   export func jwt_sign(payload, secret, ttl = 3600) {
     if (std.type.kind_of(payload) != "dict") {
-      fail("auth.jwt_sign payload must be a dict");
+      std.error.fail!("auth.jwt_sign payload must be a dict");
     }
     if (std.type.kind_of(secret) != "string" || secret == "") {
-      fail("auth.jwt_sign secret must be a non-empty string");
+      std.error.fail!("auth.jwt_sign secret must be a non-empty string");
     }
     if (std.type.kind_of(ttl) != "int" || ttl <= 0) {
-      fail("auth.jwt_sign ttl must be a positive integer");
+      std.error.fail!("auth.jwt_sign ttl must be a positive integer");
     }
     let claims = {};
     for (let key in std.dict.keys(payload)) {
@@ -427,7 +427,7 @@ package auth {
 
     let clock_skew = std.dict.get(options, "clock_skew", 0);
     if (std.type.kind_of(clock_skew) != "int" || clock_skew < 0) {
-      fail("auth.jwt_verify clock_skew must be a non-negative integer");
+      std.error.fail!("auth.jwt_verify clock_skew must be a non-negative integer");
     }
     let now = std.time.now();
     if (std.dict.has(claims, "exp")) {
@@ -479,11 +479,11 @@ package auth {
   export func auth_middleware(store, secret, options = {}) {
     let required = std.dict.get(options, "required", true);
     if (std.type.kind_of(required) != "bool") {
-      fail("auth.auth_middleware required must be a bool");
+      std.error.fail!("auth.auth_middleware required must be a bool");
     }
     let jwt_options = std.dict.get(options, "jwt", {});
     if (std.type.kind_of(jwt_options) != "dict") {
-      fail("auth.auth_middleware jwt must be a dict");
+      std.error.fail!("auth.auth_middleware jwt must be a dict");
     }
     return func(req) {
       let context = authenticate(store, req, secret, jwt_options);
@@ -500,16 +500,16 @@ package auth {
   func _required_values(value, what) {
     if (std.type.kind_of(value) == "string") {
       if (value == "") {
-        fail("auth." + what + " must not be empty");
+        std.error.fail!("auth." + what + " must not be empty");
       }
       return [value];
     }
     if (std.type.kind_of(value) != "list" || std.utils.len(value) == 0) {
-      fail("auth." + what + " must be a string or non-empty list");
+      std.error.fail!("auth." + what + " must be a string or non-empty list");
     }
     for (let item in value) {
       if (std.type.kind_of(item) != "string" || item == "") {
-        fail("auth." + what + " entries must be non-empty strings");
+        std.error.fail!("auth." + what + " entries must be non-empty strings");
       }
     }
     return value;
@@ -548,11 +548,11 @@ package auth {
   func _require_field(store, secret, field, required, options) {
     let all = std.dict.get(options, "all", false);
     if (std.type.kind_of(all) != "bool") {
-      fail("auth.require_* all must be a bool");
+      std.error.fail!("auth.require_* all must be a bool");
     }
     let jwt_options = std.dict.get(options, "jwt", {});
     if (std.type.kind_of(jwt_options) != "dict") {
-      fail("auth.require_* jwt must be a dict");
+      std.error.fail!("auth.require_* jwt must be a dict");
     }
     return func(req) {
       let context = authenticate(store, req, secret, jwt_options);
@@ -608,10 +608,10 @@ package auth {
 
   export func sign_token(value, secret, ttl = 3600) {
     if (std.type.kind_of(secret) != "string" || secret == "") {
-      fail("auth.sign_token secret must be a non-empty string");
+      std.error.fail!("auth.sign_token secret must be a non-empty string");
     }
     if (std.type.kind_of(ttl) != "int" || ttl <= 0) {
-      fail("auth.sign_token ttl must be a positive integer");
+      std.error.fail!("auth.sign_token ttl must be a positive integer");
     }
     let payload = std.json.stringify({
       "value": value,

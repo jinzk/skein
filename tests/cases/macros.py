@@ -15,7 +15,7 @@ def run_cases():
 
     proc = run(
         "import std;\n"
-        'func boom() { fail("must not run"); }\n'
+        'func boom() { std.error.fail!("must not run"); }\n'
         'std.log.set_level("error");\n'
         'info!("hidden", {"x": boom()});\n'
         'std.io.println("guard-ok");\n'
@@ -122,7 +122,7 @@ def run_cases():
     check(
         "recover macro shorthand and canonical path",
         'import std;\n'
-        'func boom(): int { fail("x"); }\n'
+        'func boom(): int { std.error.fail!("x"); }\n'
         'let seven = 7;\n'
         'let a = boom() on error(e) { recover! seven; };\n'
         'let b = boom() on error(e) { std.error.recover!(7); };\n'
@@ -301,9 +301,9 @@ def run_cases():
         'let on = 1;\n'
         'let error = 2;\n'
         'let b = Box { on: on, error: error };\n'
-        'func f() { fail "x"; }\n'
+        'func f() { std.error.fail!("x"); }\n'
         'std.io.println(str(b.on + b.error));\n'
-        'std.io.println(str(f() on error(e) { recover on + error; }));\n',
+        'std.io.println(str(f() on error(e) { std.error.recover!(on + error); }));\n',
         stdout="3\n3",
     )
     check(

@@ -60,7 +60,7 @@ def run_cases():
         "func work(n) { return n + 1; }\n"
         "let total = 0;\n"
         "for (let i = 0; i < 40; i = i + 1) {\n"
-        "  total = total + wait launch work(i);\n"
+        "  total = total + std.task.wait!(launch work(i));\n"
         "}\n"
         "std.io.println(total);\n",
         env=env,
@@ -160,7 +160,7 @@ def run_cases():
         "}\n"
         "func bad() {\n"
         "  std.task.sleep(5).wait();\n"
-        '  fail "scope-child-fail";\n'
+        '  std.error.fail!("scope-child-fail");\n'
         "}\n"
         "std.task.scope(func() {\n"
         "  let a = launch ok();\n"
@@ -173,7 +173,7 @@ def run_cases():
 
     check(
         "task scope callback failure",
-        'import std;\nstd.task.scope(func() { fail "scope-callback-fail"; });\n',
+        'import std;\nstd.task.scope(func() { std.error.fail!("scope-callback-fail"); });\n',
         stderr="scope-callback-fail",
     )
 
@@ -194,7 +194,7 @@ def run_cases():
         "}\n"
         "func bad() {\n"
         "  std.task.sleep(5).wait();\n"
-        '  fail "sibling-fail";\n'
+        '  std.error.fail!("sibling-fail");\n'
         "}\n"
         "func parent() {\n"
         '  let a = launch ok("a");\n'
@@ -202,7 +202,7 @@ def run_cases():
         '  let c = launch ok("c");\n'
         "  return 0;\n"
         "}\n"
-        "std.io.println(wait launch parent());\n",
+        "std.io.println(std.task.wait!(launch parent()));\n",
         stderr="sibling-fail",
         not_stderr="ok-a",
     )
@@ -213,7 +213,7 @@ def run_cases():
         "import std;\n"
         "func bad() {\n"
         "  std.task.sleep(5).wait();\n"
-        '  fail "detached-boom";\n'
+        '  std.error.fail!("detached-boom");\n'
         "}\n"
         "func parent() {\n"
         "  let t = launch bad();\n"
@@ -235,7 +235,7 @@ def run_cases():
         "import std;\n"
         "func work(n) { return n + 1; }\n"
         "std.io.println(await work(41));\n"
-        "std.io.println(wait launch work(41));\n",
+        "std.io.println(std.task.wait!(launch work(41)));\n",
         stdout="42\n42\n",
     )
 
@@ -250,8 +250,8 @@ def run_cases():
     check(
         "await on error catches task failure",
         'import std;\n'
-        'func boom() { fail "await-boom"; }\n'
-        'let v = await boom() on error(e) { recover 7; };\n'
+        'func boom() { std.error.fail!("await-boom"); }\n'
+        'let v = await boom() on error(e) { std.error.recover!(7); };\n'
         'std.io.println(v);\n',
         stdout="7",
         not_stderr="on error does not catch failures from the launched function",
@@ -294,28 +294,28 @@ def run_cases():
         "launch on error warns about task failures",
         "import std;\n"
         "func noop() {}\n"
-        "let t = launch noop() on error(e) { recover null; };\n"
-        "wait t;\n",
+        "let t = launch noop() on error(e) { std.error.recover!(null); };\n"
+        "std.task.wait!(t);\n",
         stderr="on error does not catch failures from the launched function",
     )
 
     check(
-        "wait with on error does not warn",
+        "macro wait with on error does not warn",
         "func noop() {}\n"
         "let t = launch noop();\n"
-        "wait t on error(e) { recover null; };\n"
-        "wait launch noop() on error(e) { recover null; };\n",
+        "std.task.wait!(t) on error(e) { std.error.recover!(null); };\n"
+        "std.task.wait!(launch noop()) on error(e) { std.error.recover!(null); };\n",
         not_stderr="on error does not catch failures from the launched function",
     )
 
     check(
-        "wait launch with on error catches task failure",
+        "macro wait launch with on error catches task failure",
         "import std;\n"
         "func boom() {\n"
-        '  fail "boom";\n'
+        '  std.error.fail!("boom");\n'
         "}\n"
-        "let r = wait launch boom() on error(e) {\n"
-        "  recover str(e);\n"
+        "let r = std.task.wait!(launch boom()) on error(e) {\n"
+        "  std.error.recover!(str(e));\n"
         "};\n"
         "std.io.println(r);\n",
         stdout="boom",
@@ -323,12 +323,12 @@ def run_cases():
     )
 
     check(
-        "wait launch with unbound on error",
+        "macro wait launch with unbound on error",
         "func boom() {\n"
-        '  fail "boom";\n'
+        '  std.error.fail!("boom");\n'
         "}\n"
-        "let r = wait launch boom() on error() {\n"
-        '  recover "caught";\n'
+        "let r = std.task.wait!(launch boom()) on error() {\n"
+        '  std.error.recover!("caught");\n'
         "};\n"
         "std.io.println(r);\n",
         stdout="caught",
@@ -336,15 +336,15 @@ def run_cases():
     )
 
     check(
-        "wait task variable with on error catches task failure",
+        "macro wait task variable with on error catches task failure",
         "import std;\n"
         "func boom() {\n"
         "  std.task.sleep(1);\n"
-        '  fail "boom";\n'
+        '  std.error.fail!("boom");\n'
         "}\n"
         "let t = launch boom();\n"
-        "let r = wait t on error(e) {\n"
-        "  recover str(e);\n"
+        "let r = std.task.wait!(t) on error(e) {\n"
+        "  std.error.recover!(str(e));\n"
         "};\n"
         "std.io.println(r);\n",
         stdout="boom",
@@ -352,12 +352,12 @@ def run_cases():
     )
 
     check(
-        "wait parenthesized launch with on error",
+        "macro wait parenthesized launch with on error",
         "func boom() {\n"
-        '  fail "boom";\n'
+        '  std.error.fail!("boom");\n'
         "}\n"
-        "let r = wait (launch boom()) on error(e) {\n"
-        "  recover str(e);\n"
+        "let r = std.task.wait!(launch boom()) on error(e) {\n"
+        "  std.error.recover!(str(e));\n"
         "};\n"
         "std.io.println(r);\n",
         stdout="boom",
@@ -366,7 +366,7 @@ def run_cases():
 
     check(
         "on error without a binding",
-        "let r = (1 / 0) on error() { recover 7; };\n"
+        "let r = (1 / 0) on error() { std.error.recover!(7); };\n"
         "std.io.println(r);\n",
         stdout="7",
     )

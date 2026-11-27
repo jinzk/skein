@@ -35,7 +35,7 @@ ts_test("on error catches assert macro", func() {
   let message = "";
   std.assert.that!(false, "via on error") on error(e) {
     message = std.error.message(e);
-    recover null;
+    std.error.recover!(null);
   };
   ts_eq(message, "via on error");
 });

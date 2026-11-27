@@ -93,7 +93,7 @@ def pool_isolation(tmp):
         "let bad = 0;\n"
         "for (let f in futures) {\n"
         "  let r = f.wait();\n"
-        "  if (!r[\"ok\"]) { fail r[\"error\"]; }\n"
+        "  if (!r[\"ok\"]) { std.error.fail!(r[\"error\"]); }\n"
         "  let want = \"worker-\" + str(r[\"value\"][\"n\"]);\n"
         "  if (r[\"value\"][\"env\"] != want) { bad = bad + 1; }\n"
         "}\n"
@@ -137,7 +137,7 @@ def spawn_inheritance(tmp):
         f'let t = std.thread.spawn_script("{worker_text}", '
         "std.thread.Message.from({}));\n"
         "let r = t.join();\n"
-        "if (!r[\"ok\"]) { fail r[\"error\"]; }\n"
+        "if (!r[\"ok\"]) { std.error.fail!(r[\"error\"]); }\n"
         "std.io.println(\"child_env=\" + r[\"value\"][\"env\"]);\n"
         "std.io.println(\"child_cwd=\" + r[\"value\"][\"cwd\"]);\n"
         "std.io.println(\"parent_env=\" + std.env.get(\"SKEIN_INHERIT\", \"\"));\n"
@@ -196,7 +196,7 @@ def child_process_worker(tmp):
         f'let f = pool.submit({{"dir": "{directory_text}", '
         f'"bin": "{bin_text}", "probe": "{probe_text}"}});\n'
         "let r = f.wait();\n"
-        "if (!r[\"ok\"]) { fail r[\"error\"]; }\n"
+        "if (!r[\"ok\"]) { std.error.fail!(r[\"error\"]); }\n"
         "std.io.println(r[\"value\"][\"out\"]);\n"
         "std.io.println(\"status=\" + r[\"value\"][\"status\"]);\n"
         "std.io.println(\"err=\" + r[\"value\"][\"err\"]);\n"
@@ -252,7 +252,7 @@ def ffi_concurrency(tmp):
         "let bad = 0;\n"
         "for (let f in futures) {\n"
         "  let r = f.wait();\n"
-        "  if (!r[\"ok\"]) { fail r[\"error\"]; }\n"
+        "  if (!r[\"ok\"]) { std.error.fail!(r[\"error\"]); }\n"
         "  if (r[\"value\"][\"value\"] != 5) {\n"
         "    bad = bad + 1;\n"
         "    std.io.println(\"bad_value=\" + str(r[\"value\"][\"value\"]));\n"

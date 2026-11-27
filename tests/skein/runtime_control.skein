@@ -190,7 +190,7 @@ ts_test("do while no trailing semicolon", func() {
 });
 
 ts_test("handler return exits function", func() {
-  let boom = func() { fail "handler-test"; };
+  let boom = func() { std.error.fail!("handler-test"); };
   let g = func() {
     let x = boom() on error(e) { return 1; };
     return 2;
@@ -199,7 +199,7 @@ ts_test("handler return exits function", func() {
 });
 
 ts_test("handler break exits loop", func() {
-  let boom = func() { fail "handler-test"; };
+  let boom = func() { std.error.fail!("handler-test"); };
   let out = [];
   for (let i in [1, 2, 3]) {
     let x = boom() on error(e) { break; };
@@ -209,7 +209,7 @@ ts_test("handler break exits loop", func() {
 });
 
 ts_test("handler continue keeps loop", func() {
-  let boom = func() { fail "handler-test"; };
+  let boom = func() { std.error.fail!("handler-test"); };
   let out = [];
   for (let i in [1, 2]) {
     let x = boom() on error(e) { continue; };
@@ -219,7 +219,7 @@ ts_test("handler continue keeps loop", func() {
 });
 
 ts_test("handler break runs block defers", func() {
-  let boom = func() { fail "handler-test"; };
+  let boom = func() { std.error.fail!("handler-test"); };
   let out = [];
   for (let i in [1]) {
     defer out = std.list.append(out, "loop");
@@ -332,13 +332,13 @@ ts_test("goto in typed function body", func() {
 });
 
 ts_test("nested handler break exits outer loop", func() {
-  let boom = func() { fail "handler-test"; };
+  let boom = func() { std.error.fail!("handler-test"); };
   let hits = 0;
   for (let i in [1, 2]) {
     let x = boom() on error(e) {
       let y = boom() on error(e2) { break; };
       hits = hits + 1;
-      recover 0;
+      std.error.recover!(0);
     };
     hits = hits + 1;
   }

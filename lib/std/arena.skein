@@ -43,7 +43,7 @@ package arena {
 
   func _check(id) {
     if (std.type.kind_of(id) != "int") {
-      fail("arena handle must be an int");
+      std.error.fail!("arena handle must be an int");
     }
   }
 
@@ -54,7 +54,7 @@ package arena {
   // Batched construction: one COW clone / one list build instead of n adds.
   export func from_list(values) {
     if (std.type.kind_of(values) != "list") {
-      fail("arena.from_list expects a list");
+      std.error.fail!("arena.from_list expects a list");
     }
     let slots = std.deque.new();
     for (let value in values) {

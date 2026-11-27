@@ -3,7 +3,7 @@ include "_support.skein";
 
 let dsn = std.env.get("SKEIN_TEST_MYSQL_DSN", "");
 if (dsn == "") {
-  fail("SKEIN_TEST_MYSQL_DSN is required");
+  std.error.fail!("SKEIN_TEST_MYSQL_DSN is required");
 }
 
 ts_test("mysql exec and query", func() {

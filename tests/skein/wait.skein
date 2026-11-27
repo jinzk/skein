@@ -13,33 +13,33 @@ func wait_void_work() {
 
 func wait_outer() {
   let t = launch wait_work(9);
-  return wait t;
+  return std.task.wait!(t);
 }
 
 ts_test("wait variable", func() {
   let t = launch wait_work(41);
-  ts_eq(wait t, 42);
+  ts_eq(std.task.wait!(t), 42);
 });
 
 ts_test("wait launch", func() {
-  ts_eq(wait launch wait_work(1), 2);
+  ts_eq(std.task.wait!(launch wait_work(1)), 2);
 });
 
 ts_test("wait parenthesized launch", func() {
-  ts_eq(wait (launch wait_work(2)), 3);
+  ts_eq(std.task.wait!(launch wait_work(2)), 3);
 });
 
 ts_test("wait binds tighter than addition", func() {
   let t = launch wait_work(3);
-  ts_eq(wait t + 1, 5);
+  ts_eq(std.task.wait!(t) + 1, 5);
 });
 
 ts_test("wait nested task", func() {
-  ts_eq(wait launch wait_outer(), 10);
+  ts_eq(std.task.wait!(launch wait_outer()), 10);
 });
 
 ts_test("wait void task", func() {
-  wait launch wait_void_work();
+  std.task.wait!(launch wait_void_work());
   ts_true(wait_void_done);
 });
 

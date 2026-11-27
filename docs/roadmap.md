@@ -529,14 +529,14 @@ keyword（`in` / `export` / `import` / `package` / `include`）已完成。其�
    `SKEIN_TOK_BUILTIN`；解析优先级为局部绑定 > 显式 import > 默认 import。
 4. **P2.2（已完成）** 内置宏改为 parser 侧默认宏绑定，裸名映射到 `std.log.*!` /
    `std.result.capture!` / `std.error.*!` / `std.task.wait!` 等规范路径；
-   `fail` / `recover` / `pass` / `wait` 的规范形式改为宏，旧关键字形式暂时并行；
+   `fail` / `recover` / `pass` / `wait` 的规范形式改为宏，旧关键字形式已移除；
    追加 `name!` 与 `name! x` 两种宏简写；用户宏可遮蔽裸名。
 5. **P2.3（已完成）** `list` / `dict` 改为默认 import，规范路径为
    `std.list.new` / `std.dict.new`；`std.list.new(x)` / `std.dict.new(x)` 解析为对应构造器，
    值作用域可遮蔽且类型命名空间保持独立；不做 `list!` / `dict!` / `try!`。
-6. **P3.1（已完成）** `wait` 退出保留字，`launch` / `wait` / `await` 改为表达式
-    起始 contextual keyword，
-   `await f()` 等价 `wait launch f()`，要求后面是调用表达式，保留 `on error`
+6. **P3.1（已完成）** `wait` 退出保留字，`launch` / `await` 改为表达式
+    起始 contextual keyword，`wait` 只作普通标识符，
+   `await f()` 等价 `std.task.wait!(launch f())`，要求后面是调用表达式，保留 `on error`
    语义；postfix 优先级高于前缀，`.` 后仍是普通名字。
 7. **P4（已完成）** 用户宏 v1 一次落地：`macro` 声明、`expr` / `ident` / 尾部
    `expr...` / 尾部 `block`、同文件声明先于使用、hygiene、嵌套调用和递归禁止。
@@ -677,7 +677,7 @@ M11 继续保持“宏不替代泛型声明”的边界。当前可用组合是�
 - 默认类型检查启用时，`for ... in std.utils.range(...)` 的参数是编译期整数常量表达式
   时走计数循环，不物化 list；`std.utils.range()` 在其他上下文仍返回 list
 - task / generator、线程、Channel
-- `wait e` task 前缀等待语法：等价于 `e.wait()`，支持 `wait launch f()`；
+- `std.task.wait!(e)` task 等待宏：等价于 `e.wait()`，支持 `std.task.wait!(launch f())`；
   `.` 后的关键字与内置名按普通成员名解析
 - `launch` 遵循 `.` 的优先级，作用于完整调用链；`launch f().wait()` 解析为
   `launch (f().wait())`，不再隐式下钻到 `f()`
@@ -978,17 +978,17 @@ RelWithDebInfo 下空脚本 `main()` 约 0.4 ms，`import std` 约 0.85 ms，
   运行时校验不可变性与 arity。`[a, b]` 保持宽松的依据是结构化读取：
   它只按位置读取元素并创建新绑定，不改写源 tuple；因此
   `let l: list[int] = (1, 2);` 仍被 checker 拒绝。
-- `wait t` 前缀写法（2026-11-22）：`wait e` 等价于 `e.wait()`，要求
-  `e: task[T]` 并返回 `T`；`wait launch f()` 合法，`launch wait f()` 被拒绝。
-  `.` 后的关键字与内置名统一按 `NAME` 解析，因此 `t.wait()`、
-  `std.task.wait`、`std.regex.match`、枚举变体和 import 路径均无需特判。
+- `std.task.wait!(e)` 等待宏（2026-11-22 引入，后续移除裸 `wait` 关键字）：
+  等价于 `e.wait()`，要求 `e: task[T]` 并返回 `T`；
+  `std.task.wait!(launch f())` 合法。`.` 后的名字按普通成员解析，因此
+  `t.wait()`、`std.task.wait`、`std.regex.match`、枚举变体和 import 路径均无需特判。
   非 task 操作数在类型检查阶段报 `wait expects a task, got <type>`；
-  `any` / 泛型 / union 保持宽松。不做：超时版 `wait e, ms`、
-  `wait all` / `wait any`、`async` 关键字、取消或恢复函数染色；`await` 已作为表达式
+  `any` / 泛型 / union 保持宽松。不做：超时版宏参数、`wait all` / `wait any`、
+  `async` 关键字、取消或恢复函数染色；`await` 已作为表达式
   起始 contextual keyword 落地（见 P3.1）。
 - `launch` 直接作用于完整调用链（2026-11-22），不再下钻到最内层 call。
   `launch make().get()` 启动整个 `make().get()`；`launch f().wait()` 解析为
-  `launch (f().wait())`。需要“启动后等待”时统一写 `wait launch f()` 或
+  `launch (f().wait())`。需要“启动后等待”时统一写 `std.task.wait!(launch f())` 或
   `(launch f()).wait()`。已迁移相关测试和 `SYNTAX.md`。
 - Redis / Valkey 作为独立的 `std.cache`（2026-11-23），不放入 `std.db`。
   采用纯 Skein 内嵌包，基于 `std.net` / `std.tls` 实现 RESP2，不依赖动态
@@ -1001,9 +1001,9 @@ RelWithDebInfo 下空脚本 `main()` 约 0.4 ms，`import std` 约 0.85 ms，
 - 嵌入式 KV（2026-11-23）：新增 `std.kv`，默认 SQLite 单文件后端；
   key/value 使用 BLOB，支持 prefix scan。LevelDB / RocksDB 只保留为未来
   可选目录后端。
-- `wait t on error(...)` / `wait launch f() on error(...)` 与 `on error()`
-  （2026-11-23）：`on error` 绑定高于前缀 `wait`/`launch`，parser 通过
-  AST 重排把 handler 移到 `wait` 外侧，使任务内 `fail` 能被捕获；错误
+- `std.task.wait!(t) on error(...)` / `std.task.wait!(launch f()) on error(...)` 与 `on error()`
+  （2026-11-23）：`on error` 绑定高于前缀 `launch`，parser 通过
+  AST 重排把 handler 移到等待宏外侧，使任务内错误能被捕获；错误
   绑定可省略。detached 诊断改为任务销毁时才上报。裸写
   `launch f() on error(...)` 仍可解析，但会给出 `launch` warning，提示
   handler 不能覆盖任务体。保留 `launch` 关键字：不改为 `task`、

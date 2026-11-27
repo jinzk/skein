@@ -61,7 +61,7 @@ def with_std_prelude(source):
     The language requires explicit imports.  Most test cases are short
     snippets focused on one behavior, so the harness supplies them instead of
     repeating them in every case.  Tests that exercise the missing-import path
-    pass std_prelude=False.
+    with std_prelude=False.
     """
     prelude = ""
     if _STD_REFERENCE.search(source) and not _STD_IMPORT.search(source):
@@ -896,7 +896,7 @@ def check_extended_stdlib():
                 "  if (method == \"add\") {\n"
                 "    return params[0] + params[1];\n"
                 "  }\n"
-                "  fail(\"unknown method \" + method);\n"
+                "  std.error.fail!(\"unknown method \" + method);\n"
                 "});\n"
             )
         rpc_worker_path = rpc_worker_script.replace("\\", "\\\\")
@@ -918,7 +918,7 @@ def check_extended_stdlib():
                 "  if (method == \"echo\") {\n"
                 "    return {\"value\": params[0], \"body\": body};\n"
                 "  }\n"
-                "  fail(\"unknown method \" + method);\n"
+                "  std.error.fail!(\"unknown method \" + method);\n"
                 "}, {\"protocol\": \"hybrid\"});\n"
             )
         rpc_hybrid_path = rpc_hybrid_script.replace("\\", "\\\\")
@@ -943,7 +943,7 @@ def check_extended_stdlib():
                 "  if (method == \"mul\") {\n"
                 "    return params[0] * params[1];\n"
                 "  }\n"
-                "  fail(\"unknown method \" + method);\n"
+                "  std.error.fail!(\"unknown method \" + method);\n"
                 "});\n"
                 "server.serve();\n"
             )
@@ -974,7 +974,7 @@ def check_extended_stdlib():
             f'let output = std.fs.open("{rpc_out_path}", "w+b");\n'
             "let server = rpc.server(func(method, params) {\n"
             '  if (method == "add") { return params[0] + params[1]; }\n'
-            '  fail("unknown method " + method);\n'
+            '  std.error.fail!("unknown method " + method);\n'
             '}, {"input": input, "output": output, "ready": false});\n'
             "let n = server.serve();\n"
             "std.io.flush(output);\n"
@@ -1066,7 +1066,7 @@ def check_extended_stdlib():
                 "  if (method == \"add\") {\n"
                 "    return params[0] + params[1];\n"
                 "  }\n"
-                "  fail(\"unknown method \" + method);\n"
+                "  std.error.fail!(\"unknown method \" + method);\n"
                 "}, {\"encode\": enc, \"decode\": dec});\n"
             )
         rpc_codec_path = rpc_codec_script.replace("\\", "\\\\")
@@ -1148,7 +1148,7 @@ def check_extended_stdlib():
                 "  if (method == \"double\") {\n"
                 "    return params[0] * 2;\n"
                 "  }\n"
-                "  fail(\"unknown method \" + method);\n"
+                "  std.error.fail!(\"unknown method \" + method);\n"
                 "});\n"
             )
         rpc_double_path = rpc_double_script.replace("\\", "\\\\")
@@ -1477,7 +1477,7 @@ def check_extended_stdlib():
             '{"strategy": "dispatch", "require": ["http2"]}) '
             "on error(e) {\n"
             '    std.io.print("kind=" + std.error.kind(e));\n'
-            "    recover null;\n"
+            "    std.error.recover!(null);\n"
             "};\n",
             stdout="kind=http.unsupported",
         )

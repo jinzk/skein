@@ -30,7 +30,7 @@ def run_cases():
         "import std;\n"
         "func worker() {\n"
         "  let signal = yield 1;\n"
-        "  if (signal is error) { fail signal; }\n"
+        "  if (signal is error) { std.error.fail!(signal); }\n"
         "  yield 2;\n"
         "}\n"
         "let g = worker();\n"
@@ -39,7 +39,7 @@ def run_cases():
         "std.error.new(\"cancel\", \"stop\")) on error(e) {\n"
         "  std.io.print(std.error.kind(e));\n"
         "  std.io.print(str(e));\n"
-        "  recover 0;\n"
+        "  std.error.recover!(0);\n"
         "};\n"
         "v\n",
         stdout_all=[
@@ -126,7 +126,7 @@ def run_cases():
     check(
         "generator close defer error",
         "import std;\n"
-        "func boom() { fail \"defer boom\"; }\n"
+        "func boom() { std.error.fail!(\"defer boom\"); }\n"
         "func g() {\n"
         "  defer boom();\n"
         "  yield 1;\n"
@@ -136,7 +136,7 @@ def run_cases():
         "let v = std.generator.close(gen) on error(e) {\n"
         "  std.io.print(std.error.kind(e));\n"
         "  std.io.print(str(e));\n"
-        "  recover false;\n"
+        "  std.error.recover!(false);\n"
         "};\n"
         "v\n"
         "std.generator.done(gen)\n",
@@ -222,7 +222,7 @@ def run_cases():
         "let v = (1 / 0) on error(e) {\n"
         "  std.io.print(std.error.kind(e));\n"
         "  std.io.print(str(e));\n"
-        "  recover 42;\n"
+        "  std.error.recover!(42);\n"
         "};\n"
         "v\n",
         stdout_all=["runtime", "division by zero", "= 42"],
@@ -230,12 +230,12 @@ def run_cases():
     check(
         "on error fail payload",
         "import std;\n"
-        "func f() { fail \"boom\"; }\n"
+        "func f() { std.error.fail!(\"boom\"); }\n"
         "let v = f() on error(e) {\n"
         "  std.io.print(std.type.kind_of(e));\n"
         "  std.io.print(std.error.kind(e));\n"
         "  std.io.print(str(e));\n"
-        "  recover 7;\n"
+        "  std.error.recover!(7);\n"
         "};\n"
         "v\n",
         stdout_all=["error", "fail", "boom", "= 7"],
@@ -243,7 +243,7 @@ def run_cases():
     check(
         "capture fail",
         "import std;\n"
-        "let r = std.result.capture(func() { fail \"boom\"; });\n"
+        "let r = std.result.capture(func() { std.error.fail!(\"boom\"); });\n"
         "std.result.is_err(r)\n"
         "std.error.kind(std.result.error(r))\n"
         "std.result.error(r)\n",
@@ -253,7 +253,7 @@ def run_cases():
         "unwrap raises",
         "import std;\n"
         "let v = std.result.unwrap(std.result.err(\"boom\")) on error(e) {\n"
-        "  recover str(e);\n"
+        "  std.error.recover!(str(e));\n"
         "};\n"
         "v\n",
         stdout="= boom",
@@ -261,7 +261,7 @@ def run_cases():
     check(
         "task fail payload",
         "import std;\n"
-        "func f() { fail \"task boom\"; }\n"
+        "func f() { std.error.fail!(\"task boom\"); }\n"
         "let r = std.task.catch(launch f()).wait();\n"
         "std.result.is_err(r)\n"
         "std.error.kind(std.result.error(r))\n"
@@ -272,12 +272,12 @@ def run_cases():
         "generator error payload",
         "import std;\n"
         "func broken() {\n"
-        "  fail \"generator boom\";\n"
+        "  std.error.fail!(\"generator boom\");\n"
         "  yield 1;\n"
         "}\n"
         "let v = std.generator.next(broken()) on error(e) {\n"
         "  std.io.print(std.error.kind(e));\n"
-        "  recover str(e);\n"
+        "  std.error.recover!(str(e));\n"
         "};\n"
         "v\n",
         stdout_all=["fail", "= generator boom"],
@@ -395,7 +395,7 @@ def run_cases():
         with open(thread_worker, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(
                 "import std;\n"
-                'func main(ctx) { fail "thread boom"; }\n'
+                'func main(ctx) { std.error.fail!("thread boom"); }\n'
             )
         check(
             "thread error keeps trace",
@@ -466,7 +466,7 @@ def run_cases():
     check(
         "result on error unwrap",
         "import std;\n"
-        "let v = std.result.ok(42) on error(e) { recover 0; };\n"
+        "let v = std.result.ok(42) on error(e) { std.error.recover!(0); };\n"
         "v\n",
         stdout="= 42",
     )
@@ -476,7 +476,7 @@ def run_cases():
         "let v = std.result.err(\"boom\") on error(e) {\n"
         "  std.io.print(std.error.kind(e));\n"
         "  std.io.print(str(e));\n"
-        "  recover 7;\n"
+        "  std.error.recover!(7);\n"
         "};\n"
         "v\n",
         stdout_all=["error", "boom", "= 7"],
@@ -485,9 +485,9 @@ def run_cases():
         "result on error pass",
         "import std;\n"
         "func f() { return std.result.err(\"inner\"); }\n"
-        "let v = (f() on error(e) { pass e; }) on error(e2) {\n"
+        "let v = (f() on error(e) { std.error.pass!(e); }) on error(e2) {\n"
         "  std.io.print(\"outer \" + str(e2));\n"
-        "  recover 9;\n"
+        "  std.error.recover!(9);\n"
         "};\n"
         "v\n",
         stdout_all=["outer inner", "= 9"],
@@ -495,7 +495,7 @@ def run_cases():
     check(
         "result on error normal value",
         "import std;\n"
-        "let v = 5 on error(e) { recover 0; };\n"
+        "let v = 5 on error(e) { std.error.recover!(0); };\n"
         "v\n",
         stdout="= 5",
     )
@@ -503,7 +503,7 @@ def run_cases():
         "result on error nested",
         "import std;\n"
         "let v = std.result.ok(std.result.ok(1)) on error(e) {\n"
-        "  recover 0;\n"
+        "  std.error.recover!(0);\n"
         "};\n"
         "v\n",
         stdout="= ok(1)",
@@ -512,7 +512,7 @@ def run_cases():
         "result on error recover result",
         "import std;\n"
         "let r = std.result.err(\"x\") on error(e) {\n"
-        "  recover std.result.err(\"y\");\n"
+        "  std.error.recover!(std.result.err(\"y\"));\n"
         "};\n"
         "std.result.is_err(r)\n"
         "std.result.error(r)\n",
@@ -524,7 +524,7 @@ def run_cases():
         "let v = do {\n"
         "  let a = 3;\n"
         "  a + 4;\n"
-        "} on error(e) { recover 0; };\n"
+        "} on error(e) { std.error.recover!(0); };\n"
         "v\n",
         stdout="= 7",
     )
@@ -532,11 +532,11 @@ def run_cases():
         "do block on error catches fail",
         "import std;\n"
         "let v = do {\n"
-        "  fail \"boom\";\n"
+        "  std.error.fail!(\"boom\");\n"
         "  1;\n"
         "} on error(e) {\n"
         "  std.io.print(str(e));\n"
-        "  recover 42;\n"
+        "  std.error.recover!(42);\n"
         "};\n"
         "v\n",
         stdout_all=["boom", "= 42"],
@@ -548,7 +548,7 @@ def run_cases():
         "  1 / 0;\n"
         "} on error(e) {\n"
         "  std.io.print(std.error.kind(e));\n"
-        "  recover -1;\n"
+        "  std.error.recover!(-1);\n"
         "};\n"
         "v\n",
         stdout_all=["runtime", "= -1"],
@@ -558,7 +558,7 @@ def run_cases():
         "import std;\n"
         "let v = do {\n"
         "  std.result.ok(11);\n"
-        "} on error(e) { recover 0; };\n"
+        "} on error(e) { std.error.recover!(0); };\n"
         "v\n",
         stdout="= 11",
     )
@@ -569,7 +569,7 @@ def run_cases():
         "  std.result.err(\"bad\");\n"
         "} on error(e) {\n"
         "  std.io.print(str(e));\n"
-        "  recover 12;\n"
+        "  std.error.recover!(12);\n"
         "};\n"
         "v\n",
         stdout_all=["bad", "= 12"],
@@ -579,9 +579,9 @@ def run_cases():
         "import std;\n"
         "let a = do {\n"
         "  let x = 5;\n"
-        "} on error(e) { recover 1; };\n"
+        "} on error(e) { std.error.recover!(1); };\n"
         "let b = do {\n"
-        "} on error(e) { recover 2; };\n"
+        "} on error(e) { std.error.recover!(2); };\n"
         "std.io.print(a);\n"
         "std.io.print(b);\n",
         stdout_all=["null", "null"],
@@ -591,12 +591,12 @@ def run_cases():
         "import std;\n"
         "func inner() {\n"
         "  return do {\n"
-        "    fail \"deep\";\n"
-        "  } on error(e) { pass e; };\n"
+        "    std.error.fail!(\"deep\");\n"
+        "  } on error(e) { std.error.pass!(e); };\n"
         "}\n"
         "let v = inner() on error(e) {\n"
         "  std.io.print(\"outer \" + str(e));\n"
-        "  recover 8;\n"
+        "  std.error.recover!(8);\n"
         "};\n"
         "v\n",
         stdout_all=["outer deep", "= 8"],
@@ -607,7 +607,7 @@ def run_cases():
         "func f() {\n"
         "  let v = do {\n"
         "    return 5;\n"
-        "  } on error(e) { recover 0; };\n"
+        "  } on error(e) { std.error.recover!(0); };\n"
         "  return v + 1;\n"
         "}\n"
         "f()\n",
@@ -624,7 +624,7 @@ def run_cases():
         "    if (i == 2) { continue; }\n"
         "    if (i == 4) { break; }\n"
         "    i * 10;\n"
-        "  } on error(e) { recover 0; };\n"
+        "  } on error(e) { std.error.recover!(0); };\n"
         "  total = total + v;\n"
         "}\n"
         "std.io.print(total);\n"
@@ -635,7 +635,7 @@ def run_cases():
         "do block on error then while",
         "import std;\n"
         "func f(n) {\n"
-        "  let v = do { n + 1; } on error(e) { recover 0; };\n"
+        "  let v = do { n + 1; } on error(e) { std.error.recover!(0); };\n"
         "  let i = 0;\n"
         "  while (i < 3) { i = i + 1; }\n"
         "  return v + i;\n"
@@ -648,7 +648,7 @@ def run_cases():
         "import std;\n"
         "func make(base) {\n"
         "  return func(x) {\n"
-        "    return do { base + x; } on error(e) { recover -1; };\n"
+        "    return do { base + x; } on error(e) { std.error.recover!(-1); };\n"
         "  };\n"
         "}\n"
         "make(10)(5)\n",
@@ -660,9 +660,9 @@ def run_cases():
         "func f(flag) {\n"
         "  return do {\n"
         "    defer std.io.print(\"deferred\");\n"
-        "    if (flag) { fail \"flagged\"; }\n"
+        "    if (flag) { std.error.fail!(\"flagged\"); }\n"
         "    1;\n"
-        "  } on error(e) { recover 2; };\n"
+        "  } on error(e) { std.error.recover!(2); };\n"
         "}\n"
         "std.io.print(f(false));\n"
         "std.io.print(f(true));\n",
@@ -681,17 +681,17 @@ def run_cases():
         "import std;\n"
         "let v = do {\n"
         "  1\n"
-        "} on error(e) { recover 0; };\n"
+        "} on error(e) { std.error.recover!(0); };\n"
         "v\n",
         stderr="syntax error",
     )
     check(
         "result on error task",
         "import std;\n"
-        "func bad() { fail \"task boom\"; }\n"
+        "func bad() { std.error.fail!(\"task boom\"); }\n"
         "let v = (std.task.catch(launch bad()).wait()) on error(e) {\n"
         "  std.io.print(\"task \" + str(e));\n"
-        "  recover 3;\n"
+        "  std.error.recover!(3);\n"
         "};\n"
         "v\n",
         stdout_all=["task task boom", "= 3"],
@@ -807,14 +807,14 @@ def run_cases():
     check(
         "defer inside error handler captures local",
         "import std;\n"
-        "func boom() { fail \"boom\"; }\n"
+        "func boom() { std.error.fail!(\"boom\"); }\n"
         "func f() {\n"
         "  let x = 1;\n"
         "  defer std.io.print(str(x));\n"
         "  let v = boom() on error(e) {\n"
         "    let y = 2;\n"
         "    defer std.io.print(str(y));\n"
-        "    recover 5;\n"
+        "    std.error.recover!(5);\n"
         "  };\n"
         "  std.io.print(str(v));\n"
         "}\n"
@@ -824,14 +824,14 @@ def run_cases():
     check(
         "handler captures local closure",
         "import std;\n"
-        "func boom() { fail \"boom\"; }\n"
+        "func boom() { std.error.fail!(\"boom\"); }\n"
         "func f() {\n"
         "  let g = func() { return 0; };\n"
         "  let v = boom() on error(e) {\n"
         "    let y = 4;\n"
         "    func h() { return y; }\n"
         "    g = h;\n"
-        "    recover y;\n"
+        "    std.error.recover!(y);\n"
         "  };\n"
         "  std.io.print(str(v));\n"
         "  std.io.print(str(g()));\n"
@@ -865,12 +865,12 @@ def run_cases():
         "import std;\n"
         "func f() {\n"
         "  defer std.io.print(\"cleanup\");\n"
-        "  fail \"boom\";\n"
+        "  std.error.fail!(\"boom\");\n"
         "}\n"
         "let v = f() on error(e) {\n"
         "  std.io.print(std.error.kind(e));\n"
         "  std.io.print(str(e));\n"
-        "  recover 1;\n"
+        "  std.error.recover!(1);\n"
         "};\n"
         "v\n",
         stdout_all=["cleanup", "fail", "boom", "= 1"],
@@ -878,14 +878,14 @@ def run_cases():
     check(
         "defer error propagates",
         "import std;\n"
-        "func boom() { fail \"defer boom\"; }\n"
+        "func boom() { std.error.fail!(\"defer boom\"); }\n"
         "func f() {\n"
         "  defer boom();\n"
         "  return 1;\n"
         "}\n"
         "let v = f() on error(e) {\n"
         "  std.io.print(\"caught \" + str(e));\n"
-        "  recover 2;\n"
+        "  std.error.recover!(2);\n"
         "};\n"
         "v\n",
         stdout_all=["caught defer boom", "= 2"],
@@ -893,14 +893,14 @@ def run_cases():
     check(
         "defer keeps original error",
         "import std;\n"
-        "func boom() { fail \"defer boom\"; }\n"
+        "func boom() { std.error.fail!(\"defer boom\"); }\n"
         "func f() {\n"
         "  defer boom();\n"
-        "  fail \"main boom\";\n"
+        "  std.error.fail!(\"main boom\");\n"
         "}\n"
         "let v = f() on error(e) {\n"
         "  std.io.print(\"caught \" + str(e));\n"
-        "  recover 3;\n"
+        "  std.error.recover!(3);\n"
         "};\n"
         "v\n",
         stdout_all=["caught main boom", "= 3"],
@@ -1023,7 +1023,7 @@ def run_cases():
           'import std;\n'
           'func work(x) {\n'
           '  std.task.sleep(5).wait();\n'
-          '  if (x == 2) { fail "bad"; }\n'
+          '  if (x == 2) { std.error.fail!("bad"); }\n'
           '  return x * 2;\n'
           '}\n'
           'let r = std.task.bounded_parallel_map(\n'
@@ -1038,11 +1038,11 @@ def run_cases():
           'std.task.bounded_parallel_map([1], 0, func(x) { return x; });\n',
           stderr="std.task.bounded_parallel_map limit must be at least 1")
     check("wait rejects non-task value",
-          'let v = wait 1;\n',
+          'let v = std.task.wait!(1);\n',
           stderr="wait expects a task, got int")
     check("wait rejects non-task call",
           'func f(): int { return 1; }\n'
-          'let v = wait f();\n',
+          'let v = std.task.wait!(f());\n',
           stderr="wait expects a task, got int")
     check("wait is no longer reserved",
           'let wait = 1;\n'
@@ -1052,10 +1052,12 @@ def run_cases():
           'func wait() { return 1; }\n'
           'std.io.println((wait)());\n',
           stdout="1")
-    check("launch rejects wait expression",
-          'func f() { return 1; }\n'
-          'let t = launch wait f();\n',
-          stderr="launch cannot be applied to a wait expression")
+    check("bare wait is an identifier in launch",
+          'import std;\n'
+          'func wait() { return 1; }\n'
+          'let t = launch wait();\n'
+          'std.io.println(std.task.wait!(t));\n',
+          stdout="1")
     check("member names may be keywords",
           'import std;\n'
           'func work(n) { return n + 1; }\n'

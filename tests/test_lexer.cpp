@@ -222,14 +222,34 @@ void check_contextual_task_keywords() {
             "launch keyword count mismatch");
     require(count_kind(tokens, SKEIN_TOK_AWAIT) == 1,
             "await keyword count mismatch");
-    require(count_kind(tokens, SKEIN_TOK_WAIT) == 0,
-            "wait must stay an identifier here");
     require(has_text(tokens, SKEIN_TOK_NAME, "launch"),
             "launch declaration name must stay an identifier");
     require(has_text(tokens, SKEIN_TOK_NAME, "await"),
             "await variable reference must stay an identifier");
     require(has_text(tokens, SKEIN_TOK_NAME, "wait"),
             "wait member name must stay an identifier");
+}
+
+void check_removed_bare_keyword_forms() {
+    std::vector<token> tokens = lex_source(
+        "let fail = 1;\n"
+        "let recover = 2;\n"
+        "let pass = 3;\n"
+        "let wait = 4;\n"
+        "value.fail;\n"
+        "value.recover;\n"
+        "value.pass;\n"
+        "value.wait;\n"
+        "std.error.fail!(\"x\");\n"
+        "std.error.recover!(1);\n"
+        "std.error.pass!(1);\n"
+        "std.task.wait!(t);\n");
+    for (const char *word : {"fail", "recover", "pass", "wait"}) {
+        require(has_text(tokens, SKEIN_TOK_NAME, word),
+                "removed bare keyword must lex as an identifier");
+    }
+    require(count_kind(tokens, SKEIN_TOK_MACRO_BANG) == 4,
+            "canonical macro-callee bang count mismatch");
 }
 
 void check_contextual_handler_keywords() {
@@ -365,6 +385,7 @@ int main() {
     check_label_body_block();
     check_switch_arm_label();
     check_contextual_task_keywords();
+    check_removed_bare_keyword_forms();
     check_contextual_handler_keywords();
     check_contextual_as_keyword();
     check_contextual_ref_keyword();

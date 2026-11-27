@@ -235,7 +235,7 @@ func work(n) {
 }
 
 let t = launch work(21);
-let value = wait t;       // 等价于 t.wait()
+let value = std.task.wait!(t);       // 等价于 t.wait()
 std.io.print(value);
 
 let total = std.task.scope(func() {
@@ -245,7 +245,7 @@ let total = std.task.scope(func() {
 });
 ```
 
-- `wait t` 是 `t.wait()` 的前缀写法；`wait launch f()` 等价于 `(launch f()).wait()`；
+- `std.task.wait!(t)` 是 `t.wait()` 的宏写法；`std.task.wait!(launch f())` 等价于 `(launch f()).wait()`；
 - `launch` 作用于完整调用链，`.` 优先级高于前缀 `wait` / `launch`：`launch f().wait()` 启动的是 `f().wait()`，不是“启动后再等待”；
 - `std.task.scope` 等待并管理一组子任务，支持取消和错误传播；
 - `std.thread.Channel` 返回有方向端点对，支持有界、无界和 rendezvous lane，以及 `select` / `broadcast`；
@@ -260,14 +260,14 @@ let total = std.task.scope(func() {
 import std;
 let n = parse_positive("0") on error(e) {
   std.io.print("bad input: " + str(e));
-  recover 0;
+  std.error.recover!(0);
 };
 ```
 
 - 捕获 `fail`、运行时错误和 `result.err`；`result.ok(v)` 直接解包为 `v`；
 - `e` 是 `error` 值，可用 `str(e)` / `std.error.message(e)` / `std.error.kind(e)` 检查；
 - `on error()` 可以不绑定错误值；handler 以 `recover`、`pass` 或 `fail` 结束；
-- task 内的错误在观察点抛出：`wait t on error(e) { ... }`、`wait launch f() on error(e) { ... }`；
+- task 内的错误在观察点抛出：`std.task.wait!(t) on error(e) { ... }`、`std.task.wait!(launch f()) on error(e) { ... }`；
 - `launch f() on error(...)` 不能捕获任务体错误，会产生 warning；
 - `on` / `error` 是 handler-scoped contextual keyword，其他位置仍是普通标识符
   （变量、字段、类型名均可）；`error!` 走普通宏解析路径；

@@ -6,7 +6,7 @@ include "_support.skein";
 
 let dsn = std.env.get("SKEIN_TEST_REDIS_DSN", "");
 if (dsn == "") {
-  fail("SKEIN_TEST_REDIS_DSN is required");
+  std.error.fail!("SKEIN_TEST_REDIS_DSN is required");
 }
 
 let prefix = "skein:cache:" + str(std.time.now_ms()) + ":" + str(std.random.int(0, 999999));

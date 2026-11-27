@@ -1377,7 +1377,7 @@ def run_cases():
 
         uncaught = os.path.join(tmp, "uncaught.skein")
         with open(uncaught, "w", encoding="utf-8") as f:
-            f.write('import std;\nstd.io.println("before");\nfail "boom";\nstd.io.println("after");\n')
+            f.write('import std;\nstd.io.println("before");\nstd.error.fail!("boom");\nstd.io.println("after");\n')
         proc = run_file(uncaught)
         assert proc.returncode == 1, proc.stderr
         assert "before\n" in proc.stdout, proc.stdout

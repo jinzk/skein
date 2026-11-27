@@ -118,7 +118,7 @@ ts_test("ordinary value cycles are still rejected", func() {
   let caught = false;
   let x = (b.next = a) on error(e) {
     caught = true;
-    recover null;
+    std.error.recover!(null);
   };
   ts_true(caught);
 });
@@ -134,7 +134,7 @@ ts_test("snapshot is sendable but a ref is not", func() {
   let caught = false;
   let sent = parent.send(std.thread.Message.from(r)) on error(e) {
     caught = true;
-    recover null;
+    std.error.recover!(null);
   };
   ts_true(caught);
 });
@@ -150,14 +150,14 @@ ts_test("nested ref and weak handles are rejected", func() {
   let caught_nested = false;
   let sent_nested = parent.send(std.thread.Message.from({"nodes": [r]})) on error(e) {
     caught_nested = true;
-    recover null;
+    std.error.recover!(null);
   };
   ts_true(caught_nested);
 
   let caught_weak = false;
   let sent_weak = parent.send(std.thread.Message.from(weak_ref)) on error(e) {
     caught_weak = true;
-    recover null;
+    std.error.recover!(null);
   };
   ts_true(caught_weak);
 
@@ -174,7 +174,7 @@ ts_test("snapshot rejects a cyclic ref graph", func() {
   let caught = false;
   let snap = std.ref.snapshot(a) on error(e) {
     caught = true;
-    recover null;
+    std.error.recover!(null);
   };
   ts_true(caught);
 });
@@ -186,7 +186,7 @@ ts_test("ref captures are rejected when transferring a function", func() {
   let done = std.thread.spawn_function(worker,
       std.thread.Message.from(1)) on error(e) {
     message = std.error.message(e);
-    recover null;
+    std.error.recover!(null);
   };
   ts_eq(std.string.contains(message, "std.ref.snapshot"), 1);
 });

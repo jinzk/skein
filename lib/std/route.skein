@@ -112,7 +112,7 @@ package route {
 
   func _parse_pattern(pattern) {
     if (std.type.kind_of(pattern) != "string") {
-      fail("route pattern must be a string");
+      std.error.fail!("route pattern must be a string");
     }
 
     let segs = [];
@@ -122,12 +122,12 @@ package route {
         continue;
       }
       if (seen_wild) {
-        fail("route wildcard must be the last segment");
+        std.error.fail!("route wildcard must be the last segment");
       }
       if (std.string.starts_with(part, ":")) {
         let name = std.string.substr(part, 1);
         if (name == "") {
-          fail("route parameter name is required");
+          std.error.fail!("route parameter name is required");
         }
         segs = std.list.append(segs, [_PARAM, name]);
       } else if (std.string.starts_with(part, "*")) {
@@ -139,7 +139,7 @@ package route {
     }
 
     if (std.utils.len(segs) > _MAX_SEGMENTS) {
-      fail("route pattern is too deep");
+      std.error.fail!("route pattern is too deep");
     }
     return segs;
   }
@@ -162,7 +162,7 @@ package route {
   func _check_route(node, segs, i, method, pattern) {
     if (i >= std.utils.len(segs)) {
       if (std.dict.has(node.handlers, method)) {
-        fail("duplicate route " + method + " " + pattern);
+        std.error.fail!("duplicate route " + method + " " + pattern);
       }
       return;
     }
@@ -177,7 +177,7 @@ package route {
       }
       let existing = node.wname;
       if (existing != seg[1]) {
-        fail("conflicting route wildcard name: *" + existing + " vs *" + seg[1]);
+        std.error.fail!("conflicting route wildcard name: *" + existing + " vs *" + seg[1]);
       }
       _check_route(child, segs, i + 1, method, pattern);
       return;
@@ -190,7 +190,7 @@ package route {
       }
       let existing = node.pname;
       if (existing != seg[1]) {
-        fail("conflicting route parameter name: :" + existing + " vs :" + seg[1]);
+        std.error.fail!("conflicting route parameter name: :" + existing + " vs :" + seg[1]);
       }
       _check_route(child, segs, i + 1, method, pattern);
       return;
@@ -352,13 +352,13 @@ package route {
 
   func _validate_request(req) {
     if (std.type.kind_of(req) != "dict") {
-      fail("route.dispatch expects a request dict");
+      std.error.fail!("route.dispatch expects a request dict");
     }
     if (!std.dict.has(req, "method") || std.type.kind_of(req["method"]) != "string") {
-      fail("route.dispatch requires a string method");
+      std.error.fail!("route.dispatch requires a string method");
     }
     if (!std.dict.has(req, "path") || std.type.kind_of(req["path"]) != "string") {
-      fail("route.dispatch requires a string path");
+      std.error.fail!("route.dispatch requires a string path");
     }
   }
 
@@ -371,10 +371,10 @@ package route {
 
     let add = func(method, pattern, handler) {
       if (std.type.kind_of(method) != "string") {
-        fail("route method must be a string");
+        std.error.fail!("route method must be a string");
       }
       if (std.type.kind_of(handler) != "function" && std.type.kind_of(handler) != "builtin") {
-        fail("route handler must be callable");
+        std.error.fail!("route handler must be callable");
       }
 
       let segs = _parse_pattern(pattern);
@@ -501,7 +501,7 @@ package route {
     let use = func(middleware) {
       if (std.type.kind_of(middleware) != "function" &&
           std.type.kind_of(middleware) != "builtin") {
-        fail("route middleware must be callable");
+        std.error.fail!("route middleware must be callable");
       }
       middlewares = std.list.append(middlewares, middleware);
     };
@@ -509,7 +509,7 @@ package route {
     let use_after = func(middleware) {
       if (std.type.kind_of(middleware) != "function" &&
           std.type.kind_of(middleware) != "builtin") {
-        fail("route after middleware must be callable");
+        std.error.fail!("route after middleware must be callable");
       }
       afterware = std.list.append(afterware, middleware);
     };

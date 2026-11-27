@@ -11,10 +11,10 @@ package lru {
 
   func _check_cap(cap) {
     if (std.type.kind_of(cap) != "int") {
-      fail("std.lru.new expects an int capacity, got " + std.type.kind_of(cap));
+      std.error.fail!("std.lru.new expects an int capacity, got " + std.type.kind_of(cap));
     }
     if (cap < 1) {
-      fail("std.lru.new capacity must be at least 1");
+      std.error.fail!("std.lru.new capacity must be at least 1");
     }
   }
 
@@ -26,7 +26,7 @@ package lru {
         kind == "struct" || kind == "enum") {
       return;
     }
-    fail("std.lru key: dict key must be int, float (not NaN), bool, string, char, byte, bytes, null, an immutable tuple of these, or a hashable struct/enum");
+    std.error.fail!("std.lru key: dict key must be int, float (not NaN), bool, string, char, byte, bytes, null, an immutable tuple of these, or a hashable struct/enum");
   }
 
   func _index(order, key) {

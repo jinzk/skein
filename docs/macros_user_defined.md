@@ -318,8 +318,8 @@ wrap!(2) {
 - 生成泛型声明；模板里的字面/占位符泛型应用允许，但不创建类型参数或约束；
 - 声明生成宏：`struct` / `enum` / `proto` / `impl` 和具名 `func` 都在定义期拒绝；
 - 对 `if` / `for` / `match` / `defer` / `on error` 等核心语义的重写；用户宏不得
-  重写 `fail` / `recover` / `pass`，这三者由后续阶段的内置宏 `fail!` /
-  `recover!` / `pass!` 提供；
+  重写错误控制流，这三者由内置宏 `std.error.fail!` / `std.error.recover!` /
+  `std.error.pass!` 提供；
 - `shape` 类型、proto 字段或鸭子类型；
 - 运算符宏；
 - 专用宏 opcode；
@@ -444,13 +444,13 @@ builtin，调用点已有的泛型值仍可通过 `expr` 片段传入。
 4. **P2.2（已完成）**：内置宏改为 parser 侧默认宏绑定（第 3.5 节）。裸名只是别名，规范
    路径仍可显式调用；加入 `fail!` / `recover!` / `pass!`（`std.error.*!`）和
    `wait!`（`std.task.wait!`，展开为 `#expr.wait()`）。落地第 3.3 节的
-   `name!` / `name! x` 两种简写；旧 bare 形式暂时并行，后续阶段再 deprecate。
+   `name!` / `name! x` 两种简写；旧 bare 关键字形式已移除，统一使用规范宏路径。
 5. **P2.3（已完成）**：`list` / `dict` 改为默认 import，新增 `std.list.new` /
    `std.dict.new`；`std.list.new(x)` / `std.dict.new(x)` 解析为对应构造器，值作用域可遮蔽，
    类型命名空间保持独立。不做 `list!` / `dict!` / `try!`。
 6. **P3.1（已完成）**：`wait` 退出保留字；`launch` / `wait` / `await` 改为表达式起始 contextual
-   keyword。`launch f()` 启动 task，`await f()` 等价 `wait launch f()` 并要求
-   后面是调用表达式；已有 task 写 `wait!(t)`。contextual 槽位覆盖语句开头、
+   keyword。`launch f()` 启动 task，`await f()` 等价 `std.task.wait!(launch f())` 并要求
+   后面是调用表达式；已有 task 写 `std.task.wait!(t)`。contextual 槽位覆盖语句开头、
    `=` / `return` / `yield` / `(` / `[` / `{` / `,` / `:` 和二元运算符之后；`.`
    之后仍是普通名字；`await(f())` 是前缀形式，同名变量写 `(await)(f())`；
    postfix 优先级高于前缀。`await f() on error(...)` 沿用当前 handler 语义。
@@ -510,17 +510,18 @@ formatter / lint / LSP 的片段覆盖、双位置诊断与 VM/JIT differential�
 14. 宏简写只支持 `name!` 与 `name! x`；列表、字典、表达式、嵌套宏和成员链
    一律写括号；`foo! { ... }` 始终是 block；
 15. `on` / `error` 已按 handler-scoped contextual 落地：`error!` 走普通宏路径，类型与字段位置不受影响；
-16. 内置宏默认 import 映射采用第 3.5 节的表；`fail!` / `recover!` / `pass!`
-    的规范路径为 `std.error.fail!` / `std.error.recover!` / `std.error.pass!`；
+16. 内置宏默认 import 映射采用第 3.5 节的表；`std.error.fail!` /
+    `std.error.recover!` / `std.error.pass!` 是规范路径，裸关键字形式已移除；
 17. 协议声明关键字 `protocol` 重命名为 `proto`，作为全局保留字；泛型约束列表中
     的 `proto` / `type` 是地位相同的 contextual 标记，只在类型参数约束位置
     生效；反射 kind 字符串同步改为 `"proto"`，不保留 `"protocol"` 别名；
-18. `wait` 改为内置宏 `wait!`，规范路径 `std.task.wait!`，展开为 `#expr.wait()`；
-    `launch` 与新增的 `await` 是表达式起始 contextual keyword，不是全局保留字。
+18. `wait` 不再是关键字；等待 task 使用内置宏 `std.task.wait!`，展开为
+    `#expr.wait()`。`launch` 与新增的 `await` 是表达式起始 contextual keyword，
+    不是全局保留字。
     contextual 槽位覆盖语句开头、`=` / `return` / `yield` / `(` / `[` / `{` /
     `,` / `:` 和二元运算符之后；`.` 之后仍是普通名字；
-19. `launch f()` 启动 task；`await f()` 等价 `wait launch f()`，要求后面是调用
-    表达式，已有 task 写 `wait!(t)`。`await(f())` 是前缀形式；调用同名变量写
+19. `launch f()` 启动 task；`await f()` 等价 `std.task.wait!(launch f())`，要求后面是调用
+    表达式，已有 task 写 `std.task.wait!(t)`。`await(f())` 是前缀形式；调用同名变量写
     `(await)(f())`。postfix 优先级高于前缀：`await f().xxx` 是
     `await (f().xxx)`，先 await 再取字段写 `(await f()).xxx`。`await f() on error(...)`
-    沿用当前 `wait launch f() on error(...)` 的 handler 语义。
+    沿用当前 `std.task.wait!(launch f()) on error(...)` 的 handler 语义。

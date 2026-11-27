@@ -59,7 +59,7 @@ package kv {
     if (kind == "string") {
       return std.bytes.from_string(value);
     }
-    fail("std.kv " + what + " must be string or bytes");
+    std.error.fail!("std.kv " + what + " must be string or bytes");
   }
 
   func _valid_table(name) {
@@ -137,7 +137,7 @@ package kv {
     let scan = func(prefix = "", limit = 0) {
       let p = _as_bytes(prefix, "prefix");
       if (std.type.kind_of(limit) != "int" || limit < 0) {
-        fail("std.kv scan limit must be a non-negative integer");
+        std.error.fail!("std.kv scan limit must be a non-negative integer");
       }
       let sql = "SELECT key, value FROM " + table;
       let params = [];
@@ -207,7 +207,7 @@ package kv {
         "busy_timeout_ms": options.busy_timeout_ms
       };
     }
-    fail("std.kv.open options must be a dict or kv.OpenOptions");
+    std.error.fail!("std.kv.open options must be a dict or kv.OpenOptions");
   }
 
   export func drivers() {
@@ -216,19 +216,19 @@ package kv {
 
   export func open(path, options = {}) {
     if (std.type.kind_of(path) != "string" || path == "") {
-      fail("std.kv.open expects a non-empty path");
+      std.error.fail!("std.kv.open expects a non-empty path");
     }
     if (std.string.starts_with(path, "rocksdb://") ||
         std.string.starts_with(path, "leveldb://")) {
-      fail("std.kv: directory LSM backend is not enabled");
+      std.error.fail!("std.kv: directory LSM backend is not enabled");
     }
     if (!std.dict.has(std, "db")) {
-      fail("std.kv requires the std.db SQLite backend");
+      std.error.fail!("std.kv requires the std.db SQLite backend");
     }
     let opts = _open_options(options);
     let table = std.dict.get(opts, "table", "skein_kv");
     if (!_valid_table(table)) {
-      fail("std.kv table must be a valid identifier");
+      std.error.fail!("std.kv table must be a valid identifier");
     }
     let db = std.db.open(path, opts);
     std.db.exec(db,

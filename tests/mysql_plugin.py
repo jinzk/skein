@@ -106,7 +106,7 @@ def test_abi():
         'mysql.connect("127.0.0.1", "nobody", "wrong", "missing", 1) '
         "on error(e) {\n"
         "  std.io.println(std.error.kind(e));\n"
-        "  recover null;\n"
+        "  std.error.recover!(null);\n"
         "}\n",
         stdout="runtime",
     )
@@ -117,7 +117,7 @@ def test_abi():
         "import skein.mysql as native;\n"
         "native.connect(1, 2, 3, 4) on error(e) {\n"
         "  std.io.println(std.error.kind(e));\n"
-        "  recover null;\n"
+        "  std.error.recover!(null);\n"
         "}\n",
         stdout="runtime",
     )
@@ -128,7 +128,7 @@ def test_abi():
         "import skein.mysql as native;\n"
         "native.query_task(1) on error(e) {\n"
         "  std.io.println(std.error.kind(e));\n"
-        "  recover null;\n"
+        "  std.error.recover!(null);\n"
         "}\n",
         stdout="runtime",
     )
@@ -219,7 +219,7 @@ def test_integration(config):
         "std.io.println(std.result.is_err(ccaught));\n"
         "c.execute(\"SELECT * FROM skein_missing_table\") on error(e) {\n"
         "  std.io.println(std.error.kind(e));\n"
-        "  recover null;\n"
+        "  std.error.recover!(null);\n"
         "}\n"
         "std.io.println(c.last_error() != \"\");\n"
         "c.execute(\"DROP TABLE skein_plugin_test\");\n"

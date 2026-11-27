@@ -2470,51 +2470,51 @@ def run_cases():
     )
 
     check("fail caught with recover",
-          'func f() { fail "boom"; }\n'
-          "f() on error(e) { std.io.print(e); recover 0; }\n",
+          'func f() { std.error.fail!("boom"); }\n'
+          "f() on error(e) { std.io.print(e); std.error.recover!(0); }\n",
           stdout_all=["boom", "= 0"])
     check("on error handler not called on success",
           "func f() { return 1; }\n"
-          'f() on error(e) { std.io.print("bad"); recover 0; }\n',
+          'f() on error(e) { std.io.print("bad"); std.error.recover!(0); }\n',
           stdout="= 1")
     check("pass propagates to outer handler",
-          'func inner() { fail "x"; }\n'
-          "func outer() { return inner() on error(e) { pass e; }; }\n"
-          'outer() on error(e) { std.io.print("caught " + str(e)); recover 7; }\n',
+          'func inner() { std.error.fail!("x"); }\n'
+          "func outer() { return inner() on error(e) { std.error.pass!(e); }; }\n"
+          'outer() on error(e) { std.io.print("caught " + str(e)); std.error.recover!(7); }\n',
           stdout_all=["caught x", "= 7"])
     check("fail stops loop body",
           "func f() {\n"
           "  for (let i in [1, 2, 3]) {\n"
-          '    if (i == 2) { fail "loop"; }\n'
+          '    if (i == 2) { std.error.fail!("loop"); }\n'
           "    std.io.print(i);\n"
           "  }\n"
           "  return 0;\n"
           "}\n"
-          'f() on error(e) { std.io.print("E " + str(e)); recover 9; }\n',
+          'f() on error(e) { std.io.print("E " + str(e)); std.error.recover!(9); }\n',
           stdout_all=["1", "E loop", "= 9"])
     check("recover value is expression result",
-          'func f() { fail "x"; }\n'
-          "(f() on error(e) { recover 2; }) + 3\n",
+          'func f() { std.error.fail!("x"); }\n'
+          "(f() on error(e) { std.error.recover!(2); }) + 3\n",
           stdout="= 5")
     check("handler accesses outer scope",
-          'let n = 3;\nfunc f() { fail "x"; }\n'
-          "f() on error(e) { recover n + 1; }\n",
+          'let n = 3;\nfunc f() { std.error.fail!("x"); }\n'
+          "f() on error(e) { std.error.recover!(n + 1); }\n",
           stdout="= 4")
     check("recover outside handler",
-          "recover 1;\n", stderr="recover outside error handler")
+          "std.error.recover!(1);\n", stderr="recover outside error handler")
     check("pass outside handler",
-          "pass 1;\n", stderr="pass outside error handler")
+          "std.error.pass!(1);\n", stderr="pass outside error handler")
     check("handler without terminal statement",
-          'func f() { fail "x"; }\n'
+          'func f() { std.error.fail!("x"); }\n'
           "let x = f() on error(e) { std.io.print(e); };\n",
           stderr="error handler must end with recover, pass, or fail")
     check("handler return exits function",
-          'func f() { fail "x"; }\n'
+          'func f() { std.error.fail!("x"); }\n'
           "func g() { let x = f() on error(e) { return 1; }; return 2; }\n"
           "g()\n",
           stdout="= 1")
     check("handler break exits loop",
-          'func f() { fail "x"; }\n'
+          'func f() { std.error.fail!("x"); }\n'
           "func g() {\n"
           "  for (let i in [1, 2, 3]) {\n"
           "    let x = f() on error(e) { break; };\n"
@@ -2525,7 +2525,7 @@ def run_cases():
           "g()\n",
           stdout="= 9")
     check("handler continue keeps loop",
-          'func f() { fail "x"; }\n'
+          'func f() { std.error.fail!("x"); }\n'
           "func g() {\n"
           "  let hits = 0;\n"
           "  for (let i in [1, 2]) {\n"
@@ -2537,7 +2537,7 @@ def run_cases():
           "g()\n",
           stdout="= 0")
     check("handler control runs block defers",
-          'func f() { fail "x"; }\n'
+          'func f() { std.error.fail!("x"); }\n'
           "func g() {\n"
           "  for (let i in [1]) {\n"
           "    defer std.io.print(\"loop\");\n"
@@ -2551,7 +2551,7 @@ def run_cases():
           "g()\n",
           stdout_all=["innerloop", "= 1"])
     check("defer handler return rejected",
-          'func f() { fail "x"; }\n'
+          'func f() { std.error.fail!("x"); }\n'
           "func g() {\n"
           "  defer f() on error(e) { return 1; };\n"
           "  return 2;\n"
@@ -2559,7 +2559,7 @@ def run_cases():
           "g()\n",
           stderr="defer expression cannot return, break, or continue")
     check("default parameter handler return rejected",
-          'func f() { fail "x"; }\n'
+          'func f() { std.error.fail!("x"); }\n'
           "func g(a = f() on error(e) { return 1; }) { return a; }\n"
           "g()\n",
           stderr="default value for parameter a cannot return control flow")
@@ -2568,18 +2568,18 @@ def run_cases():
           "  x: int;\n"
           "}\n"
           "impl P {\n"
-          '  func check(self) { if (self.x < 0) { fail "negative"; } '
+          '  func check(self) { if (self.x < 0) { std.error.fail!("negative"); } '
           "return self.x; }\n"
           "}\n"
-          'P { x: -1 }.check() on error(e) { std.io.print(e); recover 0; }\n',
+          'P { x: -1 }.check() on error(e) { std.io.print(e); std.error.recover!(0); }\n',
           stdout_all=["negative", "= 0"])
     check("recover does not cross function boundary",
-          'func bad() { recover 1; }\n'
-          'func f() { fail "x"; }\n'
-          "f() on error(e) { bad(); recover 0; };\n",
+          'func bad() { std.error.recover!(1); }\n'
+          'func f() { std.error.fail!("x"); }\n'
+          "f() on error(e) { bad(); std.error.recover!(0); };\n",
           stderr="recover outside error handler")
     check("uncaught fail at top level",
-          'fail "boom";\n', stderr="uncaught fail: boom")
+          'std.error.fail!("boom");\n', stderr="uncaught fail: boom")
 
     check("variadic function",
           "func sum(...nums: number) {\n"

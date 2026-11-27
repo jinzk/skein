@@ -23,7 +23,7 @@ ts_test("capture macro empty block", func() {
 
 ts_test("capture macro failure", func() {
   let r = capture! {
-    fail("macro boom");
+    std.error.fail!("macro boom");
   };
   ts_true(std.result.is_err(r));
   ts_eq(std.error.message(std.result.error(r)), "macro boom");
@@ -55,9 +55,9 @@ ts_test("capture macro does not flatten result", func() {
 
 ts_test("capture macro composes with on error", func() {
   let r = capture! {
-    fail("caught inside");
+    std.error.fail!("caught inside");
   } on error(e) {
-    recover std.result.ok(1);
+    std.error.recover!(std.result.ok(1));
   };
   ts_eq(std.result.value(r), 1);
 });

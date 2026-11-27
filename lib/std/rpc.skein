@@ -179,7 +179,7 @@ package rpc {
   export func connect(io, options = {}) {
     let protocol = std.dict.get(options, "protocol", "jsonl");
     if (protocol != "jsonl" && protocol != "hybrid") {
-      fail("rpc.connect supports protocol \"jsonl\" or \"hybrid\"");
+      std.error.fail!("rpc.connect supports protocol \"jsonl\" or \"hybrid\"");
     }
     if (std.dict.get(options, "ready", true)) {
       _handshake(
@@ -201,7 +201,7 @@ package rpc {
     if (std.result.is_err(opened)) {
       let error = std.result.error(opened);
       io.close();
-      fail(std.error.message(error));
+      std.error.fail!(std.error.message(error));
     }
     return io;
   }
@@ -211,7 +211,7 @@ package rpc {
   export func spawn(command, options = {}) {
     let protocol = std.dict.get(options, "protocol", "jsonl");
     if (protocol != "jsonl" && protocol != "hybrid") {
-      fail("rpc.spawn supports protocol \"jsonl\" or \"hybrid\"");
+      std.error.fail!("rpc.spawn supports protocol \"jsonl\" or \"hybrid\"");
     }
     let io = _spawn_opened(command, options, protocol);
     let reopen = func() {
@@ -229,7 +229,7 @@ package rpc {
     }
     let encoded = encode(frame);
     if (std.type.kind_of(encoded) != "string") {
-      fail("rpc encode must return a string");
+      std.error.fail!("rpc encode must return a string");
     }
     return encoded;
   }
@@ -247,7 +247,7 @@ package rpc {
     }
     let frame = decode(text);
     if (std.type.kind_of(frame) != "dict") {
-      fail("rpc decode must return a dict");
+      std.error.fail!("rpc decode must return a dict");
     }
     return frame;
   }
@@ -255,15 +255,15 @@ package rpc {
   func _handshake(io, options, protocol, timeout_ms) {
     let line = io.read_line(timeout_ms);
     if (line == null) {
-      fail("rpc connection closed before ready");
+      std.error.fail!("rpc connection closed before ready");
     }
     let frame = _decode_line(options, line);
     if (std.dict.get(frame, "ready", false) != true) {
-      fail("rpc ready frame is invalid");
+      std.error.fail!("rpc ready frame is invalid");
     }
     let remote = std.dict.get(frame, "protocol", "jsonl");
     if (remote != protocol) {
-      fail("rpc protocol mismatch: expected " + protocol + ", got " + remote);
+      std.error.fail!("rpc protocol mismatch: expected " + protocol + ", got " + remote);
     }
   }
 
@@ -454,7 +454,7 @@ package rpc {
   func _read_frame(io, options, protocol, timeout_ms) {
     let line = io.read_line(timeout_ms);
     if (line == null) {
-      fail("rpc connection closed");
+      std.error.fail!("rpc connection closed");
     }
     let response = _decode_line(options, line);
     let body = std.bytes.from_string("");
@@ -534,7 +534,7 @@ package rpc {
   //   cooldown_ms:   how long an open circuit blocks a client
   export func pool(clients, options = {}) {
     if (std.utils.len(clients) == 0) {
-      fail("rpc.pool requires at least one client");
+      std.error.fail!("rpc.pool requires at least one client");
     }
     let failure_limit = std.dict.get(options, "failure_limit", 3);
     let cooldown_ms = std.dict.get(options, "cooldown_ms", 5000);
@@ -564,7 +564,7 @@ package rpc {
     // circuits are open the next client is used as a half-open probe.
     let pick = func() {
       if (state["closed"]) {
-        fail("rpc pool is closed");
+        std.error.fail!("rpc pool is closed");
       }
       let n = std.utils.len(clients);
       let now = std.time.monotonic_ms();
@@ -822,11 +822,11 @@ package rpc {
   // continues with the next request.
   func _serve(handler, options) {
     if (std.type.kind_of(handler) != "function" && std.type.kind_of(handler) != "builtin") {
-      fail("rpc handler must be callable");
+      std.error.fail!("rpc handler must be callable");
     }
     let protocol = std.dict.get(options, "protocol", "jsonl");
     if (protocol != "jsonl" && protocol != "hybrid") {
-      fail("rpc server supports protocol \"jsonl\" or \"hybrid\"");
+      std.error.fail!("rpc server supports protocol \"jsonl\" or \"hybrid\"");
     }
     let hybrid = protocol == "hybrid";
     let input = std.dict.get(options, "input", std.io.stdin);

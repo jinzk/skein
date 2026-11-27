@@ -35,15 +35,17 @@ def run_cases():
     )
     check(
         "diagnostic uncaught pass location",
-        "let v = (1 / 0) on error(e) { pass e; };\n",
-        stderr="1:10: runtime error: uncaught fail: division by zero",
+        "import std;\n"
+        "let v = (1 / 0) on error(e) { std.error.pass!(e); };\n",
+        stderr="2:10: runtime error: uncaught fail: division by zero",
     )
     check(
         "diagnostic defer failure location",
-        'func boom() { fail "defer boom"; }\n'
+        "import std;\n"
+        'func boom() { std.error.fail!("defer boom"); }\n'
         "func f() { defer boom(); return 1; }\n"
         "f();\n",
-        stderr="1:31: runtime error: uncaught fail: defer boom",
+        stderr="2:29: runtime error: uncaught fail: defer boom",
     )
     check(
         "diagnostic parameter pattern location",
@@ -62,8 +64,9 @@ def run_cases():
     )
     check(
         "diagnostic recover location",
-        "recover 1;\n",
-        stderr="1:9: runtime error: recover outside error handler",
+        "import std;\n"
+        "std.error.recover!(1);\n",
+        stderr="2:18: runtime error: recover outside error handler",
     )
     check(
         "diagnostic complex lvalue location",
@@ -78,7 +81,7 @@ def run_cases():
     check(
         "diagnostic fail trace",
         "import std;\n"
-        'func inner() { fail "boom"; }\n'
+        'func inner() { std.error.fail!("boom"); }\n'
         "func middle() { inner(); }\n"
         "func outer() { middle(); }\n"
         "let value = outer() on error(e) {\n"
@@ -86,7 +89,7 @@ def run_cases():
         '  std.io.println(std.error.trace(e)[0]["function"]);\n'
         '  std.io.println(str(std.error.location(e)["line"]));\n'
         "  std.io.println(std.error.format_trace(e));\n"
-        "  recover null;\n"
+        "  std.error.recover!(null);\n"
         "};\n",
         stdout_all=[
             "3", "inner", "2",
@@ -105,7 +108,7 @@ def run_cases():
         "  std.io.println(str(std.utils.len(std.error.trace(e))));\n"
         '  std.io.println(str(std.error.location(e)["line"]));\n'
         "  std.io.println(std.error.format_trace(e));\n"
-        "  recover null;\n"
+        "  std.error.recover!(null);\n"
         "};\n",
         stdout_all=[
             "runtime", "2", "2",

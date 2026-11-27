@@ -3,7 +3,7 @@ package container_adapter {
 
   func _list_end(values) {
     if (std.type.kind_of(values) != "list") {
-      fail("std.list.slice expects a list");
+      std.error.fail!("std.list.slice expects a list");
     }
     return std.utils.len(values);
   }

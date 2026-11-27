@@ -258,7 +258,7 @@ t.detached() -> bool
 
 - `wait` 的规范写法是内置宏 `wait!`（规范路径 `std.task.wait!`，展开为
   `t.wait()`），旧关键字形式暂时兼容；`launch` / `await` 已是表达式起始
-  contextual keyword，不再是全局保留字，`await f()` 等价 `wait launch f()`；
+  contextual keyword，不再是全局保留字，`await f()` 等价 `std.task.wait!(launch f())`；
 - `launch` 推导为 `task[T]`；`func f(): void` 推导为 `task[void]`；
 - 静态已知返回 `task[...]` 的调用不能 `launch`，会报
   `launch cannot start a call that already returns task[...]; call it directly and use .wait()`；
@@ -1552,7 +1552,7 @@ std.generator.next(g)       // {done: true, value: null}
 ```text
 import std;
 func broken() {
-  fail std.error.new("io", "generator boom");
+  std.error.fail!(std.error.new("io", "generator boom"));
   yield 1;
 }
 
@@ -1560,7 +1560,7 @@ let g = broken();
 let v = std.generator.next(g) on error(e) {
   std.io.print(std.error.kind(e));    // io
   std.io.print(str(e));               // generator boom
-  recover 0;
+  std.error.recover!(0);
 };
 ```
 
@@ -1571,7 +1571,7 @@ import std;
 func worker() {
   let signal = yield 1;
   if (signal is error) {
-    fail signal;
+    std.error.fail!(signal);
   }
   yield 2;
 }
@@ -1582,7 +1582,7 @@ std.generator.next(g)
 let v = std.generator.next(g, std.error.new("cancel", "stop")) on error(e) {
   std.io.print(std.error.kind(e));    // cancel
   std.io.print(str(e));               // stop
-  recover 0;
+  std.error.recover!(0);
 };
 ```
 
@@ -1610,7 +1610,7 @@ str(e)
 
 ```text
 import std;
-fail "boom";              // error(kind="fail", message="boom")
+std.error.fail!("boom");              // error(kind="fail", message="boom")
 std.result.err("boom");   // error(kind="error", message="boom")
 1 / 0;                    // error(kind="runtime", message="division by zero")
 ```
@@ -1635,7 +1635,7 @@ import std;
 let v = (1 / 0) on error(e) {
   std.io.print(std.error.kind(e));   // runtime
   std.io.print(str(e));              // division by zero
-  recover 42;
+  std.error.recover!(42);
 };
 ```
 
@@ -1650,7 +1650,7 @@ func parse(s) {
 
 let n = parse(input) on error(e) {
   std.io.print(str(e));
-  recover 0;
+  std.error.recover!(0);
 };
 ```
 
@@ -1669,8 +1669,8 @@ let n = parse(input) on error(e) {
 - `on error()` 可以不绑定错误值；
 - handler 可以用 `recover` / `pass` / `fail` 或 `return` / `break` / `continue` / `goto` 退出；控制流退出时原始错误视为已处理；
 - 默认参数值和 `defer` 表达式中的 handler 仍只允许 `recover` / `pass` / `fail`；
-- `wait t on error(e) { ... }`、`wait launch f() on error(e) { ... }` 可直接
-  捕获任务内的 `fail`，等价于先写 `(wait t) on error(e) { ... }`；
+- `std.task.wait!(t) on error(e) { ... }`、`std.task.wait!(launch f()) on error(e) { ... }`
+  可直接捕获任务内的错误，等价于先写 `(std.task.wait!(t)) on error(e) { ... }`；
 - `launch f() on error(...)` 会产生 `launch` warning，因为 handler 不能捕获
   任务体内的 `fail`；请改写为 `wait` 形式。
 
@@ -1694,7 +1694,7 @@ let n = do {
   a * 2;
 } on error(e) {
   std.io.print(str(e));
-  recover 0;
+  std.error.recover!(0);
 };
 ```
 
@@ -1705,7 +1705,7 @@ let n = do {
 ```text
 import std;
 let v = std.result.unwrap(std.result.err("boom")) on error(e) {
-  recover str(e);
+  std.error.recover!(str(e));
 };
 ```
 
@@ -1729,7 +1729,7 @@ std.result.ok(value)          → result
 std.result.err(message)       → result
 std.result.is_ok(result)      → bool
 std.result.is_err(result)     → bool
-std.result.unwrap(result)     → value / fail(error)
+std.result.unwrap(result)     → value / std.error.fail!(error)
 std.result.unwrap_or(result, default)
 std.result.value(result)      → value / null
 std.result.error(result)      → error / null
@@ -2766,7 +2766,7 @@ rpc.serve(func(method, params) {
   if (method == "add") {
     return params[0] + params[1];
   }
-  fail("unknown method " + method);
+  std.error.fail!("unknown method " + method);
 }) -> served
 ```
 
@@ -2777,7 +2777,7 @@ rpc.serve(func(method, params, body) {
   if (method == "echo") {
     return {"value": params[0], "body": body};
   }
-  fail("unknown method " + method);
+  std.error.fail!("unknown method " + method);
 }, {"protocol": "hybrid"}) -> served
 ```
 

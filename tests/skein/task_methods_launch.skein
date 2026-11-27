@@ -72,11 +72,11 @@ ts_test("launch returns a task", func() {
   let t = launch task_work(41);
   ts_eq(t.wait(), 42);
   ts_true(t.done());
-  ts_eq(wait launch task_work(1), 2);
+  ts_eq(std.task.wait!(launch task_work(1)), 2);
 });
 
 ts_test("launch binds to the whole call chain", func() {
-  ts_eq(wait launch launch_chain().get(), 42);
+  ts_eq(std.task.wait!(launch launch_chain().get()), 42);
 });
 
 ts_test("launch task methods", func() {
@@ -113,13 +113,13 @@ ts_test("task scope named function", func() {
 
 ts_test("launch structured waits for children", func() {
   task_log = [];
-  ts_eq(wait launch task_parent(), 0);
+  ts_eq(std.task.wait!(launch task_parent()), 0);
   ts_eq(task_log, ["parent-body", "child"]);
 });
 
 ts_test("launch detach removes structured wait", func() {
   task_log = [];
-  ts_eq(wait launch task_parent3(), 0);
+  ts_eq(std.task.wait!(launch task_parent3()), 0);
   std.task.sleep(30).wait();
   ts_eq(task_log, ["parent", "child"]);
 });

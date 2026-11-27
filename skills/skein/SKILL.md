@@ -229,23 +229,23 @@ import std;
 func parse_positive(text) {
   let n = int(text);
   if n <= 0 {
-    fail "must be positive: " + str(n);
+    std.error.fail!("must be positive: " + str(n));
   }
   return n;
 }
 
 let n = parse_positive("0") on error(e) {
   std.io.println("bad input: " + str(e));
-  recover 0;
+  std.error.recover!(0);
 };
 
 std.io.println(str(n));
 ```
 
-- `fail expr;` 抛出错误，`fail;` 抛出空错误；
+- `std.error.fail!(expr);` 抛出错误，`std.error.fail!();` 抛出空错误；
 - `expr on error(e) { ... }` 捕获错误；
 - handler 必须以 `recover`、`pass` 或 `fail` 结尾；
-- `recover expr;` 的值成为整个 `on error` 表达式的值。
+- `std.error.recover!(expr);` 的值成为整个 `on error` 表达式的值。
 
 ## 常见报错速查
 

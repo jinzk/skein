@@ -175,12 +175,12 @@ wait!(task)
 ```
 
 `fail!` / `recover!` / `pass!` 展开为对应的控制流 AST 节点，语义与旧关键字形式
-`fail expr` / `recover expr` / `pass expr` 一致；`wait!(t)` 展开为 `t.wait()`。
+`std.error.fail!(expr)` / `std.error.recover!(expr)` / `std.error.pass!(expr)` 一致；`std.task.wait!(t)` 展开为 `t.wait()`。
 
 ```text
 import std;
 let r = std.result.capture! { std.error.fail!("boom"); };
-let v = wait launch work();
+let v = std.task.wait!(launch work());
 let w = wait!(t);
 ```
 

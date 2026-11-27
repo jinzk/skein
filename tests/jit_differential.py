@@ -36,7 +36,7 @@ CASES = [
         "import std;\nfunc risky(x) {\n"
         "  return (10 / x) on error(e) {\n"
         "    std.io.print(\"handler:\" + str(e) + \";\");\n"
-        "    recover -1;\n"
+        "    std.error.recover!(-1);\n"
         "  };\n"
         "}\n"
         "std.io.println(str(risky(2)));\n"
@@ -52,7 +52,7 @@ CASES = [
         "let error = 2;\n"
         "let b = Box { on: on, error: error };\n"
         "func risky(x) {\n"
-        "  return (10 / x) on error(e) { recover on + error; };\n"
+        "  return (10 / x) on error(e) { std.error.recover!(on + error); };\n"
         "}\n"
         "std.io.println(str(b.on + b.error));\n"
         "std.io.println(str(risky(2)));\n"
@@ -66,7 +66,7 @@ CASES = [
         "import std;\n"
         "func bad() {\n"
         "  std.task.sleep(1).wait();\n"
-        '  fail "boom";\n'
+        '  std.error.fail!("boom");\n'
         "}\n"
         "func parent() {\n"
         "  let t = launch bad();\n"
@@ -85,8 +85,8 @@ CASES = [
         "  return data[0] + data[1] + data[2];\n"
         "}\n"
         "std.io.println(str(work(3)));\n"
-        "std.io.println(str(wait launch work(10)));\n"
-        "std.io.println(str(wait launch work(20)));\n",
+        "std.io.println(str(std.task.wait!(launch work(10))));\n"
+        "std.io.println(str(std.task.wait!(launch work(20))));\n",
         expect_debug="[jit] enter work",
     ),
     case(
@@ -246,7 +246,7 @@ CASES = [
         "}\n"
         "let i = 0;\n"
         "while (i < 20) {\n"
-        "  std.io.println(str(wait launch work(Num { n: i })));\n"
+        "  std.io.println(str(std.task.wait!(launch work(Num { n: i }))));\n"
         "  i = i + 1;\n"
         "}\n",
     ),

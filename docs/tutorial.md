@@ -912,7 +912,7 @@ func parse_positive(text) {
   let n = int(text);
 
   if (n <= 0) {
-    fail "must be positive: " + str(n);
+    std.error.fail!("must be positive: " + str(n));
   }
 
   return n;
@@ -920,7 +920,7 @@ func parse_positive(text) {
 
 let n = parse_positive("0") on error(e) {
   std.io.print("bad input: " + str(e));
-  recover 0;
+  std.error.recover!(0);
 };
 ```
 
@@ -928,7 +928,7 @@ let n = parse_positive("0") on error(e) {
 
 ```text
 import std;
-func inner() { fail "boom"; }
+func inner() { std.error.fail!("boom"); }
 func outer() { inner(); }
 
 let v = outer() on error(e) {
@@ -938,11 +938,11 @@ let v = outer() on error(e) {
   //   in outer() called from line 3
   let where = std.error.location(e);
   std.io.println(str(where["line"]));    // 1
-  recover 0;
+  std.error.recover!(0);
 };
 ```
 
-- `fail expr;` 抛出错误，`fail;` 抛出空错误；
+- `std.error.fail!(expr);` 抛出错误，`std.error.fail!();` 抛出空错误；
 - 普通值会被包装成 `error(kind="fail", message=...)`；
 - 错误会在抛出点记录源位置和调用栈，捕获后仍然可读；
 - `std.error.location(e)` 返回 `{source, line, column}`，`std.error.new` 创建的错误返回 `null`；
@@ -955,8 +955,8 @@ let v = outer() on error(e) {
 - `e` 是 `error` 值，只在 handler 作用域内有效；
 - `str(e)` 或 `std.error.message(e)` 取得消息；
 - `std.error.kind(e)` 取得错误类别；
-- `recover expr;` 结束 handler 并返回恢复值；
-- `pass e;` 把错误继续传给外层，保留原始位置和调用栈；
+- `std.error.recover!(expr);` 结束 handler 并返回恢复值；
+- `std.error.pass!(e);` 把错误继续传给外层，保留原始位置和调用栈；
 - handler 必须以 `recover`、`pass`、`fail` 或 `return` / `break` / `continue` / `goto` 退出；
 - 控制流退出 handler 时，原始错误视为已处理；
 - 默认参数值和 `defer` 表达式中的 handler 只允许 `recover` / `pass` / `fail`；
@@ -983,7 +983,7 @@ let n = do {
   a * 2;
 } on error(e) {
   std.io.print("bad input: " + str(e));
-  recover 0;
+  std.error.recover!(0);
 };
 ```
 
@@ -2556,13 +2556,14 @@ std.fs.close(h);
 
 目标：理解 fiber/task、线程 Channel、环境变量和外部命令的边界与用法。
 
-### launch、await 与 `wait!`
+### launch、await 与 `std.task.wait!`
 
-`wait` 的规范写法是内置宏 `wait!`，但旧 `wait` 形式仍暂时兼容；`launch` /
-`wait` / `await` 都是表达式起始 contextual keyword，不是全局保留字。
+等待 task 使用内置宏 `std.task.wait!`（`std.task.wait!(t)` 或 `std.task.wait! t`，
+展开为 `t.wait()`）；裸 `wait` 只是普通标识符。`launch` / `await` 仍是表达式起始
+contextual keyword，不是全局保留字。
 
-`launch f()` 创建新 task 并立即返回 `task[T]`；`wait!(t)` 等价于 `t.wait()`；
-`await f()` 等价于 `wait launch f()`，启动调用并立即等待：
+`launch f()` 创建新 task 并立即返回 `task[T]`；`std.task.wait!(t)` 等价于 `t.wait()`；
+`await f()` 等价于 `std.task.wait!(launch f())`，启动调用并立即等待：
 
 ```skein
 import std;
@@ -2573,14 +2574,14 @@ func work(n) {
 }
 
 let t = launch work(21);
-let value = wait!(t);       // 等价于 t.wait()，也可写 wait! t
+let value = std.task.wait!(t); // 等价于 t.wait()，也可写 std.task.wait! t
 let same = await work(21);  // 启动后立即等待
 std.io.print(value + same);
 ```
 
 规则：
 
-- `launch` / `wait` / `await` 在表达式起始位置识别：语句开头，`=`、`return`、
+- `launch` / `await` 在表达式起始位置识别：语句开头，`=`、`return`、
   `yield`、`(`、`[`、`{`、`,`、`:` 和二元运算符之后；`.` 之后仍是普通名字。例如：
 
   ```skein
@@ -2589,14 +2590,14 @@ std.io.print(value + same);
   (await f()).xxx;
   ```
 
-- `await` 要求后面是调用表达式；已有 task 写 `wait!(t)`，`await t` 报错；
+- `await` 要求后面是调用表达式；已有 task 写 `std.task.wait!(t)`，`await t` 报错；
 - `await(f())` 是前缀形式；调用同名变量写 `(await)(f())`；
 - `launch` 与 `await` 作用于其后的完整调用链，且 postfix 优先级更高：
   `launch make().get()` 启动 `make().get()`，`await f().xxx` 是
   `await (f().xxx)`；先 await 再取字段写 `(await f()).xxx`；
-- `await f() on error(e) { ... }` 与 `wait launch f() on error(...)` 等价，
+- `await f() on error(e) { ... }` 与 `std.task.wait!(launch f()) on error(...)` 等价，
   handler 覆盖 task 内失败；`launch f() on error(...)` 仍只覆盖启动调用并告警；
-- `wait!` 不接受超时参数；需要超时请写 `t.wait(ms)` 或
+- `std.task.wait!` 不接受超时参数；需要超时请写 `t.wait(ms)` 或
   `std.task.wait(t, ms)`；
 - `t.try_wait()` 返回 `result[T, error]`，可在不抛出的情况下检查结果。
 
@@ -3210,7 +3211,7 @@ let data = std.io.read_task(p["stdout"], 4096).wait();
 - `std.process.close` 只关闭管道，不杀死进程；需要终止时先 `kill`；
 - `stderr` 始终是管道，父进程应读取，避免子进程因 stderr 写满而阻塞；
 - 管道不支持 `seek` / `tell`；
-- `wait` 超时后不会自动杀死进程。
+- `wait()` 超时后不会自动杀死进程。
 
 ##### JSON Lines worker 示例
 
@@ -3303,7 +3304,7 @@ std.worker.call_bytes(pool, method, args, body[, timeout_ms]) -> result
 std.worker.submit_bytes(pool, method, args, body) -> job
 ```
 
-`call_bytes` / `wait` 成功时返回的 value 是：
+`call_bytes` / `wait()` 成功时返回的 value 是：
 
 ```text
 {"value": <result>, "body": <bytes>}
@@ -3341,8 +3342,8 @@ std.io.flush(std.io.stdout);
 - `args` / `items`：JSON 可序列化数据
 - `timeout_ms`：可选，0 或省略表示不设置超时
 - `call` 返回 `result`，worker 错误、超时和管道断开都不会直接中断进程
-- `submit` 立即提交任务并返回 `job`；`wait` 阻塞等待结果
-- 任务多于 worker 时进入队列，由 `wait` 驱动调度
+- `submit` 立即提交任务并返回 `job`；`wait()` 阻塞等待结果
+- 任务多于 worker 时进入队列，由 `wait()` 驱动调度
 - worker 崩溃或超时后会关闭并重新启动该 worker
 - 单个 worker 连续重启超过 3 次后会被标记为不可用
 - `map` 把任务分批分发给多个 worker，保持输入顺序；任一任务失败时报告错误

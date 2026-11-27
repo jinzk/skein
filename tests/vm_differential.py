@@ -137,8 +137,8 @@ def empty_program():
         "std.io.print(std.utils.len(\"\"));\n"
         "std.io.print(str([]));\n"
         "std.io.print(str({}));\n"
-        "std.io.print([][0] on error(e) { recover \"caught\"; });\n"
-        "std.io.print({\"k\": 1}[\"missing\"] on error(e) { recover \"miss\"; });\n"
+        "std.io.print([][0] on error(e) { std.error.recover!(\"caught\"); });\n"
+        "std.io.print({\"k\": 1}[\"missing\"] on error(e) { std.error.recover!(\"miss\"); });\n"
     )
 
 
@@ -156,7 +156,7 @@ def error_program():
         "std.io.print(1 / 0);\n",
         "struct S { x: int; }\nlet s = S { x: 1 };\nstd.io.print(s.y);\n",
         "std.io.print([1, 2][9]);\n",
-        "func f() { fail \"boom\"; }\nf();\n",
+        "func f() { std.error.fail!(\"boom\"); }\nf();\n",
         "func f(a) { return a; }\nf();\n",
         "std.io.print(1 + \"x\");\n",
     ])
@@ -183,9 +183,9 @@ def task_program():
     return (
         "import std;\n"
         "func inc(x) -> x + 1;\n"
-        "std.io.print(wait launch inc(3));\n"
-        "std.io.print(wait launch inc(wait launch inc(4)));\n"
-        "std.io.print(wait launch inc(6));\n"
+        "std.io.print(std.task.wait!(launch inc(3)));\n"
+        "std.io.print(std.task.wait!(launch inc(std.task.wait!(launch inc(4)))));\n"
+        "std.io.print(std.task.wait!(launch inc(6)));\n"
     )
 
 
@@ -213,7 +213,7 @@ def defer_error_program():
         "  let i = 0;\n"
         "  let total = 0;\n"
         "  while (i < n) {\n"
-        "    total = total + ([][0] on error(e) { recover i; });\n"
+        "    total = total + ([][0] on error(e) { std.error.recover!(i); });\n"
         "    i = i + 1;\n"
         "  }\n"
         "  return total;\n"

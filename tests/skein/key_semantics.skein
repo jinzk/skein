@@ -355,7 +355,7 @@ func key_case_task_worker() {
 }
 
 ts_test("key custom hash and KeyEquatable inside task", func() {
-  ts_eq(wait launch key_case_task_worker(), "x");
+  ts_eq(std.task.wait!(launch key_case_task_worker()), "x");
 });
 
 ts_finish();

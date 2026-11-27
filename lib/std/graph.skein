@@ -36,7 +36,7 @@ package graph {
   // Batched node insertion: one COW clone instead of one per node.
   export func add_nodes(g, values) {
     if (std.type.kind_of(values) != "list") {
-      fail("graph.add_nodes values must be a list");
+      std.error.fail!("graph.add_nodes values must be a list");
     }
     let ids = std.deque.new();
     for (let value in values) {
@@ -73,7 +73,7 @@ package graph {
 
   export func set_node(g, id, value) {
     if (!has_node(g, id)) {
-      fail("graph node not found: " + str(id));
+      std.error.fail!("graph node not found: " + str(id));
     }
     g.nodes[id] = value;
     return g;
@@ -97,14 +97,14 @@ package graph {
 
   export func add_edge(g, from, to, tag = "", weight = 1) {
     if (!has_node(g, from) || !has_node(g, to)) {
-      fail("graph edge endpoints must exist");
+      std.error.fail!("graph edge endpoints must exist");
     }
 
     if (std.type.kind_of(weight) != "int" && std.type.kind_of(weight) != "float") {
-      fail("graph edge weight must be a number");
+      std.error.fail!("graph edge weight must be a number");
     }
     if (weight != weight || weight < 0) {
-      fail("graph edge weight must be non-negative");
+      std.error.fail!("graph edge weight must be non-negative");
     }
 
     let id = g.next_edge;
@@ -122,16 +122,16 @@ package graph {
   // Each edge is [from, to], [from, to, tag] or [from, to, tag, weight].
   export func add_edges(g, edges) {
     if (std.type.kind_of(edges) != "list") {
-      fail("graph.add_edges edges must be a list");
+      std.error.fail!("graph.add_edges edges must be a list");
     }
     for (let spec in edges) {
       if (std.type.kind_of(spec) != "list" || std.utils.len(spec) < 2 || std.utils.len(spec) > 4) {
-        fail("graph.add_edges edge must be [from, to[, tag[, weight]]]");
+        std.error.fail!("graph.add_edges edge must be [from, to[, tag[, weight]]]");
       }
       let from = spec[0];
       let to = spec[1];
       if (!std.dict.has(g.nodes, from) || !std.dict.has(g.nodes, to)) {
-        fail("graph edge endpoints must exist");
+        std.error.fail!("graph edge endpoints must exist");
       }
 
       let tag = "";
@@ -143,10 +143,10 @@ package graph {
         weight = spec[3];
       }
       if (std.type.kind_of(weight) != "int" && std.type.kind_of(weight) != "float") {
-        fail("graph edge weight must be a number");
+        std.error.fail!("graph edge weight must be a number");
       }
       if (weight != weight || weight < 0) {
-        fail("graph edge weight must be non-negative");
+        std.error.fail!("graph edge weight must be non-negative");
       }
 
       let id = g.next_edge;
@@ -164,7 +164,7 @@ package graph {
   // Convenience batch builder: nodes 1..count with value = id.
   export func from_edges(count, edges) {
     if (std.type.kind_of(count) != "int" || count < 0) {
-      fail("graph.from_edges count must be a non-negative int");
+      std.error.fail!("graph.from_edges count must be a non-negative int");
     }
     let values = std.deque.new();
     let i = 0;
@@ -440,7 +440,7 @@ package graph {
     if (weight_fn != null &&
         std.type.kind_of(weight_fn) != "function" &&
         std.type.kind_of(weight_fn) != "builtin") {
-      fail("graph weight must be callable");
+      std.error.fail!("graph weight must be callable");
     }
 
     let dist = {};
@@ -594,7 +594,7 @@ package graph {
 
   export func subgraph(g, ids) {
     if (std.type.kind_of(ids) != "list") {
-      fail("graph.subgraph ids must be a list");
+      std.error.fail!("graph.subgraph ids must be a list");
     }
 
     let keep = {};

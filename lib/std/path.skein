@@ -35,16 +35,16 @@ package path {
 
   func _require_string(who, value, what) {
     if (std.type.kind_of(value) != "string") {
-      fail(who + " expects " + what + " string, got " + std.type.kind_of(value));
+      std.error.fail!(who + " expects " + what + " string, got " + std.type.kind_of(value));
     }
   }
 
   func _require_style(style) {
     if (std.type.kind_of(style) != "string") {
-      fail("path: style must be a string");
+      std.error.fail!("path: style must be a string");
     }
     if (style != AUTO && style != POSIX && style != WINDOWS) {
-      fail("path: style must be \"auto\", \"posix\" or \"windows\"");
+      std.error.fail!("path: style must be \"auto\", \"posix\" or \"windows\"");
     }
   }
 
@@ -363,7 +363,7 @@ package path {
   func _combine_rooted(base, info, style) {
     let base_info = _analyze(normalize(base, style), style);
     if (!base_info["absolute"]) {
-      fail("path.resolve: base must be an absolute path");
+      std.error.fail!("path.resolve: base must be an absolute path");
     }
     return _render(
       base_info["root"], _clean(info["parts"], true), style);
@@ -372,7 +372,7 @@ package path {
   func _combine_drive(base, info, style) {
     let base_info = _analyze(normalize(base, style), style);
     if (!base_info["absolute"]) {
-      fail("path.resolve: base must be an absolute path");
+      std.error.fail!("path.resolve: base must be an absolute path");
     }
     let combined = std.deque.new();
     for (let part in base_info["parts"]) {
@@ -422,7 +422,7 @@ package path {
 
   export func join_list(parts, style = AUTO) {
     if (std.type.kind_of(parts) != "list") {
-      fail("path.join_list expects a list of paths");
+      std.error.fail!("path.join_list expects a list of paths");
     }
     for (let part in parts) {
       _require_string("path.join_list", part, "a path");
@@ -469,7 +469,7 @@ package path {
     if (count > 0 && std.type.kind_of(parts[count - 1]) == "dict") {
       let options = parts[count - 1];
       if (!std.dict.has(options, "style")) {
-        fail("path.join options must contain a style key");
+        std.error.fail!("path.join options must contain a style key");
       }
       style = options["style"];
       values = std.list.slice(parts, 0, count - 1);
@@ -504,11 +504,11 @@ package path {
 
     let base_info = _analyze(normalize(base, resolved), resolved);
     if (!base_info["absolute"]) {
-      fail("path.resolve: base must be an absolute path");
+      std.error.fail!("path.resolve: base must be an absolute path");
     }
     if (info["root"] != "") {
       if (resolved != WINDOWS) {
-        fail("path.resolve: unsupported rooted path");
+        std.error.fail!("path.resolve: unsupported rooted path");
       }
       if (info["drive"] == "") {
         return _combine_rooted(base, info, resolved);
@@ -516,7 +516,7 @@ package path {
       if (base_info["drive"] == "" ||
           _ascii_fold(base_info["drive"]) !=
           _ascii_fold(info["drive"])) {
-        fail("path.resolve: drive-relative path needs a matching base drive");
+        std.error.fail!("path.resolve: drive-relative path needs a matching base drive");
       }
       return _combine_drive(base, info, resolved);
     }
@@ -546,12 +546,12 @@ package path {
 
     if (cwd == null) {
       if (resolved != host()) {
-        fail("path.absolute: cwd is required for non-host style");
+        std.error.fail!("path.absolute: cwd is required for non-host style");
       }
       cwd = std.fs.cwd();
     }
     if (!_analyze(cwd, resolved)["absolute"]) {
-      fail("path.absolute: cwd must be an absolute path");
+      std.error.fail!("path.absolute: cwd must be an absolute path");
     }
     return resolve(cwd, text, resolved);
   }
@@ -564,7 +564,7 @@ package path {
     let to_info = _parse_resolved(normalize(to, resolved), resolved);
 
     if (from_info["absolute"] != to_info["absolute"]) {
-      fail("path.relative: paths must both be absolute or both be relative");
+      std.error.fail!("path.relative: paths must both be absolute or both be relative");
     }
 
     if (_ascii_fold(from_info["root"]) != _ascii_fold(to_info["root"])) {
@@ -632,12 +632,12 @@ package path {
     let info = _analyze(text, resolved);
     let parts = info["parts"];
     if (std.utils.len(parts) == 0) {
-      fail("path.with_ext: path has no file name");
+      std.error.fail!("path.with_ext: path has no file name");
     }
 
     let base = parts[std.utils.len(parts) - 1];
     if (base == "." || base == "..") {
-      fail("path.with_ext: path has no file stem");
+      std.error.fail!("path.with_ext: path has no file stem");
     }
 
     let suffix = extension;

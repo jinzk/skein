@@ -33,7 +33,6 @@ if else while do for
 switch case default
 struct impl proto
 return break continue goto
-fail recover pass
 null true false
 ```
 
@@ -56,10 +55,10 @@ contextual keyword；其他位置可作为变量、字段或宏名。
 
 `def` 已不再使用，匿名/命名函数统一使用 `func`。
 
-`wait` 的规范写法是内置宏 `wait!`（`wait!(t)` 或 `wait! t`，展开为 `t.wait()`）；
-旧关键字形式暂时保留兼容。`launch`、`await` 与旧 `wait` 都是表达式起始
+等待 task 使用内置宏 `std.task.wait!`（`std.task.wait!(t)` 或 `std.task.wait! t`，
+展开为 `t.wait()`）；裸 `wait` 只是普通标识符。`launch`、`await` 仍是表达式起始
 contextual keyword，不是全局保留字：`launch f()` 启动 task，`await f()` 等价
-`wait launch f()`。详见任务章节。
+`std.task.wait!(launch f())`。详见任务章节。
 
 协议类型声明关键字为 `proto`，属于全局保留字（`proto Drawable`）；`protocol`
 不再是关键字。泛型约束列表里的 `proto` 与 `type` 一样是 contextual 标记，只在
@@ -79,8 +78,9 @@ contextual keyword，不是全局保留字：`launch f()` 启动 task，`await f
 类型；规范类型名与诊断、反射输出统一为 `string`。值位置只有转换函数 `str(x)`，
 `string` 不是值。
 
-`fail` / `recover` / `pass` 的规范写法是内置宏 `fail!` / `recover!` / `pass!`；
-旧关键字形式暂时保留兼容。`on` / `error` 已按 handler-scoped contextual 处理：
+抛出、恢复与传播错误使用内置宏 `std.error.fail!` / `std.error.recover!` /
+`std.error.pass!`；裸 `fail` / `recover` / `pass` 只是普通标识符。
+`on` / `error` 已按 handler-scoped contextual 处理：
 `error!` 是普通宏调用，`: error` 走类型命名空间，`.error` 是普通字段。
 设计见 [`docs/macros_user_defined.md`](docs/macros_user_defined.md)。
 
@@ -1324,23 +1324,24 @@ import std;
   `launch` 推导为 `task[T]`；静态已知 callee 返回 `task[...]` 时直接报错，
   应改为直接调用并 `.wait()`；只有 `any`/未知 callee 才允许运行时 adopt/proxy。
   `launch` 是表达式起始 contextual keyword，不是全局保留字。
-- `wait! e` 是 `e.wait()` 的内置宏糖（规范路径 `std.task.wait!`），要求
-  `e: task[T]`，结果为 `T`；`await f()` 是 `wait launch f()` 的 contextual 简写，
-  启动调用并立即等待，结果同样是 `T`：
+- `std.task.wait! e` 是 `e.wait()` 的内置宏糖，要求
+  `e: task[T]`，结果为 `T`；`await f()` 是 `std.task.wait!(launch f())` 的
+  contextual 简写，启动调用并立即等待，结果同样是 `T`：
 
   ```text
   let t = launch work(41);
-  let v = wait!(t);            // 42，也可写 wait! t
+  let v = std.task.wait!(t);   // 42，也可写 std.task.wait! t
   let w = await work(1);       // 2，启动后立即等待
   ```
 
-  `await` 要求后面是调用表达式；`await t`（`t` 已是 task）报错，应写 `wait!(t)`。
-  `wait!` 不接受超时参数；需要超时请写 `t.wait(ms)` 或
-  `std.task.wait(t, ms)`。`launch await f()` 会被拒绝。
+  `await` 要求后面是调用表达式；`await t`（`t` 已是 task）报错，应写
+  `std.task.wait!(t)`。`std.task.wait!` 不接受超时参数；需要超时请写
+  `t.wait(ms)` 或 `std.task.wait(t, ms)`。`launch await f()` 会被拒绝。
 
-  `launch` / `wait` / `await` 在表达式起始位置识别：语句开头，`=`、`return`、
-  `yield`、`(`、`[`、`{`、`,`、`:` 和二元运算符之后。`.` 之后仍是普通名字，
-  也可以声明同名变量（调用时用 `(await)(...)` 消除歧义）。示例：
+  `launch` / `await` 在表达式起始位置识别：语句开头，`=`、`return`、
+  `yield`、`(`、`[`、`{`、`,`、`:` 和二元运算符之后。`wait` 只是普通标识符；
+  `.` 之后仍可按普通名字解析，也可以声明同名变量（调用时用 `(await)(...)`
+  消除歧义）。示例：
 
   ```text
   d = await f();
@@ -1351,7 +1352,7 @@ import std;
   `await(f())` 是前缀形式，不是调用名为 `await` 的函数；要调用同名变量写
   `(await)(f())`。postfix 优先级高于前缀：`await f().xxx` 等价于
   `await (f().xxx)`；先 await 再取字段写 `(await f()).xxx`。
-  `await f() on error(e) { ... }` 与 `wait launch f() on error(...)` 等价，
+  `await f() on error(e) { ... }` 与 `std.task.wait!(launch f()) on error(...)` 等价，
   handler 覆盖 task 内失败；`launch f() on error(...)` 仍只覆盖启动调用并告警。
 - 部分 `std.net` / `std.io` / `std.http` / `std.http2` / `std.websocket` 的 `*_task` builtin 返回 `task[...]`，例如 `std.http.get_task` 返回 `task[dict[string, any]]`；旧 `*_async` 名称已移除；其余未覆盖的异步 builtin 仍可能退化为 `any`；
 - 提供不可构造的静态 userdata 类型 `socket`、`listener`、`websocket`、`stream`；网络、I/O 和文件接口会返回这些类型，`socket` 可传给接受 `stream` 的接口；
@@ -1967,7 +1968,7 @@ func parse_positive(text) {
   let n = int(text);
 
   if (n <= 0) {
-    fail "must be positive: " + str(n);
+    std.error.fail!("must be positive: " + str(n));
   }
 
   return n;
@@ -1980,14 +1981,14 @@ func parse_positive(text) {
 import std;
 let n = parse_positive("0") on error(e) {
   std.io.print("bad input: " + str(e));
-  recover 0;
+  std.error.recover!(0);
 };
 ```
 
 规则：
 
-- `fail expr;` 抛出错误；
-- `fail;` 抛出空错误；
+- `std.error.fail!(expr);` 抛出错误；
+- `std.error.fail!();` 抛出空错误；
 - 普通值会被包装成 `error(kind="fail", message=...)`；
 - `call() on error(e) { ... }` 捕获 `fail`、运行时错误和 `result.err`；
   `on` / `error` 只在紧贴表达式的 `on error(...)` 中作为 contextual keyword，
@@ -1996,20 +1997,20 @@ let n = parse_positive("0") on error(e) {
 - `e` 是 `error` 值，只在 handler 作用域内有效；
 - `str(e)` 或 `std.error.message(e)` 取得消息；
 - `std.error.kind(e)` 取得错误类别；
-- handler 必须以 `recover`、`pass` 或 `fail` 结束，或通过 `return` / `break` / `continue` / `goto` 退出；
+- handler 必须以 `std.error.recover!`、`std.error.pass!` 或 `std.error.fail!` 结束，或通过 `return` / `break` / `continue` / `goto` 退出；
 - `on error()` 可以不绑定错误值；需要检查错误时用 `on error(e)`；
-- `wait!(t) on error(e) { ... }`、`await f() on error(e) { ... }` 的
+- `std.task.wait!(t) on error(e) { ... }`、`await f() on error(e) { ... }` 的
   handler 覆盖任务错误，可直接捕获任务内的 `fail`；被观察的任务不会再报
   detached task 诊断；
 - `launch f() on error(...)` 会给出 `launch` warning：handler 只覆盖启动调用，
   不能捕获任务体内的 `fail`；请改用 `await f() on error(...)`；
-- `recover expr;` 结束 handler，并把 `expr` 作为整个 `on error` 表达式的值；
-- `recover;` 等价于 `recover null;`；
-- `pass e;` 继续向外层传播错误；
+- `std.error.recover!(expr);` 结束 handler，并把 `expr` 作为整个 `on error` 表达式的值；
+- `std.error.recover!();` 等价于 `std.error.recover!(null);`；
+- `std.error.pass!(e);` 继续向外层传播错误；
 - handler 可以用 `return`、`break`、`continue` 或 `goto` 退出；控制流退出时原始错误视为已处理；
-- 默认参数值和 `defer` 表达式中的 handler 仍只允许 `recover` / `pass` / `fail`；
-- `recover` / `pass` 只能出现在 handler 内；
-- 未捕获的 `fail` 在脚本顶层报错并停止脚本。
+- 默认参数值和 `defer` 表达式中的 handler 仍只允许 `std.error.recover!` / `std.error.pass!` / `std.error.fail!`；
+- `std.error.recover!` / `std.error.pass!` 只能出现在 handler 内；
+- 未捕获的错误在脚本顶层报错并停止脚本。
 
 `on error` 也直接消费 `result`：
 
@@ -2022,7 +2023,7 @@ func parse(s) {
 
 let n = parse(input) on error(e) {
   std.io.print(str(e));
-  recover 0;
+  std.error.recover!(0);
 };
 ```
 
@@ -2030,7 +2031,7 @@ let n = parse(input) on error(e) {
 |---|---|
 | `ok(v)` | 表达式值是 `v` |
 | `err(e)` | 执行 handler |
-| `fail` / 运行时错误 | 执行 handler |
+| `std.error.fail!` / 运行时错误 | 执行 handler |
 | 普通值 | 原样返回 |
 
 - `ok` 只解包一层；
@@ -2044,7 +2045,7 @@ import std;
 func load() {
   let n = parse_positive("-1") on error(e) {
     std.io.print("load failed: " + str(e));
-    pass e;
+    std.error.pass!(e);
   };
 
   return n;
@@ -2052,7 +2053,7 @@ func load() {
 
 load() on error(e) {
   std.io.print("top: " + str(e));
-  recover 0;
+  std.error.recover!(0);
 };
 ```
 
@@ -2072,7 +2073,7 @@ let safe = do {
   a * 2;
 } on error(e) {
   std.io.print("bad: " + str(e));
-  recover 0;
+  std.error.recover!(0);
 };
 ```
 
@@ -2080,7 +2081,7 @@ let safe = do {
 
 - 块的值是最后一个语句的值：表达式和赋值取其值；`let` / `const` / 函数等声明、`while` / `for`、空块为 `null`；
 - 块内语句仍然必须写分号，包括最后一条；
-- `on error` 可选；`recover` 的值成为整个 `do ... on error` 表达式的值；
+- `on error` 可选；`std.error.recover!` 的值成为整个 `do ... on error` 表达式的值；
 - `return` / `break` / `continue` 直接穿出块；在 `do { ... }` 块表达式中使用 `return` 会发出警告（包括 `-> do { ... }` 和 lambda 体内的 `do { ... }`），推荐用块的最后一条表达式作为值，或改用裸 `{ ... }` 写普通语句块；
 - 该警告只针对 `do { ... }` 块表达式；`do { ... } while (...)` 循环体中的 `return` 不触发警告；`-> { ... }` 直接作为 lambda 块体时也不触发该警告；
 - `do { ... }` 作为独立语句时末尾需要 `;`；
@@ -2095,13 +2096,13 @@ while (cond) {
 }
 ```
 
-`fail` 接受任意值，但统一转换成 `error`：
+`std.error.fail!` 接受任意值，但统一转换成 `error`：
 
 ```text
 import std;
-fail 42;
-fail {"code": 7, "message": "bad"};
-fail std.error.new("io", "bad");
+std.error.fail!(42);
+std.error.fail!({"code": 7, "message": "bad"});
+std.error.fail!(std.error.new("io", "bad"));
 ```
 
 需要保留错误类别时，直接抛出 `error`：
@@ -2109,7 +2110,7 @@ fail std.error.new("io", "bad");
 ```text
 import std;
 func load() {
-  fail std.error.new("io", "open failed");
+  std.error.fail!(std.error.new("io", "open failed"));
 }
 ```
 
@@ -2476,7 +2477,7 @@ struct Point {
   y: float;
 
   func new(x, y) {
-    if (x < 0.0) { fail "x must be >= 0"; }
+    if (x < 0.0) { std.error.fail!("x must be >= 0"); }
     return Point { x: x, y: y };
   }
 }
@@ -3729,7 +3730,7 @@ Task 函数：
 sleep(ms)                  → task
 yield()                    → task
 scope(fn)                  → value
-wait(task[, timeout_ms])   → result
+std.task.wait!(task[, timeout_ms])   → result
 wait_all(tasks[, timeout_ms]) → list
 cancel(task)               → bool
 done(task)                 → bool
@@ -4527,9 +4528,10 @@ let db = b.wait();
   `make().get()`；`launch f().wait()` 解析为 `launch (f().wait())`，
   不会先 launch 再 wait。需要“启动后等待”请写 `await f()` 或
   `(launch f()).wait()`；
-- `t.wait()` 等待并返回值；`std.task.wait(t)` 是同包命名空间函数形式，`wait!` 展开为 `t.wait()`；
-- `wait!(t)` 是 `t.wait()` 的内置宏糖；`await f()` 等价于
-  `wait launch f()`，即启动调用并立即等待；
+- `t.wait()` 等待并返回值；`std.task.wait(t)` 是同包命名空间函数形式，
+  `std.task.wait!` 展开为 `t.wait()`；
+- `std.task.wait!(t)` 是 `t.wait()` 的内置宏糖；`await f()` 等价于
+  `std.task.wait!(launch f())`，即启动调用并立即等待；
 - 多个 task 可以先 `launch`，再分别 `wait()`，从而并发执行；
 - task 内部错误会变成 task 失败，在 `wait()` 处抛出；
 - `t.try_wait()` 返回 `result[T]`，可在不抛出的情况下检查结果；
@@ -4538,7 +4540,7 @@ let db = b.wait();
 
 旧的 `async` 函数颜色与 `await` 任意表达式写法已移除。当前 `await` 是
 表达式起始 contextual 语法：只接受调用表达式，表示“启动子 fiber 并立即等待”，不引入函数
-颜色，也不等待任意 task 表达式（后者用 `wait!(t)`）：
+颜色，也不等待任意 task 表达式（后者用 `std.task.wait!(t)`）：
 
 ```text
 import std;
@@ -4552,7 +4554,7 @@ func fetch(port) {
 
 let socket = await fetch(8080);
 let t = launch fetch(8081);
-let other = wait!(t);
+let other = std.task.wait!(t);
 ```
 
 生成器：
@@ -4639,7 +4641,7 @@ std.generator.next(g)       // {done: true, value: null}
 ```text
 import std;
 func broken() {
-  fail std.error.new("io", "generator boom");
+  std.error.fail!(std.error.new("io", "generator boom"));
   yield 1;
 }
 
@@ -4647,7 +4649,7 @@ let g = broken();
 let v = std.generator.next(g) on error(e) {
   std.io.print(std.error.kind(e));    // io
   std.io.print(str(e));               // generator boom
-  recover 0;
+  std.error.recover!(0);
 };
 ```
 
@@ -4658,7 +4660,7 @@ import std;
 func worker() {
   let signal = yield 1;
   if (signal is error) {
-    fail signal;
+    std.error.fail!(signal);
   }
   yield 2;
 }
@@ -4669,7 +4671,7 @@ std.generator.next(g)
 let v = std.generator.next(g, std.error.new("cancel", "stop")) on error(e) {
   std.io.print(std.error.kind(e));    // cancel
   std.io.print(str(e));               // stop
-  recover 0;
+  std.error.recover!(0);
 };
 ```
 
@@ -4915,7 +4917,7 @@ fsm.restore(snap, decode = null)    -> Context
 - `step` 是纯函数 `(state, event) -> next_state`；
 - `Machine` 的 `initial` / `start` / `step` / `run` 满足 `fsm.MachineApi`，包级同名函数已移除；
 - `define` 的第三个参数可选，是 `on_transition(from, event, to)` 回调；
-- 如果初始状态是 enum 或 struct，`step` 返回值必须保持同一类型，否则 `fail("step must return ...")`；
+- 如果初始状态是 enum 或 struct，`step` 返回值必须保持同一类型，否则 `std.error.fail!("step must return ...")`；
 - `Context` 是值，可以赋值、传参、比较；
 - `history` 包含初始状态和每一步的状态；
 - `undo` / `redo` 是线性的；`undo` 之后再 `step` 会清空 redo，形成新分支；
@@ -4923,7 +4925,7 @@ fsm.restore(snap, decode = null)    -> Context
 - 枚举状态在 JSON 往返时通过 `std.enum.decode` 自动恢复；
 - struct 状态可传解码回调：`fsm.restore(snap, func(v) { return std.struct.decode(v, "S"); })`；
 - `ctx._history` / `ctx._head` / `ctx._redo` 是内部字段，不要依赖；
-- 非法 `step` 会 `fail("step must be callable")`，非法回调会 `fail("on_transition must be callable")`。
+- 非法 `step` 会 `std.error.fail!("step must be callable")`，非法回调会 `std.error.fail!("on_transition must be callable")`。
 
 性能提示：单步 `step` 每次都会为值语义复制历史表，O(history)/次；`run` 在单次调用内复用同一份历史，整体 O(events)，`history` 为 O(n)。线性撤销/重做适合中小规模，超长历史请等待原生 fsm 实现。
 

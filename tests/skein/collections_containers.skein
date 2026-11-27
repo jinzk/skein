@@ -69,10 +69,10 @@ ts_test("set differential", func() {
       reference[v] = true;
     }
     if (set.size(s) != std.utils.len(reference)) {
-      fail("size mismatch");
+      std.error.fail!("size mismatch");
     }
     if (set.has(s, v) != (std.dict.has(reference, v) != 0)) {
-      fail("has mismatch");
+      std.error.fail!("has mismatch");
     }
     i = i + 1;
   }

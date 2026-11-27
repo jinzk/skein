@@ -1518,7 +1518,6 @@ static struct ast *new_member_or_enum_literal(struct ast *base, char *field) {
 %token IF "if" ELSE "else" WHILE "while" DO "do" FOR "for" FUNC "func" LET "let" CONST "const"
 %token YIELD "yield" DEFER "defer"
 %token LAUNCH "launch"
-%token WAIT "wait"
 %token AWAIT "await"
 %token STRUCT "struct" IMPL "impl" PROTOCOL "proto" ENUM "enum"
 %token MACRO "macro"
@@ -1530,7 +1529,7 @@ static struct ast *new_member_or_enum_literal(struct ast *base, char *field) {
 %token SWITCH "switch" CASE "case" DEFAULT "default" ARROW "=>"
 %token MATCH "match"
 %token RETURN "return" BREAK "break" CONTINUE "continue"
-%token FAIL "fail" ON "on" ERROR "error" RECOVER "recover" PASS "pass"
+%token ON "on" ERROR "error"
 %token IS "is" GOTO "goto"
 %token <str> LABEL "label"
 %token COLONCOLON "::"
@@ -2505,11 +2504,6 @@ line: returnstart exp                     { $$ = newret($2); }
     | gotostart NAME                      {
         $$ = newgoto($2, flow_keyword_line, flow_keyword_column);
       }
-    | FAIL exp                            { $$ = newfail($2); }
-    | FAIL                                { $$ = newfail(NULL); }
-    | RECOVER exp                         { $$ = newrecover($2); }
-    | RECOVER                             { $$ = newrecover(NULL); }
-    | PASS exp                            { $$ = newpass($2); }
     | exp                                 { $$ = $1; }
     ;
 
@@ -2658,7 +2652,6 @@ exp: exp '+' exp                          { $$ = newarith('+', $1, $3); }
       }
     | MATCH exp BODY_LBRACE match_arms '}'
                                            { $$ = newmatch($2, $4); }
-    | WAIT exp %prec UMINUS                { $$ = new_wait_call($2); }
     | LAUNCH exp %prec UMINUS {
         $$ = new_launch_expr($2);
       }

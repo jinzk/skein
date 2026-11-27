@@ -3,7 +3,7 @@ include "_support.skein";
 
 let dsn = std.env.get("SKEIN_TEST_POSTGRES_DSN", "");
 if (dsn == "") {
-  fail("SKEIN_TEST_POSTGRES_DSN is required");
+  std.error.fail!("SKEIN_TEST_POSTGRES_DSN is required");
 }
 
 ts_test("postgres exec and query", func() {

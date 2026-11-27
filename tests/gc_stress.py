@@ -8,7 +8,7 @@ BIN = sys.argv[1]
 
 SOURCE = """
 import std;
-func boom() { fail \"boom\"; }
+func boom() { std.error.fail!(\"boom\"); }
 func make(n) {
   let x = n;
   func f() { return x; }
@@ -52,7 +52,7 @@ while (i < 2000) {
     let y = make(i);
     func g() { return y(); }
     total = total + g();
-    recover g;
+    std.error.recover!(g);
   };
   total = total + v();
   i = i + 1;
@@ -151,14 +151,14 @@ std.io.println(\"iter \" + str(iter_sum));
 
 /* Handlers keep the captured error and recover value alive across unwinds. */
 func handler_fail(n) {
-  if (n > 0) { fail \"handler boom\"; }
+  if (n > 0) { std.error.fail!(\"handler boom\"); }
   return n;
 }
 func handler_total(n) {
   let total = 0;
   let i = 0;
   while (i < n) {
-    total = total + (handler_fail(i) on error(e) { recover 1; });
+    total = total + (handler_fail(i) on error(e) { std.error.recover!(1); });
     i = i + 1;
   }
   return total;

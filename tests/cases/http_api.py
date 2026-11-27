@@ -155,7 +155,7 @@ app.get(\"/err\", func(req) {
 app.get(\"/ok\", func(req) {
   return std.http.json_response(200, {\"ok\": true});
 });
-app.get(\"/boom\", func(req) { fail(\"boom\"); });
+app.get(\"/boom\", func(req) { std.error.fail!(\"boom\"); });
 
 let s = std.http.listen(\"127.0.0.1\", 0);
 std.io.println(str(s[\"port\"]));
@@ -217,7 +217,7 @@ std.io.flush(std.io.stdout);
 s[\"handler_timeout_ms\"] = 50;
 let n = std.http2.serve(s, func(req) {
   if (req[\"path\"] == \"/boom\") {
-    fail(\"boom\");
+    std.error.fail!(\"boom\");
   }
   if (req[\"path\"] == \"/slow\") {
     return std.task.sleep(500);

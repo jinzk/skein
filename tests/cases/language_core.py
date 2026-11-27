@@ -570,7 +570,7 @@ def run_cases():
           "struct Point { x: float; }\n"
           "impl Point {\n"
           "  func new(x) {\n"
-          "    if (x < 0.0) { fail \"x must be >= 0\"; }\n"
+          "    if (x < 0.0) { std.error.fail!(\"x must be >= 0\"); }\n"
           "    return Point { x: x };\n"
           "  }\n"
           "}\n"

@@ -79,14 +79,14 @@ package fsm {
     let gen = id >> 32;
 
     if (slot < 0 || slot >= std.utils.len(t.slots)) {
-      fail("stale fsm history handle");
+      std.error.fail!("stale fsm history handle");
     }
     if (t.gens[slot] != gen) {
-      fail("stale fsm history handle");
+      std.error.fail!("stale fsm history handle");
     }
     let node = t.slots[slot];
     if (node == null) {
-      fail("stale fsm history handle");
+      std.error.fail!("stale fsm history handle");
     }
     return node;
   }
@@ -109,10 +109,10 @@ package fsm {
     let gen = id >> 32;
 
     if (slot < 0 || slot >= std.utils.len(t.slots)) {
-      fail("stale fsm history handle");
+      std.error.fail!("stale fsm history handle");
     }
     if (t.gens[slot] != gen || t.slots[slot] == null) {
-      fail("stale fsm history handle");
+      std.error.fail!("stale fsm history handle");
     }
 
     t.slots[slot] = null;
@@ -206,13 +206,13 @@ package fsm {
 
   export func define(initial, step, on_transition = null) {
     if (std.type.kind_of(step) != "function" && std.type.kind_of(step) != "builtin") {
-      fail("step must be callable");
+      std.error.fail!("step must be callable");
     }
 
     if (on_transition != null &&
         std.type.kind_of(on_transition) != "function" &&
         std.type.kind_of(on_transition) != "builtin") {
-      fail("on_transition must be callable");
+      std.error.fail!("on_transition must be callable");
     }
 
     return Machine {
@@ -247,7 +247,7 @@ package fsm {
         if (std.type.kind_of(next) != self._kind ||
             std.type.name(next) != self._name ||
             std.type.package_name(next) != self._package_name) {
-          fail("step must return " + self._name + ", got " +
+          std.error.fail!("step must return " + self._name + ", got " +
                std.type.kind_of(next) + " " + std.type.name(next));
         }
       }
@@ -273,7 +273,7 @@ package fsm {
           if (std.type.kind_of(next) != self._kind ||
               std.type.name(next) != self._name ||
               std.type.package_name(next) != self._package_name) {
-            fail("step must return " + self._name + ", got " +
+            std.error.fail!("step must return " + self._name + ", got " +
                  std.type.kind_of(next) + " " + std.type.name(next));
           }
         }
@@ -364,7 +364,7 @@ package fsm {
   export func restore(snap, decode = null) {
     let history = _t_from_value(snap["history"], decode);
     if (!_t_check(history)) {
-      fail("invalid fsm snapshot");
+      std.error.fail!("invalid fsm snapshot");
     }
     return Context {
       state: _decode_state(snap["state"], decode),

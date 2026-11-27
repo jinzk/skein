@@ -248,7 +248,6 @@ static bool expression_start_token(int tok) {
         case SKEIN_TOK_RETURN:
         case SKEIN_TOK_YIELD:
         case SKEIN_TOK_DEFER:
-        case SKEIN_TOK_WAIT:
         case SKEIN_TOK_LAUNCH:
         case SKEIN_TOK_AWAIT:
             return true;
@@ -987,8 +986,8 @@ static bool reserved_name(const char *text, int len) {
         "struct",   "extern",   "enum",     "impl",     "proto",
         "switch",   "match",    "case",     "default",  "let",
         "const",    "func",     "yield",    "defer",    "macro",
-        "return",   "break",    "continue", "fail",
-        "goto",     "recover",  "pass",
+        "return",   "break",    "continue",
+        "goto",
         "null",     "true",     "false",
         "int",      "float",    "bool",     "str",      "char",
         "byte",
@@ -1094,9 +1093,7 @@ TYPE_PREFIX_NEXT ([A-Za-z_]|{UTF8_SEQ}|#)
   * distinct preserves unary `!` precedence and leaves `!=` untouched.
   */
 "!" {
-    if ((last_token == SKEIN_TOK_NAME ||
-         last_token == SKEIN_TOK_FAIL || last_token == SKEIN_TOK_RECOVER ||
-         last_token == SKEIN_TOK_PASS || last_token == SKEIN_TOK_WAIT) &&
+    if (last_token == SKEIN_TOK_NAME &&
         last_token_line == g_token_line &&
         last_token_end_column == yylloc.first_column)
         YYRET(SKEIN_TOK_MACRO_BANG);
@@ -1491,10 +1488,6 @@ TYPE_PREFIX_NEXT ([A-Za-z_]|{UTF8_SEQ}|#)
 }
 "launch" { MEMBER_NAME_AFTER_DOT(); YYRET(contextual_name_token()); }
 "wait"/"!" { MACRO_CALLEE_NAME(); }
-"wait"/[ \t]*{TASK_KEYWORD_NEXT} {
-    MEMBER_NAME_AFTER_DOT();
-    YYRET(contextual_task_token(SKEIN_TOK_WAIT));
-}
 "wait" { MEMBER_NAME_AFTER_DOT(); YYRET(contextual_name_token()); }
 "await"/"!" { MACRO_CALLEE_NAME(); }
 "await"/[ \t]*{TASK_KEYWORD_NEXT} {
@@ -1520,7 +1513,7 @@ TYPE_PREFIX_NEXT ([A-Za-z_]|{UTF8_SEQ}|#)
 "break" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_BREAK); }
 "continue" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_CONTINUE); }
 "fail"/"!" { MACRO_CALLEE_NAME(); }
-"fail" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_FAIL); }
+"fail" { MEMBER_NAME_AFTER_DOT(); YYRET(contextual_name_token()); }
 "is"/"!" { MACRO_CALLEE_NAME(); }
 "is"/[ \t]*"as"[^A-Za-z0-9_] {
     MEMBER_NAME_AFTER_DOT();
@@ -1557,9 +1550,9 @@ TYPE_PREFIX_NEXT ([A-Za-z_]|{UTF8_SEQ}|#)
     YYRET(contextual_name_token());
   }
 "recover"/"!" { MACRO_CALLEE_NAME(); }
-"recover" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_RECOVER); }
+"recover" { MEMBER_NAME_AFTER_DOT(); YYRET(contextual_name_token()); }
 "pass"/"!" { MACRO_CALLEE_NAME(); }
-"pass" { MEMBER_NAME_AFTER_DOT(); YYRET(SKEIN_TOK_PASS); }
+"pass" { MEMBER_NAME_AFTER_DOT(); YYRET(contextual_name_token()); }
 "package" {
     MEMBER_NAME_AFTER_DOT();
     note_contextual_declaration_name(yytext, yyleng);

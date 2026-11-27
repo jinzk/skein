@@ -23,6 +23,9 @@ struct analysis_symbol {
     std::string name;
     std::string type;
     bool callable = false;
+    bool is_macro = false;
+    /* Ready-to-display signature, e.g. `macro wrap(T: type, v: expr)`. */
+    std::string signature;
 };
 
 struct analysis_result {

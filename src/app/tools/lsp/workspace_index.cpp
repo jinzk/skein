@@ -186,7 +186,7 @@ bool is_ident_byte(unsigned char c) {
 std::vector<scanned_symbol> scan_symbols(const std::string &text) {
     static const std::vector<std::string> keywords = {
         "func", "struct", "enum", "proto", "impl", "let", "const",
-        "package", "module", "extern",
+        "package", "module", "extern", "macro",
     };
     std::vector<scanned_symbol> symbols;
     std::size_t pos = 0;

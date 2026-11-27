@@ -1497,6 +1497,39 @@ struct ast *expand_macro_impl(struct ast *callee, struct ast *args,
 
 } // namespace
 
+const char *macro_kind_spelling(user_macro_param_kind kind) {
+    switch (kind) {
+        case user_macro_param_kind::expr: return "expr";
+        case user_macro_param_kind::ident: return "ident";
+        case user_macro_param_kind::expr_list: return "expr...";
+        case user_macro_param_kind::block: return "block";
+        case user_macro_param_kind::type: return "type";
+    }
+    return "expr";
+}
+
+std::vector<user_macro_info> user_macros_snapshot() {
+    std::vector<user_macro_info> result;
+    result.reserve(g_macros.size());
+    for (const macro_entry &entry : g_macros) {
+        user_macro_info info;
+        info.name = entry.body.name;
+        info.source = entry.body.source;
+        info.line = entry.body.line;
+        info.column = entry.body.column;
+        info.imported = entry.imported;
+        std::string params;
+        for (const user_macro_param &param : entry.body.params) {
+            if (!params.empty())
+                params += ", ";
+            params += param.name + ": " + macro_kind_spelling(param.kind);
+        }
+        info.signature = "macro " + info.name + "(" + params + ")";
+        result.push_back(std::move(info));
+    }
+    return result;
+}
+
 void user_macros_reset() {
     g_macros.clear();
 }

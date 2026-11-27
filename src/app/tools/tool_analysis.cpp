@@ -95,6 +95,16 @@ void collect_visible_symbols(const std::string &source, scope_context &scopes,
          scope; scope = scope->parent)
         collect_scope_symbols(scope.get(), seen, symbols);
     collect_typecheck_symbols(source, seen, symbols);
+    for (const user_macro_info &macro : user_macros_snapshot()) {
+        if (macro.name.empty() || macro.imported ||
+            !seen.insert(macro.name).second)
+            continue;
+        analysis_symbol info;
+        info.name = macro.name;
+        info.is_macro = true;
+        info.signature = macro.signature;
+        symbols.push_back(std::move(info));
+    }
 }
 
 void shutdown_analysis_runtime() {

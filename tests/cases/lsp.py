@@ -528,6 +528,74 @@ def run_cases():
             assert related[0]["location"]["range"]["start"]["line"] == 0, related
             assert "macro bad defined here" in related[0]["message"], related
 
+            # Local macro declarations support completion, signature hover and
+            # jump-to-definition from a call site.
+            did_change(
+                session,
+                uri,
+                12,
+                "macro wrap(T: type, v: expr) { let x: #T = #v; return x; }\n"
+                "func use(v) { return wrap!(int, v); }\n"
+                "wra\n",
+            )
+            session.wait_for_diagnostics(uri)
+            items = session.request(
+                "textDocument/completion",
+                {
+                    "textDocument": {"uri": uri},
+                    "position": {"line": 2, "character": 3},
+                },
+            )["items"]
+            assert "wrap!" in [item["label"] for item in items], items
+            macro_hover = session.request(
+                "textDocument/hover",
+                {
+                    "textDocument": {"uri": uri},
+                    "position": {"line": 1, "character": 22},
+                },
+            )
+            assert "macro wrap(T: type, v: expr)" in (
+                macro_hover["contents"]["value"]
+            ), macro_hover
+            macro_definitions = session.request(
+                "textDocument/definition",
+                {
+                    "textDocument": {"uri": uri},
+                    "position": {"line": 1, "character": 22},
+                },
+            )
+            assert macro_definitions, macro_definitions
+            assert macro_definitions[0]["range"]["start"]["line"] == 0, (
+                macro_definitions
+            )
+
+            # Selective macro imports remain visible without loading the
+            # imported package during tooling analysis.
+            did_change(
+                session,
+                uri,
+                13,
+                "import {twice! as t} from util;\n"
+                "t\n",
+            )
+            session.wait_for_diagnostics(uri)
+            items = session.request(
+                "textDocument/completion",
+                {
+                    "textDocument": {"uri": uri},
+                    "position": {"line": 1, "character": 0},
+                },
+            )["items"]
+            assert "t!" in [item["label"] for item in items], items
+            alias_hover = session.request(
+                "textDocument/hover",
+                {
+                    "textDocument": {"uri": uri},
+                    "position": {"line": 1, "character": 0},
+                },
+            )
+            assert "macro t" in alias_hover["contents"]["value"], alias_hover
+
             stderr = session.stop()
             assert "SKEIN_LSP_SIDE_EFFECT" not in stderr, stderr
             assert session.process.returncode == 0, session.process.returncode

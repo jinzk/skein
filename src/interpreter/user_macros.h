@@ -66,6 +66,19 @@ bool user_macro_define(const char *name,
                        const std::vector<user_macro_param> &params,
                        struct ast *body, int line, int column);
 
+/* Read-only view of user macros visible on the current thread, for check-only
+ * tools such as LSP completion and hover. */
+struct user_macro_info {
+    std::string name;
+    std::string signature;
+    std::string source;
+    int line = 0;
+    int column = 0;
+    bool imported = false;
+};
+
+std::vector<user_macro_info> user_macros_snapshot();
+
 struct ast *expand_macro(struct ast *callee, struct ast *args,
                          struct ast *block, int line, int column,
                          bool generator);

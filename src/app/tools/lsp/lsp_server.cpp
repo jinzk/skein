@@ -253,6 +253,7 @@ int symbol_kind_for_keyword(const std::string &keyword) {
     if (keyword == "struct" || keyword == "impl") return 5; // Class
     if (keyword == "enum") return 10;       // Enum
     if (keyword == "proto") return 11;         // Interface
+    if (keyword == "macro") return 12;         // Function
     if (keyword == "package" || keyword == "module") return 3; // Namespace
     return 12;
 }
@@ -260,7 +261,7 @@ int symbol_kind_for_keyword(const std::string &keyword) {
 std::vector<doc_symbol> scan_document_symbols(const std::string &text) {
     static const std::vector<std::string> keywords = {
         "func", "struct", "enum", "proto", "impl", "let", "const",
-        "package", "module", "extern",
+        "package", "module", "extern", "macro",
     };
     std::vector<doc_symbol> symbols;
     std::size_t pos = 0;
@@ -1011,13 +1012,29 @@ private:
         if (it != std_index_.end())
             return it->second.signature;
 
+        if (qualifier.empty()) {
+            for (const analysis_symbol &symbol : document.symbols) {
+                if (symbol.name == word && symbol.is_macro)
+                    return symbol.signature.empty() ? "macro " + word
+                                                    : symbol.signature;
+            }
+        }
+
         /* Selective imports are resolved statically so check-only tools never
          * execute the imported package.  They take precedence over the bare
          * placeholder binding recorded by the checker. */
         for (const selective_import_binding &binding :
              collect_selective_imports(document.text)) {
-            if (binding.is_macro || binding.alias != word)
+            if (binding.alias != word)
                 continue;
+            if (binding.is_macro) {
+                for (const index_entry &entry : index_.lookup(binding.target)) {
+                    if (!entry.type.empty())
+                        return "macro " + word + ": " + entry.type;
+                    return "macro " + word + " (selective import)";
+                }
+                return "macro " + word + " (selective import)";
+            }
             auto std_it = std_index_.find(binding.target);
             if (std_it != std_index_.end())
                 return std_it->second.signature;
@@ -1083,8 +1100,11 @@ private:
             completion::add_keywords(candidates);
             for (const selective_import_binding &binding :
                  collect_selective_imports(document->text)) {
-                if (binding.is_macro)
+                if (binding.is_macro) {
+                    candidates.add_top({binding.alias + "!", 7,
+                                        "macro (selective import)", false});
                     continue;
+                }
                 std::string detail = "selective import";
                 auto std_it = std_index_.find(binding.target);
                 if (std_it != std_index_.end())
@@ -1098,13 +1118,21 @@ private:
                     }
                 candidates.add_top({binding.alias, 7, detail, false});
             }
-            for (const analysis_symbol &symbol : document->symbols)
+            for (const analysis_symbol &symbol : document->symbols) {
+                if (symbol.is_macro) {
+                    candidates.add_top(
+                        {symbol.name + "!", 8,
+                         symbol.signature.empty() ? "macro" : symbol.signature,
+                         false});
+                    continue;
+                }
                 candidates.add_top(
                     {symbol.name, symbol.callable ? 3 : 6,
                      symbol.type.empty()
                          ? (symbol.callable ? "function" : "variable")
                          : symbol.type,
                      false});
+            }
             candidates.add_top({"std", 9, "standard library", true});
 
             /* Top-level module names and bare import aliases. */
@@ -1338,7 +1366,7 @@ private:
         if (qualifier.empty()) {
             for (const selective_import_binding &binding :
                  collect_selective_imports(document->text)) {
-                if (binding.is_macro || binding.alias != word)
+                if (binding.alias != word)
                     continue;
                 for (const index_entry &entry : index_.lookup(binding.target)) {
                     const lsp_position start{entry.line, entry.character};

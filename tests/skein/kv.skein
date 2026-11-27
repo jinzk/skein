@@ -5,11 +5,15 @@ include "_support.skein";
 let temp = std.fs.temp_dir("skein-kv-");
 let path = std.fs.path_join(temp, "test.kv");
 
+func kv_facade(s: kv.StoreApi) {
+  return s.get("a");
+}
+
 ts_test("kv put get delete", func() {
   let store = kv.open(path);
   ts_eq(store.backend, "sqlite");
   ts_eq(store.put("a", "1"), true);
-  ts_eq(std.bytes.to_string(store.get("a")), "1");
+  ts_eq(std.bytes.to_string(kv_facade(store)), "1");
   ts_eq(store.has("a"), true);
   ts_eq(store.put("a", "2"), true);
   ts_eq(std.bytes.to_string(store.get("a")), "2");

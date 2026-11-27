@@ -2,15 +2,53 @@ package kv {
   import std;
 
   export struct Store {
-    put: Callable;
-    get: Callable;
-    delete: Callable;
-    has: Callable;
-    scan: Callable;
-    count: Callable;
-    clear: Callable;
-    close: Callable;
+    _put: Callable;
+    _get: Callable;
+    _delete: Callable;
+    _has: Callable;
+    _scan: Callable;
+    _count: Callable;
+    _clear: Callable;
+    _close: Callable;
     backend: string;
+  }
+
+  proto StoreApi {
+    func put(self, key: any, value: any);
+    func get(self, key: any);
+    func delete(self, key: any);
+    func has(self, key: any);
+    func scan(self, prefix: any, limit: int);
+    func count(self);
+    func clear(self);
+    func close(self);
+  }
+
+  impl Store {
+    func put(self, key: any, value: any) {
+      return self._put(key, value);
+    }
+    func get(self, key: any) {
+      return self._get(key);
+    }
+    func delete(self, key: any) {
+      return self._delete(key);
+    }
+    func has(self, key: any) {
+      return self._has(key);
+    }
+    func scan(self, prefix: any = "", limit: int = 0) {
+      return self._scan(prefix, limit);
+    }
+    func count(self) {
+      return self._count();
+    }
+    func clear(self) {
+      return self._clear();
+    }
+    func close(self) {
+      return self._close();
+    }
   }
 
   func _as_bytes(value, what) {
@@ -134,14 +172,14 @@ package kv {
       return true;
     };
     return Store {
-      put: put,
-      get: get,
-      delete: remove,
-      has: has,
-      scan: scan,
-      count: count,
-      clear: clear,
-      close: close,
+      _put: put,
+      _get: get,
+      _delete: remove,
+      _has: has,
+      _scan: scan,
+      _count: count,
+      _clear: clear,
+      _close: close,
       backend: backend
     };
   }

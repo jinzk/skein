@@ -3194,6 +3194,11 @@ store.close() -> bool
 store.backend -> string
 ```
 
+`Store` 的操作是满足 `kv.StoreApi` 的方法：`put` / `get` / `delete` / `has` /
+`scan` / `count` / `clear` / `close`。函数参数可标注 `s: kv.StoreApi` 做类型检查。
+原来的 callable 字段已改为方法，`scan` / `count` 仍支持默认参数；`backend` 是
+具体 `Store` 的字段，不属于 proto。`kv.open` 的返回类型不变，调用写法也不变。
+
 - key / value 支持 string 或 bytes，内部按 BLOB 存储；
 - 表结构为 `(key BLOB PRIMARY KEY, value BLOB NOT NULL) WITHOUT ROWID`；
 - `scan` 按 key 字典序返回，prefix 和 limit 可选；

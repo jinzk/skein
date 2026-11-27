@@ -4,6 +4,7 @@ import std.cache;
 import std.metrics;
 import std.auth;
 import std.web;
+import std.kv;
 include "_support.skein";
 
 struct FacadeCacheStub {
@@ -58,6 +59,7 @@ ts_test("protocol facade implements", func() {
   ts_true(std.meta.implements("metrics.Registry", "metrics.RegistryApi"));
   ts_true(std.meta.implements("auth.SessionStore", "auth.SessionStoreApi"));
   ts_true(std.meta.implements("web.Limiter", "web.LimiterApi"));
+  ts_true(std.meta.implements("kv.Store", "kv.StoreApi"));
   ts_true(FacadeCacheStub {} is cache.ClientApi);
 });
 

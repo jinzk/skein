@@ -64,7 +64,7 @@
   以及核心约束验收
 - 标准库 API 清理 P0–P4：文档对齐默认 import 语义、`kv.StoreApi` 门面、
   `std.ops` 组合约束、`kv.OpenOptions` 具名选项，以及 `graph` 的内置泛型
-  `result` envelope 入口；后续补齐 `fsm.MachineApi` 门面，旧包级函数调用保持兼容
+  `result` envelope 入口；后续补齐 `fsm.MachineApi` 门面并移除旧包级函数调用
 
 ### 1.2 推荐执行顺序
 

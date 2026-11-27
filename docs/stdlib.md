@@ -2331,20 +2331,21 @@ std.rpc（内嵌 Skein 源码包）
 import std.fsm;
 
 let m = fsm.define(0, func(state, event) { return state + event; });
-let ctx = fsm.start(m);
-ctx = fsm.run(m, ctx, [1, 2, 3]);
+let ctx = m.start();
+ctx = m.run(ctx, [1, 2, 3]);
 print(ctx.state);          // 6
 print(fsm.history(ctx));   // [0, 1, 3, 6]
 ctx = fsm.undo(ctx);       // state 3
 ctx = fsm.redo(ctx);       // state 6
 ```
 
-API：`define` / `initial` / `start` / `step` / `run` / `history` / `undo` / `redo` / `snapshot` / `restore`。
+API：包级 `define`；`Machine` 方法 `initial` / `start` / `step` / `run`；包级 `history` /
+`undo` / `redo` / `snapshot` / `restore`。
 
-`Machine` 的操作是满足 `fsm.MachineApi` 的方法：`initial` / `start` / `step` / `run`。
-函数参数可标注 `m: fsm.MachineApi` 做类型检查；原来的 callable 字段已改为包私有 `_`
-字段，包级同名函数 `fsm.step(m, ctx, event)` 仍可用。`Context` 的 `history` / `undo` /
-`redo` / `snapshot` / `restore` 保持包级函数形式。
+`Machine` 的操作是满足 `fsm.MachineApi` 的方法：`initial` / `start` / `step` / `run`，
+也是唯一入口；包级 `fsm.initial` / `fsm.start` / `fsm.step` / `fsm.run` 已移除。函数参数
+可标注 `m: fsm.MachineApi` 做类型检查；原来的 callable 字段已改为包私有 `_` 字段。
+`Context` 的 `history` / `undo` / `redo` / `snapshot` / `restore` 保持包级函数形式。
 
 `define(initial, step[, on_transition])` 支持可选的转换回调；enum / struct 状态会校验 `step` 返回值仍是同一类型。单步 `step` 每次 O(history)；批量 `run` 在单次调用内完成，整体 O(events)。
 

@@ -4755,11 +4755,11 @@ let m = fsm.define(0, func(state, event) {
   return state + event;
 });
 
-let ctx = fsm.start(m);
+let ctx = m.start();
 print(ctx.state);            // 0
 
-ctx = fsm.step(m, ctx, 1);
-ctx = fsm.step(m, ctx, 2);
+ctx = m.step(ctx, 1);
+ctx = m.step(ctx, 2);
 print(ctx.state);            // 3
 
 print(fsm.history(ctx));     // [0, 1, 3]
@@ -4770,7 +4770,7 @@ print(ctx.state);            // 1
 ctx = fsm.redo(ctx);
 print(ctx.state);            // 3
 
-ctx = fsm.run(m, ctx, [1, 2, 3]);
+ctx = m.run(ctx, [1, 2, 3]);
 print(ctx.state);            // 9
 ```
 
@@ -4778,10 +4778,10 @@ API：
 
 ```text
 fsm.define(initial, step, on_transition = null) -> Machine
-fsm.initial(m)                 -> any
-fsm.start(m)                   -> Context
-fsm.step(m, ctx, event)        -> Context
-fsm.run(m, ctx, events)        -> Context
+m.initial()                    -> any
+m.start()                      -> Context
+m.step(ctx, event)             -> Context
+m.run(ctx, events)             -> Context
 fsm.history(ctx)               -> list
 fsm.undo(ctx)                  -> Context
 fsm.redo(ctx)                  -> Context
@@ -4792,6 +4792,7 @@ fsm.restore(snap, decode = null)    -> Context
 规则：
 
 - `step` 是纯函数 `(state, event) -> next_state`；
+- `Machine` 的 `initial` / `start` / `step` / `run` 满足 `fsm.MachineApi`，包级同名函数已移除；
 - `define` 的第三个参数可选，是 `on_transition(from, event, to)` 回调；
 - 如果初始状态是 enum 或 struct，`step` 返回值必须保持同一类型，否则 `fail("step must return ...")`；
 - `Context` 是值，可以赋值、传参、比较；

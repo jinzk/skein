@@ -237,18 +237,18 @@ def run_cases():
     check("std.fsm embedded import",
           'import std.fsm;\n'
           'let m = fsm.define(0, func(state, ev) { return state + ev; });\n'
-          'let ctx = fsm.start(m);\n'
+          'let ctx = m.start();\n'
           'println(ctx.state);\n'
-          'ctx = fsm.step(m, ctx, 2);\n'
+          'ctx = m.step(ctx, 2);\n'
           'println(ctx.state);\n'
-          'ctx = fsm.run(m, ctx, [1, 2, 3]);\n'
+          'ctx = m.run(ctx, [1, 2, 3]);\n'
           'println(ctx.state);\n'
           'println(fsm.history(ctx));\n',
           stdout_all=["0", "2", "8", "[0, 2, 3, 5, 8]"])
     check("std.fsm undo redo",
           'import std.fsm;\n'
           'let m = fsm.define(0, func(state, ev) { return state + ev; });\n'
-          'let ctx = fsm.run(m, fsm.start(m), [1, 2, 3]);\n'
+          'let ctx = m.run(m.start(), [1, 2, 3]);\n'
           'ctx = fsm.undo(ctx);\n'
           'println(ctx.state);\n'
           'println(fsm.snapshot(ctx)["redo"]);\n'
@@ -258,16 +258,16 @@ def run_cases():
     check("std.fsm large run",
           'import std.fsm;\n'
           'let m = fsm.define(0, func(state, ev) { return state + 1; });\n'
-          'let ctx = fsm.run(m, fsm.start(m), range(20000));\n'
+          'let ctx = m.run(m.start(), range(20000));\n'
           'println(ctx.state);\n'
           'println(len(fsm.history(ctx)));\n',
           stdout_all=["20000", "20001"])
     check("std.fsm branch clears redo",
           'import std.fsm;\n'
           'let m = fsm.define(0, func(state, ev) { return state + ev; });\n'
-          'let ctx = fsm.run(m, fsm.start(m), [1, 2, 3]);\n'
+          'let ctx = m.run(m.start(), [1, 2, 3]);\n'
           'ctx = fsm.undo(ctx);\n'
-          'ctx = fsm.step(m, ctx, 10);\n'
+          'ctx = m.step(ctx, 10);\n'
           'println(ctx.state);\n'
           'println(fsm.snapshot(ctx)["redo"]);\n'
           'println(fsm.history(ctx));\n',
@@ -275,7 +275,7 @@ def run_cases():
     check("std.fsm alias import",
           'import std.fsm as f;\n'
           'let m = f.define(7, func(ctx, ev) { return ctx; });\n'
-          'println(f.initial(m));\n',
+          'println(m.initial());\n',
           stdout="7")
     check("std.fsm invalid step",
           'import std.fsm;\nfsm.define(0, 1);\n',
@@ -286,13 +286,13 @@ def run_cases():
     check("std.fsm package-private field hidden",
           'import std.fsm;\n'
           'let m = fsm.define(7, func(ctx, ev) { return ctx; });\n'
-          'let ctx = fsm.start(m);\n'
+          'let ctx = m.start();\n'
           'println(ctx._history);\n',
           stderr="private member _history")
     check("std.fsm coexists with std",
           'import std;\nimport std.fsm;\n'
           'println(std.regex.match("a+", "a"));\n'
-          'println(fsm.initial(fsm.define(5, func(ctx, ev) { return ctx; })));\n',
+          'println(fsm.define(5, func(ctx, ev) { return ctx; }).initial());\n',
           stdout_all=["true", "5"])
     check("std.enum.decode rejects non-enum",
           'import std;\nstd.enum.decode({"a": 1});\n',
@@ -357,7 +357,7 @@ def run_cases():
     check("std.fsm snapshot restore",
           'import std.fsm;\n'
           'let m = fsm.define(0, func(s, e) { return s + e; });\n'
-          'let ctx = fsm.run(m, fsm.start(m), [1, 2, 3]);\n'
+          'let ctx = m.run(m.start(), [1, 2, 3]);\n'
           'let ctx2 = fsm.restore(fsm.snapshot(ctx));\n'
           'println(ctx2.state);\nprintln(fsm.history(ctx2));\n',
           stdout_all=["6", "[0, 1, 3, 6]"])
@@ -367,7 +367,7 @@ def run_cases():
           "let m = fsm.define(0, func(s, e) { return s + e; },\n"
           "  func(from, ev, to) { "
           "trail = std.list.append(trail, [from, ev, to]); });\n"
-          "let ctx = fsm.run(m, fsm.start(m), [1, 2]);\n"
+          "let ctx = m.run(m.start(), [1, 2]);\n"
           "println(ctx.state);\nprintln(trail);\n",
           stdout_all=["3", "[[0, 1, 1], [1, 2, 3]]"])
     check("std.fsm on_transition must be callable",
@@ -378,14 +378,14 @@ def run_cases():
           "import std;\nimport std.fsm;\n"
           "enum S { A; B; }\n"
           "let m = fsm.define(S.A, func(s, e) { return \"x\"; });\n"
-          "fsm.step(m, fsm.start(m), 1);\n",
+          "m.step(m.start(), 1);\n",
           stderr="step must return S, got string string")
     check("std.fsm struct step type check",
           "import std;\nimport std.fsm;\n"
           "struct P { x: int; }\n"
           "struct Q { y: int; }\n"
           "let m = fsm.define(P { x: 1 }, func(s, e) { return Q { y: 2 }; });\n"
-          "fsm.step(m, fsm.start(m), 1);\n",
+          "m.step(m.start(), 1);\n",
           stderr="step must return P, got struct Q")
     check("std.fsm json snapshot",
           'import std;\nimport std.fsm;\n'
@@ -398,7 +398,7 @@ def run_cases():
           '    default => state;\n'
           '  };\n'
           '});\n'
-          'let ctx = fsm.run(m, fsm.start(m), ["inc", "inc", "done"]);\n'
+          'let ctx = m.run(m.start(), ["inc", "inc", "done"]);\n'
           'let json = std.json.stringify(fsm.snapshot(ctx));\n'
           'let ctx2 = fsm.restore(std.json.parse(json));\n'
           'println(ctx2.state);\nprintln(fsm.history(ctx2));\n',
@@ -409,7 +409,7 @@ def run_cases():
           'let m = fsm.define(S { n: 0 }, func(state, ev) {\n'
           '  return S { n: state.n + ev };\n'
           '});\n'
-          'let ctx = fsm.run(m, fsm.start(m), [1, 2, 3]);\n'
+          'let ctx = m.run(m.start(), [1, 2, 3]);\n'
           'let json = std.json.stringify(fsm.snapshot(ctx));\n'
           'let ctx2 = fsm.restore(std.json.parse(json), '
           'func(v) { return std.struct.decode(v, "S"); });\n'

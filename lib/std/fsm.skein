@@ -37,28 +37,13 @@ package fsm {
     _redo: list;
   }
 
-  // Operations live in private callable fields; MachineApi is the public
-  // structural contract.  Package-level helpers keep their existing names.
+  // MachineApi is the public structural contract for Machine operations.
+  // Context history operations remain package-level functions.
   proto MachineApi {
     func initial(self);
     func start(self);
     func step(self, ctx: Context, event: any);
     func run(self, ctx: Context, events: any);
-  }
-
-  impl Machine {
-    func initial(self) {
-      return self._initial;
-    }
-    func start(self) {
-      return fsm.start(self);
-    }
-    func step(self, ctx: Context, event: any) {
-      return fsm.step(self, ctx, event);
-    }
-    func run(self, ctx: Context, events: any) {
-      return fsm.run(self, ctx, events);
-    }
   }
 
   func _t_new() {
@@ -240,83 +225,85 @@ package fsm {
     };
   }
 
-  export func initial(m) {
-    return m._initial;
-  }
-
-  export func start(m) {
-    let r = _t_add(_t_new(), m._initial, _NIL);
-    return Context {
-      state: m._initial,
-      _history: r.table,
-      _head: r.id,
-      _redo: []
-    };
-  }
-
-  export func step(m, ctx, event) {
-    let next = m._step(ctx.state, event);
-
-    if (m._kind == "enum" || m._kind == "struct") {
-      if (kind_of(next) != m._kind ||
-          type_name(next) != m._name ||
-          type_package(next) != m._package_name) {
-        fail("step must return " + m._name + ", got " +
-             kind_of(next) + " " + type_name(next));
-      }
+  impl Machine {
+    func initial(self) {
+      return self._initial;
     }
 
-    if (m._on_transition != null) {
-      m._on_transition(ctx.state, event, next);
+    func start(self) {
+      let r = _t_add(_t_new(), self._initial, _NIL);
+      return Context {
+        state: self._initial,
+        _history: r.table,
+        _head: r.id,
+        _redo: []
+      };
     }
 
-    let r = _t_add(ctx._history, next, ctx._head);
-    return Context {
-      state: next,
-      _history: r.table,
-      _head: r.id,
-      _redo: []
-    };
-  }
+    func step(self, ctx: Context, event: any) {
+      let next = self._step(ctx.state, event);
 
-  export func run(m, ctx, events) {
-    for (let event in events) {
-      let next = m._step(ctx.state, event);
-
-      if (m._kind == "enum" || m._kind == "struct") {
-        if (kind_of(next) != m._kind ||
-            type_name(next) != m._name ||
-            type_package(next) != m._package_name) {
-          fail("step must return " + m._name + ", got " +
+      if (self._kind == "enum" || self._kind == "struct") {
+        if (kind_of(next) != self._kind ||
+            type_name(next) != self._name ||
+            type_package(next) != self._package_name) {
+          fail("step must return " + self._name + ", got " +
                kind_of(next) + " " + type_name(next));
         }
       }
 
-      if (m._on_transition != null) {
-        m._on_transition(ctx.state, event, next);
+      if (self._on_transition != null) {
+        self._on_transition(ctx.state, event, next);
       }
 
-      // Inline _t_add: after the first COW fork inside this call, the history
-      // table is uniquely owned and every following event is O(1).
-      let slot = _NIL;
-      if (std.deque.size(ctx._history.free) > 0) {
-        let popped = std.deque.pop_back(ctx._history.free);
-        slot = popped["value"];
-        ctx._history.free = popped["deque"];
-        ctx._history.gens[slot] = ctx._history.gens[slot] + 1;
-        ctx._history.slots[slot] = _Node { value: next, prev: ctx._head };
-      } else {
-        slot = len(ctx._history.slots);
-        ctx._history.slots[slot] = _Node { value: next, prev: ctx._head };
-        ctx._history.gens[slot] = 0;
-      }
-      ctx._history.alive = ctx._history.alive + 1;
-
-      ctx.state = next;
-      ctx._head = (ctx._history.gens[slot] << 32) | slot;
-      ctx._redo = [];
+      let r = _t_add(ctx._history, next, ctx._head);
+      return Context {
+        state: next,
+        _history: r.table,
+        _head: r.id,
+        _redo: []
+      };
     }
-    return ctx;
+
+    func run(self, ctx: Context, events: any) {
+      for (let event in events) {
+        let next = self._step(ctx.state, event);
+
+        if (self._kind == "enum" || self._kind == "struct") {
+          if (kind_of(next) != self._kind ||
+              type_name(next) != self._name ||
+              type_package(next) != self._package_name) {
+            fail("step must return " + self._name + ", got " +
+                 kind_of(next) + " " + type_name(next));
+          }
+        }
+
+        if (self._on_transition != null) {
+          self._on_transition(ctx.state, event, next);
+        }
+
+        // Inline _t_add: after the first COW fork inside this call, the history
+        // table is uniquely owned and every following event is O(1).
+        let slot = _NIL;
+        if (std.deque.size(ctx._history.free) > 0) {
+          let popped = std.deque.pop_back(ctx._history.free);
+          slot = popped["value"];
+          ctx._history.free = popped["deque"];
+          ctx._history.gens[slot] = ctx._history.gens[slot] + 1;
+          ctx._history.slots[slot] = _Node { value: next, prev: ctx._head };
+        } else {
+          slot = len(ctx._history.slots);
+          ctx._history.slots[slot] = _Node { value: next, prev: ctx._head };
+          ctx._history.gens[slot] = 0;
+        }
+        ctx._history.alive = ctx._history.alive + 1;
+
+        ctx.state = next;
+        ctx._head = (ctx._history.gens[slot] << 32) | slot;
+        ctx._redo = [];
+      }
+      return ctx;
+    }
   }
 
   export func history(ctx) {

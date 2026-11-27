@@ -305,13 +305,13 @@ print(arena.size(s));
 """,
     },
     {
-        "name": "fsm.run",
+        "name": "Machine.run",
         "sizes": (10000, 20000),
         "expect": "linear",
         "imports": ("std", "std.fsm"),
         "src": """
 let m = fsm.define(0, func(state, event) { return state + 1; });
-let ctx = fsm.run(m, fsm.start(m), range({n}));
+let ctx = m.run(m.start(), range({n}));
 print(ctx.state);
 """,
     },

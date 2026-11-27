@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""std.meta type introspection.
+"""std.meta type introspection and protocol conformance.
 
-Pure introspection cases live in tests/skein/meta.skein.  Package visibility
-tests stay here because they need temp modules and CLI diagnostics.
+Pure introspection cases live in tests/skein/meta.skein.  Structural protocol
+facades live in tests/skein/protocol_facade.skein.  Package visibility tests
+stay here because they need temp modules and CLI diagnostics.
 """
 import os
 import tempfile
@@ -12,6 +13,7 @@ from harness import *  # noqa: F401,F403
 
 def run_cases():
     run_skein("meta.skein")
+    run_skein("protocol_facade.skein")
     check(
         "meta golden output",
         "import std;\n"

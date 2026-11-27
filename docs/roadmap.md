@@ -39,6 +39,7 @@
 | 用户自定义泛型（M9） | 已完成 | 泛型 struct/enum/函数/proto、显式实例化、约束、默认类型参数、裸 `Box` 补全、递归、VM/JIT 擦除、`std.meta` 泛型入口和 JSON envelope 已完成；通用二进制值格式不在当前范围，按需再评估 |
 | 断言与内置语法宏（M10） | 已完成 | 第一批已完成：`std.assert` / `std.log.enabled` 与 assert、日志、`capture!` 内置 AST 宏已落地并通过全量验证；`list!` / `dict!` / `try!` 已决定不实现；用户自定义宏不在 M10 |
 | 用户自定义宏与保留字清理（M11，P1 / P2 / P3.1 / P4 含跨包 / P5.1–P5.5 / G1–G5 已完成） | 已完成 | AST 级静态模板、受限片段、hygienic、声明先于使用。`proto`、`import {name} from pkg`、prelude 默认 import、`list` / `dict` 构造器、`fail!` / `recover!` / `pass!` / `wait!` 宏、`launch` / `wait` / `await` 表达式起始 contextual、用户宏 v1 与跨包 `export macro` / `import {name!} from pkg;`，以及 `on` / `error` handler-scoped contextual、`as` / `ref` / `weak` / `is` contextual 均已落地；G1–G5 完成泛型实参 AST 化、受限 `type` 片段、定义期边界强化、formatter / lint / LSP / VM-JIT 同步与核心约束验收；设计见 [`docs/macros_user_defined.md`](macros_user_defined.md) |
+| 操作符重载（O0–O4） | 待实现 | proto 约束基础设施与 `std.ops` 协议先行；算术运算符先接线，相等/比较与标准库算法分阶段评估，见 2.9 |
 | `std.cache`（M7）/ `std.kv` | 已完成 | 维护；Valkey 独立 CI 服务可按需补 |
 | FFI 平台 CI / fuzz | 按需 | Windows x64（MinGW/MSVC）进入正式发布；32 位 / ARM 与 fuzz 按需，见 `architecture.md` |
 
@@ -586,6 +587,50 @@ M11 继续保持“宏不生成泛型语法”的边界。当前可用组合是�
    声明、`type_name` 反射入口与片段位置误用；与已有的 hygiene、声明先于使用、
    递归禁止、泛型语法/声明禁止、类型片段非法位置测试一起构成 G5 验收矩阵。
 
+### 2.9 操作符重载（O0–O4，待实现）
+
+状态：**待实现**。当前语言仍不支持用户类型操作符重载；本节记录已确认的分阶段
+设计，排期后按 O0 → O4 推进。
+
+方向：先补 proto 约束基础设施和标准协议，再把运算符在 typecheck 期重写为普通方法
+调用。保持 parser 的优先级/结合性不变，不新增 AST 节点或 opcode；AST eval、VM、JIT
+复用现有 `CallMethod` 分派。
+
+已确认决策：
+
+- 从 proto 约束开始，不采用新语法或宏 `operator` 片段；
+- 标准协议放在新包 `std.ops`，都是普通结构式 proto，不设置 `builtin_kind`；
+- 方法名用 `op_add` / `op_sub` / … / `op_eq` / `op_cmp`，不复用 `key_eq`；
+- `Comparable` 用单一 `func op_cmp(self, rhs: R): int`，不拆成四个比较方法；
+- `std.ops.Equatable` 与算术协议同批定义，但相等/比较运算符晚于算术运算符接线；
+  它与 `std.dict_key.KeyEquatable` 是不同协议；
+- `KeyEquatable.key_eq` 继续只服务 dict/set，且不改变普通 `==`；
+- 不支持 `any` 动态重载、复合赋值、下标、`++` / `--`、链式比较或宏生成重载方法。
+
+阶段：
+
+1. **O0 自引用 proto 约束（待实现）**：让 `[T Add[T, T]]` 生效。parser 需要在
+   解析泛型参数约束时把当前参数名识别为类型变量；typecheck 在调用点用已推断
+   bindings 替换约束里的类型变量。不改运算符语义，只补正例/负例测试。
+2. **O1 标准 operator proto（待实现）**：新增 `std.ops`，定义
+   `Add[R, O]` / `Sub[R, O]` / `Mul[R, O]` / `Div[R, O]` / `Mod[R, O]`，以及
+   `Equatable[R]`（`std.ops.Equatable`）的 `op_eq` 与 `Comparable[R]` 的 `op_cmp`。
+   只定义协议和文档，
+   不改任何表达式行为。
+3. **O2 算术运算符接线（待实现）**：`+ - * / %` 在左操作数为已知 struct/enum 且
+   有对应方法时，由 typecheck 重写成 `a.op_add(b)` 等调用；内置类型仍走原
+   fast path。静态检查返回方法声明类型，VM/JIT differential 验证三路一致。
+4. **O3 相等与比较接线（待实现）**：`a == b` / `a != b` 走 `std.ops.Equatable.op_eq`；
+   `< <= > >=` 由 `Comparable.op_cmp` 的符号推导。内置数值、字符串和 NaN 语义
+   保持不变；`pattern`、`list.contains`、dict/set key 判定继续使用各自的既有
+   相等逻辑。
+5. **O4 标准库算法接线（待决策）**：再评估 `sort` / `min` / `max` 等是否使用
+   `Comparable`。在明确前，用户比较协议只影响运算符表达式，不改变标准库算法。
+
+验收：每阶段保持全量测试与 VM/JIT differential 全绿，`tools/check_docs_sync.py`
+与 `git diff --check` 通过；新增文档需同步 `SYNTAX.md`、`docs/tutorial.md`、
+`docs/stdlib.md`。
+
 ---
 
 ## 3. 已完成基线与技术记录
@@ -994,7 +1039,8 @@ RelWithDebInfo 下空脚本 `main()` 约 0.4 ms，`import std` 约 0.85 ms，
 - 不做“多消费者共享一个 Channel”语义；一对多由用户建立多条端点链路；
 - 不自动把回边降级为 `weak`；回边是否保活由字段类型显式表达；
 - `_` 前缀成员只做包私有访问控制，不做名称改写、跨包符号硬隔离或反射隐藏；
-- 暂不实现 `trait` 继承、关联类型、泛型 trait、运算符重载和动态添加方法。
+- 暂不实现 `trait` 继承、关联类型、泛型 trait 和动态添加方法；运算符重载当前
+  仍不支持，已按 O0–O4 形成设计（见 2.9），未排期前保持现状。
 
 包管理与生态：
 

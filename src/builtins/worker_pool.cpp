@@ -5,6 +5,7 @@
 #include "fiber.h"
 #include "json.h"
 #include "platform.h"
+#include "process_pipe.h"
 #include "process_spawn.h"
 #include "task.h"
 #include "valuetype.h"
@@ -23,15 +24,11 @@ struct worker_pool;
 struct worker_job;
 
 struct worker_slot {
-    value_t *process = nullptr;
-    value_t *stdin_stream = nullptr;
-    value_t *stdout_stream = nullptr;
+    process_pipe pipe;
     std::shared_ptr<worker_job> job;
     bool busy = false;
     /* Set while a fiber is blocked reading this slot's response. */
     bool completing = false;
-    /* Bytes read past the current protocol line. */
-    std::string pending;
     int failures = 0;
 };
 
@@ -62,12 +59,8 @@ struct worker_pool {
     long long restarts = 0;
 
     ~worker_pool() {
-        for (worker_slot &worker : workers) {
-            if (worker.process) {
-                freeval(worker.process);
-                worker.process = nullptr;
-            }
-        }
+        for (worker_slot &worker : workers)
+            worker.pipe.close(true, true);
     }
 };
 
@@ -143,252 +136,6 @@ value_t *dict_get(value_t *dict, const char *key) {
     return nullptr;
 }
 
-value_t *call_io(int functype, std::vector<value_t *> args) {
-    return call_io_builtin(functype, args);
-}
-
-value_t *wait_async_task(value_t *task, long long timeout_ms,
-                         std::string &error,
-                         const char *timeout_message) {
-    if (!task) {
-        error = "cannot start worker operation";
-        return nullptr;
-    }
-    if (fiber_in_fiber()) {
-        task_ptr pending_task;
-        if (!get_task_value(task, pending_task)) {
-            freeval(task);
-            error = "invalid worker task";
-            return nullptr;
-        }
-        auto ready = [pending_task]() {
-            return task_get_state(pending_task) != TASK_STATE_PENDING;
-        };
-        if (!fiber_wait_for(ready, timeout_ms)) {
-            value_t *cancelled =
-                call_task_builtin(B_task_cancel, {task});
-            if (cancelled)
-                freeval(cancelled);
-            freeval(task);
-            error = timeout_message;
-            return nullptr;
-        }
-    }
-
-    value_t *wait_timeout =
-        timeout_ms > 0 ? newintval(timeout_ms) : nullptr;
-    std::vector<value_t *> wait_args{task};
-    if (wait_timeout)
-        wait_args.push_back(wait_timeout);
-    value_t *wait_result =
-        call_task_builtin(B_task_try_wait, wait_args);
-    if (wait_timeout)
-        freeval(wait_timeout);
-    freeval(task);
-    if (!wait_result) {
-        error = "cannot wait for worker response";
-        return nullptr;
-    }
-    result_value_t *result = (result_value_t *)wait_result;
-    if (!result->ok) {
-        if (result->error && result->error->type == T_error)
-            error = ((error_value_t *)result->error)->message;
-        else
-            error = "worker response failed";
-        freeval(wait_result);
-        return nullptr;
-    }
-    value_t *chunk = result->value;
-    result->value = nullptr;
-    freeval(wait_result);
-    if (!chunk) {
-        error = "worker response failed";
-        return nullptr;
-    }
-    return chunk;
-}
-
-bool write_bytes(value_t *stream, const std::string &data) {
-    size_t offset = 0;
-    while (offset < data.size()) {
-        value_t *bytes = newbytesval(data.substr(offset));
-        value_t *task = call_io(B_io_write_async, {stream, bytes});
-        freeval(bytes);
-        if (!task)
-            return false;
-        std::string error;
-        value_t *result =
-            wait_async_task(task, 0, error, "worker write timed out");
-        if (!result)
-            return false;
-        if (result->type != T_int) {
-            freeval(result);
-            return false;
-        }
-        const long long written = ((int_value_t *)result)->value;
-        freeval(result);
-        if (written <= 0 ||
-            (size_t)written > data.size() - offset)
-            return false;
-        offset += (size_t)written;
-    }
-    return true;
-}
-
-bool flush_stream(value_t *stream) {
-    value_t *result = call_io(B_io_flush, {stream});
-    if (!result)
-        return false;
-    freeval(result);
-    return true;
-}
-
-value_t *read_async_chunk(value_t *stream, long long max_bytes,
-                          long long timeout_ms, std::string &error,
-                          const char *timeout_message) {
-    value_t *size = newintval(max_bytes);
-    value_t *timeout = timeout_ms > 0 ? newintval(timeout_ms) : nullptr;
-    std::vector<value_t *> args{stream, size};
-    if (timeout)
-        args.push_back(timeout);
-    value_t *task = call_io(B_io_read_async, args);
-    freeval(size);
-    if (timeout)
-        freeval(timeout);
-    if (!task) {
-        error = "cannot start worker read";
-        return nullptr;
-    }
-    return wait_async_task(task, timeout_ms, error, timeout_message);
-}
-
-value_t *read_line(value_t *stream, std::string *pending,
-                   long long timeout_ms, std::string &error) {
-    std::string buffer;
-    if (pending && !pending->empty()) {
-        buffer.swap(*pending);
-        const size_t newline = buffer.find('\n');
-        if (newline != std::string::npos) {
-            *pending = buffer.substr(newline + 1);
-            buffer.resize(newline);
-            return newstrval(buffer.c_str());
-        }
-    }
-    if (timeout_ms <= 0 && !fiber_in_fiber()) {
-        value_t *line = call_io(B_io_read_line, {stream});
-        if (!line)
-            return nullptr;
-        if (line->type == T_null) {
-            if (buffer.empty())
-                return line;
-            freeval(line);
-            return newstrval(buffer.c_str());
-        }
-        std::string text;
-        if (line->type == T_bytes)
-            text = ((bytes_value_t *)line)->value;
-        else if (line->type == T_string)
-            text = ((string_value_t *)line)->value;
-        freeval(line);
-        buffer += text;
-        return newstrval(buffer.c_str());
-    }
-
-    const auto start = std::chrono::steady_clock::now();
-    for (;;) {
-        long long remaining = 0;
-        if (timeout_ms > 0) {
-            const auto now = std::chrono::steady_clock::now();
-            const long long elapsed = std::chrono::duration_cast<
-                std::chrono::milliseconds>(now - start).count();
-            remaining = timeout_ms - elapsed;
-            if (remaining <= 0) {
-                error = "worker response timed out";
-                return nullptr;
-            }
-        }
-        value_t *chunk = read_async_chunk(stream, 65536, remaining, error,
-                                          "worker response timed out");
-        if (!chunk)
-            return nullptr;
-        if (chunk->type == T_null) {
-            freeval(chunk);
-            break;
-        }
-        if (chunk->type != T_bytes) {
-            freeval(chunk);
-            error = "worker protocol expected bytes";
-            return nullptr;
-        }
-        const std::string &bytes = ((bytes_value_t *)chunk)->value;
-        const size_t newline = bytes.find('\n');
-        if (newline != std::string::npos) {
-            buffer.append(bytes.data(), newline);
-            if (pending)
-                *pending = bytes.substr(newline + 1);
-            freeval(chunk);
-            break;
-        }
-        buffer += bytes;
-        freeval(chunk);
-    }
-    return newstrval(buffer.c_str());
-}
-
-value_t *read_exact_stream(value_t *stream, std::string *pending,
-                           size_t size, long long timeout_ms,
-                           std::string &error) {
-    if (size == 0)
-        return newbytesval(std::string());
-    std::string buffered;
-    if (pending && !pending->empty()) {
-        const size_t take = std::min(size, pending->size());
-        buffered.assign(pending->data(), take);
-        pending->erase(0, take);
-    }
-    const auto start = std::chrono::steady_clock::now();
-    while (buffered.size() < size) {
-        const size_t missing = size - buffered.size();
-        long long remaining = 0;
-        if (timeout_ms > 0) {
-            const auto now = std::chrono::steady_clock::now();
-            const long long elapsed = std::chrono::duration_cast<
-                std::chrono::milliseconds>(now - start).count();
-            remaining = timeout_ms - elapsed;
-            if (remaining <= 0) {
-                error = "worker body read timed out";
-                return nullptr;
-            }
-        }
-        const long long request =
-            (long long)std::min<size_t>(missing, 65536);
-        value_t *chunk = read_async_chunk(stream, request, remaining, error,
-                                          "worker body read timed out");
-        if (!chunk)
-            return nullptr;
-        if (chunk->type == T_null) {
-            freeval(chunk);
-            error = "worker closed its stdout";
-            return nullptr;
-        }
-        if (chunk->type != T_bytes) {
-            freeval(chunk);
-            error = "worker protocol expected bytes";
-            return nullptr;
-        }
-        const std::string &bytes = ((bytes_value_t *)chunk)->value;
-        if (bytes.empty()) {
-            freeval(chunk);
-            error = "worker body read failed";
-            return nullptr;
-        }
-        buffered.append(bytes.data(),
-                        std::min<size_t>(bytes.size(), missing));
-        freeval(chunk);
-    }
-    return newbytesval(std::move(buffered));
-}
-
 value_t *json_stringify(value_t *value) {
     return call_json_builtin(B_json_stringify, {value});
 }
@@ -417,32 +164,19 @@ bool spawn_worker(worker_slot &slot, const std::string &script,
     options->payload->items.push_back(std::make_pair(
         newstrval("stderr"), newstrval("inherit")));
 
-    value_t *executable_value = newstrval(executable.c_str());
-    value_t *process = call_process_spawn_builtin(
-        B_process_spawn_command, {executable_value, (value_t *)options});
-    freeval(executable_value);
+    if (!slot.pipe.spawn(executable.c_str(), (value_t *)options, error)) {
+        freeval((value_t *)options);
+        if (error.empty())
+            error = "cannot spawn worker";
+        return false;
+    }
     freeval((value_t *)options);
-    if (!process) {
-        error = "cannot spawn worker";
-        return false;
-    }
-
-    value_t *stdin_stream = dict_get(process, "stdin");
-    value_t *stdout_stream = dict_get(process, "stdout");
-    if (!stdin_stream || !stdout_stream) {
-        freeval(process);
-        error = "worker process has no pipes";
-        return false;
-    }
-    slot.process = process;
-    slot.stdin_stream = stdin_stream;
-    slot.stdout_stream = stdout_stream;
     /* Reserve the slot while the handshake runs so no fiber can dispatch. */
     slot.busy = true;
     slot.completing = true;
 
-    value_t *ready_line = read_line(stdout_stream, &slot.pending,
-                                    ready_timeout_ms, error);
+    value_t *ready_line =
+        slot.pipe.read_line(ready_timeout_ms, error);
     if (!ready_line) {
         close_worker(slot, true);
         if (error.empty())
@@ -478,44 +212,14 @@ bool spawn_worker(worker_slot &slot, const std::string &script,
 }
 
 void close_worker(worker_slot &slot, bool kill_if_running, bool force) {
-    if (slot.stdin_stream) {
-        value_t *result = call_io(B_io_close, {slot.stdin_stream});
-        if (result)
-            freeval(result);
-    }
-    if (slot.process) {
-        if (!force) {
-            value_t *timeout = newintval(1000);
-            value_t *wait_result = call_process_spawn_builtin(
-                B_process_wait, {slot.process, timeout});
-            freeval(timeout);
-            if (wait_result)
-                freeval(wait_result);
-        }
-        if (kill_if_running) {
-            std::vector<value_t *> kill_args{slot.process};
-            if (force)
-                kill_args.push_back(newintval(9));
-            value_t *kill_result = call_process_spawn_builtin(
-                B_process_kill, kill_args);
-            if (kill_args.size() > 1)
-                freeval(kill_args[1]);
-            if (kill_result)
-                freeval(kill_result);
-        }
-        value_t *close_result = call_process_spawn_builtin(
-            B_process_close, {slot.process});
-        if (close_result)
-            freeval(close_result);
-        freeval(slot.process);
-    }
-    const int failures = slot.failures;
-    slot = worker_slot{};
-    slot.failures = failures;
+    slot.pipe.close(kill_if_running, force);
+    slot.job.reset();
+    slot.busy = false;
+    slot.completing = false;
 }
 
 bool worker_usable(const worker_slot &slot) {
-    return slot.process && slot.stdin_stream && slot.stdout_stream;
+    return slot.pipe.usable();
 }
 
 bool restart_worker(worker_pool *pool, worker_slot &slot,
@@ -575,12 +279,10 @@ bool make_request(long long id, const std::string &method, value_t *params,
     return true;
 }
 
-bool read_response(value_t *stdout_stream, std::string *pending,
-                   long long expected_id,
+bool read_response(process_pipe &pipe, long long expected_id,
                    long long timeout_ms, bool binary, value_t *&result,
                    std::string &transport_error) {
-    value_t *line = read_line(stdout_stream, pending, timeout_ms,
-                              transport_error);
+    value_t *line = pipe.read_line(timeout_ms, transport_error);
     if (!line)
         return false;
     if (line->type == T_null) {
@@ -623,8 +325,7 @@ bool read_response(value_t *stdout_stream, std::string *pending,
     std::string body;
     if (body_size > 0) {
         value_t *body_value =
-            read_exact_stream(stdout_stream, pending, body_size, timeout_ms,
-                              transport_error);
+            pipe.read_exact(body_size, timeout_ms, transport_error);
         if (!body_value) {
             freeval(response);
             return false;
@@ -693,7 +394,7 @@ bool complete_slot(worker_pool *pool, size_t index, long long timeout_ms) {
     slot.completing = true;
     value_t *result = nullptr;
     std::string transport_error;
-    const bool ok = read_response(slot.stdout_stream, &slot.pending, job->id,
+    const bool ok = read_response(slot.pipe, job->id,
                                   timeout_ms, job->binary, result,
                                   transport_error);
     slot.completing = false;
@@ -744,8 +445,8 @@ void try_dispatch(worker_pool *pool) {
         slot.busy = true;
         /* Block other fibers from reading this slot until the request is out. */
         slot.completing = true;
-        if (!write_bytes(slot.stdin_stream, job->request) ||
-            !flush_stream(slot.stdin_stream)) {
+        if (!slot.pipe.write(job->request) ||
+            !slot.pipe.flush()) {
             slot.completing = false;
             slot.job.reset();
             slot.busy = false;
@@ -874,7 +575,7 @@ value_t *call_worker_builtin(
                               pool->ready_timeout_ms, pool->hybrid,
                               error)) {
                 for (worker_slot &worker : pool->workers) {
-                    if (worker.process)
+                    if (worker.pipe.usable())
                         close_worker(worker, true);
                 }
                 yyerror("std.worker.pool: %s", error.c_str());
@@ -1211,8 +912,8 @@ value_t *call_worker_builtin(
         /* Reserve the slot before writing in case the write yields fibers. */
         slot->completing = true;
         if (!make_request(id, method, args[2], nullptr, pool->hybrid, line) ||
-            !write_bytes(slot->stdin_stream, line) ||
-            !flush_stream(slot->stdin_stream)) {
+            !slot->pipe.write(line) ||
+            !slot->pipe.flush()) {
             slot->completing = false;
             slot->busy = false;
             yyerror("std.worker.call: cannot send request");
@@ -1220,7 +921,7 @@ value_t *call_worker_builtin(
         }
         value_t *result = nullptr;
         std::string transport_error;
-        const bool ok = read_response(slot->stdout_stream, &slot->pending, id,
+        const bool ok = read_response(slot->pipe, id,
                                       timeout_ms, false, result,
                                       transport_error);
         slot->completing = false;
@@ -1270,8 +971,8 @@ value_t *call_worker_builtin(
             worker.completing = true;
             if (!make_request(id, method, items->payload->items[start + i],
                               nullptr, pool->hybrid, line) ||
-                !write_bytes(worker.stdin_stream, line) ||
-                !flush_stream(worker.stdin_stream)) {
+                !worker.pipe.write(line) ||
+                !worker.pipe.flush()) {
                 worker.completing = false;
                 worker.busy = false;
                 freeval((value_t *)results);
@@ -1285,7 +986,7 @@ value_t *call_worker_builtin(
             value_t *result = nullptr;
             std::string transport_error;
             const bool ok =
-                read_response(worker.stdout_stream, &worker.pending, ids[i],
+                read_response(worker.pipe, ids[i],
                               timeout_ms, false, result, transport_error);
             worker.completing = false;
             if (!ok) {

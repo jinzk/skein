@@ -1619,7 +1619,7 @@ for (let value in values) {
 
 #### 内置函数
 
-无需 `import` 的 prelude 值：`len`、`range`、`print`、`println`、`input`、`list`、`dict`、`kind_of`、`type_name`、`type_package`、`type_module_name`、`type_source`，规范路径分别为 `std.utils.*`、`std.io.*`、`std.list.new` / `std.dict.new`、`std.type.*`；它们可被局部绑定或显式 import 遮蔽。`int`、`float`、`bool`、`str`、`char`、`byte` 仍是词法识别的转换函数与类型名。数学、字符串、格式化、文件与 bytes 函数位于 `std.math`、`std.string`、`std.fs`、`std.bytes`，使用前需要 `import std;`。内置函数同样是一等值：
+无需 `import` 的 prelude 值：`len`、`range`、`print`、`println`、`input`、`list`、`dict`、`kind_of`、`type_name`、`type_package`、`type_module_name`、`type_source`，规范路径分别为 `std.utils.*`、`std.io.*`、`std.list.new` / `std.dict.new`、`std.type.*`；它们可被局部绑定或显式 import 遮蔽。`int`、`float`、`bool`、`str`、`char`、`byte` 仍是词法识别的转换函数与类型名。其中类型位置的 `str` 是 `string` 的短别名，规范类型名和诊断、反射输出都是 `string`；值位置只有 `str(x)`，`string` 不是值。数学、字符串、格式化、文件与 bytes 函数位于 `std.math`、`std.string`、`std.fs`、`std.bytes`，使用前需要 `import std;`。内置函数同样是一等值：
 
 ```text
 import std;
@@ -1679,7 +1679,7 @@ apply(std.math.sqrt, 16)
 - `list`、`dict` 和 `struct` 是值类型：赋值、传参和返回在语义上复制，但内部使用写时复制（COW），只读或复制时共享底层数据，真正修改时才分离。
 - `method` 是绑定到结构体实例的方法值；当前版本捕获提取时的实例快照。
 - `bytes` 和字符串目前仍然复制内容；函数值共享闭包环境，文件句柄等原生资源共享底层句柄。
-- 显式转换：`int(x)`、`float(x)`、`bool(x)`、`str(x)`。`int` / `float` 接受整数、浮点数、布尔值或字符串；`bool` 按真值规则转换；`str` 接受任意值。
+- 显式转换：`int(x)`、`float(x)`、`bool(x)`、`str(x)`。`int` / `float` 接受整数、浮点数、布尔值或字符串；`bool` 按真值规则转换；`str` 接受任意值。类型标注请用规范类型名 `string`（`str` 作为类型别名也可用，但仅 `str(x)` 是转换函数）。
 - 浮点数输出使用可往返的最短表示并保留 `.0`：`1.0` 显示为 `1.0`，`1.23456` 显示为 `1.23456`。
 - 没有字符串与数字之间的隐式转换，`1 + "2"` 会报错；需要时请使用 `int()` / `float()` / `str()`。
 

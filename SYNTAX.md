@@ -75,7 +75,9 @@ contextual keyword，不是全局保留字：`launch f()` 启动 task，`await f
 `list` / `dict` 现在也是默认导入的 prelude 值，规范路径为 `std.list.new` /
 `std.dict.new`；值作用域可遮蔽，但类型注解里的 `list[T]` / `dict[K, V]` 始终按
 独立的类型命名空间解析。`int` / `float` / `bool` / `str` / `char` / `byte`
-目前仍由类型命名空间处理。
+目前仍由类型命名空间处理。`str` 在类型位置是 `string` 的短别名，两者是同一个
+类型；规范类型名与诊断、反射输出统一为 `string`。值位置只有转换函数 `str(x)`，
+`string` 不是值。
 
 `fail` / `recover` / `pass` 的规范写法是内置宏 `fail!` / `recover!` / `pass!`；
 旧关键字形式暂时保留兼容。`on` / `error` 已按 handler-scoped contextual 处理：
@@ -325,7 +327,7 @@ false
 - 假：`null`、`false`、`0`、`0.0`、空字符串、空 bytes、空列表、空字典；
 - 真：其他值，包括 `true`、struct、方法值、函数、内置函数和 userdata（例如文件句柄）。
 
-`bool(x)` 按真值规则转换为 `true` / `false`。`str(true)` 得到 `"true"`，`int(true)` 得到 `1`，`float(false)` 得到 `0.0`。
+`bool(x)` 按真值规则转换为 `true` / `false`。`str(true)` 得到 `"true"`，`int(true)` 得到 `1`，`float(false)` 得到 `0.0`。类型标注中 `str` 与 `string` 等价（`let a: str = "x"` 和 `let b: string = a` 可以互相赋值），但只有 `str(x)` 是转换函数。
 
 ## 4. 表达式
 

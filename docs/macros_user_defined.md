@@ -91,7 +91,10 @@ macro call_all(f: expr, args: expr...) {
 ```
 
 `type` 片段只接受调用点的普通类型名、限定名（`pkg.Type` / `pkg.Proto`）和内建
-类型名；表达式、约束标记 `hashable` / `iterable`、内部占位符拼写都会被拒绝。
+类型名；`str` 与 `string` 等价，均按规范类型名 `string` 处理。表达式、旧的小写
+约束标记 `hashable` / `iterable`、内部占位符拼写都会被拒绝；当前约束写作
+`Hashable` / `Iterable` proto，它们作为类型名可以传入，但 `type` 片段不提供
+专用约束语义。
 传入的名字保留调用点拼写和 import 别名，因此 `is #T` 能识别调用点可见的 proto；
 模板内部写出的字面类型名仍按定义点解析。类型片段可出现在变量/函数参数类型、
 `as` 与 `is` 的类型位置，以及 `#T?` / `ref #T` / `weak #T` 前缀或后缀包装中。

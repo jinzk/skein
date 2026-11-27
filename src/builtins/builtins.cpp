@@ -47,6 +47,7 @@
 #include "platform.h"
 #include "process_builtin.h"
 #include "process_spawn.h"
+#include "process_io.h"
 #include "random_builtin.h"
 #include "regex_builtin.h"
 #include "refvalue.h"
@@ -678,6 +679,8 @@ struct value_t *call_builtin(int functype,
         functype == B_process_run_function ||
         functype == B_process_spawn_function)
         return call_process_spawn_builtin(functype, args);
+    if (functype >= B_process_spawn_pipe && functype <= B_process_io)
+        return call_process_io_builtin(functype, args);
     if (functype >= B_worker_pool && functype <= B_worker_stats)
         return call_worker_builtin(functype, args);
     if (functype >= B_thread_message_from &&

@@ -3253,6 +3253,29 @@ def run_cases():
     check("command as value",
           'import std;\nlet run = std.process.command;\nrun("echo ok")\n',
           stdout="= ok")
+    if os.name != "nt":
+        check(
+            "process spawn_pipe write read",
+            "import std;\n"
+            'let p = std.process.spawn_pipe("/bin/cat");\n'
+            'println(str(p.write("hello\\n")));\n'
+            "p.flush();\n"
+            "println(str(p.read_line(1000)));\n"
+            "p.close();\n",
+            stdout_all=["6", "hello"],
+        )
+        check(
+            "process io attaches existing handle",
+            "import std;\n"
+            'let proc = std.process.spawn_command("/bin/cat");\n'
+            "let io = std.process.io(proc);\n"
+            'io.write("world\\n");\n'
+            "io.flush();\n"
+            "println(str(io.read_line(1000)));\n"
+            "io.close();\n"
+            "std.process.close(proc);\n",
+            stdout="world\n",
+        )
     check("command type error", 'import std;\nstd.process.command(1)\n',
           stderr="command expects a string")
     check("command arity error", 'import std;\nstd.process.command()\n',

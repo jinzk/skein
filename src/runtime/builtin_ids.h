@@ -407,6 +407,8 @@ enum bifs {
     B_process_result,
     B_process_run_function,
     B_process_spawn_function,
+    B_process_spawn_pipe,
+    B_process_io,
     B_worker_pool,
     B_worker_call,
     B_worker_map,

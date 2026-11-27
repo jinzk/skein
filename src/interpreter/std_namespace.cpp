@@ -386,6 +386,8 @@ value_t *build_namespace_impl() {
             {"command_status", B_command_status},
             {"run_command", B_process_run_command},
             {"spawn_command", B_process_spawn_command},
+            {"spawn_pipe", B_process_spawn_pipe},
+            {"io", B_process_io},
             {"run_entry", B_process_run_entry},
             {"spawn_entry", B_process_spawn_entry},
             {"run_function", B_process_run_function},

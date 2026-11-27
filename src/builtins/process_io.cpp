@@ -1,14 +1,17 @@
 #include "process_io.h"
 
+#include "ast.h"
 #include "builtin_ids.h"
 #include "builtins_io.h"
 #include "fiber.h"
+#include "process_spawn.h"
 #include "task.h"
 #include "valuetype.h"
 
 #include <algorithm>
 #include <chrono>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -332,4 +335,254 @@ void process_io::close_streams() {
     }
     stdout_stream = nullptr;
     pending.clear();
+}
+
+// ---------------------------------------------------------------------------
+// Public std.process.spawn_pipe / std.process.io value
+// ---------------------------------------------------------------------------
+
+struct process_io_value : std::enable_shared_from_this<process_io_value> {
+    value_t *process = nullptr;
+    bool owns_process = false;
+    process_io io;
+
+    ~process_io_value() { close(); }
+
+    void close() {
+        io.close_streams();
+        if (owns_process && process) {
+            value_t *timeout = newintval(1000);
+            value_t *wait_result = call_process_spawn_builtin(
+                B_process_wait, {process, timeout});
+            freeval(timeout);
+            if (wait_result)
+                freeval(wait_result);
+            value_t *close_result = call_process_spawn_builtin(
+                B_process_close, {process});
+            if (close_result)
+                freeval(close_result);
+            freeval(process);
+            process = nullptr;
+        }
+    }
+};
+
+std::string process_io_describe(const void *data) {
+    const process_io_value *state =
+        static_cast<const process_io_value *>(data);
+    return state && state->process ? "<process_io>"
+                                   : "<process_io: closed>";
+}
+
+value_t *io_method(const std::shared_ptr<process_io_value> &state,
+                   const char *name) {
+    if (std::strcmp(name, "write") == 0) {
+        return newnativeval([state](const std::vector<value_t *> &args) {
+            if (args.size() != 1) {
+                yyerror("process_io.write expects 1 argument");
+                return (value_t *)nullptr;
+            }
+            std::string data;
+            if (args[0]->type == T_bytes)
+                data = ((bytes_value_t *)args[0])->value;
+            else if (args[0]->type == T_string)
+                data = ((string_value_t *)args[0])->value;
+            else {
+                yyerror("process_io.write expects bytes or string");
+                return (value_t *)nullptr;
+            }
+            if (!state->io.write(data)) {
+                yyerror("process_io.write failed");
+                return (value_t *)nullptr;
+            }
+            return newintval((long long)data.size());
+        }, state);
+    }
+    if (std::strcmp(name, "flush") == 0) {
+        return newnativeval([state](const std::vector<value_t *> &args) {
+            if (!args.empty()) {
+                yyerror("process_io.flush expects no arguments");
+                return (value_t *)nullptr;
+            }
+            if (!state->io.flush()) {
+                yyerror("process_io.flush failed");
+                return (value_t *)nullptr;
+            }
+            return newnull();
+        }, state);
+    }
+    if (std::strcmp(name, "read_line") == 0) {
+        return newnativeval([state](const std::vector<value_t *> &args) {
+            if (args.size() > 1) {
+                yyerror("process_io.read_line expects 0 or 1 argument");
+                return (value_t *)nullptr;
+            }
+            long long timeout = 0;
+            if (!args.empty()) {
+                if (args[0]->type != T_int || ((int_value_t *)args[0])->value < 0) {
+                    yyerror("process_io.read_line timeout must be non-negative");
+                    return (value_t *)nullptr;
+                }
+                timeout = ((int_value_t *)args[0])->value;
+            }
+            std::string error;
+            value_t *line = state->io.read_line(timeout, error);
+            if (!line) {
+                if (!error.empty())
+                    yyerror("%s", error.c_str());
+                return (value_t *)nullptr;
+            }
+            return line;
+        }, state);
+    }
+    if (std::strcmp(name, "read_exact") == 0) {
+        return newnativeval([state](const std::vector<value_t *> &args) {
+            if (args.empty() || args.size() > 2 ||
+                args[0]->type != T_int ||
+                ((int_value_t *)args[0])->value < 0) {
+                yyerror("process_io.read_exact expects size[, timeout_ms]");
+                return (value_t *)nullptr;
+            }
+            long long timeout = 0;
+            if (args.size() == 2) {
+                if (args[1]->type != T_int ||
+                    ((int_value_t *)args[1])->value < 0) {
+                    yyerror("process_io.read_exact timeout must be non-negative");
+                    return (value_t *)nullptr;
+                }
+                timeout = ((int_value_t *)args[1])->value;
+            }
+            std::string error;
+            value_t *data = state->io.read_exact(
+                (std::size_t)((int_value_t *)args[0])->value, timeout, error);
+            if (!data) {
+                if (!error.empty())
+                    yyerror("%s", error.c_str());
+                return (value_t *)nullptr;
+            }
+            return data;
+        }, state);
+    }
+    if (std::strcmp(name, "close") == 0) {
+        return newnativeval([state](const std::vector<value_t *> &args) {
+            if (!args.empty()) {
+                yyerror("process_io.close expects no arguments");
+                return (value_t *)nullptr;
+            }
+            state->close();
+            return newnull();
+        }, state);
+    }
+    if (std::strcmp(name, "wait") == 0) {
+        return newnativeval([state](const std::vector<value_t *> &args) {
+            if (args.size() > 1 || !state->process) {
+                yyerror("process_io.wait expects 0 or 1 argument");
+                return (value_t *)nullptr;
+            }
+            std::vector<value_t *> wait_args{dupval(state->process)};
+            if (!args.empty())
+                wait_args.push_back(dupval(args[0]));
+            return call_process_spawn_builtin(B_process_wait, wait_args);
+        }, state);
+    }
+    if (std::strcmp(name, "kill") == 0) {
+        return newnativeval([state](const std::vector<value_t *> &args) {
+            if (args.size() > 1 || !state->process) {
+                yyerror("process_io.kill expects 0 or 1 argument");
+                return (value_t *)nullptr;
+            }
+            std::vector<value_t *> kill_args{dupval(state->process)};
+            if (!args.empty())
+                kill_args.push_back(dupval(args[0]));
+            return call_process_spawn_builtin(B_process_kill, kill_args);
+        }, state);
+    }
+    if (std::strcmp(name, "pid") == 0) {
+        return newnativeval([state](const std::vector<value_t *> &args) {
+            if (!args.empty() || !state->process) {
+                yyerror("process_io.pid expects no arguments");
+                return (value_t *)nullptr;
+            }
+            return call_process_spawn_builtin(
+                B_process_pid, {dupval(state->process)});
+        }, state);
+    }
+    if (std::strcmp(name, "process") == 0) {
+        return newnativeval([state](const std::vector<value_t *> &args) {
+            if (!args.empty() || !state->process) {
+                yyerror("process_io.process expects no arguments");
+                return (value_t *)nullptr;
+            }
+            return dupval(state->process);
+        }, state);
+    }
+    yyerror("process_io has no field %s", name);
+    return (value_t *)nullptr;
+}
+
+value_t *process_io_get_field(void *data, const char *name) {
+    process_io_value *raw = static_cast<process_io_value *>(data);
+    if (!raw || !name) {
+        yyerror("process_io has no field");
+        return (value_t *)nullptr;
+    }
+    return io_method(raw->shared_from_this(), name);
+}
+
+const native_type kProcessIoType = {
+    "process_io",
+    process_io_describe,
+    nullptr,
+    process_io_get_field,
+    nullptr,
+    nullptr,
+};
+
+value_t *new_process_io_value(std::shared_ptr<process_io_value> state) {
+    return newuserdataval(&kProcessIoType, std::move(state));
+}
+
+value_t *call_process_io_builtin(
+    int functype, const std::vector<struct value_t *> &args) {
+    if (functype == B_process_spawn_pipe) {
+        if (args.empty() || args.size() > 2 ||
+            args[0]->type != T_string) {
+            yyerror("std.process.spawn_pipe expects command[, options]");
+            return nullptr;
+        }
+        std::vector<value_t *> spawn_args{dupval(args[0])};
+        if (args.size() == 2)
+            spawn_args.push_back(dupval(args[1]));
+        value_t *process = call_process_spawn_builtin(
+            B_process_spawn_command, spawn_args);
+        if (!process)
+            return nullptr;
+        auto state = std::make_shared<process_io_value>();
+        state->process = process;
+        state->owns_process = true;
+        std::string error;
+        if (!state->io.attach(process, error)) {
+            yyerror("%s", error.c_str());
+            state->close();
+            return nullptr;
+        }
+        return new_process_io_value(std::move(state));
+    }
+    if (functype == B_process_io) {
+        if (args.size() != 1) {
+            yyerror("std.process.io expects 1 argument");
+            return nullptr;
+        }
+        auto state = std::make_shared<process_io_value>();
+        state->process = dupval(args[0]);
+        state->owns_process = false;
+        std::string error;
+        if (!state->io.attach(state->process, error)) {
+            yyerror("%s", error.c_str());
+            return nullptr;
+        }
+        return new_process_io_value(std::move(state));
+    }
+    yyerror("unknown process_io builtin");
+    return nullptr;
 }

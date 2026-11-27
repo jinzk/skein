@@ -3532,6 +3532,8 @@ std.process.status
 std.process.command_status
 std.process.run_command
 std.process.spawn_command
+std.process.spawn_pipe
+std.process.io
 std.process.run_entry
 std.process.spawn_entry
 std.process.run_function
@@ -3837,6 +3839,8 @@ std.fs.glob
 
 std.process.run_command
 std.process.spawn_command
+std.process.spawn_pipe
+std.process.io
 std.process.run_entry
 std.process.spawn_entry
 std.process.run_function
@@ -3921,6 +3925,8 @@ std.thread.capabilities
 - `std.io` 提供 `print`、`println`、`format`、`input`，以及文件和 socket 通用的流式读写；`print` 不追加换行，`println` 输出后自动追加换行符；
 - `std.fs` 提供文件读写和文件句柄操作；
 - `std.process` 提供命令执行和状态查询；
+- `std.process.spawn_pipe(command[, options])` 返回 `process_io`，复用子进程已有的 stdin/stdout pipe；`std.process.io(process)` 可包装已有进程句柄；
+- `process_io` 提供 `write(bytes|string)` / `flush()` / `read_line([timeout_ms])` / `read_exact(size[, timeout_ms])` / `close()` / `wait([timeout_ms])` / `kill([signal])` / `pid` / `process`；`spawn_pipe` 返回的对象拥有进程，`io(process)` 只借用进程，进程生命周期仍由原句柄管理；
 - `std.type` 提供 `kind_of`、`type_name`、`type_package`、`type_module_name`、`type_source`；
 - `std.ref` 提供 `ref` / `weak` 句柄的替换、升级和值快照；
 - `std.meta` 提供只读类型反射，查询字段、变体、方法和 proto；

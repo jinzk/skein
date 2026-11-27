@@ -3,8 +3,13 @@
 
 #include <cstddef>
 #include <string>
+#include <vector>
 
 struct value_t;
+
+/* Builtin constructor entry points for std.process.spawn_pipe / std.process.io. */
+struct value_t *call_process_io_builtin(
+    int functype, const std::vector<struct value_t *> &args);
 
 /*
  * Byte-level I/O adapter over an existing child process's stdin/stdout.

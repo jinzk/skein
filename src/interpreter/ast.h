@@ -285,6 +285,12 @@ struct forinloop {
     char *value_name;
     struct ast *iterable;
     struct ast *body;
+    /* Internal typecheck marker: iterable is a direct builtin range call, so
+     * AST/VM/JIT iterate it arithmetically instead of materializing a list. */
+    int range_fast;
+    long long range_start;
+    long long range_length;
+    long long range_step;
 };
 
 struct switch_node {

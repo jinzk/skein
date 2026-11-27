@@ -354,6 +354,23 @@ CASES = [
         "println(str(hot(100)));\n",
         expect_debug="[jit] enter hot",
     ),
+    case(
+        "range-forin-fast-path",
+        "import std;\n"
+        "func hot(n) {\n"
+        "  let total = 0;\n"
+        "  for i in range(1000000000) {\n"
+        "    total = total + i;\n"
+        "    if (i == 2) { break; }\n"
+        "  }\n"
+        "  for j in std.utils.range(5, 3, -2) {\n"
+        "    total = total + j;\n"
+        "  }\n"
+        "  return total + n;\n"
+        "}\n"
+        "println(str(hot(1)));\n",
+        expect_debug="[jit] enter hot",
+    ),
 ]
 
 

@@ -13,6 +13,7 @@
 #include "structtype.h"
 #include "valuetype.h"
 
+#include <climits>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -2469,6 +2470,186 @@ struct Checker : public BuiltinContext {
         return false;
     }
 
+    static bool ll_in_range(__int128 value) {
+        return value >= (__int128)LLONG_MIN &&
+               value <= (__int128)LLONG_MAX;
+    }
+
+    static bool const_int_arg(struct ast *node, long long &out) {
+        if (!node)
+            return false;
+        if (node->nodetype == 'V') {
+            struct val *value = (struct val *)node;
+            if (!value->val || value->val->type != T_int)
+                return false;
+            out = ((struct int_value_t *)value->val)->value;
+            return true;
+        }
+        if (node->nodetype == 'M') {
+            long long operand = 0;
+            if (!const_int_arg(node->l, operand) || operand == LLONG_MIN)
+                return false;
+            out = -operand;
+            return true;
+        }
+        if (node->nodetype == '~') {
+            long long operand = 0;
+            if (!const_int_arg(node->l, operand))
+                return false;
+            out = ~operand;
+            return true;
+        }
+
+        switch (node->nodetype) {
+            case '+':
+            case '-':
+            case '*':
+            case '/':
+            case '%':
+            case '&':
+            case '|':
+            case '^':
+            case 's':
+            case 'r':
+                break;
+            default:
+                return false;
+        }
+
+        long long left = 0;
+        long long right = 0;
+        if (!const_int_arg(node->l, left) || !const_int_arg(node->r, right))
+            return false;
+        switch (node->nodetype) {
+            case '+':
+            case '-':
+            case '*': {
+                __int128 value = node->nodetype == '+'
+                                     ? (__int128)left + right
+                                     : node->nodetype == '-'
+                                           ? (__int128)left - right
+                                           : (__int128)left * right;
+                if (!ll_in_range(value))
+                    return false;
+                out = (long long)value;
+                return true;
+            }
+            case '/':
+                if (right == 0 || (left == LLONG_MIN && right == -1))
+                    return false;
+                out = left / right;
+                return true;
+            case '%':
+                if (right == 0)
+                    return false;
+                out = right == -1 ? 0 : left % right;
+                return true;
+            case '&':
+                out = left & right;
+                return true;
+            case '|':
+                out = left | right;
+                return true;
+            case '^':
+                out = left ^ right;
+                return true;
+            case 's':
+                if (right < 0 || right >= 64)
+                    return false;
+                out = (long long)((unsigned long long)left
+                                  << (unsigned int)right);
+                return true;
+            case 'r':
+                if (right < 0 || right >= 64)
+                    return false;
+                out = left >> (unsigned int)right;
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    bool range_callee_is_builtin(struct ast *callee, Env &env) {
+        if (!callee)
+            return false;
+        if (callee->nodetype == 'V') {
+            struct val *value = (struct val *)callee;
+            if (!value->val || value->val->type != T_builtin)
+                return false;
+            return ((struct builtin_value_t *)value->val)->functype ==
+                   B_range;
+        }
+        if (callee->nodetype == 'N') {
+            std::string name;
+            return simple_name(callee, name) &&
+                   callee_is_builtin(name, B_range, env);
+        }
+        if (callee->nodetype == 'j') {
+            std::string path;
+            if (!flatten_path(callee, path) ||
+                path.find('.') == std::string::npos)
+                return false;
+            std::string root = path_root(path);
+            if (env.lookup(root) || functions.find(root) != functions.end())
+                return false;
+            struct value_t *value = NULL;
+            if (!resolve_namespace_value(path, value) || !value ||
+                value->type != T_builtin)
+                return false;
+            return ((struct builtin_value_t *)value)->functype == B_range;
+        }
+        return false;
+    }
+
+    void try_mark_range_fast(struct forinloop *f, Env &env) {
+        f->range_fast = 0;
+        if (!f || f->value_name || !f->name || f->name[0] == '#')
+            return;
+        if (!f->iterable || f->iterable->nodetype != 'C')
+            return;
+        struct ufncall *call = (struct ufncall *)f->iterable;
+        if (call->launch || call->awaited || call->wait_sugar)
+            return;
+        if (!range_callee_is_builtin(call->callee, env))
+            return;
+
+        std::vector<struct ast *> args;
+        collect_call_args(call->args, args);
+        if (args.size() < 1 || args.size() > 3)
+            return;
+        for (struct ast *arg : args) {
+            if (arg && arg->nodetype == 'x')
+                return;
+        }
+
+        long long start = 0;
+        long long length = 0;
+        long long step = 1;
+        if (args.size() == 1) {
+            if (!const_int_arg(args[0], length))
+                return;
+        } else {
+            if (!const_int_arg(args[0], start) ||
+                !const_int_arg(args[1], length))
+                return;
+            if (args.size() == 3 && !const_int_arg(args[2], step))
+                return;
+        }
+        if (length < 0 || step == 0)
+            return;
+        if (length > 0) {
+            __int128 last =
+                (__int128)start + (__int128)(length - 1) * step;
+            if (!ll_in_range(last))
+                return;
+        }
+
+        f->range_fast = 1;
+        f->range_start = start;
+        f->range_length = length;
+        f->range_step = step;
+    }
+
     bool resolve_namespace_type(const std::string &path,
                                 const TypeNode *&type,
                                 bool *fixed = NULL) {
@@ -4116,6 +4297,7 @@ struct Checker : public BuiltinContext {
             }
             case 'F': {
                 struct forinloop *f = (struct forinloop *)stmt;
+                try_mark_range_fast(f, env);
                 bool fixed = expr_fixed(f->iterable, env);
                 const TypeNode *iterable = infer(f->iterable, env);
                 const TypeNode *element = NULL;

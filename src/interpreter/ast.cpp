@@ -689,6 +689,10 @@ struct ast *newforin(char *name, char *value_name, struct ast *iterable,
     a->value_name = value_name;
     a->iterable = iterable;
     a->body = body;
+    a->range_fast = 0;
+    a->range_start = 0;
+    a->range_length = 0;
+    a->range_step = 1;
     return (struct ast *)a;
 }
 

@@ -60,6 +60,76 @@ ts_test("for in without let range builtin", func() {
   ts_eq(out, [0, 1, 2]);
 });
 
+ts_test("for in constant range with start and step", func() {
+  let out = [];
+  for i in range(5, 3, -2) {
+    out = std.list.append(out, i);
+  }
+  ts_eq(out, [5, 3, 1]);
+});
+
+ts_test("for in constant range via std.utils", func() {
+  let out = [];
+  for i in std.utils.range(2, 3) {
+    out = std.list.append(out, i);
+  }
+  ts_eq(out, [2, 3, 4]);
+});
+
+ts_test("for in nonconstant range still works", func() {
+  let n = 3;
+  let out = [];
+  for i in range(n) {
+    out = std.list.append(out, i);
+  }
+  ts_eq(out, [0, 1, 2]);
+});
+
+ts_test("for in large constant range is lazy", func() {
+  let n = 0;
+  for i in range(1000000000) {
+    n = n + 1;
+    if (i == 2) {
+      break;
+    }
+  }
+  ts_eq(n, 3);
+});
+
+ts_test("for in constant range at int64 boundary", func() {
+  let out = [];
+  for i in range(9223372036854775805, 3) {
+    out = std.list.append(out, i);
+  }
+  ts_eq(out, [9223372036854775805, 9223372036854775806,
+              9223372036854775807]);
+});
+
+ts_test("for in constant range label continue", func() {
+  let out = [];
+  outer: for i in range(2) {
+    for j in range(2) {
+      if (j == 1) {
+        continue outer;
+      }
+      out = std.list.append(out, i * 10 + j);
+    }
+  }
+  ts_eq(out, [0, 10]);
+});
+
+ts_test("for in constant range closure capture", func() {
+  let fs = [];
+  for i in range(3) {
+    fs = std.list.append(fs, func() -> i);
+  }
+  let out = [];
+  for f in fs {
+    out = std.list.append(out, f());
+  }
+  ts_eq(out, [2, 2, 2]);
+});
+
 ts_test("for in without let empty body", func() {
   let n = 0;
   for x in [] {

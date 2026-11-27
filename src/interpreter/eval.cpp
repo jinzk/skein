@@ -1318,6 +1318,72 @@ struct value_t *eval(struct ast *a) {
             struct forinloop *f = (struct forinloop *)a;
             const char *loop_label = take_pending_label();
             int errors_before = eval_ctx().runtime_error_count;
+            if (f->range_fast) {
+                eval_pushscope();
+                struct symbol *sym = newsym(f->name);
+                sym->val = NULL;
+                savesym(sym);
+
+                bool leave = false;
+                for (long long k = 0;
+                     k < f->range_length && !leave; ++k) {
+                    if (g_interrupted)
+                        break;
+                    __int128 value = (__int128)f->range_start +
+                                     (__int128)k * f->range_step;
+                    struct value_t *item = new_int_checked(value);
+                    if (!item) {
+                        leave = true;
+                        break;
+                    }
+                    freeval(sym->val);
+                    sym->val = item;
+
+                    errors_before = eval_ctx().runtime_error_count;
+                    struct value_t *body = eval(f->body);
+                    if (eval_ctx().runtime_error_count != errors_before) {
+                        freeval(body);
+                        leave = true;
+                        break;
+                    }
+                    if (eval_ctx().control != EVAL_CONTROL_NONE) {
+                        freeval(body);
+                        leave = true;
+                        break;
+                    }
+                    if (body) {
+                        if (body->type == T_return ||
+                            body->type == T_goto) {
+                            ret = body;
+                            leave = true;
+                            break;
+                        }
+                        if (body->type == T_break) {
+                            if (control_matches_label(body, loop_label)) {
+                                freeval(body);
+                                leave = true;
+                                break;
+                            }
+                            ret = body;
+                            leave = true;
+                            break;
+                        }
+                        if (body->type == T_continue) {
+                            if (control_matches_label(body, loop_label)) {
+                                freeval(body);
+                                continue;
+                            }
+                            ret = body;
+                            leave = true;
+                            break;
+                        }
+                        freeval(body);
+                    }
+                }
+                eval_popscope();
+                break;
+            }
+
             struct value_t *iter = eval(f->iterable);
             if (!iter || eval_ctx().runtime_error_count != errors_before) {
                 freeval(iter);

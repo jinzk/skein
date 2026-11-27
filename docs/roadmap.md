@@ -653,6 +653,8 @@ M11 继续保持“宏不生成泛型语法”的边界。当前可用组合是�
   与同值 int 等价
 - 10 种复合赋值运算符；静态检查按运算符推导结果类型，JIT 覆盖
   param / index 目标
+- 默认类型检查启用时，`for ... in range(...)` 的参数是编译期整数常量表达式
+  时走计数循环，不物化 list；`range()` 在其他上下文仍返回 list
 - task / generator、线程、Channel
 - `wait e` task 前缀等待语法：等价于 `e.wait()`，支持 `wait launch f()`；
   `.` 后的关键字与内置名按普通成员名解析

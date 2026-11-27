@@ -2908,9 +2908,84 @@ struct Compiler {
         emit(Op::LoadNull, 0, 0, 0, here);
     }
 
+    void compile_range_forin(ast *node) {
+        struct forinloop *src = (struct forinloop *)node;
+        SourceLoc here = loc_of(node);
+
+        auto place = [&here](struct ast *n) {
+            n->line = here.line;
+            n->column = here.column;
+            return n;
+        };
+        auto copy_name = [](const char *text) {
+            const char *source = text ? text : "";
+            std::size_t size = std::strlen(source) + 1;
+            char *copy = (char *)std::malloc(size);
+            if (!copy) {
+                yyerror("out of space");
+                std::exit(0);
+            }
+            std::memcpy(copy, source, size);
+            return copy;
+        };
+
+        long long start = src->range_start;
+        long long length = src->range_length;
+        long long step = src->range_step;
+        static int range_counter = 0;
+        std::string counter_name =
+            "#range" + std::to_string(++range_counter);
+        auto counter_ref = [&]() {
+            return place(newref(copy_name(counter_name.c_str())));
+        };
+        auto value_ref = [&]() {
+            return place(newref(copy_name(src->name)));
+        };
+
+        struct ast *init = place(newast(
+            'L',
+            place(newvar(copy_name(src->name), place(newint(start)))),
+            place(newvar(copy_name(counter_name.c_str()),
+                         place(newint(0))))));
+
+        struct ast *cond = place(newcmp(2, counter_ref(),
+                                        place(newint(length))));
+
+        /* Guard the final increment so a range ending at LLONG_MAX never
+         * computes an out-of-range value. */
+        struct ast *at_end = place(newcmp(
+            4, counter_ref(), place(newint(length - 1))));
+        struct ast *same = value_ref();
+        struct ast *advance = place(
+            newast('+', value_ref(), place(newint(step))));
+        struct ast *picked = place(newflow('T', at_end, same, advance));
+        struct ast *step_expr = place(newast(
+            'L', place(newasgn(value_ref(), picked)),
+            place(newasgn(counter_ref(), place(newast(
+                              '+', counter_ref(), place(newint(1))))))));
+
+        struct forloop loop;
+        loop.nodetype = 'P';
+        loop.line = here.line;
+        loop.column = here.column;
+        loop.init = init;
+        loop.cond = cond;
+        loop.step = step_expr;
+        loop.body = src->body;
+        compile_for((struct ast *)&loop);
+
+        treefree(init);
+        treefree(cond);
+        treefree(step_expr);
+    }
+
     void compile_forin(ast *node) {
         struct forinloop *f = (struct forinloop *)node;
         SourceLoc here = loc_of(node);
+        if (f->range_fast) {
+            compile_range_forin(node);
+            return;
+        }
 
         compile(f->iterable);
         if (!ok) return;

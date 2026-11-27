@@ -2777,23 +2777,36 @@ let one = conn.call("add", [2, 3]);              // ok(5)
 let slow = conn.call_timeout("add", [2, 3], 1000);
 let bin = conn.call_bytes("echo", [], body);      // ok({value, body})
 let job = conn.submit("add", [4, 5]);
+let raw = conn.submit_bytes("echo", [], body);
 
 job is RpcJob;       // true
 job.wait(5000);      // ok(9)
 job.done();          // true
 job.id();
 
-conn.stats();        // {calls, errors, protocol, closed, owns}
+conn.stats();        // {calls, errors, protocol, closed, owns, pending}
 conn.pid();
 conn.close();
+```
+
+流水线（pipelining）：
+
+```text
+let a = conn.submit("add", [1, 2]);   // 立即发送
+let b = conn.submit("add", [3, 4]);   // 立即发送
+
+b.wait(5000);        // ok(7)，同时缓存 a 的响应
+a.done();            // true
+a.wait(5000);        // ok(3)，直接取缓存
 ```
 
 - `rpc.spawn(command[, options])` 用 `std.process.spawn_pipe` 启动子进程并持有其生命周期；
 - `rpc.connect(io[, options])` 复用已有 `process_io`，只借用，不接管进程；
 - 两者支持 `protocol`、`ready`、`timeout_ms`、`encode`、`decode` 选项；
 - `call` / `call_timeout` / `call_bytes` 返回 `ok(result)` 或 `err(error(kind, message))`；
-- `submit` 返回惰性 `rpc.Job`，`wait()` 时才发送请求，单连接按 `wait` 顺序串行执行；
-- `Connection.stats()` 返回 `{calls, errors, protocol, closed, owns}`。
+- `submit` / `submit_bytes` 立即发送请求并返回 `rpc.Job`；
+- `Job.wait()` 读取自己的响应，期间会把其他 job 的响应缓存到 `pending`，支持乱序等待；
+- `Connection.stats()` 返回 `{calls, errors, protocol, closed, owns, pending}`，`pending` 是已缓存但尚未取走的响应数。
 
 `Iterable[T]` 是结构化迭代器 proto：
 

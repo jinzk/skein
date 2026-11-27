@@ -1092,6 +1092,24 @@ def check_extended_stdlib():
             "conn.close();\n",
             stdout_all=["call=5", "err=true", "kind=worker", "errors=1"],
         )
+        check(
+            "std.rpc pipelined submit",
+            "import std;\n"
+            "import std.rpc;\n"
+            f'let conn = rpc.spawn("{binary_path}", '
+            f'{{"args": ["{rpc_worker_path}"]}});\n'
+            'let a = conn.submit("add", [1, 2]);\n'
+            'let b = conn.submit("add", [3, 4]);\n'
+            'print("ids=" + str(a.id() < b.id()));\n'
+            'print("b=" + str(b.wait(5000)));\n'
+            'print("a_done=" + str(a.done()));\n'
+            'print("a=" + str(a.wait(5000)));\n'
+            'print("pending=" + str(conn.stats()["pending"]));\n'
+            'print("calls=" + str(conn.stats()["calls"]));\n'
+            "conn.close();\n",
+            stdout_all=["ids=true", "b=ok(7)", "a_done=true", "a=ok(3)",
+                        "pending=0", "calls=2"],
+        )
         restart_script = os.path.join(worker_tmp, "restart.skein")
         with open(restart_script, "w", encoding="utf-8") as handle:
             handle.write(

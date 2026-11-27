@@ -8,6 +8,7 @@ package rpc {
     _call: Callable;
     _call_bytes: Callable;
     _submit: Callable;
+    _submit_bytes: Callable;
     _close: Callable;
     _pid: Callable;
     _stats: Callable;
@@ -34,6 +35,10 @@ package rpc {
 
     func submit(self, method: string, args: list) {
       return self._submit(method, args);
+    }
+
+    func submit_bytes(self, method: string, args: list, body: bytes) {
+      return self._submit_bytes(method, args, body);
     }
 
     func close(self) {
@@ -164,22 +169,96 @@ package rpc {
       "calls": 0,
       "errors": 0,
       "closed": false,
-      "owns": owns
+      "owns": owns,
+      "pending": {}
+    };
+
+    // Send one request and return its id.  submit uses this eagerly so many
+    // requests can be in flight before their responses are consumed.
+    let send = func(method, params, body) {
+      let id = state["next_id"];
+      state["next_id"] = id + 1;
+      _send_frame(io, options, protocol, id, method, params, body);
+      return id;
+    };
+
+    // Wait for one response id, buffering responses that belong to other
+    // pending calls.
+    let receive = func(id, binary, timeout_ms) {
+      if (state["closed"]) {
+        return std.result.err(std.error.new("rpc", "connection is closed"));
+      }
+      let fetched = std.result.capture(func() {
+        if (std.dict.has(state["pending"], id)) {
+          let entry = state["pending"][id];
+          state["pending"] = std.dict.delete(state["pending"], id);
+          return entry;
+        }
+        while (true) {
+          let frame = _read_frame(io, options, protocol, timeout_ms);
+          let response = frame["response"];
+          let response_id = std.dict.get(response, "id", 0);
+          if (response_id == id) {
+            return frame;
+          }
+          state["pending"][response_id] = frame;
+        }
+      });
+      if (std.result.is_err(fetched)) {
+        state["errors"] = state["errors"] + 1;
+        let error = std.result.error(fetched);
+        return std.result.err(std.error.new("rpc", std.error.message(error)));
+      }
+      let result = _result_from_frame(std.result.unwrap(fetched), binary);
+      state["calls"] = state["calls"] + 1;
+      if (std.result.is_err(result)) {
+        state["errors"] = state["errors"] + 1;
+      }
+      return result;
     };
 
     let perform = func(method, params, body, binary, timeout_ms) {
       if (state["closed"]) {
         return std.result.err(std.error.new("rpc", "connection is closed"));
       }
-      let id = state["next_id"];
-      state["next_id"] = id + 1;
-      let result = _call_impl(
-        io, options, protocol, id, method, params, body, binary, timeout_ms);
-      state["calls"] = state["calls"] + 1;
-      if (std.result.is_err(result)) {
+      let sent = std.result.capture(func() {
+        return send(method, params, body);
+      });
+      if (std.result.is_err(sent)) {
         state["errors"] = state["errors"] + 1;
+        let error = std.result.error(sent);
+        return std.result.err(std.error.new("rpc", std.error.message(error)));
       }
-      return result;
+      return receive(std.result.unwrap(sent), binary, timeout_ms);
+    };
+
+    let submit_one = func(method, params, body, binary) {
+      let job_state = {"id": 0, "done": false, "result": null};
+      let sent = std.result.capture(func() {
+        job_state["id"] = send(method, params, body);
+      });
+      if (std.result.is_err(sent)) {
+        state["errors"] = state["errors"] + 1;
+        let error = std.result.error(sent);
+        job_state["result"] =
+          std.result.err(std.error.new("rpc", std.error.message(error)));
+        job_state["done"] = true;
+      }
+      return Job {
+        _wait: func(timeout_ms) {
+          if (job_state["done"] == false) {
+            job_state["result"] = receive(
+              job_state["id"], binary, timeout_ms);
+            job_state["done"] = true;
+          }
+          return job_state["result"];
+        },
+        _id: func() { return job_state["id"]; },
+        _done: func() {
+          return job_state["done"] ||
+                 std.dict.has(state["pending"], job_state["id"]);
+        }
+      };
     };
 
     return Connection {
@@ -191,20 +270,10 @@ package rpc {
         return perform(method, args, body, true, timeout_ms);
       },
       _submit: func(method, args) {
-        let job_state = {"id": 0, "done": false, "result": null};
-        return Job {
-          _wait: func(timeout_ms) {
-            if (job_state["done"] == false) {
-              job_state["id"] = state["next_id"];
-              job_state["result"] = perform(
-                method, args, std.bytes.from_string(""), false, timeout_ms);
-              job_state["done"] = true;
-            }
-            return job_state["result"];
-          },
-          _id: func() { return job_state["id"]; },
-          _done: func() { return job_state["done"]; }
-        };
+        return submit_one(method, args, std.bytes.from_string(""), false);
+      },
+      _submit_bytes: func(method, args, body) {
+        return submit_one(method, args, body, true);
       },
       _close: func() {
         if (state["closed"] == false) {
@@ -221,54 +290,45 @@ package rpc {
           "errors": state["errors"],
           "protocol": state["protocol"],
           "closed": state["closed"],
-          "owns": state["owns"]
+          "owns": state["owns"],
+          "pending": len(state["pending"])
         };
       },
       options: options
     };
   }
 
-  func _call_impl(io, options, protocol, id, method, params, body, binary,
-                  timeout_ms) {
+  func _send_frame(io, options, protocol, id, method, params, body) {
     let hybrid = protocol == "hybrid";
-
     let request = {"id": id, "method": method, "params": params};
     if (hybrid) {
       request["body_len"] = len(body);
     }
-
-    let exchange = std.result.capture(func() {
-      io.write(_encode_line(options, request) + "\n");
-      if (hybrid && len(body) > 0) {
-        io.write(body);
-      }
-      io.flush();
-
-      let line = io.read_line(timeout_ms);
-      if (line == null) {
-        fail("rpc connection closed");
-      }
-      let response = _decode_line(options, line);
-      if (std.dict.get(response, "id", 0) != id) {
-        fail("rpc response id mismatch");
-      }
-      let response_body = std.bytes.from_string("");
-      if (hybrid) {
-        let body_len = std.dict.get(response, "body_len", 0);
-        if (body_len > 0) {
-          response_body = io.read_exact(body_len, timeout_ms);
-        }
-      }
-      return {"response": response, "body": response_body};
-    });
-
-    if (std.result.is_err(exchange)) {
-      let error = std.result.error(exchange);
-      return std.result.err(std.error.new("rpc", std.error.message(error)));
+    io.write(_encode_line(options, request) + "\n");
+    if (hybrid && len(body) > 0) {
+      io.write(body);
     }
+    io.flush();
+  }
 
-    let payload = std.result.unwrap(exchange);
-    let response = payload["response"];
+  func _read_frame(io, options, protocol, timeout_ms) {
+    let line = io.read_line(timeout_ms);
+    if (line == null) {
+      fail("rpc connection closed");
+    }
+    let response = _decode_line(options, line);
+    let body = std.bytes.from_string("");
+    if (protocol == "hybrid") {
+      let body_len = std.dict.get(response, "body_len", 0);
+      if (body_len > 0) {
+        body = io.read_exact(body_len, timeout_ms);
+      }
+    }
+    return {"response": response, "body": body};
+  }
+
+  func _result_from_frame(frame, binary) {
+    let response = frame["response"];
     if (response["ok"] == false) {
       let error = std.dict.get(response, "error", {});
       let kind = std.dict.get(error, "kind", "rpc");
@@ -278,7 +338,7 @@ package rpc {
     if (binary) {
       return std.result.ok({
         "value": response["result"],
-        "body": payload["body"]
+        "body": frame["body"]
       });
     }
     return std.result.ok(response["result"]);

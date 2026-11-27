@@ -490,6 +490,25 @@ def run_cases():
                 "};\n"
             ), repr(edits[0]["newText"])
 
+            # Formatting validation is syntax-only: a selective macro import
+            # must not force loading the imported package.
+            did_change(
+                session,
+                uri,
+                10,
+                "import {twice! as t} from util;\n"
+                "func f(){return t!(1);}\n",
+            )
+            session.wait_for_diagnostics(uri)
+            edits = session.request(
+                "textDocument/formatting", {"textDocument": {"uri": uri}}
+            )
+            assert len(edits) == 1, edits
+            assert edits[0]["newText"] == (
+                "import {twice! as t} from util;\n"
+                "func f() { return t!(1); }\n"
+            ), repr(edits[0]["newText"])
+
             stderr = session.stop()
             assert "SKEIN_LSP_SIDE_EFFECT" not in stderr, stderr
             assert session.process.returncode == 0, session.process.returncode

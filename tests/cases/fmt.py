@@ -327,3 +327,48 @@ def run_cases():
         )
     finally:
         os.unlink(type_fragment_path)
+
+    type_fragment_positions = [
+        (
+            "macro wrap(T:type,v:expr){let x:#T? = #v;return x;}\n",
+            "macro wrap(T: type, v: expr) { let x: #T? = #v; return x; }\n",
+            "nullable type fragments",
+        ),
+        (
+            "macro wrap(T:type,v:expr){let r:ref #T = ref(#v);return r;}\n",
+            "macro wrap(T: type, v: expr) { let r: ref #T = ref(#v); return r; }\n",
+            "ref type fragments",
+        ),
+        (
+            "macro wrap(T:type,r:expr){let w:weak #T = #r;return w;}\n",
+            "macro wrap(T: type, r: expr) { let w: weak #T = #r; return w; }\n",
+            "weak type fragments",
+        ),
+        (
+            "macro wrap(T:type,v:expr){#v as #T;return #v is #T;}\n",
+            "macro wrap(T: type, v: expr) { #v as #T; return #v is #T; }\n",
+            "as/is type fragments",
+        ),
+        (
+            "macro wrap(T:type,v:expr){let f=func(x:#T):#T{return x;};"
+            "return f(#v);}\n",
+            "macro wrap(T: type, v: expr) { let f = func(x: #T): #T { return x; };"
+            " return f(#v); }\n",
+            "function type fragments",
+        ),
+    ]
+    for source, expected, label in type_fragment_positions:
+        path = write_temp(source)
+        try:
+            formatted = run_fmt(path)
+            assert formatted.returncode == 0, decode(formatted.stderr)
+            assert decode(formatted.stdout) == expected, decode(formatted.stdout)
+            second = run_fmt("-", stdin=formatted.stdout)
+            assert second.returncode == 0, decode(second.stderr)
+            assert second.stdout == formatted.stdout, (
+                f"fmt must be idempotent for {label}\n"
+                f"first:\n{decode(formatted.stdout)}\n"
+                f"second:\n{decode(second.stdout)}"
+            )
+        finally:
+            os.unlink(path)

@@ -1223,6 +1223,9 @@ private:
 
         analysis_options options = analysis_options_for(uri);
         options.typecheck_mode = skein::typecheck::Mode::Off;
+        /* Formatting is syntax-only: do not pull in imported packages while
+         * validating the formatted text, matching `skein fmt`. */
+        options.resolve_macros = false;
         analysis_result validation = analyze_source_text(formatted, options);
         if (validation.error_count != 0) {
             std::fprintf(stderr,

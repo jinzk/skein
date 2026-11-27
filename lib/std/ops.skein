@@ -1,0 +1,36 @@
+package ops {
+  // Binary arithmetic protocols.  R is the right-hand-side type and O is
+  // the result type.  A type conforms structurally by defining a matching
+  // op_* method.  Operator expressions do not use these protocols yet.
+  proto Add[R any, O any] {
+    func op_add(self, rhs: R): O;
+  }
+
+  proto Sub[R any, O any] {
+    func op_sub(self, rhs: R): O;
+  }
+
+  proto Mul[R any, O any] {
+    func op_mul(self, rhs: R): O;
+  }
+
+  proto Div[R any, O any] {
+    func op_div(self, rhs: R): O;
+  }
+
+  proto Mod[R any, O any] {
+    func op_mod(self, rhs: R): O;
+  }
+
+  // Custom value equality for explicit generic constraints.  This is not
+  // std.dict_key.KeyEquatable and does not affect dict/set key semantics.
+  proto Equatable[R any] {
+    func op_eq(self, rhs: R): bool;
+  }
+
+  // Three-way comparison: negative when self < rhs, zero when equal, and
+  // positive when self > rhs.  A single method keeps ordering consistent.
+  proto Comparable[R any] {
+    func op_cmp(self, rhs: R): int;
+  }
+}

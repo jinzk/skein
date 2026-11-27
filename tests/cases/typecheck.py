@@ -320,6 +320,26 @@ def run_cases():
           "func add[T Add[T, T] = BadRhs](x: T): T { return x.op_add(x); }\n",
           stderr="type error: default type BadRhs does not satisfy the constraint for T")
 
+    check("std.ops equatable constraint mismatch",
+          "import {Equatable} from std.ops;\n"
+          "struct NoEq { }\n"
+          "func equal[T Equatable[T]](a: T, b: T): bool { return a.op_eq(b); }\n"
+          "equal(NoEq {}, NoEq {});\n",
+          stderr="type error: type argument NoEq does not satisfy generic constraint for equal")
+
+    check("std.ops comparable constraint mismatch",
+          "import {Comparable} from std.ops;\n"
+          "struct NoCmp { }\n"
+          "func compare[T Comparable[T]](a: T, b: T): int { return a.op_cmp(b); }\n"
+          "compare(NoCmp {}, NoCmp {});\n",
+          stderr="type error: type argument NoCmp does not satisfy generic constraint for compare")
+
+    check("std.ops does not overload plus",
+          "import {Add} from std.ops;\n"
+          "struct Op { func op_add(self, rhs: Op): Op { return self; } }\n"
+          "let x = Op {} + Op {};\n",
+          stderr="runtime error: cannot add Op and Op")
+
     check("generic default type must be trailing",
           "struct Bad[T = int, U any] { }\n",
           stderr="type error: default type parameters must be trailing")

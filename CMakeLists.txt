@@ -607,6 +607,7 @@ set(SKEIN_EMBEDDED_SOURCES
   path.skein:kStdPathSource:std_path_source.inc
   lru.skein:kStdLruSource:std_lru_source.inc
   dict_key.skein:kStdDictKeySource:std_dict_key_source.inc
+  ops.skein:kStdOpsSource:std_ops_source.inc
   traits.skein:kStdTraitsSource:std_traits_source.inc
 )
 set(SKEIN_EMBEDDED_OUTPUTS)

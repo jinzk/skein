@@ -1,0 +1,52 @@
+import std;
+import {Add, Sub, Mul, Div, Mod, Equatable, Comparable} from std.ops;
+include "_support.skein";
+
+struct OpNum {
+  value: int;
+
+  func op_add(self, rhs: OpNum): OpNum {
+    return OpNum { value: self.value + rhs.value };
+  }
+  func op_sub(self, rhs: OpNum): OpNum {
+    return OpNum { value: self.value - rhs.value };
+  }
+  func op_mul(self, rhs: OpNum): OpNum {
+    return OpNum { value: self.value * rhs.value };
+  }
+  func op_div(self, rhs: OpNum): OpNum {
+    return OpNum { value: self.value / rhs.value };
+  }
+  func op_mod(self, rhs: OpNum): OpNum {
+    return OpNum { value: self.value % rhs.value };
+  }
+  func op_eq(self, rhs: OpNum): bool {
+    return self.value == rhs.value;
+  }
+  func op_cmp(self, rhs: OpNum): int {
+    return self.value - rhs.value;
+  }
+}
+
+func do_add[T Add[T, T]](a: T, b: T): T { return a.op_add(b); }
+func do_sub[T Sub[T, T]](a: T, b: T): T { return a.op_sub(b); }
+func do_mul[T Mul[T, T]](a: T, b: T): T { return a.op_mul(b); }
+func do_div[T Div[T, T]](a: T, b: T): T { return a.op_div(b); }
+func do_mod[T Mod[T, T]](a: T, b: T): T { return a.op_mod(b); }
+func do_eq[T Equatable[T]](a: T, b: T): bool { return a.op_eq(b); }
+func do_cmp[T Comparable[T]](a: T, b: T): int { return a.op_cmp(b); }
+
+ts_test("std.ops structural protocols", func() {
+  let a = OpNum { value: 12 };
+  let b = OpNum { value: 5 };
+
+  ts_eq(do_add(a, b).value, 17);
+  ts_eq(do_sub(a, b).value, 7);
+  ts_eq(do_mul(a, b).value, 60);
+  ts_eq(do_div(a, b).value, 2);
+  ts_eq(do_mod(a, b).value, 2);
+  ts_eq(do_eq(a, OpNum { value: 12 }), true);
+  ts_eq(do_cmp(a, b) > 0, true);
+});
+
+ts_finish();

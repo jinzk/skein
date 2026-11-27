@@ -88,7 +88,7 @@ impl Box {
 [T any]
 [T Hashable]
 [T Drawable]
-[T Drawable & std.dict_key.DictHashable]
+[T Drawable & DictHashable]
 [T int | string | Box[int]]
 ```
 
@@ -106,7 +106,9 @@ impl Box {
 - 这里的 `type` / `proto` 都是 contextual 标记，只在类型参数约束位置识别；
   作为协议声明关键字的 `proto` 则是全局保留字；
 - 不同参数可以使用不同标记；
-- 不写标记的旧形式继续兼容。
+- 不写标记的旧形式继续兼容；
+- qualified proto 名称需要先 import 到本地名字，例如
+  `import {DictHashable} from std.dict_key;`，约束里写 `[T DictHashable]`。
 
 不使用：
 
@@ -149,7 +151,7 @@ TypeUnion     := ConcreteType ('|' ConcreteType)*
 
 ```skein
 [T Drawable]
-[T Drawable & std.dict_key.DictHashable]
+[T Drawable & DictHashable]
 ```
 
 - `&` 两侧必须是 proto；

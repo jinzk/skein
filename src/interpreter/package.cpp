@@ -40,6 +40,7 @@
 #include "std_path_source.inc"
 #include "std_lru_source.inc"
 #include "std_dict_key_source.inc"
+#include "std_ops_source.inc"
 #include "std_traits_source.inc"
 
 #include <chrono>
@@ -120,6 +121,7 @@ const embedded_package_source kEmbeddedPackages[] = {
     {"std.path", kStdPathSource},
     {"std.lru", kStdLruSource},
     {"std.dict_key", kStdDictKeySource},
+    {"std.ops", kStdOpsSource},
     {"std.traits", kStdTraitsSource},
 };
 

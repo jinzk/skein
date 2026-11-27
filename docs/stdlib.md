@@ -2318,6 +2318,7 @@ std.arena（内嵌 Skein 源码包）
 std.path（内嵌 Skein 源码包）
 std.lru（内嵌 Skein 源码包）
 std.dict_key（内嵌 Skein 源码包）
+std.ops（内嵌 Skein 源码包）
 std.traits（内嵌 Skein 源码包）
 ```
 
@@ -2518,6 +2519,26 @@ struct User {
 - `key_eq` 只影响 dict/set（以及 unique、group_by、LRU 等内部使用 dict/set 的操作），**不改变普通 `==`**。
 - `key_eq` 必须是纯函数、确定性、无副作用，并且与 `dict_hash` 一致：`a.key_eq(b)` 为 true 时，`dict_hash(a)` 和 `dict_hash(b)` 必须相同。
 - key_eq 期间禁止重入 dict/set key equality。
+
+`std.ops` 是内嵌 Skein 源码包（`lib/std/ops.skein`），提供操作符相关 proto：
+`Add[R, O]` / `Sub[R, O]` / `Mul[R, O]` / `Div[R, O]` / `Mod[R, O]`、
+`Equatable[R]` 和 `Comparable[R]`。它们是普通结构式 proto，可用在泛型约束中；当前
+只支持显式方法调用，运算符表达式尚未接线。
+
+```text
+import {Add} from std.ops;
+
+func add[T Add[T, T]](a: T, b: T): T {
+  return a.op_add(b);
+}
+```
+
+泛型约束里的 qualified proto 名称需要显式 import；`std.ops.Add[T, T]` 这种写法当前
+不支持。
+
+`std.ops.Equatable.op_eq` 与 `std.dict_key.KeyEquatable.key_eq` 是两个不同协议；
+后者只服务 dict/set key。`Comparable` 使用单一 `op_cmp` 返回负数 / 0 / 正数，
+标准库算法当前不使用它。
 
 `std.traits` 是内嵌 Skein 源码包（`lib/std/traits.skein`），提供内置 trait proto。`Hashable`、`Iterable`、`Callable` 都是默认导入的 prelude proto，无需显式 import。
 

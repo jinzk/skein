@@ -2368,7 +2368,10 @@ let d = Point { ...p, x: 9 };
   两个 `struct` 的普通值互递归字段不支持，需使用 `ref T?` / `weak T?`（见 5.12.3）；
 - 普通值不允许创建环：`a.next = b; b.next = a;` 会报 `recursive value would create a cycle`；共享子结构（DAG）允许；使用 `ref` 字段的强引用环由 GC 回收，见 5.12.3；
 - 字段可以保存 `Callable` / `function` 值，作为普通回调使用，不会自动绑定 `self`；
-- 不支持继承、静态方法、动态添加方法或运算符重载；唯一例外是构造函数，见 5.12.4；泛型 `struct` / `enum` / `proto` / 函数见“用户自定义泛型”；
+- 不支持继承、静态方法、动态添加方法或运算符重载；`std.ops` 已定义 `Add` /
+  `Sub` / `Mul` / `Div` / `Mod` / `Equatable` / `Comparable` proto，但当前只用于
+  显式方法调用，不改变运算符表达式；唯一例外是构造函数，见 5.12.4；泛型
+  `struct` / `enum` / `proto` / 函数见“用户自定义泛型”；
 - 内建容器的类型参数见变量类型标注章节。
 
 #### 5.12.4 构造函数
@@ -3032,6 +3035,7 @@ std.arena（内嵌 Skein 源码包）
 std.path（内嵌 Skein 源码包）
 std.lru（内嵌 Skein 源码包）
 std.dict_key（内嵌 Skein 源码包）
+std.ops（内嵌 Skein 源码包）
 std.traits（内嵌 Skein 源码包）
 ```
 

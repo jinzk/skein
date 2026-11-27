@@ -418,6 +418,9 @@ x is Keyed        // 允许
 x is Keyed[int]   // 错误
 ```
 
+`std.ops` 提供 `Add` / `Sub` / `Mul` / `Div` / `Mod` / `Equatable` / `Comparable`
+等结构式 proto，可用于泛型约束；当前只支持显式方法调用，运算符重载尚未接线。
+
 元数据和序列化：
 
 ```text

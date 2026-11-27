@@ -1,7 +1,7 @@
 # 用户自定义宏设计（设计方案）
 
 - 状态：P1 / P2 / P3.1 / P4 同文件 v1、跨包宏、G1 AST 泛型实参、G2 受限
-  `type` 片段、G3 边界强化已完成；G4–G5 待实施
+  `type` 片段、G3 边界强化、G4 工具链与双后端同步已完成；G5 待实施
 - 关联：[`docs/macros.md`](macros.md)、[`docs/roadmap.md`](roadmap.md)
 - 建议里程碑：M11，不回写已完成的 M10
 - 拟改动：`src/interpreter/tokens.l`、`src/interpreter/parser.y`、新增
@@ -343,9 +343,13 @@ wrap!(2) {
 ## 8. 工具链
 
 - **formatter**：无损往返 `macro` 声明、`#param` 占位符、`expr...`、`T: type`、
-  类型位置的 `#T`、宏调用和 selective import；
-- **lint**：报告未使用参数、未知宏、模板中的非法占位符；
-- **LSP**：宏名补全、签名 hover、调用点/定义点跳转；v1 不做跨文件 rename；
+  类型位置的 `#T`、宏调用和 selective import；CLI 与 LSP 的格式化校验都只做
+  语法检查，不解析宏调用；
+- **lint**：报告未使用片段、未知宏、模板中的非法占位符与非法片段位置；宏展开
+  错误同时给出调用点（主位置）与模板定义点（related location）；
+- **LSP**：宏名与 selective import 宏别名补全、签名 hover、调用点/定义点跳转，
+  并在 `relatedInformation` 中显示模板定义点；document/workspace symbol 能识别
+  `macro` 声明；v1 不做跨文件 rename；
 - **snippets**：可选添加 `macro` 声明模板；
 - **docs sync**：`README.md`、`SYNTAX.md`、`docs/macros.md` 与本文件同步。
 
@@ -443,6 +447,11 @@ wrap!(2) {
     其他位置是普通标识符。
 13. **P5.5（已完成）**：`is` contextual；只在 `expr is T` / `case is T` 类型测试
     位置作为运算符，其他位置是普通标识符。
+
+宏与泛型结合阶段 G1–G4（已完成）紧随 P5.5：parser 先把显式泛型实参存入 AST，
+用户宏随后获得只用于类型位置的受限 `type` 片段，定义期拒绝生成声明和泛型语法；
+G4 补齐 formatter / lint / LSP 的片段覆盖、双位置诊断与 VM/JIT differential，
+语义边界保持不变。
 
 每个阶段都要保持第一批宏与全量测试全绿；用户宏不得改变第一批宏的行为；每阶段
 运行 `tools/check_docs_sync.py` 与 `git diff --check`。

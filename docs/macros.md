@@ -1,7 +1,7 @@
 # Skein 宏（第一批：内置语法宏）
 
 - 状态：第一批内置宏已完成；用户自定义宏 v1、G1 AST 泛型实参、G2 受限
-  `type` 片段、G3 边界强化已落地（见
+  `type` 片段、G3 边界强化、G4 工具链与双后端同步已落地（见
   [`docs/macros_user_defined.md`](macros_user_defined.md)）
 - 相关模块：`std.assert`、`std.log`、`std.result`
 - 实现位置：`src/interpreter/macros.cpp`、`src/interpreter/user_macros.cpp`、
@@ -260,6 +260,11 @@ typechecker 已直接使用 AST 中的泛型实参（roadmap G1），不再从�
 拒绝模板生成声明（`struct` / `enum` / `proto` / `impl` / 具名 `func`）和显式泛型
 应用（含字面 `f[int](...)` / `Box[int] { ... }` 与 `f[#T](...)`）；类型片段不能
 进入反射 builtin。调用点已有的泛型值仍可作为 `expr` 片段传入。
+
+G4 只补齐工具链与双后端覆盖，不改变语义：formatter 无损往返类型片段及其
+nullable / `ref` / `weak` / `as` / `is` / 函数签名形态；lint 报告未使用片段与
+非法片段位置，宏展开错误同时显示调用点和模板定义点；LSP 提供宏补全、签名
+hover、跳转与 `relatedInformation`；新增 VM/JIT differential 覆盖。
 
 ## 6. 测试
 

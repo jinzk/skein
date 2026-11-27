@@ -568,6 +568,10 @@ def run_cases():
             assert macro_definitions[0]["range"]["start"]["line"] == 0, (
                 macro_definitions
             )
+            symbols = session.request(
+                "textDocument/documentSymbol", {"textDocument": {"uri": uri}}
+            )
+            assert any(item["name"] == "wrap" for item in symbols), symbols
 
             # Selective macro imports remain visible without loading the
             # imported package during tooling analysis.

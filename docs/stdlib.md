@@ -2690,6 +2690,9 @@ rpc.serve(func(method, params, body) {
 ```text
 rpc.serve(handler[, options])
 rpc.server(handler[, options]) -> rpc.Server
+rpc.spawn(command[, options]) -> rpc.Connection
+rpc.connect(io[, options]) -> rpc.Connection
+rpc.pool(clients[, options]) -> rpc.Pool
 
 options:
   protocol: "jsonl" | "hybrid"   // 默认 "jsonl"
@@ -2807,6 +2810,37 @@ a.wait(5000);        // ok(3)，直接取缓存
 - `submit` / `submit_bytes` 立即发送请求并返回 `rpc.Job`；
 - `Job.wait()` 读取自己的响应，期间会把其他 job 的响应缓存到 `pending`，支持乱序等待；
 - `Connection.stats()` 返回 `{calls, errors, protocol, closed, owns, pending}`，`pending` 是已缓存但尚未取走的响应数。
+
+连接池 `rpc.pool(clients)` 把多个 `RpcClient` 包装成 round-robin 客户端。传入的 clients 可以是 `rpc.Connection`、`std.worker.pool` 或任何满足 `RpcClient` 的对象：
+
+```text
+let a = rpc.spawn("skein", {"args": ["worker.skein"]});
+let b = rpc.spawn("skein", {"args": ["worker.skein"]});
+let pool = rpc.pool([a, b]);
+
+pool is RpcClient;   // true
+
+let one = pool.call("add", [1, 2]);                // ok(3)
+let two = pool.call_timeout("add", [10, 20], 5000);
+let raw = pool.call_bytes("echo", [], body);
+let job = pool.submit("add", [4, 5]);
+
+job is RpcJob;       // true
+job.wait(5000);      // ok(9)
+job.id();
+job.done();
+
+let results = pool.map("double", [1, 2, 3, 4]);   // list[result]，按 round-robin 派发
+
+pool.stats();        // {clients, calls, errors, closed}
+pool.close();
+```
+
+- `call` / `submit` 按 round-robin 顺序选择客户端；
+- `call_timeout` / `call_bytes_timeout` 优先调用客户端的 timeout 方法，不存在时回退到基础接口（因此 `worker_pool` 和 `rpc.Connection` 都可用）；
+- `map(method, items[, timeout_ms])` 按 round-robin 逐项派发，每项返回 `ok(result)` 或 `err(error)`；同一 `rpc.Connection` 只有一条响应流，因此池不做并发调用。
+- `pool.stats()` 返回聚合计数；`close()` 尝试关闭所有支持 `close()` 的客户端；
+- 关闭后的池调用返回 `ok`/`err` 结果，不会直接抛出。
 
 `Iterable[T]` 是结构化迭代器 proto：
 

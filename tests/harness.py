@@ -1110,6 +1110,85 @@ def check_extended_stdlib():
             stdout_all=["ids=true", "b=ok(7)", "a_done=true", "a=ok(3)",
                         "pending=0", "calls=2"],
         )
+        check(
+            "std.rpc pool round robin",
+            "import std;\n"
+            "import std.rpc;\n"
+            f'let a = rpc.spawn("{binary_path}", '
+            f'{{"args": ["{rpc_worker_path}"]}});\n'
+            f'let b = rpc.spawn("{binary_path}", '
+            f'{{"args": ["{rpc_worker_path}"]}});\n'
+            "let p = rpc.pool([a, b]);\n"
+            'print("rpc=" + str(p is RpcClient));\n'
+            'print("clients=" + str(p.stats()["clients"]));\n'
+            'print("a=" + str(std.result.unwrap('
+            'p.call("add", [1, 2]))));\n'
+            'print("b=" + str(std.result.unwrap('
+            'p.call_timeout("add", [10, 20], 5000))));\n'
+            'print("c=" + str(std.result.unwrap('
+            'p.call("add", [100, 200]))));\n'
+            'let j = p.submit("add", [4, 5]);\n'
+            'print("jobrpc=" + str(j is RpcJob));\n'
+            'print("j=" + str(std.result.unwrap(j.wait(5000))));\n'
+            'print("calls=" + str(p.stats()["calls"]));\n'
+            "p.close();\n"
+            'let after = p.call("add", [1, 1]);\n'
+            'print("closed=" + str(p.stats()["closed"]));\n'
+            'print("after=" + str(std.result.is_err(after)));\n',
+            stdout_all=["rpc=true", "clients=2", "a=3", "b=30", "c=300",
+                        "jobrpc=true", "j=9", "calls=4", "closed=true",
+                        "after=true"],
+        )
+        rpc_double_script = os.path.join(worker_tmp, "rpc_double_worker.skein")
+        with open(rpc_double_script, "w", encoding="utf-8") as handle:
+            handle.write(
+                "import std;\n"
+                "import std.rpc;\n"
+                "rpc.serve(func(method, params) {\n"
+                "  if (method == \"double\") {\n"
+                "    return params[0] * 2;\n"
+                "  }\n"
+                "  fail(\"unknown method \" + method);\n"
+                "});\n"
+            )
+        rpc_double_path = rpc_double_script.replace("\\", "\\\\")
+        check(
+            "std.rpc pool map",
+            "import std;\n"
+            "import std.rpc;\n"
+            f'let a = rpc.spawn("{binary_path}", '
+            f'{{"args": ["{rpc_double_path}"]}});\n'
+            f'let b = rpc.spawn("{binary_path}", '
+            f'{{"args": ["{rpc_double_path}"]}});\n'
+            "let p = rpc.pool([a, b]);\n"
+            'let results = p.map("double", [1, 2, 3, 4]);\n'
+            "let sum = 0;\n"
+            "for r in results {\n"
+            "  sum = sum + std.result.unwrap(r);\n"
+            "}\n"
+            'print("sum=" + str(sum));\n'
+            'print("calls=" + str(p.stats()["calls"]));\n'
+            "p.close();\n",
+            stdout_all=["sum=20", "calls=4"],
+        )
+        check(
+            "std.rpc pool with native worker pool",
+            "import std;\n"
+            "import std.rpc;\n"
+            f'let native = std.worker.pool(2, "{rpc_worker_path}");\n'
+            f'let conn = rpc.spawn("{binary_path}", '
+            f'{{"args": ["{rpc_worker_path}"]}});\n'
+            "let p = rpc.pool([native, conn]);\n"
+            'print("a=" + str(std.result.unwrap('
+            'p.call("add", [1, 2]))));\n'
+            'print("b=" + str(std.result.unwrap('
+            'p.call_timeout("add", [10, 20], 5000))));\n'
+            'let j = p.submit("add", [4, 5]);\n'
+            'print("j=" + str(std.result.unwrap(j.wait(5000))));\n'
+            'print("clients=" + str(p.stats()["clients"]));\n'
+            "p.close();\n",
+            stdout_all=["a=3", "b=30", "j=9", "clients=2"],
+        )
         restart_script = os.path.join(worker_tmp, "restart.skein")
         with open(restart_script, "w", encoding="utf-8") as handle:
             handle.write(

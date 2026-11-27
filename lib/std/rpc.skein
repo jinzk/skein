@@ -76,6 +76,87 @@ package rpc {
     }
   }
 
+  // A pool of RpcClient objects that distributes calls round-robin.
+  // Pool satisfies std.traits.RpcClient via call/submit, and PoolJob
+  // satisfies std.traits.RpcJob via wait.
+  export struct Pool {
+    _call: Callable;
+    _call_timeout: Callable;
+    _call_bytes: Callable;
+    _call_bytes_timeout: Callable;
+    _submit: Callable;
+    _submit_bytes: Callable;
+    _map: Callable;
+    _stats: Callable;
+    _close: Callable;
+    clients: list;
+  }
+
+  impl Pool {
+    func call(self, method: string, args: list) {
+      return self._call(method, args);
+    }
+
+    func call_timeout(self, method: string, args: list, timeout_ms: int) {
+      return self._call_timeout(method, args, timeout_ms);
+    }
+
+    func call_bytes(self, method: string, args: list, body: bytes) {
+      return self._call_bytes(method, args, body);
+    }
+
+    func call_bytes_timeout(self, method: string, args: list, body: bytes,
+                            timeout_ms: int) {
+      return self._call_bytes_timeout(method, args, body, timeout_ms);
+    }
+
+    func submit(self, method: string, args: list) {
+      return self._submit(method, args);
+    }
+
+    func submit_bytes(self, method: string, args: list, body: bytes) {
+      return self._submit_bytes(method, args, body);
+    }
+
+    func map(self, method: string, items: list) {
+      return self._map(method, items, 0);
+    }
+
+    func map_timeout(self, method: string, items: list, timeout_ms: int) {
+      return self._map(method, items, timeout_ms);
+    }
+
+    func stats(self) {
+      return self._stats();
+    }
+
+    func close(self) {
+      return self._close();
+    }
+  }
+
+  // Deferred call produced by Pool.submit.  Forwards to the underlying
+  // client's job and satisfies std.traits.RpcJob via wait.
+  export struct PoolJob {
+    _wait: Callable;
+    _id: Callable;
+    _done: Callable;
+  }
+
+  impl PoolJob {
+    func wait(self, timeout_ms: int = 0) {
+      return self._wait(timeout_ms);
+    }
+
+    func id(self) {
+      return self._id();
+    }
+
+    func done(self) {
+      return self._done();
+    }
+  }
+
   // Wrap an existing process_io transport and consume its ready frame.
   export func connect(io, options = {}) {
     let protocol = std.dict.get(options, "protocol", "jsonl");
@@ -189,12 +270,14 @@ package rpc {
         return std.result.err(std.error.new("rpc", "connection is closed"));
       }
       let fetched = std.result.capture(func() {
-        if (std.dict.has(state["pending"], id)) {
-          let entry = state["pending"][id];
-          state["pending"] = std.dict.delete(state["pending"], id);
-          return entry;
-        }
         while (true) {
+          // Check on every iteration: another fiber may have buffered this
+          // response while we were waiting to read.
+          if (std.dict.has(state["pending"], id)) {
+            let entry = state["pending"][id];
+            state["pending"] = std.dict.delete(state["pending"], id);
+            return entry;
+          }
           let frame = _read_frame(io, options, protocol, timeout_ms);
           let response = frame["response"];
           let response_id = std.dict.get(response, "id", 0);
@@ -342,6 +425,150 @@ package rpc {
       });
     }
     return std.result.ok(response["result"]);
+  }
+
+  func _has_method(value, name) {
+    return std.result.is_ok(std.result.capture(func() {
+      return value[name];
+    }));
+  }
+
+  // Invoke a client's call method, preferring timeout-aware variants when
+  // available and falling back to the base RpcClient interface.
+  func _client_call(client, method, args, body, binary, timeout_ms) {
+    if (binary) {
+      if (timeout_ms > 0 && _has_method(client, "call_bytes_timeout")) {
+        return client.call_bytes_timeout(method, args, body, timeout_ms);
+      }
+      return client.call_bytes(method, args, body);
+    }
+    if (timeout_ms > 0 && _has_method(client, "call_timeout")) {
+      return client.call_timeout(method, args, timeout_ms);
+    }
+    return client.call(method, args);
+  }
+
+  func _client_submit(client, method, args, body, binary) {
+    if (binary) {
+      return client.submit_bytes(method, args, body);
+    }
+    return client.submit(method, args);
+  }
+
+  // Wrap a job from any RpcClient as a PoolJob.
+  func _wrap_job(job) {
+    return PoolJob {
+      _wait: func(timeout_ms) { return job.wait(timeout_ms); },
+      _id: func() { return job.id(); },
+      _done: func() { return job.done(); }
+    };
+  }
+
+  // Create a round-robin pool over a list of RpcClient objects.
+  export func pool(clients, options = {}) {
+    if (len(clients) == 0) {
+      fail("rpc.pool requires at least one client");
+    }
+    let state = {
+      "next": 0,
+      "calls": 0,
+      "errors": 0,
+      "closed": false
+    };
+
+    let pick = func() {
+      if (state["closed"]) {
+        fail("rpc pool is closed");
+      }
+      let client = clients[state["next"] % len(clients)];
+      state["next"] = state["next"] + 1;
+      return client;
+    };
+
+    let record = func(result) {
+      state["calls"] = state["calls"] + 1;
+      if (std.result.is_err(result)) {
+        state["errors"] = state["errors"] + 1;
+      }
+      return result;
+    };
+
+    let call_one = func(method, args, body, binary, timeout_ms) {
+      if (state["closed"]) {
+        return std.result.err(std.error.new("rpc", "rpc pool is closed"));
+      }
+      let client = pick();
+      return record(_client_call(client, method, args, body, binary, timeout_ms));
+    };
+
+    let submit_one = func(method, args, body, binary) {
+      if (state["closed"]) {
+        return PoolJob {
+          _wait: func(timeout_ms) {
+            return std.result.err(std.error.new("rpc", "rpc pool is closed"));
+          },
+          _id: func() { return 0; },
+          _done: func() { return true; }
+        };
+      }
+      let client = pick();
+      state["calls"] = state["calls"] + 1;
+      return _wrap_job(_client_submit(client, method, args, body, binary));
+    };
+
+    // Sequential dispatch: a single rpc.Connection has one response stream,
+    // so concurrent calls on the same client are not supported.  Different
+    // clients are still load-balanced round-robin.
+    let map_one = func(method, items, timeout_ms) {
+      let results = [];
+      for item in items {
+        results = std.list.append(results, call_one(
+          method, [item], std.bytes.from_string(""), false, timeout_ms));
+      }
+      return results;
+    };
+
+    return Pool {
+      _call: func(method, args) {
+        return call_one(method, args, std.bytes.from_string(""), false, 0);
+      },
+      _call_timeout: func(method, args, timeout_ms) {
+        return call_one(method, args, std.bytes.from_string(""),
+                        false, timeout_ms);
+      },
+      _call_bytes: func(method, args, body) {
+        return call_one(method, args, body, true, 0);
+      },
+      _call_bytes_timeout: func(method, args, body, timeout_ms) {
+        return call_one(method, args, body, true, timeout_ms);
+      },
+      _submit: func(method, args) {
+        return submit_one(method, args, std.bytes.from_string(""), false);
+      },
+      _submit_bytes: func(method, args, body) {
+        return submit_one(method, args, body, true);
+      },
+      _map: map_one,
+      _stats: func() {
+        return {
+          "clients": len(clients),
+          "calls": state["calls"],
+          "errors": state["errors"],
+          "closed": state["closed"]
+        };
+      },
+      _close: func() {
+        if (state["closed"] == false) {
+          state["closed"] = true;
+          for client in clients {
+            std.result.capture(func() {
+              return client.close();
+            });
+          }
+        }
+      },
+      clients: clients
+    };
   }
 
   // Object wrapper around the server loop.  Server satisfies the

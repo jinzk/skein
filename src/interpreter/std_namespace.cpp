@@ -62,6 +62,11 @@ value_t *build_namespace_impl() {
         {"length", B_len},
         {"iter", B_iter_elements},
     });
+    value_t *pair_module = builtin_module({
+        {"new", B_pair},
+        {"length", B_len},
+        {"iter", B_iter_elements},
+    });
     value_t *fn_module = builtin_module({
         {"compose", B_fn_compose},
         {"pipe", B_fn_pipe},
@@ -133,6 +138,8 @@ value_t *build_namespace_impl() {
         newstrval("list"), list_module));
     root->payload->items.push_back(std::make_pair(
         newstrval("tuple"), tuple_module));
+    root->payload->items.push_back(std::make_pair(
+        newstrval("pair"), pair_module));
     root->payload->items.push_back(std::make_pair(
         newstrval("fn"), fn_module));
     root->payload->items.push_back(std::make_pair(

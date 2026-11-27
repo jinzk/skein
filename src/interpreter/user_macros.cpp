@@ -235,6 +235,7 @@ struct type_constraint *builtin_type_from_functype(int functype) {
         case B_list: return new_type_constraint(TYPE_LIST);
         case B_dict: return new_type_constraint(TYPE_DICT);
         case B_tuple: return new_type_constraint(TYPE_TUPLE);
+        case B_pair: return new_type_constraint(TYPE_PAIR);
         default: return NULL;
     }
 }

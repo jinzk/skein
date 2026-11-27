@@ -743,6 +743,32 @@ struct value_t *call_builtin(int functype,
         return collected;
     }
 
+    if (functype == B_pair) {
+        if (args.empty() || args.size() > 2) {
+            yyerror("std.pair.new expects 1 or 2 arguments, got %d",
+                    (int)args.size());
+            return NULL;
+        }
+        if (args.size() == 2) {
+            struct list_value_t *out = newtupleval();
+            out->payload->items.push_back(dupval(args[0]));
+            out->payload->items.push_back(dupval(args[1]));
+            return (struct value_t *)out;
+        }
+        struct value_t *collected = list_new_from_value(args[0]);
+        if (!collected)
+            return NULL;
+        struct list_value_t *items = (struct list_value_t *)collected;
+        if (items->payload->items.size() != 2) {
+            yyerror("std.pair.new expects exactly 2 elements, got %d",
+                    (int)items->payload->items.size());
+            freeval(collected);
+            return NULL;
+        }
+        items->payload->frozen = true;
+        return collected;
+    }
+
     if (functype == B_format || functype == B_print ||
         functype == B_println) {
         bool is_print = functype == B_print || functype == B_println;

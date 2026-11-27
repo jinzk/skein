@@ -1983,7 +1983,7 @@ struct Checker : public BuiltinContext {
             {TYPE_STRING, "iter", "std.iter.elements", B_iter_elements},
             {TYPE_BYTES, "iter", "std.iter.elements", B_iter_elements},
             {TYPE_GENERATOR, "iter", "std.iter.elements", B_iter_elements},
-            {TYPE_PAIR, "length", "std.tuple.length", B_len},
+            {TYPE_PAIR, "length", "std.pair.length", B_len},
             {TYPE_TUPLE, "length", "std.tuple.length", B_len},
             {TYPE_PAIR, "iter", "std.iter.elements", B_iter_elements},
             {TYPE_TUPLE, "iter", "std.iter.elements", B_iter_elements},

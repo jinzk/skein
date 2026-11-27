@@ -2335,6 +2335,7 @@ skein --check-ffi ./libshape.so shape.ffi.json
 import std;
 std.list
 std.tuple
+std.pair
 std.fn
 std.iter
 std.dict
@@ -3629,8 +3630,10 @@ drive-relative 的 `C:foo` 和普通相对路径为 `false`。
 
 `std.tuple.new()` 返回空 tuple，`std.tuple.new(x)` 从可迭代对象复制元素并冻结为
 tuple；裸 `tuple(...)` 是默认根绑定，等价于规范路径 `std.tuple.new(...)`。
-tuple / pair 统一支持 `(t).length()` / `std.tuple.length(t)` 与
-`(t).iter()` / `std.tuple.iter(t)`。
+`pair` 是二元素 tuple 的类型别名，同时也是默认根绑定：`pair(a, b)` 与
+`pair([a, b])` 都等价于 `std.pair.new(...)`，并要求恰好两个元素。
+tuple / pair 统一支持 `(t).length()` / `std.*.length(t)` 与
+`(t).iter()` / `std.*.iter(t)`；pair 的规范路径是 `std.pair.*`。
 
 `std.list` 新增常用算法：
 
@@ -3773,6 +3776,10 @@ std.list.builder
 std.tuple.new
 std.tuple.length
 std.tuple.iter
+
+std.pair.new
+std.pair.length
+std.pair.iter
 
 std.fn.compose
 std.fn.pipe
@@ -4312,7 +4319,7 @@ std.thread.capabilities
 - `std` 名称保留，不能通过源码包覆盖；
 - `std` 是语言级默认根绑定，无需 `import std;` 即可使用；显式 `import std;` 仍然合法且幂等；
 - `std.*` 是规范形式；通过 `std.list`、`std.string` 等方式访问；
-- 默认裸值只有 `list` / `dict` / `tuple` / `input` / `print` / `println`；`len` / `iter!` 已完全移除，`range` 与类型内省裸名也不再提供，分别使用 `std.utils.range` / `std.type.*`；
+- 默认裸值只有 `list` / `dict` / `tuple` / `pair` / `input` / `print` / `println`；`len` / `iter!` 已完全移除，`range` 与类型内省裸名也不再提供，分别使用 `std.utils.range` / `std.type.*`；
 - 容器长度统一使用 `length()` 或 `std.*.length`，包括 `deque` / `heap` / `set`、`arena` / `lru` 与 tuple / pair；`size()` 保留为这些类型的兼容别名；迭代器统一使用 `iter()` 或 `std.iter.*`，不再提供 `.len()` / `std.utils.len` / `std.utils.iter!`；
 - 数学、字符串、格式化、文件与 bytes 的旧全局函数（如 `find`、`split`、`bytes_*`、`file_*`）已移除，请改用对应的 `std.math` / `std.string` / `std.fs` / `std.bytes` 函数；
 - `std` 导入得到的是命名空间副本，修改自己的副本不会污染内置缓存；
@@ -4389,7 +4396,7 @@ std.thread.capabilities
 - `std.result.capture` 捕获同步 `fail` 和运行时错误；task 使用 `std.task.catch`；
 - 显式 `std.generator.close(g)` 会执行生成器的 `defer`；被直接丢弃的挂起生成器不会执行，但会打印 warning；
 - DNS 超时依赖 libuv 取消系统解析请求，极端情况下可能延迟返回；
-- 内置函数以 `std.*` 为规范路径；默认裸值只有 `list` / `dict` / `input` / `print` / `println`。
+- 内置函数以 `std.*` 为规范路径；默认裸值只有 `list` / `dict` / `tuple` / `pair` / `input` / `print` / `println`。
 
 ### 控制台输入
 

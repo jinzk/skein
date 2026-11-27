@@ -165,6 +165,7 @@ static void install_default_value_bindings(const std::shared_ptr<scope_t> &root)
         {"list", B_list},
         {"dict", B_dict},
         {"tuple", B_tuple},
+        {"pair", B_pair},
         {"input", B_input},
         {"print", B_print},
         {"println", B_println},

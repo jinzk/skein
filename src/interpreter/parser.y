@@ -799,6 +799,7 @@ static const char *builtin_field_name(int functype) {
         case B_list: return "list";
         case B_dict: return "dict";
         case B_tuple: return "tuple";
+        case B_pair: return "pair";
         case B_int: return "int";
         case B_float: return "float";
         case B_bool: return "bool";
@@ -1075,6 +1076,7 @@ static struct type_constraint *type_constraint_from_builtin(int functype) {
         case B_list: return new_type_constraint(TYPE_LIST);
         case B_dict: return new_type_constraint(TYPE_DICT);
         case B_tuple: return new_type_constraint(TYPE_TUPLE);
+        case B_pair: return new_type_constraint(TYPE_PAIR);
         default: {
             const char *name = builtin_field_name(functype);
             yyerror("unknown type name %s", name ? name : "builtin");

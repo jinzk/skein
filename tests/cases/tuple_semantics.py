@@ -29,6 +29,27 @@ def run_cases():
           "std.io.println(str((std.tuple.new()).length()));\n",
           stdout_all=["2", "1", "0"])
 
+    check("pair constructor aliases two-element tuples",
+          "let p = pair(1, 2);\n"
+          "std.io.println(str((p).length()));\n"
+          "std.io.println(str(std.pair.length(p)));\n"
+          "let (a, b) = p;\n"
+          "std.io.println(str(a + b));\n"
+          "let q = pair([3, 4]);\n"
+          "std.io.println(str((q)[1]));\n"
+          "let r = std.pair.new(5, 6);\n"
+          "std.io.println(str((r).length()));\n",
+          stdout_all=["2", "2", "3", "4", "2"])
+
+    check("pair constructor rejects one element",
+          "pair([1])\n",
+          env=OFF_ENV,
+          stderr="std.pair.new expects exactly 2 elements")
+
+    check("pair constructor rejects extra arguments",
+          "pair(1, 2, 3)\n",
+          stderr="function expects at most 2 argument(s), got 3")
+
     check("tuple constructor rejects extra arguments",
           "tuple([1], [2])\n",
           stderr="function expects at most 1 argument(s), got 2")

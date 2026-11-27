@@ -543,7 +543,7 @@ keyword（`in` / `export` / `import` / `package` / `include`）已完成。其�
 空间保持独立。
 设计细节见 [`docs/macros_user_defined.md`](macros_user_defined.md)。
 
-#### 后续计划：宏与泛型结合（G1 / G2 已完成，G3–G5 未排期）
+#### 后续计划：宏与泛型结合（G1 / G2 / G3 已完成，G4–G5 未排期）
 
 M11 继续保持“宏不生成泛型语法”的边界。当前可用组合是：泛型实例化写在宏外，
 宏只接收已绑定泛型值；宏体生成对泛型函数的普通调用并交给类型推断。不要依靠宏
@@ -556,11 +556,18 @@ M11 继续保持“宏不生成泛型语法”的边界。当前可用组合是�
    增加只出现在类型位置的 `T: type`；片段按类型命名空间解析并参与 hygiene：
    调用点传入的名字保留调用点拼写与 import 别名，模板内字面类型名按定义点解析。
    `proto` 名称（`Drawable`、`pkg.Keyed`）作为类型命名空间实体一并支持：可用于
-   类型标注、`is #T` 与 `[V proto #P]`；不得作为普通类型实参（`Box[#P]`），
-   `Hashable` / `Iterable` 等 proto 约束仍需专用约束片段，不混入 `type` 片段。
-3. **G3 宏类型参数边界**：宏的类型参数只允许把调用点已有类型（含 proto 名称）
-   传给已有泛型声明；禁止类型计算、类型内省、`impl Box[int]` 特化生成和声明生成宏，
-   不让宏替代泛型。
+    类型标注与 `is #T`；`[V proto Drawable]` 在普通源码继续可用，但宏模板仍
+    不得生成泛型声明或实参，因此 `Box[#P]` / `f[#T](...)` 明确拒绝。
+    `Hashable` / `Iterable` 等 proto 约束仍需专用约束片段，不混入 `type` 片段。
+3. **G3 宏类型参数边界（已完成）**：在定义期固化“宏不替代泛型”的边界，不新增
+   语法。模板体不得生成 `struct` / `enum` / `proto` / `impl` 或具名 `func` 声明
+   （`macro template cannot generate declarations`），也不得生成显式泛型应用，
+   包括模板里写死的 `f[int](...)` / `Box[int] { ... }` 与 `f[#T](...)`
+   （`macro template cannot generate generic syntax`）；`impl Box[int]` 本身在
+   parser 阶段就是语法错误。类型片段不能进入反射 builtin（`kind_of(#T)` 等报
+   `type fragment cannot be used as a value or name`），不做类型计算或类型内省。
+   限制只针对模板体：调用点已有的泛型值仍可经 `expr` 片段传入，匿名函数表达式
+   仍可作为普通表达式出现在模板里。
 4. **G4 工具链与双后端同步**：formatter 无损往返、lint 报告未使用或非法类型片段、
    LSP 补全与跳转、诊断同时给出调用点与定义点位置，并补齐 VM/JIT parity。
 5. **G5 保持核心约束**：继续 parse-before-typecheck、AST 级受限模板、hygienic、

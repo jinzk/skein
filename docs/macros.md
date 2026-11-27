@@ -1,7 +1,7 @@
 # Skein 宏（第一批：内置语法宏）
 
 - 状态：第一批内置宏已完成；用户自定义宏 v1、G1 AST 泛型实参、G2 受限
-  `type` 片段已落地（见
+  `type` 片段、G3 边界强化已落地（见
   [`docs/macros_user_defined.md`](macros_user_defined.md)）
 - 相关模块：`std.assert`、`std.log`、`std.result`
 - 实现位置：`src/interpreter/macros.cpp`、`src/interpreter/user_macros.cpp`、
@@ -256,8 +256,10 @@ for (k, v) in iter!({"a": 1}) { ... }
 - 序列化 type descriptor。
 
 typechecker 已直接使用 AST 中的泛型实参（roadmap G1），不再从原始源码文本
-重新解析。G2 的受限 `type` 片段只把调用点已有名字放进类型位置，仍不允许宏
-生成泛型声明、`Box[int] { ... }` 或 `f[int](...)`。
+重新解析。G2 的受限 `type` 片段只把调用点已有名字放进类型位置。G3 在定义期
+拒绝模板生成声明（`struct` / `enum` / `proto` / `impl` / 具名 `func`）和显式泛型
+应用（含字面 `f[int](...)` / `Box[int] { ... }` 与 `f[#T](...)`）；类型片段不能
+进入反射 builtin。调用点已有的泛型值仍可作为 `expr` 片段传入。
 
 ## 6. 测试
 

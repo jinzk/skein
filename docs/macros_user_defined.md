@@ -1,7 +1,7 @@
 # 用户自定义宏设计（设计方案）
 
 - 状态：P1 / P2 / P3.1 / P4 同文件 v1、跨包宏、G1 AST 泛型实参、G2 受限
-  `type` 片段已完成；G3–G5 待实施
+  `type` 片段、G3 边界强化已完成；G4–G5 待实施
 - 关联：[`docs/macros.md`](macros.md)、[`docs/roadmap.md`](roadmap.md)
 - 建议里程碑：M11，不回写已完成的 M10
 - 拟改动：`src/interpreter/tokens.l`、`src/interpreter/parser.y`、新增
@@ -97,6 +97,14 @@ macro call_all(f: expr, args: expr...) {
 `as` 与 `is` 的类型位置，以及 `#T?` / `ref #T` / `weak #T` 前缀或后缀包装中。
 它不能进入普通泛型实参（`Box[#T]` / `f[#T](...)`），也不能用于生成泛型声明；
 `[V proto Drawable]` 这类约束仍由普通源码书写。
+
+G3 边界在定义期执行：模板体不得生成 `struct` / `enum` / `proto` / `impl` 或具名
+`func` 声明（`macro template cannot generate declarations`），也不得生成显式泛型
+应用，包括模板里写死的字面实参 `f[int](...)` / `Box[int] { ... }` 和 `f[#T](...)`
+（`macro template cannot generate generic syntax`）。匿名函数表达式 `func(x) {...}`
+是普通表达式，仍然允许。这些限制只作用于模板体：调用点传入的表达式片段可以是
+`identity[int]` 这类已绑定泛型值，宏会原样克隆。类型片段不能进入反射 builtin，
+`kind_of(#T)` / `type_name(#T)` 等报 `type fragment cannot be used as a value or name`。
 
 ### 3.3 调用
 
@@ -287,8 +295,8 @@ wrap!(2) {
 - 编译期任意执行、编译期 I/O、反射或类型内省；
 - `pattern` / `module` / `operator` 片段，以及类型计算、类型内省和专用约束片段；
 - 宏递归、互递归或展开次数参数；
-- 生成泛型声明或泛型调用，如 `f[int](...)` / `Box[int]{}`；
-- 声明生成宏；
+- 生成泛型声明或泛型调用，如 `f[int](...)` / `Box[int]{}`（含模板里的字面类型实参）；
+- 声明生成宏：`struct` / `enum` / `proto` / `impl` 和具名 `func` 都在定义期拒绝；
 - 对 `if` / `for` / `match` / `defer` / `on error` 等核心语义的重写；用户宏不得
   重写 `fail` / `recover` / `pass`，这三者由后续阶段的内置宏 `fail!` /
   `recover!` / `pass!` 提供；
@@ -300,9 +308,10 @@ wrap!(2) {
 - 改变装饰器语义：装饰器继续是 `@expr` 普通高阶函数。
 
 显式泛型实参已由 parser 一次解析并保存在 AST 节点上（roadmap G1），typechecker
-不再回读原始源码文本。模板仍禁止生成泛型语法：用户宏片段支持
-`expr` / `ident` / `expr...` / `block` 与受限 `type`（G2），但 `Box[#T]`、
-`f[#T](...)` 和泛型声明生成都保持禁止。
+不再回读原始源码文本。用户宏片段支持 `expr` / `ident` / `expr...` / `block` 与
+受限 `type`（G2）。G3 把这些边界固化为定义期诊断：模板不得生成声明或显式泛型
+语法（包括字面的 `f[int](...)` / `Box[int] { ... }`），类型片段不能被当作值传给
+反射 builtin；调用点已有的泛型值仍可通过 `expr` 片段传入。
 
 ## 7. 诊断
 
@@ -319,7 +328,8 @@ wrap!(2) {
 - `block` 不是最后一个参数，或出现在括号内；
 - 同文件宏重名；遮蔽内置裸名不是错误，但需说明实际命中的来源；
 - 自递归 / 未注册宏调用；
-- 模板中出现泛型语法；
+- 模板中出现声明定义：`macro template cannot generate declarations`；
+- 模板中出现泛型语法，含字面类型实参：`macro template cannot generate generic syntax`；
 - 无参数宏收到表达式参数，或需要参数的宏缺少参数；
 - 内置宏裸名与规范路径解析到不同定义时，诊断说明实际命中的来源；
 - 块片段中的控制流位置错误；
@@ -351,7 +361,9 @@ wrap!(2) {
 - `import {retry} from util;` 与 `import {retry!} from util;` 命名空间隔离；
 - `type` 片段的标注、`as` / `is`、`#T?` / `ref #T` 包装，以及调用点限定名和
   import alias；模板内字面类型名按定义点解析；
-- `type` 片段拒绝表达式、约束标记、泛型实参及非类型位置。
+- `type` 片段拒绝表达式、约束标记、泛型实参及非类型位置；
+- 模板拒绝声明生成和字面/片段泛型实参；调用点 `expr` 片段中的泛型值保持可用；
+- 类型片段进入反射 builtin 与匿名函数表达式的边界。
 
 ### 9.2 hygiene / 运行时
 

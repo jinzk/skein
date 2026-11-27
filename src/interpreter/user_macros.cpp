@@ -71,6 +71,9 @@ struct expansion_state {
     int expansion_id = 0;
     bool failed = false;
     bool validate_only = false;
+    /* True only while cloning the template body.  Call-site arguments may
+     * contain generic values such as `identity[int]`; templates may not. */
+    bool template_body = false;
 };
 
 char *copy_string(const char *text) {
@@ -261,44 +264,6 @@ bool type_constraint_contains_placeholder(const struct type_constraint *type) {
            std::strstr(type->display, USER_MACRO_PARAM_PREFIX) != NULL;
 }
 
-const user_macro_param *find_param(const user_macro_template *macro,
-                                   const std::string &name) {
-    if (!macro)
-        return NULL;
-    for (const auto &param : macro->params)
-        if (param.name == name)
-            return &param;
-    return NULL;
-}
-
-bool validate_type_constraint(const struct type_constraint *type,
-                              const user_macro_template &macro, int line,
-                              int column) {
-    if (!type)
-        return true;
-    std::string param_name;
-    if (macro_type_placeholder(type, &param_name)) {
-        const user_macro_param *param = find_param(&macro, param_name);
-        if (!param) {
-            report_at(line, column, "unknown macro placeholder",
-                      param_name.c_str());
-            return false;
-        }
-        if (param->kind != user_macro_param_kind::type) {
-            report_at(line, column, "macro fragment cannot be used here",
-                      param_name.c_str());
-            return false;
-        }
-        return true;
-    }
-    if (type_constraint_contains_placeholder(type)) {
-        report_at(line, column,
-                  "type fragment cannot be used inside a generic type");
-        return false;
-    }
-    return true;
-}
-
 /* Replace `#T` type placeholders with the call-site constraint.  Literal
  * template types are duplicated unchanged, so their source string still
  * resolves at the macro definition point. */
@@ -356,6 +321,9 @@ expansion_state fragment_state_for(const expansion_state &state) {
     expansion_state fragment = state;
     fragment.expansion_id = 0;
     fragment.declared.clear();
+    /* Fragment values always come from the call site, even when cloned while
+     * substituting a placeholder in the template body. */
+    fragment.template_body = false;
     return fragment;
 }
 
@@ -502,6 +470,50 @@ struct ast *clone_node(const struct ast *node, expansion_state &state,
                        clone_context context) {
     if (!node)
         return NULL;
+
+    /* G3 boundary: a template cannot introduce declarations.  Anonymous
+     * function expressions are ordinary expressions and remain allowed. */
+    if (state.template_body &&
+        (node->nodetype == 'Y' || node->nodetype == 'H' ||
+         node->nodetype == 't' || node->nodetype == NODE_ENUM_DECL ||
+         (node->nodetype == 'Z' &&
+          ((const struct funcdef *)node)->name != NULL))) {
+        const struct funcdef *func = node->nodetype == 'Z'
+                                         ? (const struct funcdef *)node
+                                         : NULL;
+        if (func && func->generic_params)
+            report_at(node->line, node->column,
+                      "macro template cannot generate generic syntax");
+        else
+            report_at(node->line, node->column,
+                      "macro template cannot generate declarations");
+        state.failed = true;
+        return NULL;
+    }
+
+    /* Explicit generic applications are syntax generation too, whether the
+     * argument is a fragment or a literal type written in the template. */
+    if (state.template_body && node->nodetype == 'y') {
+        const struct struct_lit_node *lit =
+            (const struct struct_lit_node *)node;
+        if (lit->has_type_args || lit->type_args || lit->type_args_error) {
+            report_at(node->line, node->column,
+                      "macro template cannot generate generic syntax");
+            state.failed = true;
+            return NULL;
+        }
+    }
+    if (state.template_body && node->nodetype == NODE_ENUM_LITERAL) {
+        const struct enum_lit_node *lit =
+            (const struct enum_lit_node *)node;
+        if (lit->has_type_args || lit->type_args || lit->type_args_error) {
+            report_at(node->line, node->column,
+                      "macro template cannot generate generic syntax");
+            state.failed = true;
+            return NULL;
+        }
+    }
+
     switch (node->nodetype) {
         case 'N': {
             const struct symref *ref = (const struct symref *)node;
@@ -610,6 +622,15 @@ struct ast *clone_node(const struct ast *node, expansion_state &state,
         case 'G': {
             const struct index_node *source =
                 (const struct index_node *)node;
+            if (state.template_body &&
+                (source->generic_candidate ||
+                 source->generic_function_value || source->type_args ||
+                 source->type_args_error)) {
+                report_at(node->line, node->column,
+                          "macro template cannot generate generic syntax");
+                state.failed = true;
+                return NULL;
+            }
             struct index_node *copy = copy_node(source);
             copy->l = clone_node(node->l, state, clone_context::expr);
             copy->r = clone_node(node->r, state, clone_context::expr);
@@ -999,296 +1020,6 @@ void collect_declared(const struct ast *node,
     }
 }
 
-bool validate_node(const struct ast *node, const user_macro_template &macro,
-                   clone_context context) {
-    if (!node)
-        return true;
-    if (node->nodetype == NODE_USER_MACRO_CALL) {
-        const struct user_macro_call_node *call =
-            (const struct user_macro_call_node *)node;
-        const char *name = call->callee && call->callee->nodetype == 'N'
-                               ? ((const struct symref *)call->callee)->name
-                               : NULL;
-        if (name && std::strcmp(name, macro.name.c_str()) == 0) {
-            report_at(node->line, node->column,
-                      "recursive user macro calls are not allowed");
-            return false;
-        }
-        return validate_node(call->callee, macro, clone_context::expr) &&
-               validate_node(call->args, macro, clone_context::arg) &&
-               validate_node(call->block, macro, clone_context::stmt);
-    }
-    if (node->nodetype == 'G') {
-        const struct index_node *index = (const struct index_node *)node;
-        if (index->generic_candidate || index->generic_function_value) {
-            report_at(node->line, node->column,
-                      "macro template cannot generate generic syntax");
-            return false;
-        }
-    }
-    std::string param_name;
-    if (is_expand_node(node, &param_name)) {
-        if (context != clone_context::arg) {
-            report_at(node->line, node->column,
-                      "expr... fragment must be used in an argument list",
-                      param_name.c_str());
-            return false;
-        }
-        bool valid = false;
-        for (const auto &param : macro.params)
-            if (param.name == param_name &&
-                param.kind == user_macro_param_kind::expr_list)
-                valid = true;
-        if (!valid) {
-            report_at(node->line, node->column,
-                      "expr... placeholder must refer to an expr... parameter",
-                      param_name.c_str());
-            return false;
-        }
-        return true;
-    }
-    if (node->nodetype == 'N' &&
-        placeholder_of(((const struct symref *)node)->name, &param_name)) {
-        bool found = false;
-        user_macro_param_kind kind = user_macro_param_kind::expr;
-        for (const auto &param : macro.params) {
-            if (param.name == param_name) {
-                found = true;
-                kind = param.kind;
-                break;
-            }
-        }
-        if (!found) {
-            report_at(node->line, node->column, "unknown macro placeholder",
-                      param_name.c_str());
-            return false;
-        }
-        if (kind == user_macro_param_kind::block &&
-            context != clone_context::stmt) {
-            report_at(node->line, node->column,
-                      "block fragment must be used as a statement",
-                      param_name.c_str());
-            return false;
-        }
-        if (kind == user_macro_param_kind::expr_list) {
-            report_at(node->line, node->column,
-                      "expr... fragment must be written as #name...",
-                      param_name.c_str());
-            return false;
-        }
-        if (kind == user_macro_param_kind::type) {
-            report_at(node->line, node->column,
-                      "type fragment cannot be used as a value or name",
-                      param_name.c_str());
-            return false;
-        }
-        return true;
-    }
-
-    bool ok = true;
-    switch (node->nodetype) {
-        case 'D': {
-            const struct symdef *def = (const struct symdef *)node;
-            if (placeholder_of(def->name, &param_name)) {
-                bool is_ident = false;
-                for (const auto &param : macro.params)
-                    if (param.name == param_name &&
-                        param.kind == user_macro_param_kind::ident)
-                        is_ident = true;
-                if (!is_ident) {
-                    report_at(node->line, node->column,
-                              "only an ident fragment can be used as a name",
-                              param_name.c_str());
-                    ok = false;
-                }
-            }
-            ok = validate_type_constraint(def->type, macro, node->line,
-                                          node->column) &&
-                 ok;
-            ok = validate_node(def->v, macro, clone_context::expr) && ok;
-            break;
-        }
-        case 'Z': {
-            const struct funcdef *func = (const struct funcdef *)node;
-            if (func->generic_params) {
-                report_at(node->line, node->column,
-                          "macro template cannot generate generic syntax");
-                ok = false;
-            }
-            ok = validate_type_constraint(func->ret_type, macro, node->line,
-                                          node->column) &&
-                 ok;
-            ok = validate_type_constraint(func->method_self_type, macro,
-                                          node->line, node->column) &&
-                 ok;
-            for (const struct symlist *param = func->sl; param;
-                 param = param->next) {
-                ok = validate_type_constraint(param->type, macro, node->line,
-                                              node->column) &&
-                     ok;
-                const char *name = param->sym ? param->sym->name : NULL;
-                if (placeholder_of(name, &param_name)) {
-                    bool is_ident = false;
-                    for (const auto &item : macro.params)
-                        if (item.name == param_name &&
-                            item.kind == user_macro_param_kind::ident)
-                            is_ident = true;
-                    if (!is_ident) {
-                        report_at(node->line, node->column,
-                                  "only an ident fragment can be used as a name",
-                                  param_name.c_str());
-                        ok = false;
-                    }
-                }
-            }
-            ok = validate_node(func->ast, macro, clone_context::stmt) && ok;
-            break;
-        }
-        case 'F': {
-            const struct forinloop *loop = (const struct forinloop *)node;
-            const char *names[2] = {loop->name, loop->value_name};
-            for (const char *name : names) {
-                if (!placeholder_of(name, &param_name))
-                    continue;
-                bool is_ident = false;
-                for (const auto &item : macro.params)
-                    if (item.name == param_name &&
-                        item.kind == user_macro_param_kind::ident)
-                        is_ident = true;
-                if (!is_ident) {
-                    report_at(node->line, node->column,
-                              "only an ident fragment can be used as a name",
-                              param_name.c_str());
-                    ok = false;
-                }
-            }
-            ok = validate_node(loop->iterable, macro, clone_context::expr) &&
-                 validate_node(loop->body, macro, clone_context::stmt) && ok;
-            break;
-        }
-        case 'o': {
-            const struct on_error_node *handler =
-                (const struct on_error_node *)node;
-            if (placeholder_of(handler->name, &param_name)) {
-                bool is_ident = false;
-                for (const auto &item : macro.params)
-                    if (item.name == param_name &&
-                        item.kind == user_macro_param_kind::ident)
-                        is_ident = true;
-                if (!is_ident) {
-                    report_at(node->line, node->column,
-                              "only an ident fragment can be used as a name",
-                              param_name.c_str());
-                    ok = false;
-                }
-            }
-            ok = validate_node(handler->call, macro, clone_context::expr) &&
-                 validate_node(handler->body, macro, clone_context::stmt) && ok;
-            break;
-        }
-        case 'C': {
-            const struct ufncall *call = (const struct ufncall *)node;
-            ok = validate_node(call->callee, macro, clone_context::expr) &&
-                 validate_node(call->args, macro, clone_context::arg) && ok;
-            break;
-        }
-        case 'L': {
-            if (context == clone_context::arg && is_expand_node(node->l) &&
-                node->r) {
-                report_at(node->l->line, node->l->column,
-                          "expr... fragment must be the last argument");
-                return false;
-            }
-            ok = validate_node(node->l, macro, context) &&
-                 validate_node(node->r, macro, context) && ok;
-            break;
-        }
-        case 'X':
-        case 'l':
-            ok = validate_node(node->l, macro, context) &&
-                 validate_node(node->r, macro, context) && ok;
-            break;
-        case 'V':
-            break;
-        case '+':
-        case '-':
-        case '*':
-        case '/':
-        case '%':
-        case '&':
-        case '|':
-        case '^':
-        case 'A':
-        case 'Q':
-        case 's':
-        case 'r':
-        case 'j':
-        case '1':
-        case '2':
-        case '3':
-        case '4':
-        case '5':
-        case '6':
-        case '0':
-        case NODE_FUNCTION_BODY:
-        case NODE_OPTIONAL_CHAIN:
-        case NODE_REF_TARGET:
-        case 'M':
-        case '!':
-        case '~':
-        case 'b':
-        case 'w':
-        case 'n':
-        case 'G':
-        case NODE_BRACKET_APPLY:
-        case '=':
-        case 'a':
-        case 'U':
-        case 'R':
-        case 'd':
-        case NODE_TUPLE:
-        case 'I':
-        case 'W':
-        case 'E':
-        case 'T':
-        case 'P':
-        case 'S':
-        case 'c': {
-            ok = validate_node(node->l, macro, clone_context::expr) &&
-                 validate_node(node->r, macro, clone_context::expr) && ok;
-            break;
-        }
-        case 'k': {
-            const struct is_node *is = (const struct is_node *)node;
-            ok = validate_type_constraint(is->type, macro, node->line,
-                                          node->column) &&
-                 ok;
-            ok = validate_node(is->value, macro, clone_context::expr) && ok;
-            break;
-        }
-        case NODE_CAST: {
-            const struct cast_node *cast = (const struct cast_node *)node;
-            ok = validate_type_constraint(cast->type, macro, node->line,
-                                          node->column) &&
-                 ok;
-            ok = validate_node(cast->value, macro, clone_context::expr) && ok;
-            break;
-        }
-        case 'x':
-        case 'g':
-        case NODE_GOTO:
-        case 'B':
-        case 'O':
-            ok = validate_node(node->l, macro, clone_context::expr) &&
-                 validate_node(node->r, macro, clone_context::expr) && ok;
-            break;
-        default:
-            report_at(node->line, node->column,
-                      "macro template contains unsupported syntax");
-            return false;
-    }
-    return ok;
-}
 
 macro_entry *find_macro(const char *name) {
     if (!name)
@@ -1673,6 +1404,7 @@ struct ast *expand_user_macro(macro_entry *entry, struct ast *args,
     }
 
     collect_declared(macro.body, state.declared);
+    state.template_body = true;
     struct ast *result = clone_node(macro.body, state, clone_context::stmt);
     if (state.failed) {
         treefree(result);
@@ -1847,6 +1579,7 @@ bool user_macro_define(const char *name,
     expansion_state validation;
     validation.macro = &macro;
     validation.validate_only = true;
+    validation.template_body = true;
     for (const auto &param : params) {
         param_value value;
         value.kind = param.kind;

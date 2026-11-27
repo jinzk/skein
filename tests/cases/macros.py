@@ -357,6 +357,73 @@ def run_cases():
         stderr="type fragment cannot be used inside a generic type",
     )
     check(
+        "user macro cannot generate declarations",
+        'macro bad() { func f() { return 1; } return f(); }\n'
+        'func test(): int { return bad!(); }\n'
+        'println(str(test()));\n',
+        stderr="macro template cannot generate declarations",
+    )
+    check(
+        "user macro cannot generate struct declarations",
+        'macro bad() { struct S { x: int; } return 1; }\n'
+        'func test(): int { return bad!(); }\n'
+        'println(str(test()));\n',
+        stderr="macro template cannot generate declarations",
+    )
+    check(
+        "user macro cannot generate impl declarations",
+        'proto P { func f(self); }\n'
+        'macro bad() { impl P { } return 1; }\n'
+        'func test(): int { return bad!(); }\n'
+        'println(str(test()));\n',
+        stderr="macro template cannot generate declarations",
+    )
+    check(
+        "user macro cannot generate generic declarations",
+        'macro bad() { func f[T any]() { return 1; } return 1; }\n'
+        'func test(): int { return bad!(); }\n'
+        'println(str(test()));\n',
+        stderr="macro template cannot generate generic syntax",
+    )
+    check(
+        "user macro cannot generate literal generic calls",
+        'func id[T any](x: T) { return x; }\n'
+        'macro bad(v: expr) { return id[int](#v); }\n'
+        'func test(): int { return bad!(7); }\n'
+        'println(str(test()));\n',
+        stderr="macro template cannot generate generic syntax",
+    )
+    check(
+        "user macro cannot generate generic calls with type fragments",
+        'func id[T any](x: T) { return x; }\n'
+        'macro bad(T: type, v: expr) { return id[#T](#v); }\n'
+        'func test(): int { return bad!(int, 7); }\n'
+        'println(str(test()));\n',
+        stderr="macro template cannot generate generic syntax",
+    )
+    check(
+        "user macro cannot generate generic struct literals",
+        'struct Box[T any] { value: T; }\n'
+        'macro bad(T: type) { let b = Box[int] { value: 1 }; return 1; }\n'
+        'func test(): int { return bad!(int); }\n'
+        'println(str(test()));\n',
+        stderr="macro template cannot generate generic syntax",
+    )
+    check(
+        "user macro type fragment cannot reach introspection",
+        'macro bad(T: type) { let k = kind_of(#T); return 1; }\n'
+        'func test(): int { return bad!(int); }\n'
+        'println(str(test()));\n',
+        stderr="type fragment cannot be used as a value or name",
+    )
+    check(
+        "user macro allows anonymous function expressions",
+        'macro mk() { let f = func(x) { return x; }; return f(7); }\n'
+        'func test(): int { return mk!(); }\n'
+        'println(str(test()));\n',
+        stdout="7",
+    )
+    check(
         "user macro block fragment must be last",
         'macro m(b: block, x: expr) { #b return #x; }\n',
         stderr="block fragment must be the last parameter",

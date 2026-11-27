@@ -1,14 +1,14 @@
-#include "process_pipe.h"
+#include "process_io.h"
 
 #include "builtin_ids.h"
 #include "builtins_io.h"
 #include "fiber.h"
-#include "process_spawn.h"
 #include "task.h"
 #include "valuetype.h"
 
 #include <algorithm>
 #include <chrono>
+#include <cstring>
 #include <string>
 #include <utility>
 #include <vector>
@@ -99,81 +99,58 @@ value_t *read_async_chunk(value_t *stream, long long max_bytes,
 
 } // namespace
 
-process_pipe::~process_pipe() {
-    close(true, true);
-}
 
-process_pipe::process_pipe(process_pipe &&other) noexcept
-    : process(other.process),
-      stdin_stream(other.stdin_stream),
+process_io::process_io(process_io &&other) noexcept
+    : stdin_stream(other.stdin_stream),
       stdout_stream(other.stdout_stream),
       pending(std::move(other.pending)) {
-    other.process = nullptr;
     other.stdin_stream = nullptr;
     other.stdout_stream = nullptr;
 }
 
-process_pipe &process_pipe::operator=(process_pipe &&other) noexcept {
+process_io &process_io::operator=(process_io &&other) noexcept {
     if (this == &other)
         return *this;
-    close(true, true);
-    process = other.process;
     stdin_stream = other.stdin_stream;
     stdout_stream = other.stdout_stream;
     pending = std::move(other.pending);
-    other.process = nullptr;
     other.stdin_stream = nullptr;
     other.stdout_stream = nullptr;
     return *this;
 }
 
-bool process_pipe::spawn(const char *executable, struct value_t *options,
-                         std::string &error) {
-    close(true, true);
-    if (!executable || !*executable) {
-        error = "cannot locate process executable";
+bool process_io::attach(value_t *process, std::string &error) {
+    stdin_stream = nullptr;
+    stdout_stream = nullptr;
+    pending.clear();
+    if (!process || process->type != T_dict) {
+        error = "process pipe expects a process handle";
         return false;
     }
-    value_t *executable_value = newstrval(executable);
-    value_t *process = call_process_spawn_builtin(
-        B_process_spawn_command, {executable_value, options});
-    freeval(executable_value);
-    if (!process) {
-        error = "cannot spawn process";
-        return false;
-    }
-    value_t *stdin_stream = nullptr;
-    value_t *stdout_stream = nullptr;
-    if (process->type == T_dict) {
-        dict_value_t *dict = (dict_value_t *)process;
-        for (auto &entry : dict->payload->items) {
-            if (!entry.first || entry.first->type != T_string)
-                continue;
-            const char *key =
-                ((string_value_t *)entry.first)->value;
-            if (std::string(key) == "stdin")
-                stdin_stream = entry.second;
-            else if (std::string(key) == "stdout")
-                stdout_stream = entry.second;
-        }
+    dict_value_t *dict = (dict_value_t *)process;
+    for (auto &entry : dict->payload->items) {
+        if (!entry.first || entry.first->type != T_string)
+            continue;
+        const char *key = ((string_value_t *)entry.first)->value;
+        if (std::strcmp(key, "stdin") == 0)
+            stdin_stream = entry.second;
+        else if (std::strcmp(key, "stdout") == 0)
+            stdout_stream = entry.second;
     }
     if (!stdin_stream || !stdout_stream) {
-        freeval(process);
-        error = "process has no pipes";
+        stdin_stream = nullptr;
+        stdout_stream = nullptr;
+        error = "process has no stdio pipes";
         return false;
     }
-    this->process = process;
-    this->stdin_stream = stdin_stream;
-    this->stdout_stream = stdout_stream;
-    pending.clear();
     return true;
 }
 
-bool process_pipe::usable() const {
-    return process && stdin_stream && stdout_stream;
+bool process_io::usable() const {
+    return stdin_stream && stdout_stream;
 }
 
-bool process_pipe::write(const std::string &data) {
+bool process_io::write(const std::string &data) {
     if (!stdin_stream)
         return false;
     std::size_t offset = 0;
@@ -202,7 +179,7 @@ bool process_pipe::write(const std::string &data) {
     return true;
 }
 
-bool process_pipe::flush() {
+bool process_io::flush() {
     if (!stdin_stream)
         return false;
     value_t *result = call_io(B_io_flush, {stdin_stream});
@@ -212,7 +189,7 @@ bool process_pipe::flush() {
     return true;
 }
 
-value_t *process_pipe::read_line(long long timeout_ms, std::string &error) {
+value_t *process_io::read_line(long long timeout_ms, std::string &error) {
     if (!stdout_stream) {
         error = "process pipe has no stdout";
         return nullptr;
@@ -290,7 +267,7 @@ value_t *process_pipe::read_line(long long timeout_ms, std::string &error) {
     return newstrval(buffer.c_str());
 }
 
-value_t *process_pipe::read_exact(std::size_t size, long long timeout_ms,
+value_t *process_io::read_exact(std::size_t size, long long timeout_ms,
                                   std::string &error) {
     if (size == 0)
         return newbytesval(std::string());
@@ -346,40 +323,12 @@ value_t *process_pipe::read_exact(std::size_t size, long long timeout_ms,
     return newbytesval(std::move(buffered));
 }
 
-void process_pipe::close(bool kill_if_running, bool force) {
+void process_io::close_streams() {
     if (stdin_stream) {
         value_t *result = call_io(B_io_close, {stdin_stream});
         if (result)
             freeval(result);
         stdin_stream = nullptr;
-    }
-    if (process) {
-        if (!force) {
-            value_t *timeout = newintval(1000);
-            value_t *wait_result =
-                call_process_spawn_builtin(B_process_wait,
-                                           {process, timeout});
-            freeval(timeout);
-            if (wait_result)
-                freeval(wait_result);
-        }
-        if (kill_if_running) {
-            std::vector<value_t *> kill_args{process};
-            if (force)
-                kill_args.push_back(newintval(9));
-            value_t *kill_result = call_process_spawn_builtin(
-                B_process_kill, kill_args);
-            if (kill_args.size() > 1)
-                freeval(kill_args[1]);
-            if (kill_result)
-                freeval(kill_result);
-        }
-        value_t *close_result = call_process_spawn_builtin(
-            B_process_close, {process});
-        if (close_result)
-            freeval(close_result);
-        freeval(process);
-        process = nullptr;
     }
     stdout_stream = nullptr;
     pending.clear();

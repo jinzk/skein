@@ -5,7 +5,7 @@
 #include "fiber.h"
 #include "json.h"
 #include "platform.h"
-#include "process_pipe.h"
+#include "process_io.h"
 #include "process_spawn.h"
 #include "task.h"
 #include "valuetype.h"
@@ -24,7 +24,8 @@ struct worker_pool;
 struct worker_job;
 
 struct worker_slot {
-    process_pipe pipe;
+    value_t *process = nullptr;
+    process_io io;
     std::shared_ptr<worker_job> job;
     bool busy = false;
     /* Set while a fiber is blocked reading this slot's response. */
@@ -47,6 +48,9 @@ struct worker_job {
     }
 };
 
+void close_worker(worker_slot &slot, bool kill_if_running,
+                  bool force = false);
+
 struct worker_pool {
     std::vector<worker_slot> workers;
     std::vector<std::shared_ptr<worker_job>> queue;
@@ -60,7 +64,7 @@ struct worker_pool {
 
     ~worker_pool() {
         for (worker_slot &worker : workers)
-            worker.pipe.close(true, true);
+            close_worker(worker, true, true);
     }
 };
 
@@ -144,9 +148,6 @@ value_t *json_parse(value_t *value) {
     return call_json_builtin(B_json_parse, {value});
 }
 
-void close_worker(worker_slot &slot, bool kill_if_running,
-                  bool force = false);
-
 bool spawn_worker(worker_slot &slot, const std::string &script,
                   long long ready_timeout_ms, bool hybrid,
                   std::string &error) {
@@ -164,19 +165,26 @@ bool spawn_worker(worker_slot &slot, const std::string &script,
     options->payload->items.push_back(std::make_pair(
         newstrval("stderr"), newstrval("inherit")));
 
-    if (!slot.pipe.spawn(executable.c_str(), (value_t *)options, error)) {
-        freeval((value_t *)options);
-        if (error.empty())
-            error = "cannot spawn worker";
+    value_t *executable_value = newstrval(executable.c_str());
+    value_t *process = call_process_spawn_builtin(
+        B_process_spawn_command, {executable_value, (value_t *)options});
+    freeval(executable_value);
+    freeval((value_t *)options);
+    if (!process) {
+        error = "cannot spawn worker";
         return false;
     }
-    freeval((value_t *)options);
+    slot.process = process;
+    if (!slot.io.attach(process, error)) {
+        close_worker(slot, true);
+        return false;
+    }
     /* Reserve the slot while the handshake runs so no fiber can dispatch. */
     slot.busy = true;
     slot.completing = true;
 
     value_t *ready_line =
-        slot.pipe.read_line(ready_timeout_ms, error);
+        slot.io.read_line(ready_timeout_ms, error);
     if (!ready_line) {
         close_worker(slot, true);
         if (error.empty())
@@ -212,14 +220,41 @@ bool spawn_worker(worker_slot &slot, const std::string &script,
 }
 
 void close_worker(worker_slot &slot, bool kill_if_running, bool force) {
-    slot.pipe.close(kill_if_running, force);
+    slot.io.close_streams();
+    if (slot.process) {
+        if (!force) {
+            value_t *timeout = newintval(1000);
+            value_t *wait_result = call_process_spawn_builtin(
+                B_process_wait, {slot.process, timeout});
+            freeval(timeout);
+            if (wait_result)
+                freeval(wait_result);
+        }
+        if (kill_if_running) {
+            std::vector<value_t *> kill_args{slot.process};
+            if (force)
+                kill_args.push_back(newintval(9));
+            value_t *kill_result = call_process_spawn_builtin(
+                B_process_kill, kill_args);
+            if (kill_args.size() > 1)
+                freeval(kill_args[1]);
+            if (kill_result)
+                freeval(kill_result);
+        }
+        value_t *close_result = call_process_spawn_builtin(
+            B_process_close, {slot.process});
+        if (close_result)
+            freeval(close_result);
+        freeval(slot.process);
+        slot.process = nullptr;
+    }
     slot.job.reset();
     slot.busy = false;
     slot.completing = false;
 }
 
 bool worker_usable(const worker_slot &slot) {
-    return slot.pipe.usable();
+    return slot.process && slot.io.usable();
 }
 
 bool restart_worker(worker_pool *pool, worker_slot &slot,
@@ -279,7 +314,7 @@ bool make_request(long long id, const std::string &method, value_t *params,
     return true;
 }
 
-bool read_response(process_pipe &pipe, long long expected_id,
+bool read_response(process_io &pipe, long long expected_id,
                    long long timeout_ms, bool binary, value_t *&result,
                    std::string &transport_error) {
     value_t *line = pipe.read_line(timeout_ms, transport_error);
@@ -394,7 +429,7 @@ bool complete_slot(worker_pool *pool, size_t index, long long timeout_ms) {
     slot.completing = true;
     value_t *result = nullptr;
     std::string transport_error;
-    const bool ok = read_response(slot.pipe, job->id,
+    const bool ok = read_response(slot.io, job->id,
                                   timeout_ms, job->binary, result,
                                   transport_error);
     slot.completing = false;
@@ -445,8 +480,8 @@ void try_dispatch(worker_pool *pool) {
         slot.busy = true;
         /* Block other fibers from reading this slot until the request is out. */
         slot.completing = true;
-        if (!slot.pipe.write(job->request) ||
-            !slot.pipe.flush()) {
+        if (!slot.io.write(job->request) ||
+            !slot.io.flush()) {
             slot.completing = false;
             slot.job.reset();
             slot.busy = false;
@@ -575,7 +610,7 @@ value_t *call_worker_builtin(
                               pool->ready_timeout_ms, pool->hybrid,
                               error)) {
                 for (worker_slot &worker : pool->workers) {
-                    if (worker.pipe.usable())
+                    if (worker.process && worker.io.usable())
                         close_worker(worker, true);
                 }
                 yyerror("std.worker.pool: %s", error.c_str());
@@ -912,8 +947,8 @@ value_t *call_worker_builtin(
         /* Reserve the slot before writing in case the write yields fibers. */
         slot->completing = true;
         if (!make_request(id, method, args[2], nullptr, pool->hybrid, line) ||
-            !slot->pipe.write(line) ||
-            !slot->pipe.flush()) {
+            !slot->io.write(line) ||
+            !slot->io.flush()) {
             slot->completing = false;
             slot->busy = false;
             yyerror("std.worker.call: cannot send request");
@@ -921,7 +956,7 @@ value_t *call_worker_builtin(
         }
         value_t *result = nullptr;
         std::string transport_error;
-        const bool ok = read_response(slot->pipe, id,
+        const bool ok = read_response(slot->io, id,
                                       timeout_ms, false, result,
                                       transport_error);
         slot->completing = false;
@@ -971,8 +1006,8 @@ value_t *call_worker_builtin(
             worker.completing = true;
             if (!make_request(id, method, items->payload->items[start + i],
                               nullptr, pool->hybrid, line) ||
-                !worker.pipe.write(line) ||
-                !worker.pipe.flush()) {
+                !worker.io.write(line) ||
+                !worker.io.flush()) {
                 worker.completing = false;
                 worker.busy = false;
                 freeval((value_t *)results);
@@ -986,7 +1021,7 @@ value_t *call_worker_builtin(
             value_t *result = nullptr;
             std::string transport_error;
             const bool ok =
-                read_response(worker.pipe, ids[i],
+                read_response(worker.io, ids[i],
                               timeout_ms, false, result, transport_error);
             worker.completing = false;
             if (!ok) {

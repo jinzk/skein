@@ -465,7 +465,7 @@ add_library(skein_builtins STATIC
   src/builtins/password.cpp
   src/builtins/process_builtin.cpp
   src/builtins/process_spawn.cpp
-  src/builtins/process_pipe.cpp
+  src/builtins/process_io.cpp
   src/builtins/random_builtin.cpp
   src/builtins/regex_builtin.cpp
   src/builtins/result.cpp

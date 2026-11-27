@@ -2565,6 +2565,9 @@ func add[T Add[T, T]](a: T, b: T): T {
 `std.list.sort` / `std.list.sort_desc` 和 `std.math.min` / `std.math.max`
 在全部参数为 Comparable 用户值时也使用它，显式比较器仍然优先。
 
+`op_eq` 不会自动作为 dict/set key 相等。若希望两者一致，可显式让 `key_eq`
+委托 `op_eq`，并继续由 `dict_hash` 保证 hash 一致性。
+
 `std.traits` 是内嵌 Skein 源码包（`lib/std/traits.skein`），提供内置 trait proto。`Hashable`、`Iterable`、`Callable` 都是默认导入的 prelude proto，无需显式 import。
 
 `Hashable` 是 marker proto，conformance 由内置 key contract 计算：

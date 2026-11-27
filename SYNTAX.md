@@ -5101,6 +5101,15 @@ impl User {
 - `key_eq` 只影响 dict/set（以及 unique、group_by、LRU 等内部使用 dict/set 的操作），不改变普通 `==`。
 - `key_eq` 必须返回 `bool`，并且与 `dict_hash` 一致：`a.key_eq(b)` 为 true 时 hash 必须相同。
 - key_eq 期间禁止重入 dict/set key equality。
+- `op_eq` 不会自动成为 key 相等。若希望复用，可显式委托：
+
+```text
+func key_eq(self, other: User): bool {
+  return self.op_eq(other);
+}
+```
+
+此时仍需 `dict_hash` 与 `key_eq` 保持一致。
 
 ### std.set / std.deque / std.heap
 

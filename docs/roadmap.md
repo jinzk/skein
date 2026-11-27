@@ -606,6 +606,8 @@ M11 继续保持“宏不生成泛型语法”的边界。当前可用组合是�
 - `std.ops.Equatable` 与算术协议同批定义，但相等/比较运算符晚于算术运算符接线；
   它与 `std.dict_key.KeyEquatable` 是不同协议；
 - `KeyEquatable.key_eq` 继续只服务 dict/set，且不改变普通 `==`；
+- `op_eq` 不自动作为 dict/set key 相等；需要复用时由用户显式让 `key_eq`
+  委托 `op_eq`，并继续由 `dict_hash` 保证 hash 一致性；
 - 标准库 `std.list.sort` / `std.list.sort_desc` 和 `std.math.min` / `std.math.max`
   在全部参数为 Comparable 用户值时使用 `op_cmp`；显式比较器仍然优先，内置数值、
   字符串与 NaN 语义不变；

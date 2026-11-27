@@ -2791,8 +2791,9 @@ job.wait(5000);      // ok(9)
 job.done();          // true
 job.id();
 
-conn.stats();        // {calls, errors, protocol, closed, owns, pending}
+conn.stats();        // {calls, errors, reconnects, protocol, closed, owns, pending}
 conn.pid();
+conn.reconnect();    // ok(true)，重新 spawn 子进程（仅 rpc.spawn 创建的连接）
 conn.close();
 ```
 
@@ -2808,12 +2809,13 @@ a.wait(5000);        // ok(3)，直接取缓存
 ```
 
 - `rpc.spawn(command[, options])` 用 `std.process.spawn_pipe` 启动子进程并持有其生命周期；
+- `Connection.reconnect()` 关闭当前子进程，用相同的 command/options 重新 spawn 并完成握手，然后清空 `pending` 并解除 closed；`rpc.connect` 借用的连接没有 command，调用返回 `err`；
 - `rpc.connect(io[, options])` 复用已有 `process_io`，只借用，不接管进程；
 - 两者支持 `protocol`、`ready`、`timeout_ms`、`encode`、`decode` 选项；
 - `call` / `call_timeout` / `call_bytes` 返回 `ok(result)` 或 `err(error(kind, message))`；
 - `submit` / `submit_bytes` 立即发送请求并返回 `rpc.Job`；
 - `Job.wait()` 读取自己的响应，期间会把其他 job 的响应缓存到 `pending`，支持乱序等待；
-- `Connection.stats()` 返回 `{calls, errors, protocol, closed, owns, pending}`，`pending` 是已缓存但尚未取走的响应数。
+- `Connection.stats()` 返回 `{calls, errors, reconnects, protocol, closed, owns, pending}`，`pending` 是已缓存但尚未取走的响应数。
 
 连接池 `rpc.pool(clients)` 把多个 `RpcClient` 包装成 round-robin 客户端。传入的 clients 可以是 `rpc.Connection`、`std.worker.pool` 或任何满足 `RpcClient` 的对象：
 
@@ -2836,7 +2838,7 @@ job.done();
 
 let results = pool.map("double", [1, 2, 3, 4]);   // list[result]，按 round-robin 派发
 
-pool.stats();        // {clients, calls, errors, closed, healthy}
+pool.stats();        // {clients, calls, errors, reconnects, closed, healthy}
 pool.health();       // [{index, failures, open}, ...]
 pool.reset();        // 清除失败计数并重新闭合所有熔断
 pool.close();
@@ -2859,6 +2861,7 @@ rpc.pool(clients, {
 ```
 
 - 客户端连续失败达到 `failure_limit` 后，其熔断打开，`stats().healthy` 减一；
+- 熔断打开时，池会尝试调用客户端的 `reconnect()`（如果存在）。重连成功会清空该客户端的失败计数并立即闭合熔断，`stats().reconnects` 加一；显式 `close()` 过的客户端会被跳过，`worker_pool` 等没有 `reconnect()` 的客户端也不受影响；
 - `pick` 会跳过熔断中的客户端；如果全部熔断，则按 round-robin 选一个做半开探测；
 - 超过 `cooldown_ms` 后熔断自动闭合，下一次调用会重新探测该客户端；
 - 调用成功后对应客户端的失败计数清零，熔断闭合；

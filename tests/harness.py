@@ -1267,6 +1267,46 @@ def check_extended_stdlib():
             )
         restart_path = restart_script.replace("\\", "\\\\")
         check(
+            "std.rpc connection reconnect",
+            "import std;\n"
+            "import std.rpc;\n"
+            f'let c = rpc.spawn("{binary_path}", '
+            f'{{"args": ["{restart_path}"]}});\n'
+            'print("before=" + str(std.result.unwrap('
+            'c.call("add", [1, 2]))));\n'
+            'print("dieerr=" + str(std.result.is_err('
+            'c.call("die", [1, 2]))));\n'
+            "let opened = c.reconnect();\n"
+            'print("opened=" + str(std.result.is_ok(opened)));\n'
+            'print("after=" + str(std.result.unwrap('
+            'c.call("add", [10, 20]))));\n'
+            'print("rec=" + str(c.stats()["reconnects"]));\n'
+            "c.close();\n",
+            stdout_all=["before=3", "dieerr=true", "opened=true",
+                        "after=30", "rec=1"],
+        )
+        check(
+            "std.rpc pool auto reconnect",
+            "import std;\n"
+            "import std.rpc;\n"
+            f'let c = rpc.spawn("{binary_path}", '
+            f'{{"args": ["{restart_path}"]}});\n'
+            'let p = rpc.pool([c], '
+            '{"failure_limit": 1, "cooldown_ms": 100000});\n'
+            'print("before=" + str(std.result.unwrap('
+            'p.call("add", [1, 2]))));\n'
+            'print("dieerr=" + str(std.result.is_err('
+            'p.call("die", [3, 4]))));\n'
+            'print("failures=" + str(p.health()[0]["failures"]));\n'
+            'print("after=" + str(std.result.unwrap('
+            'p.call("add", [10, 20]))));\n'
+            'print("rec=" + str(p.stats()["reconnects"]));\n'
+            'print("healthy=" + str(p.stats()["healthy"]));\n'
+            "p.close();\n",
+            stdout_all=["before=3", "dieerr=true", "failures=0",
+                        "after=30", "rec=1", "healthy=1"],
+        )
+        check(
             "std.worker submit and wait",
             "import std;\n"
             f'let pool = std.worker.pool(2, "{worker_path}");\n'

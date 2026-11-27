@@ -10,6 +10,7 @@ package rpc {
     _submit: Callable;
     _submit_bytes: Callable;
     _close: Callable;
+    _reconnect: Callable;
     _pid: Callable;
     _stats: Callable;
     options: dict;
@@ -43,6 +44,11 @@ package rpc {
 
     func close(self) {
       self._close();
+    }
+
+    // Re-spawn the child process for a connection created by rpc.spawn.
+    func reconnect(self) {
+      return self._reconnect();
     }
 
     func pid(self) {
@@ -180,18 +186,11 @@ package rpc {
         io, options, protocol,
         std.dict.get(options, "timeout_ms", 5000));
     }
-    return _connection(io, options, false);
+    return _connection(io, options, false, null);
   }
 
-  // Spawn a child process with std.process.spawn_pipe and wrap it as an
-  // owning RPC connection.  RPC options are ignored by spawn.
-  export func spawn(command, options = {}) {
+  func _spawn_opened(command, options, protocol) {
     let io = std.process.spawn_pipe(command, options);
-    let protocol = std.dict.get(options, "protocol", "jsonl");
-    if (protocol != "jsonl" && protocol != "hybrid") {
-      io.close();
-      fail("rpc.spawn supports protocol \"jsonl\" or \"hybrid\"");
-    }
     let opened = std.result.capture(func() {
       if (std.dict.get(options, "ready", true)) {
         _handshake(
@@ -204,7 +203,21 @@ package rpc {
       io.close();
       fail(std.error.message(error));
     }
-    return _connection(io, options, true);
+    return io;
+  }
+
+  // Spawn a child process with std.process.spawn_pipe and wrap it as an
+  // owning RPC connection.  RPC options are ignored by spawn.
+  export func spawn(command, options = {}) {
+    let protocol = std.dict.get(options, "protocol", "jsonl");
+    if (protocol != "jsonl" && protocol != "hybrid") {
+      fail("rpc.spawn supports protocol \"jsonl\" or \"hybrid\"");
+    }
+    let io = _spawn_opened(command, options, protocol);
+    let reopen = func() {
+      return _spawn_opened(command, options, protocol);
+    };
+    return _connection(io, options, true, reopen);
   }
 
   // Custom framing hook: encode a frame dict as one line (without newline).
@@ -254,15 +267,17 @@ package rpc {
     }
   }
 
-  func _connection(io, options, owns) {
+  func _connection(io, options, owns, reopen) {
     let protocol = std.dict.get(options, "protocol", "jsonl");
     let state = {
       "protocol": protocol,
       "next_id": 1,
       "calls": 0,
       "errors": 0,
+      "reconnects": 0,
       "closed": false,
       "owns": owns,
+      "io": io,
       "pending": {}
     };
 
@@ -271,7 +286,8 @@ package rpc {
     let send = func(method, params, body) {
       let id = state["next_id"];
       state["next_id"] = id + 1;
-      _send_frame(io, options, protocol, id, method, params, body);
+      _send_frame(
+        state["io"], options, protocol, id, method, params, body);
       return id;
     };
 
@@ -290,7 +306,8 @@ package rpc {
             state["pending"] = std.dict.delete(state["pending"], id);
             return entry;
           }
-          let frame = _read_frame(io, options, protocol, timeout_ms);
+          let frame = _read_frame(
+            state["io"], options, protocol, timeout_ms);
           let response = frame["response"];
           let response_id = std.dict.get(response, "id", 0);
           if (response_id == id) {
@@ -356,6 +373,30 @@ package rpc {
       };
     };
 
+    let reconnect_one = func() {
+      if (reopen == null) {
+        return std.result.err(std.error.new(
+          "rpc", "connection cannot reconnect without a spawn command"));
+      }
+      let opened = std.result.capture(func() {
+        return reopen();
+      });
+      if (std.result.is_err(opened)) {
+        state["errors"] = state["errors"] + 1;
+        return opened;
+      }
+      if (state["closed"] == false) {
+        std.result.capture(func() {
+          state["io"].close();
+        });
+      }
+      state["io"] = std.result.unwrap(opened);
+      state["pending"] = {};
+      state["closed"] = false;
+      state["reconnects"] = state["reconnects"] + 1;
+      return std.result.ok(true);
+    };
+
     return Connection {
       _call: func(method, args, timeout_ms) {
         return perform(
@@ -373,16 +414,20 @@ package rpc {
       _close: func() {
         if (state["closed"] == false) {
           state["closed"] = true;
-          io.close();
+          std.result.capture(func() {
+            state["io"].close();
+          });
         }
       },
+      _reconnect: reconnect_one,
       _pid: func() {
-        return io.pid();
+        return state["io"].pid();
       },
       _stats: func() {
         return {
           "calls": state["calls"],
           "errors": state["errors"],
+          "reconnects": state["reconnects"],
           "protocol": state["protocol"],
           "closed": state["closed"],
           "owns": state["owns"],
@@ -467,6 +512,21 @@ package rpc {
     return client.submit(method, args);
   }
 
+  // Reconnect a client when it supports it.  Other clients (for example
+  // worker_pool) are left untouched.
+  func _client_reconnect(client) {
+    if (_has_method(client, "reconnect") == false) {
+      return std.result.ok(false);
+    }
+    if (_has_method(client, "stats")) {
+      let stats = client.stats();
+      if (stats["closed"] == true) {
+        return std.result.ok(false);
+      }
+    }
+    return client.reconnect();
+  }
+
   // Create a round-robin pool over a list of RpcClient objects.
   //
   // options:
@@ -487,6 +547,7 @@ package rpc {
       "next": 0,
       "calls": 0,
       "errors": 0,
+      "reconnects": 0,
       "closed": false,
       "health": health
     };
@@ -522,6 +583,25 @@ package rpc {
       return {"client": clients[idx], "index": idx};
     };
 
+    // A successful reconnect clears the circuit immediately.  Failures are
+    // swallowed so they do not replace the original RPC error.
+    let _try_reconnect = func(idx) {
+      let captured = std.result.capture(func() {
+        return _client_reconnect(clients[idx]);
+      });
+      if (std.result.is_err(captured)) {
+        return false;
+      }
+      let reopened = std.result.unwrap(captured);
+      if (kind_of(reopened) != "result" ||
+          std.result.is_err(reopened) ||
+          std.result.unwrap(reopened) != true) {
+        return false;
+      }
+      state["reconnects"] = state["reconnects"] + 1;
+      return true;
+    };
+
     let record_health = func(idx, result) {
       if (failure_limit > 0) {
         if (std.result.is_err(result)) {
@@ -530,6 +610,10 @@ package rpc {
           if (state["health"][idx]["failures"] >= failure_limit) {
             state["health"][idx]["open_until"] =
               std.time.monotonic_ms() + cooldown_ms;
+            if (_try_reconnect(idx)) {
+              state["health"][idx]["failures"] = 0;
+              state["health"][idx]["open_until"] = 0;
+            }
           }
         } else {
           state["health"][idx]["failures"] = 0;
@@ -645,6 +729,7 @@ package rpc {
           "clients": len(clients),
           "calls": state["calls"],
           "errors": state["errors"],
+          "reconnects": state["reconnects"],
           "closed": state["closed"],
           "healthy": healthy
         };

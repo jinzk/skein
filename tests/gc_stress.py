@@ -202,6 +202,15 @@ std.generator.next(gen);
 let pair_total = apply_pair(make_one(1), slow_make_one(2), 0);
 println("pair " + str(pair_total));
 
+/* A member call frees its receiver while the JIT slot is still rooted. */
+struct Holder {
+  f: Callable;
+  func run(self, g, pad, churn) { return self.f(pad) + g(pad); }
+}
+let holder = Holder { f: make_one(3) };
+let member_total = holder.run(make_one(4), 0, slow_key(0));
+println("member " + str(member_total));
+
 let churn = slow_true(0);
 println("churn " + str(churn));
 """
@@ -226,6 +235,7 @@ EXPECTED = [
     "lazy 336",
     "generator 5",
     "pair 3",
+    "member 7",
     "churn true",
 ]
 

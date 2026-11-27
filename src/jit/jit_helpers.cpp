@@ -2459,6 +2459,7 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_invoke_method(
         }
     }
     value_t *callee = nullptr;
+    bool receiver_owned = false;
     if (receiver && name) {
         const char *private_owner = nullptr;
         if (receiver->type == T_struct) {
@@ -2504,8 +2505,10 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_invoke_method(
             callee = skein_vm_read_member_value(receiver,
                                                 (struct value_t *)&key,
                                                 true);
+            /* Keep the receiver alive until the nested call returns: its JIT
+             * slot is still rooted while callee runs. */
             if (callee)
-                freeval(receiver);
+                receiver_owned = true;
         }
     }
     if (!callee) {
@@ -2516,6 +2519,8 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_invoke_method(
     }
     skein::jit::invoke_fn fn = skein::jit::invoke();
     if (!fn) {
+        if (receiver_owned)
+            freeval(receiver);
         freeval(callee);
         for (uint32_t i = 0; i < argc; ++i)
             freeval(args[i]);
@@ -2523,6 +2528,8 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_invoke_method(
         return nullptr;
     }
     value_t *result = fn(callee, args, argc);
+    if (receiver_owned)
+        freeval(receiver);
     if (g_interrupted) {
         freeval(result);
         return nullptr;

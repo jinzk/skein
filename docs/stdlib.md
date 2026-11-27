@@ -249,11 +249,11 @@ t.detached() -> bool
 - 顶层脚本没有父 task，顶层 `launch` 默认 detached，需要显式 `wait()`；
 - generator fiber 没有 task 父级，其中的 `launch` 也按 detached 处理。
 
-当前限制：
+当前限制与写法：
 
 - `wait` 的规范写法是内置宏 `wait!`（规范路径 `std.task.wait!`，展开为
-  `t.wait()`），旧关键字形式暂时并行；规划中 `launch` / `await` 是表达式起始
-  contextual keyword，M11 落地前当前实现仍使用保留字 `launch` / `wait`；
+  `t.wait()`），旧关键字形式暂时兼容；`launch` / `await` 已是表达式起始
+  contextual keyword，不再是全局保留字，`await f()` 等价 `wait launch f()`；
 - `launch` 推导为 `task[T]`；`func f(): void` 推导为 `task[void]`；
 - 静态已知返回 `task[...]` 的调用不能 `launch`，会报
   `launch cannot start a call that already returns task[...]; call it directly and use .wait()`；
@@ -1386,14 +1386,15 @@ let db = b.wait();
 
 - 普通函数可以直接调用会挂起的 API，并在当前 fiber 上隐式挂起；
 - `launch` 创建新 task，立即返回 `task[T]`，不阻塞、不自动 `.wait()`；
-- `t.wait()` 等待并返回值；`std.task.wait(t)` 保留为兼容别名；
+- `t.wait()` 等待并返回值；`std.task.wait(t)` 是同一包内的命名空间函数形式，宏 `wait!` 展开为 `t.wait()`；
 - 多个 task 可以先 `launch`，再分别 `wait()`，从而并发执行；
 - task 内部错误会变成 task 失败，在 `wait()` 处抛出；
 - `t.try_wait()` 返回 `result[T]`，用于不抛出地检查结果；
 - `yield` 不用于 task；主动让出使用 `std.task.yield()`；
 - 协程栈由 Boost.Context 提供，支持 Boost.Context 覆盖的平台。
 
-`async` / `await` 已移除：
+旧的 `async` 函数颜色与“`await` 任意表达式”写法已移除；当前 `await` 是
+表达式起始 contextual keyword，只接受调用表达式：
 
 ```text
 // 旧写法不再解析
@@ -1403,6 +1404,7 @@ let db = b.wait();
 func fetch(port) {
   return std.net.tcp_connect_task("127.0.0.1", port, 1000).wait();
 }
+let same = await fetch(8080);
 let t = launch fetch(8080);
 println(t.wait());
 ```
@@ -4155,7 +4157,8 @@ std.thread.capabilities
 
 - `std` 是内置包，不参与文件系统查找，也不需要满足目录名规则；
 - `std` 名称保留，不能通过源码包覆盖；
-- 使用 `import std;` 后通过 `std.list`、`std.string` 等方式访问；
+- `std.*` 是规范形式；使用 `import std;` 后通过 `std.list`、`std.string` 等方式访问；
+- 保留的无 `import` 裸名只来自 prelude 默认 import（`len` / `range` / `print` / `println` / `input` / `kind_of` / `type_name` / `type_package` / `type_module_name` / `type_source` / `list` / `dict`），不是全局兼容别名，可被局部绑定或显式 import 遮蔽；
 - 数学、字符串、格式化、文件与 bytes 的旧全局函数（如 `find`、`split`、`bytes_*`、`file_*`）已移除，请改用对应的 `std.math` / `std.string` / `std.fs` / `std.bytes` 函数；
 - `std` 导入得到的是命名空间副本，修改自己的副本不会污染内置缓存；
 - 新函数只通过 `std.*` 提供，不再增加全局函数名；
@@ -4194,7 +4197,7 @@ std.thread.capabilities
 - `std.string.to_lower` / `to_upper` 使用 Unicode 默认完整大小写映射（与 locale 无关）：`to_upper("ß")` 是 `SS`，`to_upper("ﬁ")` 是 `FI`，`to_lower("İ")` 是 `i` + `U+0307`，希腊文词尾 `Σ` 映射为 `ς`；输出长度可能变化，映射有损且不可逆；无效 UTF-8 报错；
 - `std.unicode.casefold` 是完整大小写折叠，`ß` / `ẞ` / `SS` 都折叠为 `ss`，`ς` 折叠为 `σ`；结果可能变长，仅用于大小写不敏感比较，不用于展示；
 - 大小写不敏感比较应先 NFC 归一化，再 `casefold`，再比较；`casefold` 本身不做归一化；
-- `std.math` 与全局数学函数使用同一套实现；
+- 数学函数统一通过 `std.math` 提供，不再保留全局数学函数别名；
 - `std.io` 提供 `print`、`println`、`format`、`input`，以及文件和 socket 通用的流式读写；`print` 不追加换行，`println` 输出后自动追加换行符；
 - `std.fs` 提供文件读写和文件句柄操作；
 - `std.process` 提供命令执行和状态查询；
@@ -4231,7 +4234,7 @@ std.thread.capabilities
 - `std.result.capture` 捕获同步 `fail` 和运行时错误；task 使用 `std.task.catch`；
 - 显式 `std.generator.close(g)` 会执行生成器的 `defer`；被直接丢弃的挂起生成器不会执行，但会打印 warning；
 - DNS 超时依赖 libuv 取消系统解析请求，极端情况下可能延迟返回；
-- 全局函数目前仍作为兼容别名保留，新代码建议使用 `std.*`。
+- 裸名 prelude 绑定与 `std.*` 是同一批内置函数的两个入口；新代码优先使用规范路径 `std.*`。
 
 ### 控制台输入
 

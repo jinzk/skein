@@ -864,7 +864,9 @@ name!(expr, ...) { statements }
 
 `!` 紧跟宏名；括号内只能是表达式参数，`{}` 中最多一个尾部 block。
 宏名本身不是一等值，不能赋值或传入函数；宏调用在展开后是普通表达式，
-可用于赋值等表达式位置。用户自定义 `macro` 声明不在第一批范围内。
+可用于赋值等表达式位置。用户自定义 `macro` 声明已支持：同文件声明先于使用，
+跨包用 `export macro` / `import {name!} from pkg;`，详见
+[`docs/macros_user_defined.md`](docs/macros_user_defined.md)。
 
 首批宏：
 
@@ -4416,7 +4418,7 @@ let db = b.wait();
   `make().get()`；`launch f().wait()` 解析为 `launch (f().wait())`，
   不会先 launch 再 wait。需要“启动后等待”请写 `await f()` 或
   `(launch f()).wait()`；
-- `t.wait()` 等待并返回值；`std.task.wait(t)` 保留为兼容别名；
+- `t.wait()` 等待并返回值；`std.task.wait(t)` 是同包命名空间函数形式，`wait!` 展开为 `t.wait()`；
 - `wait!(t)` 是 `t.wait()` 的内置宏糖；`await f()` 等价于
   `wait launch f()`，即启动调用并立即等待；
 - 多个 task 可以先 `launch`，再分别 `wait()`，从而并发执行；
@@ -4425,8 +4427,8 @@ let db = b.wait();
 - `yield` 不用于 task；主动让出使用 `std.task.yield()`；
 - 使用 Boost.Context 提供有栈协程。
 
-旧的 `async` 函数颜色与 `await` 任意表达式写法已移除。规划中的 `await` 是新的
-contextual 语法：只接受调用表达式，表示“启动子 fiber 并立即等待”，不引入函数
+旧的 `async` 函数颜色与 `await` 任意表达式写法已移除。当前 `await` 是
+表达式起始 contextual 语法：只接受调用表达式，表示“启动子 fiber 并立即等待”，不引入函数
 颜色，也不等待任意 task 表达式（后者用 `wait!(t)`）：
 
 ```text

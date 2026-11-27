@@ -1,13 +1,12 @@
 # 用户自定义宏设计（设计方案）
 
-- 状态：P1 / P2 / P3.1 / P4 同文件 v1、跨包宏、G1 AST 泛型实参、G2 受限
+- 状态：P1 / P2 / P3.1 / P4 用户宏 v1（同文件 + 跨包 selective import）、G1 AST 泛型实参、G2 受限
   `type` 片段、G3 边界强化、G4 工具链与双后端同步、G5 核心约束验收已完成
 - 关联：[`docs/macros.md`](macros.md)、[`docs/roadmap.md`](roadmap.md)
 - 建议里程碑：M11，不回写已完成的 M10
 - 拟改动：`src/interpreter/tokens.l`、`src/interpreter/parser.y`、新增
   `src/interpreter/user_macros.{h,cpp}`，以及 formatter / lint / LSP 配套
-- 跨包前提：先为值/类型增加 selective import
-  `import {name} from pkg;`，宏复用同一形式并加 `!`
+- 跨包宏与值/类型共用 selective import `import {name} from pkg;`，宏名加 `!`
 
 ## 1. 结论摘要
 
@@ -24,10 +23,9 @@ typecheck 前展开**。它不应变成编译期任意执行，也不应触碰�
   参数），所有其他参数仍必须写在括号内；
 - 内置宏也按默认 import 处理：裸名是解析期的隐式绑定，每个宏都有规范路径，
   用户宏可以遮蔽裸名，但规范路径仍可显式调用（第 3.5 节）；
-- 只在**同一文件、声明先于使用**的范围内可见；
-- 跨包阶段先用 `import {retry, Point} from util;` 给值/类型增加 selective
-  import，宏写作 `import {retry!} from util;`；`from` 是 contextual keyword；
-- 禁止递归、跨模块宏、泛型语法生成、类型内省、一等宏值和核心控制流重写。
+- 同文件宏遵循声明先于使用；跨包宏通过 `export macro` 与
+  `import {retry!} from util;` 显式导入，`from` 是 contextual keyword；
+- 禁止递归、隐式跨模块宏、泛型语法生成、类型内省、一等宏值和核心控制流重写。
 
 > 泛型负责类型抽象；宏负责语法抽象。这条边界在用户自定义宏中继续成立。
 
@@ -136,7 +134,7 @@ call_all!(add, 1, 2, 3);
 
 `!` 仍然必须紧贴宏名；普通调用、泛型下标、一元 `!` 和 `!(expr)` 不受影响。
 
-规划中的简写只追加两种形式：
+已支持的简写追加两种形式：
 
 | 写法 | 含义 |
 | --- | --- |
@@ -319,7 +317,7 @@ wrap!(2) {
 - `shape` 类型、proto 字段或鸭子类型；
 - 运算符宏；
 - 专用宏 opcode；
-- v1 跨模块宏可见性；后续按第 3.4 节的 selective import 设计；
+- 隐式跨模块宏可见性；跨包只按第 3.4 节的 selective import 显式导入；
 - 把 `from` 设为全局保留字；它只作为 selective import 的 contextual keyword；
 - 改变装饰器语义：装饰器继续是 `@expr` 普通高阶函数。
 
@@ -480,8 +478,8 @@ G5 用负例验收非文本展开、无编译期执行/类型检查、非一等�
 
 1. 使用 `#参数名` 作为模板占位符标记；
 2. `macro` 作为新保留关键字；
-3. v1 只支持同文件、声明先于使用；
-4. 禁止递归和跨模块宏；
+3. 同文件宏声明先于使用；跨包宏通过 `export macro` / `import {name!} from pkg;` 显式导入；
+4. 禁止递归和隐式跨模块宏；
 5. 内置宏改为默认 import 的解析期绑定；同文件用户宏可遮蔽裸名，规范路径仍可
    显式调用（已确认，以第 3.5 节为准）；
 6. 用户宏作为 M11，不回写已完成的 M10；
@@ -493,7 +491,7 @@ G5 用负例验收非文本展开、无编译期执行/类型检查、非一等�
    `launch` / `await` 走表达式起始 contextual；
 10. `in`、`export`、`package`、`import`、`include` 同属低风险 contextual
    keyword，在 Phase 1 处理；`module` 仅用于 manifest，不占 `.skein` 保留字；
-11. 普通内置函数改为默认 import；`len` / `range` 放进规划中的 `std.utils`
+11. 普通内置函数改为默认 import；`len` / `range` 放进 `std.utils`
    模块，而不是 `std.prelude`；解析优先级为局部绑定 > 显式 import > 默认
    import；
 12. `list` / `dict` 作为默认 import 的 `std.list` / `std.dict`，裸构造调用与

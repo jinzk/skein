@@ -350,9 +350,16 @@ static bool resolve_write_container(
                 yyerror("invalid index assignment path");
                 return false;
             }
-            struct value_t *elem = userdata->meta->get_field(
-                userdata->data.get(),
-                ((struct string_value_t *)indices[k])->value);
+            struct value_t *elem;
+            if (userdata->meta->get_field_with_self) {
+                elem = userdata->meta->get_field_with_self(
+                    container, userdata->data.get(),
+                    ((struct string_value_t *)indices[k])->value);
+            } else {
+                elem = userdata->meta->get_field(
+                    userdata->data.get(),
+                    ((struct string_value_t *)indices[k])->value);
+            }
             if (!elem)
                 return false;
             if (holds)
@@ -1298,6 +1305,11 @@ struct value_t *read_member_value(struct value_t *container,
         if (!userdata->meta || !userdata->meta->get_field) {
             yyerror("%s values do not have fields", typename_of(container));
             return NULL;
+        }
+        if (userdata->meta->get_field_with_self) {
+            return userdata->meta->get_field_with_self(
+                container, userdata->data.get(),
+                ((struct string_value_t *)index)->value);
         }
         return userdata->meta->get_field(
             userdata->data.get(), ((struct string_value_t *)index)->value);

@@ -4,6 +4,7 @@
 #include "binding_registry.h"
 #include "eval.h"
 #include "event_loop.h"
+#include "gc.h"
 #include "symbol.h"
 #include "task.h"
 
@@ -77,11 +78,29 @@ void release_post_values(post_job &job) {
     job.args.clear();
 }
 
+/* Queued callbacks live in C++ state until the owner thread drains them, so
+ * their closures must be marked by the collector independently of the active
+ * script frame. */
+void visit_post_roots(void *, gc_mark_fn mark, void *mark_ctx, gc_pin_fn pin,
+                      void *pin_ctx) {
+    std::lock_guard<std::mutex> lock(post_mutex());
+    for (const std::shared_ptr<post_job> &job : post_queue()) {
+        gc_mark_pinned_value(pin, pin_ctx, mark, mark_ctx, job->callee);
+        for (value_t *arg : job->args)
+            gc_mark_pinned_value(pin, pin_ctx, mark, mark_ctx, arg);
+    }
+}
+
 } // namespace
 
 void install(skein_context *ctx) {
     if (!ctx)
         return;
+    static const bool roots_registered = [] {
+        gc_add_global_root_visitor(&visit_post_roots);
+        return true;
+    }();
+    (void)roots_registered;
     ctx->drain_native_tasks = background_drain;
     ctx->call_task = call_task;
     ctx->task_cancelled = task_cancelled;

@@ -68,8 +68,43 @@ struct worker_pool : std::enable_shared_from_this<worker_pool> {
     }
 };
 
-value_t *worker_pool_get_field(void *data, const char *name);
-value_t *worker_job_get_field(void *data, const char *name);
+value_t *worker_pool_get_field(value_t *self, void *data, const char *name);
+value_t *worker_job_get_field(value_t *self, void *data, const char *name);
+
+/* Compatibility entry points for callers that only hold the payload. */
+value_t *worker_pool_get_field_plain(void *data, const char *name) {
+    return worker_pool_get_field(nullptr, data, name);
+}
+value_t *worker_job_get_field_plain(void *data, const char *name) {
+    return worker_job_get_field(nullptr, data, name);
+}
+
+void worker_job_for_each_child(
+    const void *data,
+    const std::function<void(const struct value_t *child)> &visit) {
+    const worker_job *job = static_cast<const worker_job *>(data);
+    if (job && job->result)
+        visit(job->result);
+}
+
+void worker_pool_for_each_child(
+    const void *data,
+    const std::function<void(const struct value_t *child)> &visit) {
+    const worker_pool *pool = static_cast<const worker_pool *>(data);
+    if (!pool)
+        return;
+    for (const worker_slot &slot : pool->workers) {
+        if (slot.process)
+            visit(slot.process);
+        if (slot.io.stdin_stream)
+            visit(slot.io.stdin_stream);
+        if (slot.io.stdout_stream)
+            visit(slot.io.stdout_stream);
+        worker_job_for_each_child(slot.job.get(), visit);
+    }
+    for (const std::shared_ptr<worker_job> &job : pool->queue)
+        worker_job_for_each_child(job.get(), visit);
+}
 
 const native_type kWorkerPoolType = {
     "worker_pool",
@@ -81,9 +116,10 @@ const native_type kWorkerPoolType = {
                " workers>";
     },
     nullptr,
+    worker_pool_get_field_plain,
+    nullptr,
+    worker_pool_for_each_child,
     worker_pool_get_field,
-    nullptr,
-    nullptr,
 };
 
 value_t *new_pool_value(std::shared_ptr<worker_pool> pool) {
@@ -104,9 +140,10 @@ const native_type kWorkerJobType = {
                (job->done ? " done>" : ">");
     },
     nullptr,
+    worker_job_get_field_plain,
+    nullptr,
+    worker_job_for_each_child,
     worker_job_get_field,
-    nullptr,
-    nullptr,
 };
 
 value_t *new_job_value(std::shared_ptr<worker_job> job) {
@@ -145,113 +182,125 @@ value_t *job_builtin_call(const std::shared_ptr<worker_job> &job,
     return result;
 }
 
-value_t *worker_pool_get_field(void *data, const char *name) {
+value_t *worker_pool_get_field(value_t *self, void *data, const char *name) {
     worker_pool *raw = static_cast<worker_pool *>(data);
     if (!raw || !name) {
         yyerror("worker_pool has no field");
         return nullptr;
     }
     auto pool = raw->shared_from_this();
+    auto method = [pool, self](
+        std::function<value_t *(const std::vector<value_t *> &)> call) {
+        value_t *fn = newnativeval(std::move(call), pool);
+        native_add_child(fn, self);
+        return fn;
+    };
     if (std::strcmp(name, "call") == 0) {
-        return newnativeval([pool](const std::vector<value_t *> &args) {
+        return method([pool](const std::vector<value_t *> &args) {
             if (args.size() < 2 || args.size() > 3) {
                 yyerror("worker_pool.call expects method, args[, timeout_ms]");
                 return (value_t *)nullptr;
             }
             return pool_builtin_call(pool, B_worker_call, args);
-        }, pool);
+        });
     }
     if (std::strcmp(name, "call_bytes") == 0) {
-        return newnativeval([pool](const std::vector<value_t *> &args) {
+        return method([pool](const std::vector<value_t *> &args) {
             if (args.size() < 3 || args.size() > 4) {
                 yyerror("worker_pool.call_bytes expects method, args, body[, timeout_ms]");
                 return (value_t *)nullptr;
             }
             return pool_builtin_call(pool, B_worker_call_bytes, args);
-        }, pool);
+        });
     }
     if (std::strcmp(name, "submit") == 0) {
-        return newnativeval([pool](const std::vector<value_t *> &args) {
+        return method([pool](const std::vector<value_t *> &args) {
             if (args.size() != 2) {
                 yyerror("worker_pool.submit expects method and args");
                 return (value_t *)nullptr;
             }
             return pool_builtin_call(pool, B_worker_submit, args);
-        }, pool);
+        });
     }
     if (std::strcmp(name, "submit_bytes") == 0) {
-        return newnativeval([pool](const std::vector<value_t *> &args) {
+        return method([pool](const std::vector<value_t *> &args) {
             if (args.size() != 3) {
                 yyerror("worker_pool.submit_bytes expects method, args and body");
                 return (value_t *)nullptr;
             }
             return pool_builtin_call(pool, B_worker_submit_bytes, args);
-        }, pool);
+        });
     }
     if (std::strcmp(name, "map") == 0) {
-        return newnativeval([pool](const std::vector<value_t *> &args) {
+        return method([pool](const std::vector<value_t *> &args) {
             if (args.size() < 2 || args.size() > 3) {
                 yyerror("worker_pool.map expects method, items[, timeout_ms]");
                 return (value_t *)nullptr;
             }
             return pool_builtin_call(pool, B_worker_map, args);
-        }, pool);
+        });
     }
     if (std::strcmp(name, "shutdown") == 0) {
-        return newnativeval([pool](const std::vector<value_t *> &args) {
+        return method([pool](const std::vector<value_t *> &args) {
             if (!args.empty()) {
                 yyerror("worker_pool.shutdown expects no arguments");
                 return (value_t *)nullptr;
             }
             return pool_builtin_call(pool, B_worker_shutdown, args);
-        }, pool);
+        });
     }
     if (std::strcmp(name, "stats") == 0) {
-        return newnativeval([pool](const std::vector<value_t *> &args) {
+        return method([pool](const std::vector<value_t *> &args) {
             if (!args.empty()) {
                 yyerror("worker_pool.stats expects no arguments");
                 return (value_t *)nullptr;
             }
             return pool_builtin_call(pool, B_worker_stats, args);
-        }, pool);
+        });
     }
     yyerror("worker_pool has no field %s", name);
     return nullptr;
 }
 
-value_t *worker_job_get_field(void *data, const char *name) {
+value_t *worker_job_get_field(value_t *self, void *data, const char *name) {
     worker_job *raw = static_cast<worker_job *>(data);
     if (!raw || !name) {
         yyerror("worker_job has no field");
         return nullptr;
     }
     auto job = raw->shared_from_this();
+    auto method = [job, self](
+        std::function<value_t *(const std::vector<value_t *> &)> call) {
+        value_t *fn = newnativeval(std::move(call), job);
+        native_add_child(fn, self);
+        return fn;
+    };
     if (std::strcmp(name, "wait") == 0) {
-        return newnativeval([job](const std::vector<value_t *> &args) {
+        return method([job](const std::vector<value_t *> &args) {
             if (args.size() > 1) {
                 yyerror("worker_job.wait expects at most one timeout");
                 return (value_t *)nullptr;
             }
             return job_builtin_call(job, B_worker_wait, args);
-        }, job);
+        });
     }
     if (std::strcmp(name, "id") == 0) {
-        return newnativeval([job](const std::vector<value_t *> &args) {
+        return method([job](const std::vector<value_t *> &args) {
             if (!args.empty()) {
                 yyerror("worker_job.id expects no arguments");
                 return (value_t *)nullptr;
             }
             return newintval(job->id);
-        }, job);
+        });
     }
     if (std::strcmp(name, "done") == 0) {
-        return newnativeval([job](const std::vector<value_t *> &args) {
+        return method([job](const std::vector<value_t *> &args) {
             if (!args.empty()) {
                 yyerror("worker_job.done expects no arguments");
                 return (value_t *)nullptr;
             }
             return newboolval(job->done);
-        }, job);
+        });
     }
     yyerror("worker_job has no field %s", name);
     return nullptr;
@@ -596,6 +645,7 @@ bool complete_slot(worker_pool *pool, size_t index, long long timeout_ms) {
         ((result_value_t *)result)->ok) {
         slot.failures = 0;
     }
+    freeval(job->result);
     job->result = result;
     job->done = true;
     return true;

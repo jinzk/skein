@@ -13,12 +13,29 @@
 #include <cstring>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace {
 
 thread_local uint64_t gc_cell_epoch = 0;
+
+struct global_root_visitor {
+    gc_global_root_visit_fn visit;
+    void *ctx;
+};
+
+std::mutex &global_root_mutex() {
+    static std::mutex mutex;
+    return mutex;
+}
+
+std::vector<global_root_visitor> &global_root_visitors() {
+    static std::vector<global_root_visitor> visitors;
+    return visitors;
+}
 
 /*
  * Cycle collection works at scope granularity.  Every cycle that can occur in
@@ -33,6 +50,8 @@ struct cycle_collector {
     std::unordered_set<dict_payload *> seen_dicts;
     std::vector<scope_t *> scope_work;
     std::vector<value_t *> value_work;
+    /* Native owners kept alive until the mark pass finishes. */
+    std::vector<std::shared_ptr<void>> pins;
 
     void mark_scope(scope_t *s) {
         if (s)
@@ -128,6 +147,11 @@ void mark_scope_root(void *ctx, struct scope_t *scope) {
     static_cast<cycle_collector *>(ctx)->mark_scope(scope);
 }
 
+void pin_root_owner(void *ctx, std::shared_ptr<void> owner) {
+    if (owner)
+        static_cast<cycle_collector *>(ctx)->pins.push_back(std::move(owner));
+}
+
 thread_local gc_thread_roots_fn thread_roots_visitor = nullptr;
 
 std::atomic<void (*)()> thread_cycle_collector{nullptr};
@@ -168,6 +192,29 @@ void gc_set_thread_root_visitor(gc_thread_roots_fn visit) {
     thread_roots_visitor = visit;
 }
 
+void gc_add_global_root_visitor(gc_global_root_visit_fn visit, void *ctx) {
+    if (!visit)
+        return;
+    std::lock_guard<std::mutex> lock(global_root_mutex());
+    for (const global_root_visitor &entry : global_root_visitors()) {
+        if (entry.visit == visit && entry.ctx == ctx)
+            return;
+    }
+    global_root_visitors().push_back({visit, ctx});
+}
+
+void gc_mark_pinned_value(gc_pin_fn pin, void *pin_ctx, gc_mark_fn mark,
+                          void *mark_ctx, struct value_t *value) {
+    if (!pin || !mark || !value)
+        return;
+    struct value_t *held = dupval(value);
+    if (!held)
+        return;
+    pin(pin_ctx, std::shared_ptr<void>(
+                     held, [](void *p) { freeval((struct value_t *)p); }));
+    mark(mark_ctx, held);
+}
+
 void gc_sweep_all_cells(scope_context &context) {
     sweep_cells(true, &context);
 }
@@ -199,6 +246,15 @@ void collect_cycles(scope_context &context) {
     for (auto &s : context.restore_stack)
         collector.mark_scope(s.get());
     gc_roots_visit(context, mark_root_value, &collector);
+    std::vector<global_root_visitor> visitors;
+    {
+        std::lock_guard<std::mutex> lock(global_root_mutex());
+        visitors = global_root_visitors();
+    }
+    for (const global_root_visitor &entry : visitors) {
+        entry.visit(entry.ctx, mark_root_value, &collector, &pin_root_owner,
+                    &collector);
+    }
     if (thread_roots_visitor) {
         thread_roots_visitor(&collector, &mark_scope_root, &mark_root_value);
     }
@@ -221,6 +277,10 @@ void collect_cycles(scope_context &context) {
     gc_sweep_unmarked_refs(gc_cell_epoch);
     sweep_cells(false, &context);
     scopes.clear();
+    /* Pinned queue entries are only needed while this collector is tracing.
+     * Release them before the thread-handle cycle collector checks external
+     * reference counts, or the pins themselves look like live handles. */
+    collector.pins.clear();
     collect_thread_cycles();
     prune_scopes(context);
 }

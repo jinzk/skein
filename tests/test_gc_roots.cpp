@@ -10,6 +10,7 @@
 #include "symbol.h"
 #include "valuetype.h"
 
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -32,6 +33,31 @@ void add_symbol(scope_context &context, const std::shared_ptr<scope_t> &scope,
     sym->val = value;
     scope->syms.insert(sym);
 }
+
+struct visitor_payload {
+    value_t *child = nullptr;
+
+    ~visitor_payload() { freeval(child); }
+};
+
+std::string visitor_describe(const void *) { return "visitor"; }
+
+void visitor_for_each_child(
+    const void *data,
+    const std::function<void(const value_t *child)> &visit) {
+    const visitor_payload *payload = static_cast<const visitor_payload *>(data);
+    if (payload && payload->child)
+        visit(payload->child);
+}
+
+const native_type kVisitorType = {
+    "visitor",
+    visitor_describe,
+    nullptr,
+    nullptr,
+    nullptr,
+    visitor_for_each_child,
+};
 
 } // namespace
 
@@ -110,9 +136,33 @@ int main() {
     const bool guard_cleared = guarded_scope->syms.small.empty();
     donescope(guarded_context);
 
+    /* Userdata payloads must expose their script children through the
+     * native_type visitor; otherwise their captured scopes are cleared. */
+    scope_context visitor_context;
+    initscope(visitor_context);
+    std::shared_ptr<scope_t> visitor_scope =
+        make_scope(visitor_context.current);
+    add_symbol(visitor_context, visitor_scope, "guest", newintval(99));
+    value_t *guest_fn = newfuncval(nullptr, visitor_scope, {});
+    auto payload = std::make_shared<visitor_payload>();
+    payload->child = guest_fn;
+    value_t *visitor = newuserdataval(&kVisitorType, payload);
+    std::vector<value_t *> visitor_roots{visitor};
+    {
+        gc_root_scope roots(visitor_context);
+        roots.add_vector(&visitor_roots);
+        collect_cycles(visitor_context);
+    }
+    const bool visitor_live = !visitor_scope->syms.small.empty();
+    visitor_roots.clear();
+    freeval(visitor);
+    collect_cycles(visitor_context);
+    const bool visitor_cleared = visitor_scope->syms.small.empty();
+    donescope(visitor_context);
+
     return outer_live && captured_live && outer_cleared &&
                    control_live && control_cleared && guard_live &&
-                   guard_cleared
+                   guard_cleared && visitor_live && visitor_cleared
                ? 0
                : 1;
 }

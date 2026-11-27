@@ -3,6 +3,8 @@
 
 #include "gc_roots.h"
 
+#include <memory>
+
 struct scope_context;
 
 /*
@@ -21,6 +23,26 @@ using gc_thread_roots_fn = void (*)(void *collector_ctx,
                                     gc_scope_mark_fn mark_scope,
                                     gc_mark_fn mark_value);
 void gc_set_thread_root_visitor(gc_thread_roots_fn visit);
+
+/*
+ * Process-wide root providers for native queues (for example posted native
+ * callbacks and cross-thread messages).  They are marked on every thread's
+ * collection and must snapshot their queues under their own locks.  A visitor
+ * can pin native owners with `pin`; the collector keeps them alive until the
+ * mark pass is complete, which is essential when the owner itself holds the
+ * values being marked.
+ */
+using gc_pin_fn = void (*)(void *ctx, std::shared_ptr<void> owner);
+using gc_global_root_visit_fn = void (*)(void *ctx, gc_mark_fn mark,
+                                        void *mark_ctx, gc_pin_fn pin,
+                                        void *pin_ctx);
+void gc_add_global_root_visitor(gc_global_root_visit_fn visit,
+                                void *ctx = nullptr);
+/* Duplicate and pin a queued value for the duration of one collection.  The
+ * duplicate is marked instead of the original so a queue drained on another
+ * thread cannot free a value the collector is still tracing. */
+void gc_mark_pinned_value(gc_pin_fn pin, void *pin_ctx, gc_mark_fn mark,
+                          void *mark_ctx, struct value_t *value);
 
 /*
  * Reference counting plus cycle collection over scopes and explicit frame

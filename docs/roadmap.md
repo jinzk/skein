@@ -809,6 +809,9 @@ VM 会丢失全局定义；该开关仅用于对比调试，默认路径不受�
 - JIT frame：整个 value slot 数组（`skein_jit_push_roots`）
 - 挂起 fiber：scope 树、其 `gc_roots`、yield/final/error/resume 值
 - task 注册表、struct 方法表、FFI callback / logger userdata
+- userdata 的 `for_each_child`：原生 owner 长期持有的脚本值
+- 全局 native queue visitor：posted callback、FFI 跨线程队列与 thread channel
+  缓冲中的脚本值
 - 显式 `gc_root_scope`（C++ 局部值的临时根）
 
 审计修复：
@@ -830,24 +833,38 @@ VM 会丢失全局定义；该开关仅用于对比调试，默认路径不受�
 - http / http2 serve 任务与 thread pool worker 在任务 / worker 生命周期内
   登记 handler 与 `on_request_body`
 - JIT 尾调用 trampoline 在每次进入 callee 前登记 pending callee 与实参
+- 长期持有脚本值的 userdata（`list_builder`、`db.pool`、`process_io`、
+  `worker_pool` / `worker_job`、process/thread HTTP server）补上
+  `for_each_child`；分离出去的 native method 通过 `get_field_with_self`
+  拿到实际 receiver，再由 `native_add_child` 保持该 userdata 存活，避免
+  “method 还在、owner 已不可见”以及临时 userdata 的悬空 back-reference
+- `native_async.post_callback` 队列由全局 visitor 标记 callee 与实参；
+  queued FFI callback 同时标记脚本函数与 `keepalive` 中的脚本值；队列项会被
+  `dupval` 后 pin 到本次 collector，避免跨线程排空时读到已释放值
+- `thread.Message` / Channel 缓冲由全局 visitor 暴露给主 collector，
+  message userdata 本身也补上 `for_each_child`
 
 验证：
 
 - `tests/test_gc_roots.cpp`：guard 存在时闭包 scope 存活，guard 销毁后可回收
 - `tests/gc_stress.py`：在 `SKEIN_GC_STRESS=1` 下覆盖 map/filter/reduce/
   unique_by/sort/top_k/group_by/compose/capture、lazy iterator 与 generator
-  实参，VM 与 JIT 各跑一遍
+  实参、`list_builder` / `db.pool` 的 C++ owner 与脱离 owner 的 native
+  method，VM 与 JIT 各跑一遍
+- native module 测试覆盖 `post_callback` 排队期间闭包捕获值的存活；
+  `worker_vm_stress` 在 JIT + GC stress 下覆盖跨线程队列的 pin 快照
 
 剩余边界（已知且明确）：
 
 - 长期存活的 builtin 回调（http / http2 serve handler、thread pool worker）
   在任务 / worker 生命周期内由 `gc_root_scope` 登记，调用间隙也不会被清理
 - JIT 尾调用 trampoline 在进入下一个 callee 前登记 pending callee 与实参
-- FFI callback 仍然要求脚本保持 callback 值存活（既有生命周期契约）；
-  userdata 的 `for_each_child` 会标记其中的脚本函数
-- 新增“C++ 长期持有脚本值”的代码必须显式登记，不能依赖调用时临时根
-- `thread.Message` / Channel endpoint 载荷跨线程序列化，不允许函数值，因此
-  不需要主 collector 遍历通道缓冲
+- FFI callback 在排队与执行期间由全局 visitor 标记脚本函数；脚本侧仍应保留
+  callback userdata，否则队列排空后该回调不再可复用
+- 新增“C++ 长期持有脚本值”的代码必须实现 userdata visitor 或注册全局
+  queue visitor，不能依赖调用时临时根
+- `thread.Message` / Channel endpoint 载荷仍不允许函数值；缓冲中的消息与
+  userdata 子值只对主 collector 可见，handle 环仍由 thread collector 处理
 - per-pc liveness / safepoint 表仍未做，属于 moving GC 前置工作
 
 已知问题：在单条顶层语句内的长循环中创建闭包时，`scope ↔ closure` 环只能

@@ -402,6 +402,11 @@ struct native_type {
     void (*for_each_child)(
         const void *data,
         const std::function<void(const struct value_t *)> &fn) = nullptr;
+    /* Field lookup that also receives the userdata being indexed.  Natives
+     * whose methods capture the owner state use this to root that exact
+     * userdata; `self` is a borrowed pointer valid for the call only. */
+    struct value_t *(*get_field_with_self)(
+        struct value_t *self, void *data, const char *name) = nullptr;
 };
 
 struct userdata_value_t {
@@ -448,6 +453,10 @@ struct value_t *newnativeval(
     std::function<struct value_t *(
         const std::vector<struct value_t *> &args)> call,
     std::shared_ptr<void> owner = nullptr);
+/* Register a script value that a native callable keeps reachable in C++
+ * state, so the cycle collector can see it even if the owning value is
+ * dropped while the native callable is still alive. */
+void native_add_child(struct value_t *native, struct value_t *child);
 struct value_t *newerrorval(const std::string &kind,
                             const std::string &message);
 /* Attach a source location and call stack to an error value.  Errors that

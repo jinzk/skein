@@ -41,16 +41,35 @@ std::string string_builder_describe(const void *data) {
            std::to_string(state ? state->text.size() : 0) + ")";
 }
 
-value_t *list_builder_get_field(void *data, const char *name);
+value_t *list_builder_get_field(value_t *self, void *data, const char *name);
 value_t *string_builder_get_field(void *data, const char *name);
+
+/* Compatibility entry point for callers that only hold the payload. */
+value_t *list_builder_get_field_plain(void *data, const char *name) {
+    return list_builder_get_field(nullptr, data, name);
+}
+
+void list_builder_for_each_child(
+    const void *data,
+    const std::function<void(const struct value_t *child)> &visit) {
+    const list_builder_state *state =
+        static_cast<const list_builder_state *>(data);
+    if (!state)
+        return;
+    for (const value_t *item : state->items) {
+        if (item)
+            visit(item);
+    }
+}
 
 const struct native_type kListBuilderType = {
     "list_builder",
     list_builder_describe,
     nullptr,
+    list_builder_get_field_plain,
+    nullptr,
+    list_builder_for_each_child,
     list_builder_get_field,
-    nullptr,
-    nullptr,
 };
 
 const struct native_type kStringBuilderType = {
@@ -62,25 +81,31 @@ const struct native_type kStringBuilderType = {
     nullptr,
 };
 
-value_t *list_builder_get_field(void *data, const char *name) {
+value_t *list_builder_get_field(value_t *self, void *data, const char *name) {
     list_builder_state *state = static_cast<list_builder_state *>(data);
     if (!state || !name) {
         yyerror("list builder has no field");
         return NULL;
     }
     std::shared_ptr<list_builder_state> shared = state->shared_from_this();
+    auto method = [shared, self](
+        std::function<value_t *(const std::vector<value_t *> &)> call) {
+        value_t *fn = newnativeval(std::move(call), shared);
+        native_add_child(fn, self);
+        return fn;
+    };
     if (std::strcmp(name, "push") == 0) {
-        return newnativeval([shared](const std::vector<value_t *> &args) {
+        return method([shared](const std::vector<value_t *> &args) {
             if (args.size() != 1) {
                 yyerror("builder.push expects 1 argument");
                 return (value_t *)NULL;
             }
             shared->items.push_back(dupval(args[0]));
             return newnull();
-        }, shared);
+        });
     }
     if (std::strcmp(name, "extend") == 0) {
-        return newnativeval([shared](const std::vector<value_t *> &args) {
+        return method([shared](const std::vector<value_t *> &args) {
             if (args.size() != 1 || !args[0] || args[0]->type != T_list) {
                 yyerror("builder.extend expects a list");
                 return (value_t *)NULL;
@@ -91,19 +116,19 @@ value_t *list_builder_get_field(void *data, const char *name) {
             for (value_t *item : items)
                 shared->items.push_back(dupval(item));
             return newnull();
-        }, shared);
+        });
     }
     if (std::strcmp(name, "len") == 0) {
-        return newnativeval([shared](const std::vector<value_t *> &args) {
+        return method([shared](const std::vector<value_t *> &args) {
             if (!args.empty()) {
                 yyerror("builder.len expects 0 arguments");
                 return (value_t *)NULL;
             }
             return newintval((long long)shared->items.size());
-        }, shared);
+        });
     }
     if (std::strcmp(name, "build") == 0) {
-        return newnativeval([shared](const std::vector<value_t *> &args) {
+        return method([shared](const std::vector<value_t *> &args) {
             if (!args.empty()) {
                 yyerror("builder.build expects 0 arguments");
                 return (value_t *)NULL;
@@ -113,7 +138,7 @@ value_t *list_builder_get_field(void *data, const char *name) {
             for (value_t *item : shared->items)
                 list->payload->items.push_back(dupval(item));
             return (value_t *)list;
-        }, shared);
+        });
     }
     yyerror("list builder has no field %s", name);
     return NULL;

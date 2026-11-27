@@ -2,6 +2,7 @@
 
 #include "eval.h"
 #include "ffi_marshal.h"
+#include "gc.h"
 #include "runtime_context.h"
 #include "valuetype.h"
 
@@ -143,6 +144,31 @@ struct blocking_callback_job {
 std::deque<std::shared_ptr<blocking_callback_job>> &blocking_queue() {
     static std::deque<std::shared_ptr<blocking_callback_job>> queue;
     return queue;
+}
+
+/* Cross-thread callbacks keep script functions in C++ queues until the owner
+ * thread drains them.  Mark those functions (and any values retained for C
+ * memory) so the cycle collector cannot clear their closure scopes early. */
+void visit_queued_roots(void *, gc_mark_fn mark, void *mark_ctx, gc_pin_fn pin,
+                        void *pin_ctx) {
+    auto mark_handle = [&](const std::shared_ptr<callback_handle> &handle) {
+        if (handle)
+            gc_mark_pinned_value(pin, pin_ctx, mark, mark_ctx,
+                                 handle->function);
+    };
+    auto mark_keep = [&](const std::shared_ptr<keepalive> &keep) {
+        if (!keep)
+            return;
+        for (value_t *value : keep->values)
+            gc_mark_pinned_value(pin, pin_ctx, mark, mark_ctx, value);
+    };
+    std::lock_guard<std::mutex> lock(background_mutex());
+    for (const pending_callback &job : background_queue())
+        mark_handle(job.handle);
+    for (const std::shared_ptr<blocking_callback_job> &job : blocking_queue()) {
+        mark_handle(job->handle);
+        mark_keep(job->keep);
+    }
 }
 
 std::shared_ptr<blocking_callback_job> make_blocking_job(
@@ -349,6 +375,14 @@ std::shared_ptr<callback_handle> get_callback(const struct value_t *value) {
 }
 
 } // namespace
+
+void install_gc_roots() {
+    static const bool registered = [] {
+        gc_add_global_root_visitor(&visit_queued_roots);
+        return true;
+    }();
+    (void)registered;
+}
 
 async_scope::async_scope(std::shared_ptr<std::atomic<bool>> failed) {
     context_ = new async_call_context();

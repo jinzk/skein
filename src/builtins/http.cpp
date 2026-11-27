@@ -4356,7 +4356,9 @@ bool process_server_stop_children(process_server_state *server, bool wait,
         return true;
 
     if (!wait) {
-        for (value_t *process : server->children) {
+        std::vector<value_t *> children;
+        children.swap(server->children);
+        for (value_t *process : children) {
             value_t *signal_arg = newintval(kForceKillSignal);
             value_t *killed = call_process_spawn_builtin(
                 B_process_kill, {process, signal_arg});
@@ -4369,7 +4371,6 @@ bool process_server_stop_children(process_server_state *server, bool wait,
                 freeval(closed);
             freeval(process);
         }
-        server->children.clear();
         return true;
     }
 
@@ -4437,7 +4438,9 @@ bool process_server_stop_children(process_server_state *server, bool wait,
         }
     }
 
-    for (value_t *process : server->children) {
+    std::vector<value_t *> children;
+    children.swap(server->children);
+    for (value_t *process : children) {
         value_t *timeout_arg = newintval(1000);
         value_t *status = call_process_spawn_builtin(
             B_process_wait, {process, timeout_arg});
@@ -4450,7 +4453,6 @@ bool process_server_stop_children(process_server_state *server, bool wait,
             freeval(closed);
         freeval(process);
     }
-    server->children.clear();
     return true;
 }
 
@@ -4619,16 +4621,23 @@ std::string process_server_describe(const void *) {
     return "<process_server>";
 }
 
-value_t *process_server_get_field(void *data, const char *name) {
+value_t *process_server_get_field(value_t *self, void *data,
+                                  const char *name) {
     process_server_state *raw = static_cast<process_server_state *>(data);
     if (!raw || !name) {
         yyerror("std.http.ProcessServer has no such field");
         return nullptr;
     }
     std::shared_ptr<process_server_state> server = raw->shared_from_this();
+    auto method = [server, self](
+        std::function<value_t *(const std::vector<value_t *> &)> call) {
+        value_t *fn = newnativeval(std::move(call), server);
+        native_add_child(fn, self);
+        return fn;
+    };
 
     if (std::strcmp(name, "stop") == 0) {
-        return newnativeval(
+        return method(
             [server](const std::vector<value_t *> &args) {
                 if (!args.empty()) {
                     yyerror("ProcessServer.stop expects no arguments");
@@ -4637,11 +4646,10 @@ value_t *process_server_get_field(void *data, const char *name) {
                 if (server->shared)
                     server->shared->stopping.store(true);
                 return newnull();
-            },
-            server);
+            });
     }
     if (std::strcmp(name, "join") == 0) {
-        return newnativeval(
+        return method(
             [server](const std::vector<value_t *> &args) {
                 long long timeout_ms = 0;
                 if (args.size() > 1) {
@@ -4664,11 +4672,10 @@ value_t *process_server_get_field(void *data, const char *name) {
                     return (value_t *)nullptr;
                 }
                 return newintval(served);
-            },
-            server);
+            });
     }
     if (std::strcmp(name, "shutdown") == 0) {
-        return newnativeval(
+        return method(
             [server](const std::vector<value_t *> &args) {
                 long long timeout_ms = 0;
                 if (args.size() > 1) {
@@ -4692,19 +4699,17 @@ value_t *process_server_get_field(void *data, const char *name) {
                     return (value_t *)nullptr;
                 }
                 return newintval(served);
-            },
-            server);
+            });
     }
     if (std::strcmp(name, "stats") == 0) {
-        return newnativeval(
+        return method(
             [server](const std::vector<value_t *> &args) {
                 if (!args.empty()) {
                     yyerror("ProcessServer.stats expects no arguments");
                     return (value_t *)nullptr;
                 }
                 return process_server_build_stats(server.get());
-            },
-            server);
+            });
     }
     if (std::strcmp(name, "strategy") == 0)
         return newstrval(server->strategy.c_str());
@@ -4723,14 +4728,40 @@ value_t *process_server_get_field(void *data, const char *name) {
     return nullptr;
 }
 
+void process_server_for_each_child(
+    const void *data,
+    const std::function<void(const struct value_t *child)> &visit) {
+    const process_server_state *server =
+        static_cast<const process_server_state *>(data);
+    if (!server)
+        return;
+    if (server->pool)
+        visit(server->pool);
+    for (value_t *process : server->children) {
+        if (process)
+            visit(process);
+    }
+}
+
+/* Compatibility entry point for callers that only hold the payload. */
+value_t *process_server_get_field_plain(void *data, const char *name) {
+    return process_server_get_field(nullptr, data, name);
+}
+
 const native_type kProcessServerType = {
     "process_server",
     process_server_describe,
     nullptr,
+    process_server_get_field_plain,
+    nullptr,
+    process_server_for_each_child,
     process_server_get_field,
-    nullptr,
-    nullptr,
 };
+
+value_t *new_process_server_value(
+    const std::shared_ptr<process_server_state> &server) {
+    return newuserdataval(&kProcessServerType, server);
+}
 
 value_t *http_serve_processes(const std::vector<value_t *> &args) {
     if (args.size() < 3 || args.size() > 6 || args[0]->type != T_dict ||
@@ -5177,12 +5208,19 @@ value_t *http_serve_processes(const std::vector<value_t *> &args) {
         }
         std::vector<value_t *> children;
         auto stop_children = [&children]() {
-            for (value_t *process : children) {
-                call_process_spawn_builtin(B_process_kill, {process});
-                call_process_spawn_builtin(B_process_close, {process});
+            std::vector<value_t *> doomed;
+            doomed.swap(children);
+            for (value_t *process : doomed) {
+                value_t *killed =
+                    call_process_spawn_builtin(B_process_kill, {process});
+                if (killed)
+                    freeval(killed);
+                value_t *closed =
+                    call_process_spawn_builtin(B_process_close, {process});
+                if (closed)
+                    freeval(closed);
                 freeval(process);
             }
-            children.clear();
         };
         for (long long i = 0; i < workers; ++i) {
             value_t *file = newstrval(executable.c_str());
@@ -5238,7 +5276,7 @@ value_t *http_serve_processes(const std::vector<value_t *> &args) {
         server->entry = entry;
         server->children = std::move(children);
         children.clear();
-        return newuserdataval(&kProcessServerType, server);
+        return new_process_server_value(server);
     }
 #endif
 
@@ -5484,7 +5522,7 @@ value_t *http_serve_processes(const std::vector<value_t *> &args) {
     }
     server->http = state;
     server->server_task = task;
-    return newuserdataval(&kProcessServerType, server);
+    return new_process_server_value(server);
 }
 
 value_t *json_response_value(long long status, value_t *value,
@@ -6327,16 +6365,23 @@ value_t *thread_dispatch(
     return response;
 }
 
-value_t *thread_server_get_field(void *data, const char *name) {
+value_t *thread_server_get_field(value_t *self, void *data,
+                                 const char *name) {
     thread_server_state *raw = static_cast<thread_server_state *>(data);
     if (!raw || !name) {
         yyerror("std.http.ThreadServer has no such field");
         return nullptr;
     }
     std::shared_ptr<thread_server_state> server = raw->shared_from_this();
+    auto method = [server, self](
+        std::function<value_t *(const std::vector<value_t *> &)> call) {
+        value_t *fn = newnativeval(std::move(call), server);
+        native_add_child(fn, self);
+        return fn;
+    };
 
     if (std::strcmp(name, "stop") == 0) {
-        return newnativeval(
+        return method(
             [server](const std::vector<value_t *> &args) {
                 if (!args.empty()) {
                     yyerror("ThreadServer.stop expects no arguments");
@@ -6346,11 +6391,10 @@ value_t *thread_server_get_field(void *data, const char *name) {
                 if (server->http && server->http->shared)
                     server->http->shared->stopping.store(true);
                 return newnull();
-            },
-            server);
+            });
     }
     if (std::strcmp(name, "join") == 0) {
-        return newnativeval(
+        return method(
             [server](const std::vector<value_t *> &args) {
                 long long timeout_ms = 0;
                 if (args.size() > 1) {
@@ -6387,11 +6431,10 @@ value_t *thread_server_get_field(void *data, const char *name) {
                         ? server->http->shared->served.load()
                         : 0;
                 return newintval(served);
-            },
-            server);
+            });
     }
     if (std::strcmp(name, "shutdown") == 0) {
-        return newnativeval(
+        return method(
             [server](const std::vector<value_t *> &args) {
                 long long timeout_ms = 0;
                 if (args.size() > 1) {
@@ -6414,11 +6457,10 @@ value_t *thread_server_get_field(void *data, const char *name) {
                     return (value_t *)nullptr;
                 }
                 return newintval(served);
-            },
-            server);
+            });
     }
     if (std::strcmp(name, "stats") == 0) {
-        return newnativeval(
+        return method(
             [server](const std::vector<value_t *> &args) {
                 if (!args.empty()) {
                     yyerror("ThreadServer.stats expects no arguments");
@@ -6496,8 +6538,7 @@ value_t *thread_server_get_field(void *data, const char *name) {
                                        ? server->http->max_requests
                                        : 0));
                 return stats;
-            },
-            server);
+            });
     }
     if (std::strcmp(name, "strategy") == 0)
         return newstrval(server->strategy.c_str());
@@ -6519,14 +6560,34 @@ value_t *thread_server_get_field(void *data, const char *name) {
     return nullptr;
 }
 
+void thread_server_for_each_child(
+    const void *data,
+    const std::function<void(const struct value_t *child)> &visit) {
+    const thread_server_state *server =
+        static_cast<const thread_server_state *>(data);
+    if (server && server->on_request_body)
+        visit(server->on_request_body);
+}
+
+/* Compatibility entry point for callers that only hold the payload. */
+value_t *thread_server_get_field_plain(void *data, const char *name) {
+    return thread_server_get_field(nullptr, data, name);
+}
+
 const native_type kThreadServerType = {
     "thread_server",
     thread_server_describe,
     nullptr,
+    thread_server_get_field_plain,
+    nullptr,
+    thread_server_for_each_child,
     thread_server_get_field,
-    nullptr,
-    nullptr,
 };
+
+value_t *new_thread_server_value(
+    const std::shared_ptr<thread_server_state> &server) {
+    return newuserdataval(&kThreadServerType, server);
+}
 
 std::shared_ptr<http_shared_state> map_shared_state_file(
     const std::string &path, bool create, std::string &error) {
@@ -6954,7 +7015,7 @@ value_t *http_serve_threads(const std::vector<value_t *> &args) {
             yyerror("std.http.serve_threads: %s", error.c_str());
             return NULL;
         }
-        return newuserdataval(&kThreadServerType, server);
+        return new_thread_server_value(server);
     }
 #endif
 
@@ -6992,7 +7053,7 @@ value_t *http_serve_threads(const std::vector<value_t *> &args) {
         return NULL;
     }
     server->server_task = task;
-    return newuserdataval(&kThreadServerType, server);
+    return new_thread_server_value(server);
 }
 
 value_t *http_thread_capabilities(

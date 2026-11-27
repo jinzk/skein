@@ -336,6 +336,7 @@ static struct value_t *enum_decode_builtin(
 
 bool builtins_register_modules(std::string &error) {
 #ifdef SKEIN_ENABLE_FFI
+    ffi::install_gc_roots();
     if (struct skein_context *context = skein_context_current())
         context->drain_background = ffi::background_drain;
 #endif

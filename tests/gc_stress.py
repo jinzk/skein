@@ -211,6 +211,56 @@ let holder = Holder { f: make_one(3) };
 let member_total = holder.run(make_one(4), 0, slow_key(0));
 println("member " + str(member_total));
 
+/* Native owners hold script values in C++ state.  Their visitors must keep
+ * captured scopes alive, including when a detached method outlives the
+ * userdata that created it. */
+struct NativeBox {
+  value: int;
+}
+func native_payload(n) {
+  let r = ref NativeBox { value: n };
+  let w: weak NativeBox = r;
+  let f = func() { return r.value; };
+  return {"max": 1, "watch": w, "f": f};
+}
+func native_churn() {
+  let i = 0;
+  while (i < 2000) {
+    let junk = func(pad) { return pad + i; };
+    i = i + 1;
+  }
+}
+
+let builder_payload = native_payload(41);
+let builder_watch = builder_payload["watch"];
+let builder = std.list.builder();
+let builder_push = builder.push;
+let builder_build = builder.build;
+builder_push(builder_payload["f"]);
+builder_payload = null;
+builder = null;
+native_churn();
+let builder_revived = std.ref.upgrade(builder_watch);
+println("builder " + str(builder_revived != null) + " " +
+        str(builder_revived.value) + " " + str(builder_build()[0]()));
+
+let pool_payload = native_payload(7);
+let pool_watch = pool_payload["watch"];
+let pool = std.db.pool(":memory:", pool_payload);
+let pool_acquire = pool.acquire;
+let pool_release = pool.release;
+let pool_close = pool.close;
+pool_payload = null;
+pool = null;
+native_churn();
+let pool_revived = std.ref.upgrade(pool_watch);
+let db = pool_acquire();
+println("dbpool " + str(pool_revived != null) + " " +
+        str(pool_revived.value) + " " + str(db != null));
+println("dbquery " +
+        str(std.db.query(db, "SELECT 1 AS n")[0]["n"]));
+println("dbclose " + str(pool_release(db)) + " " + str(pool_close()));
+
 let churn = slow_true(0);
 println("churn " + str(churn));
 """
@@ -236,6 +286,10 @@ EXPECTED = [
     "generator 5",
     "pair 3",
     "member 7",
+    "builder true 41 41",
+    "dbpool true 7 true",
+    "dbquery 1",
+    "dbclose true true",
     "churn true",
 ]
 

@@ -455,13 +455,29 @@ struct value_t *db_pool_close(const std::shared_ptr<db_pool> &pool) {
     return newboolval(true);
 }
 
-struct value_t *db_pool_get_field(void *data, const char *name) {
+void db_pool_for_each_child(
+    const void *data,
+    const std::function<void(const struct value_t *child)> &visit) {
+    const db_pool *pool = static_cast<const db_pool *>(data);
+    if (pool && pool->options)
+        visit(pool->options);
+}
+
+struct value_t *db_pool_get_field(struct value_t *self, void *data,
+                                  const char *name) {
     db_pool *raw = static_cast<db_pool *>(data);
     if (!raw || !name)
         return NULL;
     std::shared_ptr<db_pool> pool = raw->shared_from_this();
+    auto method = [pool, self](
+        std::function<struct value_t *(
+            const std::vector<struct value_t *> &)> call) {
+        struct value_t *fn = newnativeval(std::move(call));
+        native_add_child(fn, self);
+        return fn;
+    };
     if (std::strcmp(name, "acquire") == 0) {
-        return newnativeval([pool](const std::vector<struct value_t *> &args) {
+        return method([pool](const std::vector<struct value_t *> &args) {
             if (!args.empty()) {
                 yyerror("std.db pool acquire expects no arguments");
                 return (struct value_t *)NULL;
@@ -470,7 +486,7 @@ struct value_t *db_pool_get_field(void *data, const char *name) {
         });
     }
     if (std::strcmp(name, "release") == 0) {
-        return newnativeval([pool](const std::vector<struct value_t *> &args) {
+        return method([pool](const std::vector<struct value_t *> &args) {
             if (args.size() != 1) {
                 yyerror("std.db pool release expects one database handle");
                 return (struct value_t *)NULL;
@@ -479,7 +495,7 @@ struct value_t *db_pool_get_field(void *data, const char *name) {
         });
     }
     if (std::strcmp(name, "stats") == 0) {
-        return newnativeval([pool](const std::vector<struct value_t *> &args) {
+        return method([pool](const std::vector<struct value_t *> &args) {
             if (!args.empty()) {
                 yyerror("std.db pool stats expects no arguments");
                 return (struct value_t *)NULL;
@@ -488,7 +504,7 @@ struct value_t *db_pool_get_field(void *data, const char *name) {
         });
     }
     if (std::strcmp(name, "close") == 0) {
-        return newnativeval([pool](const std::vector<struct value_t *> &args) {
+        return method([pool](const std::vector<struct value_t *> &args) {
             if (!args.empty()) {
                 yyerror("std.db pool close expects no arguments");
                 return (struct value_t *)NULL;
@@ -499,13 +515,19 @@ struct value_t *db_pool_get_field(void *data, const char *name) {
     return NULL;
 }
 
+/* Compatibility entry point for callers that only hold the payload. */
+struct value_t *db_pool_get_field_plain(void *data, const char *name) {
+    return db_pool_get_field(nullptr, data, name);
+}
+
 const native_type kDbPoolType = {
     "db_pool",
     [](const void *) { return std::string("<db_pool>"); },
     nullptr,
+    db_pool_get_field_plain,
+    nullptr,
+    db_pool_for_each_child,
     db_pool_get_field,
-    nullptr,
-    nullptr,
 };
 
 struct value_t *db_pool_create(const std::vector<struct value_t *> &args) {

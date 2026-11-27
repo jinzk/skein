@@ -151,8 +151,50 @@ void prune_registry(std::vector<std::weak_ptr<T>> &registry) {
     registry.resize(write);
 }
 
+/* Messages and channel queues hold script values in C++ state.  The custom
+ * thread cycle collector only breaks handle cycles, so the regular collector
+ * also needs to see queued payloads as roots. */
+void visit_thread_value_roots(void *, gc_mark_fn mark, void *mark_ctx,
+                              gc_pin_fn pin, void *pin_ctx) {
+    std::vector<std::shared_ptr<message_state>> messages;
+    std::vector<std::shared_ptr<channel_state>> channels;
+    {
+        std::lock_guard<std::mutex> lock(thread_cycle_registry_mutex);
+        for (const std::weak_ptr<message_state> &weak :
+             thread_message_registry) {
+            if (std::shared_ptr<message_state> state = weak.lock())
+                messages.push_back(std::move(state));
+        }
+        for (const std::weak_ptr<channel_state> &weak :
+             thread_channel_registry) {
+            if (std::shared_ptr<channel_state> state = weak.lock())
+                channels.push_back(std::move(state));
+        }
+    }
+    for (const std::shared_ptr<message_state> &state : messages) {
+        gc_mark_pinned_value(pin, pin_ctx, mark, mark_ctx, state->payload);
+        gc_mark_pinned_value(pin, pin_ctx, mark, mark_ctx, state->handles);
+    }
+    for (const std::shared_ptr<channel_state> &state : channels) {
+        /* Duplicate under the queue lock: a receive on another thread can
+         * pop and free an entry while this collection is marking it. */
+        std::lock_guard<std::mutex> lock(state->mutex);
+        for (value_t *value : state->queue)
+            gc_mark_pinned_value(pin, pin_ctx, mark, mark_ctx, value);
+    }
+}
+
+void ensure_thread_value_roots() {
+    static const bool registered = [] {
+        gc_add_global_root_visitor(&visit_thread_value_roots);
+        return true;
+    }();
+    (void)registered;
+}
+
 std::shared_ptr<message_state> make_message_state() {
     ensure_thread_cycle_collector();
+    ensure_thread_value_roots();
     std::shared_ptr<message_state> state =
         std::make_shared<message_state>();
     {
@@ -165,6 +207,7 @@ std::shared_ptr<message_state> make_message_state() {
 
 std::shared_ptr<channel_state> make_channel_state(long long capacity) {
     ensure_thread_cycle_collector();
+    ensure_thread_value_roots();
     std::shared_ptr<channel_state> state =
         std::make_shared<channel_state>(capacity);
     {
@@ -632,13 +675,25 @@ struct value_t *message_get_field(void *data, const char *name) {
     return nullptr;
 }
 
+void message_for_each_child(
+    const void *data,
+    const std::function<void(const struct value_t *child)> &visit) {
+    const message_state *state = static_cast<const message_state *>(data);
+    if (!state)
+        return;
+    if (state->payload)
+        visit(state->payload);
+    if (state->handles)
+        visit(state->handles);
+}
+
 const struct native_type kMessageType = {
     "thread_message",
     message_describe,
     nullptr,
     message_get_field,
     nullptr,
-    nullptr,
+    message_for_each_child,
 };
 
 struct value_t *channel_send_value(

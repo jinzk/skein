@@ -9,6 +9,7 @@ import os
 
 OFF_ENV = dict(os.environ, SKEIN_TYPECHECK="off")
 VM_ENV = dict(os.environ, SKEIN_VM="1")
+GC_STRESS_ENV = dict(os.environ, SKEIN_GC_STRESS="1")
 
 
 def run_cases():
@@ -1344,6 +1345,38 @@ def run_cases():
             "std.task.wait(std.task.sleep(5));\n"
             "seen\n",
             stdout_all=["= true", "= 0"],
+        )
+        queued_callback_source = (
+            "import std;\n"
+            f"std.native.load({native_module});\n"
+            "import test.dynamic;\n"
+            "struct Box { value: int; }\n"
+            "let seen = 0;\n"
+            "func make_callback() {\n"
+            "  let r = ref Box { value: 41 };\n"
+            "  let w: weak Box = r;\n"
+            "  func callback(v) { seen = r.value + v; }\n"
+            "  return {\"f\": callback, \"watch\": w};\n"
+            "}\n"
+            "let queued = make_callback();\n"
+            "let watch = queued[\"watch\"];\n"
+            "dynamic.post_now(queued[\"f\"], 1);\n"
+            "queued = null;\n"
+        )
+        queued_callback_source += "".join(
+            f"let junk{i} = func(pad) {{ return pad + {i}; }};\n"
+            for i in range(100)
+        )
+        queued_callback_source += (
+            "println(str(std.ref.upgrade(watch) != null));\n"
+            "std.task.wait(std.task.sleep(5));\n"
+            "println(str(seen));\n"
+        )
+        check(
+            "native module posted callback keeps closure alive",
+            queued_callback_source,
+            stdout_all=["true", "42"],
+            env=GC_STRESS_ENV,
         )
         check(
             "native module unload keeps live bindings",

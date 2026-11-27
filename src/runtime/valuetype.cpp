@@ -293,6 +293,13 @@ struct value_t *newnativeval(
     return (struct value_t *)v;
 }
 
+void native_add_child(struct value_t *native, struct value_t *child) {
+    if (!native || native->type != T_native || !child)
+        return;
+    native_function_value *value = (native_function_value *)native;
+    value->children.push_back(dupval(child));
+}
+
 struct value_t *newbuiltinval(int functype) {
     struct builtin_value_t *v = new builtin_value_t;
     v->type = T_builtin;

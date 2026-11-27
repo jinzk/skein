@@ -2694,6 +2694,10 @@ rpc.spawn(command[, options]) -> rpc.Connection
 rpc.connect(io[, options]) -> rpc.Connection
 rpc.pool(clients[, options]) -> rpc.Pool
 
+pool options:
+  failure_limit: int      // 连续失败熔断阈值，默认 3，0 关闭
+  cooldown_ms: int        // 熔断冷却时间，默认 5000
+
 options:
   protocol: "jsonl" | "hybrid"   // 默认 "jsonl"
   input: readable stream          // 默认 std.io.stdin
@@ -2832,15 +2836,33 @@ job.done();
 
 let results = pool.map("double", [1, 2, 3, 4]);   // list[result]，按 round-robin 派发
 
-pool.stats();        // {clients, calls, errors, closed}
+pool.stats();        // {clients, calls, errors, closed, healthy}
+pool.health();       // [{index, failures, open}, ...]
+pool.reset();        // 清除失败计数并重新闭合所有熔断
 pool.close();
 ```
 
 - `call` / `submit` 按 round-robin 顺序选择客户端；
 - `call_timeout` / `call_bytes_timeout` 优先调用客户端的 timeout 方法，不存在时回退到基础接口（因此 `worker_pool` 和 `rpc.Connection` 都可用）；
 - `map(method, items[, timeout_ms])` 按 round-robin 逐项派发，每项返回 `ok(result)` 或 `err(error)`；同一 `rpc.Connection` 只有一条响应流，因此池不做并发调用。
-- `pool.stats()` 返回聚合计数；`close()` 尝试关闭所有支持 `close()` 的客户端；
+- `pool.stats()` 返回聚合计数，`healthy` 是未熔断的客户端数；
+- `close()` 尝试关闭所有支持 `close()` 的客户端；
 - 关闭后的池调用返回 `ok`/`err` 结果，不会直接抛出。
+
+熔断器默认开启，可通过选项调整：
+
+```text
+rpc.pool(clients, {
+  "failure_limit": 3,      // 连续失败次数，0 表示关闭熔断
+  "cooldown_ms": 5000      // 熔断后禁止使用该客户端的时间
+})
+```
+
+- 客户端连续失败达到 `failure_limit` 后，其熔断打开，`stats().healthy` 减一；
+- `pick` 会跳过熔断中的客户端；如果全部熔断，则按 round-robin 选一个做半开探测；
+- 超过 `cooldown_ms` 后熔断自动闭合，下一次调用会重新探测该客户端；
+- 调用成功后对应客户端的失败计数清零，熔断闭合；
+- `health()` 返回每个客户端的 `{index, failures, open}`；`reset()` 清除所有失败计数并闭合所有熔断。
 
 `Iterable[T]` 是结构化迭代器 proto：
 

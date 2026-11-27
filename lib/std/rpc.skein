@@ -88,6 +88,8 @@ package rpc {
     _submit_bytes: Callable;
     _map: Callable;
     _stats: Callable;
+    _health: Callable;
+    _reset: Callable;
     _close: Callable;
     clients: list;
   }
@@ -128,6 +130,16 @@ package rpc {
 
     func stats(self) {
       return self._stats();
+    }
+
+    // Per-client circuit breaker state.
+    func health(self) {
+      return self._health();
+    }
+
+    // Clear failure counts and reopen all circuits.
+    func reset(self) {
+      return self._reset();
     }
 
     func close(self) {
@@ -455,41 +467,83 @@ package rpc {
     return client.submit(method, args);
   }
 
-  // Wrap a job from any RpcClient as a PoolJob.
-  func _wrap_job(job) {
-    return PoolJob {
-      _wait: func(timeout_ms) { return job.wait(timeout_ms); },
-      _id: func() { return job.id(); },
-      _done: func() { return job.done(); }
-    };
-  }
-
   // Create a round-robin pool over a list of RpcClient objects.
+  //
+  // options:
+  //   failure_limit: consecutive failures before opening a circuit (0 disables)
+  //   cooldown_ms:   how long an open circuit blocks a client
   export func pool(clients, options = {}) {
     if (len(clients) == 0) {
       fail("rpc.pool requires at least one client");
+    }
+    let failure_limit = std.dict.get(options, "failure_limit", 3);
+    let cooldown_ms = std.dict.get(options, "cooldown_ms", 5000);
+    let health = [];
+    for client in clients {
+      health = std.list.append(
+        health, {"failures": 0, "open_until": 0});
     }
     let state = {
       "next": 0,
       "calls": 0,
       "errors": 0,
-      "closed": false
+      "closed": false,
+      "health": health
     };
 
+    let is_open = func(idx, now) {
+      if (failure_limit <= 0) {
+        return false;
+      }
+      let h = state["health"][idx];
+      return h["failures"] >= failure_limit && now < h["open_until"];
+    };
+
+    // Pick the next available client.  Open circuits are skipped; when all
+    // circuits are open the next client is used as a half-open probe.
     let pick = func() {
       if (state["closed"]) {
         fail("rpc pool is closed");
       }
-      let client = clients[state["next"] % len(clients)];
-      state["next"] = state["next"] + 1;
-      return client;
+      let n = len(clients);
+      let now = std.time.monotonic_ms();
+      let start = state["next"] % n;
+      let i = 0;
+      while (i < n) {
+        let idx = (start + i) % n;
+        if (is_open(idx, now) == false) {
+          state["next"] = idx + 1;
+          return {"client": clients[idx], "index": idx};
+        }
+        i = i + 1;
+      }
+      let idx = state["next"] % n;
+      state["next"] = idx + 1;
+      return {"client": clients[idx], "index": idx};
     };
 
-    let record = func(result) {
+    let record_health = func(idx, result) {
+      if (failure_limit > 0) {
+        if (std.result.is_err(result)) {
+          state["health"][idx]["failures"] =
+            state["health"][idx]["failures"] + 1;
+          if (state["health"][idx]["failures"] >= failure_limit) {
+            state["health"][idx]["open_until"] =
+              std.time.monotonic_ms() + cooldown_ms;
+          }
+        } else {
+          state["health"][idx]["failures"] = 0;
+          state["health"][idx]["open_until"] = 0;
+        }
+      }
+    };
+
+    let record = func(idx, result) {
       state["calls"] = state["calls"] + 1;
       if (std.result.is_err(result)) {
         state["errors"] = state["errors"] + 1;
       }
+      record_health(idx, result);
       return result;
     };
 
@@ -497,8 +551,10 @@ package rpc {
       if (state["closed"]) {
         return std.result.err(std.error.new("rpc", "rpc pool is closed"));
       }
-      let client = pick();
-      return record(_client_call(client, method, args, body, binary, timeout_ms));
+      let picked = pick();
+      let result = _client_call(
+        picked["client"], method, args, body, binary, timeout_ms);
+      return record(picked["index"], result);
     };
 
     let submit_one = func(method, args, body, binary) {
@@ -511,9 +567,23 @@ package rpc {
           _done: func() { return true; }
         };
       }
-      let client = pick();
+      let picked = pick();
+      let underlying = _client_submit(
+        picked["client"], method, args, body, binary);
+      let idx = picked["index"];
       state["calls"] = state["calls"] + 1;
-      return _wrap_job(_client_submit(client, method, args, body, binary));
+      return PoolJob {
+        _wait: func(timeout_ms) {
+          let result = underlying.wait(timeout_ms);
+          if (std.result.is_err(result)) {
+            state["errors"] = state["errors"] + 1;
+          }
+          record_health(idx, result);
+          return result;
+        },
+        _id: func() { return underlying.id(); },
+        _done: func() { return underlying.done(); }
+      };
     };
 
     // Sequential dispatch: a single rpc.Connection has one response stream,
@@ -526,6 +596,20 @@ package rpc {
           method, [item], std.bytes.from_string(""), false, timeout_ms));
       }
       return results;
+    };
+
+    let health_snapshot = func() {
+      let now = std.time.monotonic_ms();
+      let out = [];
+      for i in range(len(state["health"])) {
+        let h = state["health"][i];
+        out = std.list.append(out, {
+          "index": i,
+          "failures": h["failures"],
+          "open": is_open(i, now)
+        });
+      }
+      return out;
     };
 
     return Pool {
@@ -550,12 +634,27 @@ package rpc {
       },
       _map: map_one,
       _stats: func() {
+        let now = std.time.monotonic_ms();
+        let healthy = 0;
+        for i in range(len(state["health"])) {
+          if (is_open(i, now) == false) {
+            healthy = healthy + 1;
+          }
+        }
         return {
           "clients": len(clients),
           "calls": state["calls"],
           "errors": state["errors"],
-          "closed": state["closed"]
+          "closed": state["closed"],
+          "healthy": healthy
         };
+      },
+      _health: health_snapshot,
+      _reset: func() {
+        for i in range(len(state["health"])) {
+          state["health"][i]["failures"] = 0;
+          state["health"][i]["open_until"] = 0;
+        }
       },
       _close: func() {
         if (state["closed"] == false) {

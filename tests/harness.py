@@ -1189,6 +1189,59 @@ def check_extended_stdlib():
             "p.close();\n",
             stdout_all=["a=3", "b=30", "j=9", "clients=2"],
         )
+        check(
+            "std.rpc pool circuit breaker",
+            "import std;\n"
+            "import std.rpc;\n"
+            f'let good = rpc.spawn("{binary_path}", '
+            f'{{"args": ["{rpc_worker_path}"]}});\n'
+            f'let bad = rpc.spawn("{binary_path}", '
+            f'{{"args": ["{rpc_worker_path}"]}});\n'
+            "bad.close();\n"
+            'let p = rpc.pool([good, bad], '
+            '{"failure_limit": 2, "cooldown_ms": 100000});\n'
+            'let r1 = p.call("add", [1, 2]);\n'
+            'let r2 = p.call("add", [10, 20]);\n'
+            'let r3 = p.call("add", [100, 200]);\n'
+            'let r4 = p.call("add", [1000, 2000]);\n'
+            'print("r1=" + str(std.result.unwrap(r1)));\n'
+            'print("r2err=" + str(std.result.is_err(r2)));\n'
+            'print("r3=" + str(std.result.unwrap(r3)));\n'
+            'print("r4err=" + str(std.result.is_err(r4)));\n'
+            'print("open=" + str(p.health()[1]["open"]));\n'
+            'print("healthy=" + str(p.stats()["healthy"]));\n'
+            'let r5 = p.call("add", [3, 4]);\n'
+            'print("r5=" + str(std.result.unwrap(r5)));\n'
+            "p.reset();\n"
+            'print("reset=" + str(p.health()[1]["failures"]));\n'
+            'print("healthy2=" + str(p.stats()["healthy"]));\n'
+            "p.close();\n",
+            stdout_all=["r1=3", "r2err=true", "r3=300", "r4err=true",
+                        "open=true", "healthy=1", "r5=7", "reset=0",
+                        "healthy2=2"],
+        )
+        check(
+            "std.rpc pool circuit cooldown",
+            "import std;\n"
+            "import std.rpc;\n"
+            f'let good = rpc.spawn("{binary_path}", '
+            f'{{"args": ["{rpc_worker_path}"]}});\n'
+            f'let bad = rpc.spawn("{binary_path}", '
+            f'{{"args": ["{rpc_worker_path}"]}});\n'
+            "bad.close();\n"
+            'let p = rpc.pool([good, bad], '
+            '{"failure_limit": 1, "cooldown_ms": 150});\n'
+            'let r1 = p.call("add", [1, 2]);\n'
+            'let r2 = p.call("add", [10, 20]);\n'
+            'print("open=" + str(p.health()[1]["open"]));\n'
+            "std.task.sleep(200).wait();\n"
+            'print("cool=" + str(p.health()[1]["open"]));\n'
+            'let r3 = p.call("add", [3, 4]);\n'
+            'print("r3=" + str(std.result.unwrap(r3)));\n'
+            'print("failures=" + str(p.health()[1]["failures"]));\n'
+            "p.close();\n",
+            stdout_all=["open=true", "cool=false", "r3=7", "failures=1"],
+        )
         restart_script = os.path.join(worker_tmp, "restart.skein")
         with open(restart_script, "w", encoding="utf-8") as handle:
             handle.write(

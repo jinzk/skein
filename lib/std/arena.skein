@@ -30,7 +30,7 @@ package arena {
   }
 
   func _entry(s, slot) {
-    if (slot < 0 || slot >= len(s.slots)) {
+    if (slot < 0 || slot >= std.utils.len(s.slots)) {
       return null;
     }
     return s.slots[slot];
@@ -42,7 +42,7 @@ package arena {
   }
 
   func _check(id) {
-    if (kind_of(id) != "int") {
+    if (std.type.kind_of(id) != "int") {
       fail("arena handle must be an int");
     }
   }
@@ -53,7 +53,7 @@ package arena {
 
   // Batched construction: one COW clone / one list build instead of n adds.
   export func from_list(values) {
-    if (kind_of(values) != "list") {
+    if (std.type.kind_of(values) != "list") {
       fail("arena.from_list expects a list");
     }
     let slots = std.deque.new();
@@ -61,7 +61,7 @@ package arena {
       slots = std.deque.push_back(
         slots, _Slot { gen: 1, alive: true, value: value });
     }
-    let n = len(values);
+    let n = std.utils.len(values);
     return Store {
       slots: std.deque.to_list(slots),
       free: [],
@@ -71,8 +71,8 @@ package arena {
   }
 
   export func add(s, value) {
-    if (len(s.free) > 0) {
-      let n = len(s.free);
+    if (std.utils.len(s.free) > 0) {
+      let n = std.utils.len(s.free);
       let slot = s.free[n - 1];
       s.free = std.list.slice(s.free, 0, n - 1);
       let prev = s.slots[slot];
@@ -134,13 +134,13 @@ package arena {
   }
 
   export func capacity(s) {
-    return len(s.slots);
+    return std.utils.len(s.slots);
   }
 
   export func ids(s) {
     let out = std.deque.new();
     let slot = 0;
-    while (slot < len(s.slots)) {
+    while (slot < std.utils.len(s.slots)) {
       let entry = s.slots[slot];
       if (entry.alive) {
         out = std.deque.push_back(out, _handle(slot, entry.gen));

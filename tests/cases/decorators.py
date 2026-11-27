@@ -13,9 +13,9 @@ from harness import *  # noqa: F401,F403
 TRACE = (
     "func trace(fn) {\n"
     "  return func(...args) {\n"
-    '    println("enter");\n'
+    '    std.io.println("enter");\n'
     "    let r = fn(...args);\n"
-    '    println("exit");\n'
+    '    std.io.println("exit");\n'
     "    return r;\n"
     "  };\n"
     "}\n"
@@ -34,15 +34,15 @@ def run_cases():
         "decorator golden output",
         "func trace(fn) {\n"
         "  return func(...args) {\n"
-        '    println("enter");\n'
+        '    std.io.println("enter");\n'
         "    let r = fn(...args);\n"
-        '    println("exit");\n'
+        '    std.io.println("exit");\n'
         "    return r;\n"
         "  };\n"
         "}\n"
         "struct G { x: int; }\n"
         "impl G { @trace func get(self) { return self.x; } }\n"
-        "println(G { x: 3 }.get());\n",
+        "std.io.println(G { x: 3 }.get());\n",
         stdout_all=["enter", "exit", "3"],
     )
 
@@ -75,13 +75,13 @@ def run_cases():
         + "impl P {\n"
         + "  @trace\n"
         + "  func nums(self) {\n"
-        + "    for (let i in range(self.n)) { yield i; }\n"
+        + "    for (let i in std.utils.range(self.n)) { yield i; }\n"
         + "  }\n"
         + "}\n"
         + "let p = P { n: 3 };\n"
-        + "for (let x in p.nums()) { println(x); }\n"
+        + "for (let x in p.nums()) { std.io.println(x); }\n"
         + "let f = p.nums;\n"
-        + 'for (let x in f()) { println(str(x) + "!"); }\n',
+        + 'for (let x in f()) { std.io.println(str(x) + "!"); }\n',
         ["enter", "exit", "0", "1", "2",
          "enter", "exit", "0!", "1!", "2!"],
     )
@@ -104,11 +104,11 @@ def run_cases():
         "impl P {\n"
         "  @limit(2)\n"
         "  func nums(self) {\n"
-        "    for (let i in range(self.n)) { yield i; }\n"
+        "    for (let i in std.utils.range(self.n)) { yield i; }\n"
         "  }\n"
         "}\n"
         "let g: generator[int] = P { n: 5 }.nums();\n"
-        "println(std.iter.collect(g));\n",
+        "std.io.println(std.iter.collect(g));\n",
         ["[0, 1]"],
     )
 
@@ -124,9 +124,9 @@ def run_cases():
         "  }\n"
         "}\n"
         "let g = P { n: 0 }.dialog();\n"
-        "println(std.generator.next(g));\n"
-        'println(std.generator.next(g, "hi"));\n'
-        "println(std.generator.next(g));\n",
+        "std.io.println(std.generator.next(g));\n"
+        'std.io.println(std.generator.next(g, "hi"));\n'
+        "std.io.println(std.generator.next(g));\n",
         ["{done: false, value: start}",
          "{done: false, value: hi!}",
          "{done: true, value: null}"],
@@ -139,14 +139,14 @@ def run_cases():
         "impl P {\n"
         "  @identity\n"
         "  func worker(self) {\n"
-        '    defer println("cleanup");\n'
+        '    defer std.io.println("cleanup");\n'
         "    yield 1;\n"
-        '    println("not reached");\n'
+        '    std.io.println("not reached");\n'
         "  }\n"
         "}\n"
         "let g = P { n: 0 }.worker();\n"
-        "println(std.generator.next(g));\n"
-        "println(std.generator.close(g));\n",
+        "std.io.println(std.generator.next(g));\n"
+        "std.io.println(std.generator.close(g));\n",
         ["{done: false, value: 1}", "cleanup", "true"],
     )
 
@@ -154,9 +154,9 @@ def run_cases():
         "import std;\n"
         "func trace(fn) {\n"
         "  return func(...args) {\n"
-        '    println("enter");\n'
+        '    std.io.println("enter");\n'
         "    let r = fn(...args);\n"
-        '    println("exit");\n'
+        '    std.io.println("exit");\n'
         "    return r;\n"
         "  };\n"
         "}\n"
@@ -170,7 +170,7 @@ def run_cases():
         "  }\n"
         "}\n"
         "let xs: list[int] = std.iter.collect(P { n: 5 }.nums());\n"
-        "println(xs);\n",
+        "std.io.println(xs);\n",
         ["enter", "exit", "[5, 6]"],
     )
 
@@ -184,7 +184,7 @@ def run_cases():
         "  func items(self) { yield 1; yield self.n; }\n"
         "}\n"
         "func render(source: Source) {\n"
-        "  println(std.iter.collect(source.items()));\n"
+        "  std.io.println(std.iter.collect(source.items()));\n"
         "}\n"
         "render(P { n: 7 });\n",
         ["[1, 7]"],
@@ -212,7 +212,7 @@ def run_cases():
         "  func nums(self) { yield self.n; yield self.n + 1; }\n"
         "}\n"
         "let g: generator[int] = P { n: 5 }.nums();\n"
-        "println(std.iter.collect(g));\n",
+        "std.io.println(std.iter.collect(g));\n",
         stdout_all=["[5, 6]"],
         not_stderr="type warning",
         env=dict(os.environ, SKEIN_TYPECHECK="strict"),
@@ -240,7 +240,7 @@ def run_cases():
         "import std;\n"
         "func trace(fn) {\n"
         "  return func(...args) {\n"
-        '    println("enter");\n'
+        '    std.io.println("enter");\n'
         "    return fn(...args);\n"
         "  };\n"
         "}\n"
@@ -255,7 +255,7 @@ def run_cases():
         "    }\n"
         "  }\n"
         "}\n"
-        "println(std.iter.collect(P { n: 2 }.down()));\n",
+        "std.io.println(std.iter.collect(P { n: 2 }.down()));\n",
         ["enter", "enter", "enter", "[2, 1, 0]"],
     )
 
@@ -295,13 +295,13 @@ def run_cases():
     run_case(
         "func trace(fn) {\n"
         "  return func(...args) {\n"
-        '    println("create");\n'
+        '    std.io.println("create");\n'
         "    return fn(...args);\n"
         "  };\n"
         "}\n"
         "@trace\n"
         "func nums() { yield 1; yield 2; }\n"
-        "for (let x in nums()) { println(x); }\n",
+        "for (let x in nums()) { std.io.println(x); }\n",
         ["create", "1", "2"],
     )
 
@@ -348,12 +348,13 @@ def run_cases():
 
         write(
             "aa.skein",
+            "import std;\n"
             "package aa {\n"
             "  export struct P { x: int; }\n"
             "  export func make(x) { return P { x: x }; }\n"
             "  export func trace(fn) {\n"
             "    return func(...args) {\n"
-            '      println("[aa trace]");\n'
+            '      std.io.println("[aa trace]");\n'
             "      return fn(...args);\n"
             "    };\n"
             "  }\n"
@@ -365,9 +366,10 @@ def run_cases():
         )
         main = write(
             "main.skein",
+            "import std;\n"
             "import aa;\n"
             "let p = aa.make(7);\n"
-            "println(p.get());\n",
+            "std.io.println(p.get());\n",
         )
         proc = run_file(main)
         assert proc.returncode == 0, proc.stderr
@@ -383,10 +385,11 @@ def run_cases():
 
         write(
             "aa.skein",
+            "import std;\n"
             "package aa {\n"
             "  func logged(fn) {\n"
             "    return func(...args) {\n"
-            '      println("[aa fn]");\n'
+            '      std.io.println("[aa fn]");\n'
             "      return fn(...args);\n"
             "    };\n"
             "  }\n"
@@ -396,8 +399,9 @@ def run_cases():
         )
         main = write(
             "main.skein",
+            "import std;\n"
             "import aa;\n"
-            "println(aa.add(2, 3));\n",
+            "std.io.println(aa.add(2, 3));\n",
         )
         proc = run_file(main)
         assert proc.returncode == 0, proc.stderr
@@ -413,12 +417,13 @@ def run_cases():
 
         write(
             "aa.skein",
+            "import std;\n"
             "package aa {\n"
             "  export struct P { n: int; }\n"
             "  export func make(n) { return P { n: n }; }\n"
             "  export func trace(fn) {\n"
             "    return func(...args) {\n"
-            '      println("[aa gen]");\n'
+            '      std.io.println("[aa gen]");\n'
             "      return fn(...args);\n"
             "    };\n"
             "  }\n"
@@ -430,8 +435,9 @@ def run_cases():
         )
         main = write(
             "main.skein",
+            "import std;\n"
             "import aa;\n"
-            "for (let x in aa.make(7).nums()) { println(x); }\n",
+            "for (let x in aa.make(7).nums()) { std.io.println(x); }\n",
         )
         proc = run_file(main)
         assert proc.returncode == 0, proc.stderr

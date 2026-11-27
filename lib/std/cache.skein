@@ -17,7 +17,7 @@ package cache {
   }
 
   func _option(options, key, fallback) {
-    if (kind_of(options) != "dict") {
+    if (std.type.kind_of(options) != "dict") {
       return fallback;
     }
     return std.dict.get(options, key, fallback);
@@ -26,7 +26,7 @@ package cache {
   func _last_index(text, needle) {
     let index = -1;
     let i = 0;
-    while (i < len(text)) {
+    while (i < std.utils.len(text)) {
       if (std.string.substr(text, i, 1) == needle) {
         index = i;
       }
@@ -38,9 +38,9 @@ package cache {
   func _percent_decode(text) {
     let output = std.bytes.from_string("");
     let i = 0;
-    while (i < len(text)) {
+    while (i < std.utils.len(text)) {
       let c = std.string.substr(text, i, 1);
-      if (c == "%" && i + 2 < len(text)) {
+      if (c == "%" && i + 2 < std.utils.len(text)) {
         let pair = std.string.substr(text, i + 1, 2);
         output = std.bytes.concat(output, std.bytes.from_hex(pair));
         i = i + 3;
@@ -54,14 +54,14 @@ package cache {
 
   func _timeout_option(options, key) {
     let value = _option(options, key, 5000);
-    if (kind_of(value) != "int" || value < 0) {
+    if (std.type.kind_of(value) != "int" || value < 0) {
       fail("std.cache " + key + " must be a non-negative integer");
     }
     return value;
   }
 
   func _parse_uri(uri, options) {
-    if (kind_of(uri) != "string") {
+    if (std.type.kind_of(uri) != "string") {
       fail("std.cache.open expects a URI string");
     }
     let scheme_end = std.string.find(uri, "://");
@@ -148,21 +148,21 @@ package cache {
     let configured_user = _option(options, "username", user);
     let configured_password = _option(options, "password", password);
     let configured_tls = _option(options, "tls", tls);
-    if (kind_of(configured_user) != "string" ||
-        kind_of(configured_password) != "string") {
+    if (std.type.kind_of(configured_user) != "string" ||
+        std.type.kind_of(configured_password) != "string") {
       fail("std.cache.open username/password must be strings");
     }
-    if (kind_of(configured_tls) != "bool") {
+    if (std.type.kind_of(configured_tls) != "bool") {
       fail("std.cache.open tls must be a bool");
     }
     let verify = _option(options, "verify", true);
-    if (kind_of(verify) != "bool") {
+    if (std.type.kind_of(verify) != "bool") {
       fail("std.cache.open verify must be a bool");
     }
     let ca_file = _option(options, "ca_file", "");
     let server_name = _option(options, "server_name", host);
-    if (kind_of(ca_file) != "string" ||
-        kind_of(server_name) != "string") {
+    if (std.type.kind_of(ca_file) != "string" ||
+        std.type.kind_of(server_name) != "string") {
       fail("std.cache.open ca_file/server_name must be strings");
     }
     return {
@@ -183,9 +183,9 @@ package cache {
   }
 
   func _ensure(state, count) {
-    while (len(state.buffer) < count) {
+    while (std.utils.len(state.buffer) < count) {
       let chunk = std.io.read(state.stream, 4096, state.read_timeout_ms);
-      if (chunk == null || len(chunk) == 0) {
+      if (chunk == null || std.utils.len(chunk) == 0) {
         state.closed = true;
         fail("std.cache: connection closed");
       }
@@ -206,7 +206,7 @@ package cache {
 
   func _line_end(data) {
     let i = 0;
-    while (i + 1 < len(data)) {
+    while (i + 1 < std.utils.len(data)) {
       if (std.bytes.get(data, i) == 13 &&
           std.bytes.get(data, i + 1) == 10) {
         return i;
@@ -221,7 +221,7 @@ package cache {
     let end = _line_end(state.buffer);
     while (end < 0) {
       let chunk = std.io.read(state.stream, 4096, state.read_timeout_ms);
-      if (chunk == null || len(chunk) == 0) {
+      if (chunk == null || std.utils.len(chunk) == 0) {
         state.closed = true;
         fail("std.cache: connection closed");
       }
@@ -281,7 +281,7 @@ package cache {
   }
 
   func _arg_bytes(value) {
-    let kind = kind_of(value);
+    let kind = std.type.kind_of(value);
     if (kind == "bytes") {
       return value;
     }
@@ -299,17 +299,17 @@ package cache {
     if (state.closed) {
       fail("std.cache: connection is closed");
     }
-    let payload = std.bytes.from_string("*" + str(len(args)) + "\r\n");
+    let payload = std.bytes.from_string("*" + str(std.utils.len(args)) + "\r\n");
     for (let arg in args) {
       let data = _arg_bytes(arg);
       payload = std.bytes.concat(
-        payload, std.bytes.from_string("$" + str(len(data)) + "\r\n"));
+        payload, std.bytes.from_string("$" + str(std.utils.len(data)) + "\r\n"));
       payload = std.bytes.concat(payload, data);
       payload = std.bytes.concat(payload, _CRLF);
     }
     let written = std.io.write_all(state.stream, payload,
                                    state.write_timeout_ms);
-    if (written == null || written != len(payload)) {
+    if (written == null || written != std.utils.len(payload)) {
       state.closed = true;
       fail("std.cache: failed to write command");
     }
@@ -319,12 +319,12 @@ package cache {
   func _set(state, key, value, options) {
     let args = ["SET", key, value];
     let ttl = _option(options, "ttl_ms", 0);
-    if (kind_of(ttl) != "int" || ttl < 0) {
+    if (std.type.kind_of(ttl) != "int" || ttl < 0) {
       fail("std.cache.set ttl_ms must be a non-negative integer");
     }
     let nx = _option(options, "nx", false);
     let xx = _option(options, "xx", false);
-    if (kind_of(nx) != "bool" || kind_of(xx) != "bool") {
+    if (std.type.kind_of(nx) != "bool" || std.type.kind_of(xx) != "bool") {
       fail("std.cache.set nx/xx must be bool");
     }
     if (nx && xx) {
@@ -357,13 +357,13 @@ package cache {
       return _command(state, ["EXISTS", key]) > 0;
     };
     let incr = func(key, amount = 1) {
-      if (kind_of(amount) != "int") {
+      if (std.type.kind_of(amount) != "int") {
         fail("std.cache.incr amount must be an integer");
       }
       return _command(state, ["INCRBY", key, amount]);
     };
     let expire = func(key, ttl_ms) {
-      if (kind_of(ttl_ms) != "int" || ttl_ms < 0) {
+      if (std.type.kind_of(ttl_ms) != "int" || ttl_ms < 0) {
         fail("std.cache.expire ttl_ms must be a non-negative integer");
       }
       return _command(state, ["PEXPIRE", key, ttl_ms]) == 1;
@@ -375,12 +375,12 @@ package cache {
       return _command(state, ["PTTL", key]);
     };
     let incr_window = func(key, window_ms) {
-      if (kind_of(window_ms) != "int" || window_ms <= 0) {
+      if (std.type.kind_of(window_ms) != "int" || window_ms <= 0) {
         fail("std.cache.incr_window window_ms must be a positive integer");
       }
       let script = "local n=redis.call('INCR',KEYS[1]); if n==1 then redis.call('PEXPIRE',KEYS[1],ARGV[1]) end; return {n,redis.call('PTTL',KEYS[1])}";
       let result = _command(state, ["EVAL", script, "1", key, window_ms]);
-      if (kind_of(result) != "list" || len(result) != 2) {
+      if (std.type.kind_of(result) != "list" || std.utils.len(result) != 2) {
         fail("std.cache.incr_window received an invalid response");
       }
       return {"count": result[0], "ttl_ms": result[1]};

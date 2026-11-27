@@ -74,7 +74,7 @@ ts_test("generic function value", func() {
 
 ts_test("generic function default type parameter", func() {
   let xs: list[int] = make_list();
-  ts_eq(len(xs), 0);
+  ts_eq(std.utils.len(xs), 0);
 });
 
 ts_finish();

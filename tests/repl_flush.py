@@ -13,7 +13,7 @@ proc = subprocess.Popen(
     stderr=subprocess.PIPE,
 )
 try:
-    proc.stdin.write(b'print("A");\n')
+    proc.stdin.write(b'import std; std.io.print("A");\n')
     proc.stdin.flush()
 
     # select() only works on sockets under Windows, so wait for the first

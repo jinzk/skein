@@ -17,9 +17,9 @@ struct ByteStructS {
 ts_test("char literal", func() {
   let c = 'a';
   ts_eq(str(c), "a");
-  ts_eq(kind_of(c), "char");
-  ts_eq(type_name(c), "char");
-  ts_eq(len(c), 1);
+  ts_eq(std.type.kind_of(c), "char");
+  ts_eq(std.type.name(c), "char");
+  ts_eq(std.utils.len(c), 1);
 });
 
 ts_test("char conversions", func() {
@@ -55,7 +55,7 @@ ts_test("char concat", func() {
 ts_test("string index char", func() {
   let s = "你好";
   ts_eq(str(s[0]), "你");
-  ts_eq(kind_of(s[0]), "char");
+  ts_eq(std.type.kind_of(s[0]), "char");
   ts_eq(str(s[1]), "好");
 });
 
@@ -95,14 +95,14 @@ ts_test("char struct json", func() {
   ts_eq(j, "{\"ch\":\"a\"}");
   let c = std.struct.decode(std.json.parse(j), "CharStructC");
   ts_eq(str(c.ch), "a");
-  ts_eq(kind_of(c.ch), "char");
+  ts_eq(std.type.kind_of(c.ch), "char");
 });
 
 ts_test("char enum json", func() {
   let e = std.enum.decode(std.json.parse(
     std.json.stringify(CharEnumE.A { ch: '你' })));
   ts_eq(str(e), "CharEnumE.A { ch: 你 }");
-  ts_eq(kind_of(e.ch), "char");
+  ts_eq(std.type.kind_of(e.ch), "char");
 });
 
 ts_test("char sort", func() {
@@ -144,8 +144,8 @@ ts_test("char bytes roundtrip", func() {
 ts_test("byte int conversions", func() {
   ts_eq(int(byte(65)), 65);
   ts_eq(int(byte(255)), 255);
-  ts_eq(kind_of(byte(1)), "byte");
-  ts_eq(len(byte(1)), 1);
+  ts_eq(std.type.kind_of(byte(1)), "byte");
+  ts_eq(std.utils.len(byte(1)), 1);
 });
 
 ts_test("byte type annotation", func() {
@@ -160,7 +160,7 @@ ts_test("byte struct json", func() {
   ts_eq(j, "{\"b\":255,\"c\":\"a\"}");
   let s = std.struct.decode(std.json.parse(j), "ByteStructS");
   ts_eq(int(s.b), 255);
-  ts_eq(kind_of(s.b), "byte");
+  ts_eq(std.type.kind_of(s.b), "byte");
   ts_eq(str(s.c), "a");
 });
 

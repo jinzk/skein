@@ -9,7 +9,7 @@ package path {
   export const WINDOWS = "windows";
 
   func _is_drive_prefix(text) {
-    if (len(text) < 2) {
+    if (std.utils.len(text) < 2) {
       return false;
     }
     let first = int(text[0]);
@@ -34,13 +34,13 @@ package path {
   }
 
   func _require_string(who, value, what) {
-    if (kind_of(value) != "string") {
-      fail(who + " expects " + what + " string, got " + kind_of(value));
+    if (std.type.kind_of(value) != "string") {
+      fail(who + " expects " + what + " string, got " + std.type.kind_of(value));
     }
   }
 
   func _require_style(style) {
-    if (kind_of(style) != "string") {
+    if (std.type.kind_of(style) != "string") {
       fail("path: style must be a string");
     }
     if (style != AUTO && style != POSIX && style != WINDOWS) {
@@ -99,10 +99,10 @@ package path {
   }
 
   func _starts_fold(text, prefix) {
-    if (len(text) < len(prefix)) {
+    if (std.utils.len(text) < std.utils.len(prefix)) {
       return false;
     }
-    return _ascii_fold(std.string.substr(text, 0, len(prefix))) ==
+    return _ascii_fold(std.string.substr(text, 0, std.utils.len(prefix))) ==
            _ascii_fold(prefix);
   }
 
@@ -134,7 +134,7 @@ package path {
       root = "/";
       absolute = true;
       let index = 0;
-      while (index < len(text) && int(text[index]) == 47) {
+      while (index < std.utils.len(text) && int(text[index]) == 47) {
         index = index + 1;
       }
       rest = std.string.substr(text, index);
@@ -158,12 +158,12 @@ package path {
 
     if (_starts_fold(tail, "unc/")) {
       let segments = _split_nonempty(std.string.substr(tail, 4), "/");
-      if (len(segments) >= 2) {
+      if (std.utils.len(segments) >= 2) {
         root = win_prefix + "UNC\\" + segments[0] + "\\" +
                segments[1] + "\\";
         parts = std.list.slice(segments, 2);
         absolute = true;
-      } else if (len(segments) == 1) {
+      } else if (std.utils.len(segments) == 1) {
         root = win_prefix + "UNC\\" + segments[0] + "\\";
         absolute = true;
       } else {
@@ -172,7 +172,7 @@ package path {
       }
     } else if (_is_drive_prefix(tail)) {
       drive = std.string.substr(tail, 0, 2);
-      if (len(tail) >= 3 && int(tail[2]) == 47) {
+      if (std.utils.len(tail) >= 3 && int(tail[2]) == 47) {
         root = win_prefix + drive + "\\";
         parts = _split_nonempty(std.string.substr(tail, 3), "/");
         absolute = true;
@@ -182,7 +182,7 @@ package path {
       }
     } else {
       let segments = _split_nonempty(tail, "/");
-      if (len(segments) > 0) {
+      if (std.utils.len(segments) > 0) {
         root = win_prefix + segments[0] + "\\";
         parts = std.list.slice(segments, 1);
         absolute = true;
@@ -213,16 +213,16 @@ package path {
     let parts = [];
     let absolute = false;
 
-    let is_unc = len(slash_text) >= 3 &&
+    let is_unc = std.utils.len(slash_text) >= 3 &&
                  int(slash_text[0]) == 47 &&
                  int(slash_text[1]) == 47 &&
                  int(slash_text[2]) != 47;
     if (is_unc) {
       let segments = _split_nonempty(std.string.substr(slash_text, 2), "/");
-      if (len(segments) >= 2) {
+      if (std.utils.len(segments) >= 2) {
         root = "\\\\" + segments[0] + "\\" + segments[1] + "\\";
         parts = std.list.slice(segments, 2);
-      } else if (len(segments) == 1) {
+      } else if (std.utils.len(segments) == 1) {
         root = "\\\\" + segments[0] + "\\";
       } else {
         root = "\\\\";
@@ -230,7 +230,7 @@ package path {
       absolute = true;
     } else if (_is_drive_prefix(slash_text)) {
       drive = std.string.substr(slash_text, 0, 2);
-      if (len(slash_text) >= 3 && int(slash_text[2]) == 47) {
+      if (std.utils.len(slash_text) >= 3 && int(slash_text[2]) == 47) {
         root = drive + "\\";
         parts = _split_nonempty(std.string.substr(slash_text, 3), "/");
         absolute = true;
@@ -283,7 +283,7 @@ package path {
   }
 
   func _render(root, parts, style) {
-    if (len(parts) == 0) {
+    if (std.utils.len(parts) == 0) {
       if (root == "") {
         return ".";
       }
@@ -309,7 +309,7 @@ package path {
 
     let dot = -1;
     let index = 0;
-    while (index < len(base)) {
+    while (index < std.utils.len(base)) {
       if (int(base[index]) == 46) {
         dot = index;
       }
@@ -329,14 +329,14 @@ package path {
     let info = _analyze(text, style);
     let parts = info["parts"];
     let base = "";
-    if (len(parts) > 0) {
-      base = parts[len(parts) - 1];
+    if (std.utils.len(parts) > 0) {
+      base = parts[std.utils.len(parts) - 1];
     }
 
     let dir = "";
-    if (len(parts) > 1) {
+    if (std.utils.len(parts) > 1) {
       dir = _render(
-        info["root"], std.list.slice(parts, 0, len(parts) - 1), style);
+        info["root"], std.list.slice(parts, 0, std.utils.len(parts) - 1), style);
     } else if (info["root"] != "") {
       dir = info["root"];
     }
@@ -421,7 +421,7 @@ package path {
   }
 
   export func join_list(parts, style = AUTO) {
-    if (kind_of(parts) != "list") {
+    if (std.type.kind_of(parts) != "list") {
       fail("path.join_list expects a list of paths");
     }
     for (let part in parts) {
@@ -465,8 +465,8 @@ package path {
   export func join(...parts) {
     let style = AUTO;
     let values = parts;
-    let count = len(parts);
-    if (count > 0 && kind_of(parts[count - 1]) == "dict") {
+    let count = std.utils.len(parts);
+    if (count > 0 && std.type.kind_of(parts[count - 1]) == "dict") {
       let options = parts[count - 1];
       if (!std.dict.has(options, "style")) {
         fail("path.join options must contain a style key");
@@ -574,7 +574,7 @@ package path {
     let from_parts = _clean(from_info["parts"], from_info["rooted"]);
     let to_parts = _clean(to_info["parts"], to_info["rooted"]);
     let common = 0;
-    while (common < len(from_parts) && common < len(to_parts)) {
+    while (common < std.utils.len(from_parts) && common < std.utils.len(to_parts)) {
       let left = from_parts[common];
       let right = to_parts[common];
       if (resolved == WINDOWS) {
@@ -589,17 +589,17 @@ package path {
 
     let out = std.deque.new();
     let index = common;
-    while (index < len(from_parts)) {
+    while (index < std.utils.len(from_parts)) {
       out = std.deque.push_back(out, "..");
       index = index + 1;
     }
     index = common;
-    while (index < len(to_parts)) {
+    while (index < std.utils.len(to_parts)) {
       out = std.deque.push_back(out, to_parts[index]);
       index = index + 1;
     }
     let parts = std.deque.to_list(out);
-    if (len(parts) == 0) {
+    if (std.utils.len(parts) == 0) {
       return ".";
     }
     return std.string.join(parts, _sep_for(resolved));
@@ -631,11 +631,11 @@ package path {
     let resolved = _style_for(style, text);
     let info = _analyze(text, resolved);
     let parts = info["parts"];
-    if (len(parts) == 0) {
+    if (std.utils.len(parts) == 0) {
       fail("path.with_ext: path has no file name");
     }
 
-    let base = parts[len(parts) - 1];
+    let base = parts[std.utils.len(parts) - 1];
     if (base == "." || base == "..") {
       fail("path.with_ext: path has no file stem");
     }
@@ -649,7 +649,7 @@ package path {
     let new_base = ext_info["stem"] + suffix;
     let out = std.deque.new();
     let index = 0;
-    while (index < len(parts) - 1) {
+    while (index < std.utils.len(parts) - 1) {
       out = std.deque.push_back(out, parts[index]);
       index = index + 1;
     }

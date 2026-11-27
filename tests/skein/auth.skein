@@ -32,7 +32,7 @@ ts_test("invalid cookie option", func() {
 ts_test("session store lifecycle", func() {
   let store = auth.new_store({"ttl": 3600, "cookie_name": "sid"});
   let id = store.create({"user_id": 1});
-  ts_true(len(id) > 0);
+  ts_true(std.utils.len(id) > 0);
   ts_eq(store.cookie_name, "sid");
   ts_eq(store.get(id), {"user_id": 1});
   ts_true(store.set(id, {"user_id": 2}));

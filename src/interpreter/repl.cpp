@@ -369,16 +369,8 @@ void append_global_symbols(completion::index &out) {
                          sym->val->type == T_native);
         out.add_top({sym->name, callable ? rank : 6, detail, false});
     };
-    scope_context &scopes = active_scope_context();
-    for (const struct symbol *sym : scopes.global_slots)
+    for (const struct symbol *sym : active_scope_context().global_slots)
         add(sym, "global", 3);
-    for (std::shared_ptr<scope_t> scope =
-             scopes.global_scope ? scopes.global_scope->parent
-                                 : std::shared_ptr<scope_t>();
-         scope; scope = scope->parent) {
-        for (const struct symbol *sym : scope->syms.small)
-            add(sym, "prelude", 4);
-    }
 }
 
 std::vector<std::string> completion_candidates(const std::string &line,

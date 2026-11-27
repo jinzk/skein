@@ -21,27 +21,27 @@ def main():
             f'let root = "{root}";\n'
             "std.fs.mkdir(root, true);\n"
             'let base = std.fs.temp_dir("skein-fs-");\n'
-            'println("temp_dir=" + str(std.fs.stat(base)["type"] == "dir"));\n'
+            'std.io.println("temp_dir=" + str(std.fs.stat(base)["type"] == "dir"));\n'
             'std.fs.mkdir(std.fs.path_join(base, "a/b/c"), true);\n'
             'std.fs.write_text(std.fs.path_join(base, "a/b/c/one.txt"), "one", "utf-8");\n'
             'std.fs.write_text(std.fs.path_join(base, "root.txt"), "root", "utf-8");\n'
             'let files = std.fs.glob(std.fs.path_join(base, "*.txt"));\n'
-            'println("glob=" + str(len(files)));\n'
+            'std.io.println("glob=" + str(std.utils.len(files)));\n'
             'std.fs.copy(std.fs.path_join(base, "root.txt"), '
             'std.fs.path_join(base, "copy.txt"));\n'
-            'println("copy=" + str(std.fs.exists('
+            'std.io.println("copy=" + str(std.fs.exists('
             'std.fs.path_join(base, "copy.txt")) == 1));\n'
             'std.fs.copy(base, std.fs.path_join(root, "tree"));\n'
-            'println("tree=" + str(std.fs.exists('
+            'std.io.println("tree=" + str(std.fs.exists('
             'std.fs.path_join(root, "tree/root.txt")) == 1));\n'
-            'println("which_abs=" + str(std.fs.which(std.sys.executable()) '
+            'std.io.println("which_abs=" + str(std.fs.which(std.sys.executable()) '
             '!= ""));\n'
-            f'println("which_name=" + str(std.fs.which("{name}") != ""));\n'
-            'println("which_missing=" + str(std.fs.which('
+            f'std.io.println("which_name=" + str(std.fs.which("{name}") != ""));\n'
+            'std.io.println("which_missing=" + str(std.fs.which('
             '"definitely-not-a-real-tool-xyz") == ""));\n'
             "std.fs.remove_all(base);\n"
             "std.fs.remove_all(base);\n"
-            'println("removed=" + str(std.fs.exists(base) == 0));\n'
+            'std.io.println("removed=" + str(std.fs.exists(base) == 0));\n'
             "std.fs.remove_all(root);\n"
         )
         proc = subprocess.run(

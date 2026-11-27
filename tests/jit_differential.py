@@ -33,15 +33,15 @@ def case(name, source, extra_env=None, expect_debug=None):
 CASES = [
     case(
         "handlers",
-        "func risky(x) {\n"
+        "import std;\nfunc risky(x) {\n"
         "  return (10 / x) on error(e) {\n"
-        "    print(\"handler:\" + str(e) + \";\");\n"
+        "    std.io.print(\"handler:\" + str(e) + \";\");\n"
         "    recover -1;\n"
         "  };\n"
         "}\n"
-        "println(str(risky(2)));\n"
-        "println(str(risky(0)));\n"
-        "println(str(risky(5)));\n",
+        "std.io.println(str(risky(2)));\n"
+        "std.io.println(str(risky(0)));\n"
+        "std.io.println(str(risky(5)));\n",
         expect_debug="[jit] enter risky",
     ),
     case(
@@ -54,11 +54,11 @@ CASES = [
         "func risky(x) {\n"
         "  return (10 / x) on error(e) { recover on + error; };\n"
         "}\n"
-        "println(str(b.on + b.error));\n"
-        "println(str(risky(2)));\n"
-        "println(str(risky(0)));\n"
+        "std.io.println(str(b.on + b.error));\n"
+        "std.io.println(str(risky(2)));\n"
+        "std.io.println(str(risky(0)));\n"
         "macro error(x: expr) { #x + 100; }\n"
-        "println(str(error!(1)));\n",
+        "std.io.println(str(error!(1)));\n",
         expect_debug="[jit] enter risky",
     ),
     case(
@@ -84,21 +84,21 @@ CASES = [
         "  std.task.sleep(1).wait();\n"
         "  return data[0] + data[1] + data[2];\n"
         "}\n"
-        "println(str(work(3)));\n"
-        "println(str(wait launch work(10)));\n"
-        "println(str(wait launch work(20)));\n",
+        "std.io.println(str(work(3)));\n"
+        "std.io.println(str(wait launch work(10)));\n"
+        "std.io.println(str(wait launch work(20)));\n",
         expect_debug="[jit] enter work",
     ),
     case(
         "gc-stress-jit-frames",
-        "func make(n) {\n"
+        "import std;\nfunc make(n) {\n"
         "  let data = [n, n + 1, n + 2];\n"
         "  let extra = {\"k\": n};\n"
         "  return data[0] + data[1] + data[2] + extra[\"k\"];\n"
         "}\n"
         "let i = 0;\n"
         "while (i < 40) {\n"
-        "  println(str(make(i)));\n"
+        "  std.io.println(str(make(i)));\n"
         "  i = i + 1;\n"
         "}\n",
         extra_env={"SKEIN_GC_STRESS": "1"},
@@ -106,20 +106,20 @@ CASES = [
     ),
     case(
         "selective-import",
-        "import {basename} from std.path;\n"
+        "import std;\nimport {basename} from std.path;\n"
         "func selected(path) { return basename(path); }\n"
-        'println(selected("/a/b.txt"));\n',
+        'std.io.println(selected("/a/b.txt"));\n',
         expect_debug="[jit] enter selected",
     ),
     case(
         "runtime-types-and-inline-caches",
-        "func add(a, b) { return a + b; }\n"
+        "import std;\nfunc add(a, b) { return a + b; }\n"
         "func get(c, k) { return c[k]; }\n"
-        "println(str(add(1, 2)));\n"
-        'println(str(add("a", "b")));\n'
-        "println(str(add(1.5, 2.5)));\n"
-        'println(str(get({"x": 1}, "x")));\n'
-        "println(str(get([10, 20], 1)));\n",
+        "std.io.println(str(add(1, 2)));\n"
+        'std.io.println(str(add("a", "b")));\n'
+        "std.io.println(str(add(1.5, 2.5)));\n"
+        'std.io.println(str(get({"x": 1}, "x")));\n'
+        "std.io.println(str(get([10, 20], 1)));\n",
         expect_debug="[jit] enter add",
     ),
     case(
@@ -133,23 +133,23 @@ CASES = [
         "  return d[i].name;\n"
         "}\n"
         "let i = 1;\n"
-        "while (i <= 2) { println(lookup(i)); i = i + 1; }\n",
+        "while (i <= 2) { std.io.println(lookup(i)); i = i + 1; }\n",
         expect_debug="[jit] enter lookup",
     ),
     case(
         "tuple-dict-keys",
-        "func roundtrip(i) {\n"
+        "import std;\nfunc roundtrip(i) {\n"
         "  let d = {(1, 'a'): i, (2, 'b'): i + 1};\n"
         "  d[(3, 'c')] = i + 2;\n"
         "  return d[(1, 'a')] + d[(2, 'b')] + d[(3, 'c')];\n"
         "}\n"
         "let i = 0;\n"
-        "while (i < 20) { println(str(roundtrip(i))); i = i + 1; }\n",
+        "while (i < 20) { std.io.println(str(roundtrip(i))); i = i + 1; }\n",
         expect_debug="[jit] enter roundtrip",
     ),
     case(
         "struct-dict-keys",
-        "struct Key { id: int; tag: string; }\n"
+        "import std;\nstruct Key { id: int; tag: string; }\n"
         "func roundtrip(i) {\n"
         '  let d = {Key { id: 1, tag: "a" }: i};\n'
         '  d[Key { id: 2, tag: "b" }] = i + 1;\n'
@@ -157,22 +157,22 @@ CASES = [
         'd[Key { id: 2, tag: "b" }];\n'
         "}\n"
         "let i = 0;\n"
-        "while (i < 20) { println(str(roundtrip(i))); i = i + 1; }\n",
+        "while (i < 20) { std.io.println(str(roundtrip(i))); i = i + 1; }\n",
         expect_debug="[jit] enter roundtrip",
     ),
     case(
         "enum-dict-keys",
-        "enum Key { A { id: int; }; B; }\n"
+        "import std;\nenum Key { A { id: int; }; B; }\n"
         "func roundtrip(i) {\n"
         "  let d = {Key.A { id: 1 }: i, Key.B: i + 1};\n"
         "  return d[Key.A { id: 1 }] + d[Key.B];\n"
         "}\n"
         "let i = 0;\n"
-        "while (i < 20) { println(str(roundtrip(i))); i = i + 1; }\n",
+        "while (i < 20) { std.io.println(str(roundtrip(i))); i = i + 1; }\n",
     ),
     case(
         "custom-struct-hash",
-        "import std.dict_key;\n"
+        "import std;\nimport std.dict_key;\n"
         "struct Key { id: int; cache: list[int]; }\n"
         "impl Key {\n"
         "  func dict_hash(self): int { return self.id; }\n"
@@ -184,12 +184,12 @@ CASES = [
         "d[Key { id: 2, cache: [] }];\n"
         "}\n"
         "let i = 0;\n"
-        "while (i < 20) { println(str(roundtrip(i))); i = i + 1; }\n",
+        "while (i < 20) { std.io.println(str(roundtrip(i))); i = i + 1; }\n",
         expect_debug="[jit] enter roundtrip",
     ),
     case(
         "custom-key-equality",
-        "import std.dict_key;\n"
+        "import std;\nimport std.dict_key;\n"
         "struct Key { id: int; cache: list[int]; }\n"
         "impl Key {\n"
         "  func dict_hash(self): int { return self.id; }\n"
@@ -204,12 +204,12 @@ CASES = [
         "d[Key { id: 2, cache: [i] }];\n"
         "}\n"
         "let i = 0;\n"
-        "while (i < 20) { println(str(roundtrip(i))); i = i + 1; }\n",
+        "while (i < 20) { std.io.println(str(roundtrip(i))); i = i + 1; }\n",
         expect_debug="[jit] enter roundtrip",
     ),
     case(
         "structural-protocol-dispatch",
-        "proto Doubler {\n"
+        "import std;\nproto Doubler {\n"
         "  func value(self) -> int;\n"
         "  func double(self) { return self.value() * 2; }\n"
         "}\n"
@@ -217,18 +217,18 @@ CASES = [
         "impl Num { func value(self): int { return self.n; } }\n"
         "func roundtrip(x: Doubler) { return x.double(); }\n"
         "let i = 0;\n"
-        "while (i < 20) { println(str(roundtrip(Num { n: i }))); i = i + 1; }\n",
+        "while (i < 20) { std.io.println(str(roundtrip(Num { n: i }))); i = i + 1; }\n",
     ),
     case(
         "inline-struct-method-dispatch",
-        "struct Counter { n: int; func bump(self): int { return self.n + 1; } }\n"
+        "import std;\nstruct Counter { n: int; func bump(self): int { return self.n + 1; } }\n"
         "impl Counter { func twice_bumped(self) -> self.bump() * 2; }\n"
         "func roundtrip(i) {\n"
         "  let c = Counter { n: i };\n"
         "  return c.bump() + c.twice_bumped();\n"
         "}\n"
         "let i = 0;\n"
-        "while (i < 20) { println(str(roundtrip(i))); i = i + 1; }\n",
+        "while (i < 20) { std.io.println(str(roundtrip(i))); i = i + 1; }\n",
         expect_debug="[jit] enter roundtrip",
     ),
     case(
@@ -246,43 +246,43 @@ CASES = [
         "}\n"
         "let i = 0;\n"
         "while (i < 20) {\n"
-        "  println(str(wait launch work(Num { n: i })));\n"
+        "  std.io.println(str(wait launch work(Num { n: i })));\n"
         "  i = i + 1;\n"
         "}\n",
     ),
     case(
         "globals-and-upvalues",
-        "let g = 0;\n"
+        "import std;\nlet g = 0;\n"
         "func bump() { g = g + 1; return g; }\n"
-        "println(str(bump()));\n"
-        "println(str(bump()));\n"
+        "std.io.println(str(bump()));\n"
+        "std.io.println(str(bump()));\n"
         "func outer(n) { return func(x) { return x + n; }; }\n"
         "let f = outer(10);\n"
-        "println(str(f(5)));\n",
+        "std.io.println(str(f(5)));\n",
         expect_debug="[jit] enter bump",
     ),
     case(
         "defer",
-        "func f(n) {\n"
-        "  defer print(\"defer;\");\n"
+        "import std;\nfunc f(n) {\n"
+        "  defer std.io.print(\"defer;\");\n"
         "  return n * 2;\n"
         "}\n"
-        "println(str(f(1)));\n"
-        "println(str(f(2)));\n",
+        "std.io.println(str(f(1)));\n"
+        "std.io.println(str(f(2)));\n",
         expect_debug="[jit] enter f",
     ),
     case(
         "generator-fallback",
         "import std;\n"
         "func gen() { yield 1; yield 2; }\n"
-        "for (let x in gen()) { println(str(x)); }\n",
+        "for (let x in gen()) { std.io.println(str(x)); }\n",
         expect_debug="suspendable gen",
     ),
     case(
         "pattern-params-fallback",
-        "func pat([a, b]) { return a + b; }\n"
-        "println(str(pat([1, 2])));\n"
-        "println(str(pat([10, 20])));\n",
+        "import std;\nfunc pat([a, b]) { return a + b; }\n"
+        "std.io.println(str(pat([1, 2])));\n"
+        "std.io.println(str(pat([10, 20])));\n",
     ),
     case(
         "top-level-statements",
@@ -291,39 +291,39 @@ CASES = [
         "let xs = [1, 2, 3];\n"
         "let total = 0;\n"
         "for (let x in xs) { total = total + add(x, 1); }\n"
-        "println(str(total));\n"
+        "std.io.println(str(total));\n"
         "let i = 0;\n"
         "while (i < 100) { total = total + add(i, 2); i = i + 1; }\n"
-        "println(str(total));\n",
+        "std.io.println(str(total));\n",
         expect_debug="[jit] top-level",
     ),
     case(
         "tight-loop",
-        "func sum(n) {\n"
+        "import std;\nfunc sum(n) {\n"
         "  let i = 0;\n"
         "  let total = 0;\n"
         "  while (i < n) { total = total + i; i = i + 1; }\n"
         "  return total;\n"
         "}\n"
-        "println(str(sum(1000)));\n"
-        "println(str(sum(2000)));\n",
+        "std.io.println(str(sum(1000)));\n"
+        "std.io.println(str(sum(2000)));\n",
         expect_debug="[jit] enter sum",
     ),
     case(
         "macro-type-fragment-annotation",
-        "macro pick(T: type, v: expr) { let x: #T = #v; return x; }\n"
+        "import std;\nmacro pick(T: type, v: expr) { let x: #T = #v; return x; }\n"
         "func hot(n) {\n"
         "  let total = 0;\n"
         "  let i = 0;\n"
         "  while (i < n) { total = total + pick!(int, i); i = i + 1; }\n"
         "  return total;\n"
         "}\n"
-        "println(str(hot(100)));\n",
+        "std.io.println(str(hot(100)));\n",
         expect_debug="[jit] enter hot",
     ),
     case(
         "macro-type-fragment-wrappers",
-        "macro wrappers(T: type) {\n"
+        "import std;\nmacro wrappers(T: type) {\n"
         "  let r: ref #T? = null;\n"
         "  let w: weak #T? = null;\n"
         "  return 1;\n"
@@ -334,12 +334,12 @@ CASES = [
         "  while (i < n) { total = total + wrappers!(int); i = i + 1; }\n"
         "  return total;\n"
         "}\n"
-        "println(str(hot(100)));\n",
+        "std.io.println(str(hot(100)));\n",
         expect_debug="[jit] enter hot",
     ),
     case(
         "macro-type-fragment-cast-is",
-        "macro cast_it(T: type, v: expr) { let x = #v as #T; return x; }\n"
+        "import std;\nmacro cast_it(T: type, v: expr) { let x = #v as #T; return x; }\n"
         "macro is_it(T: type, v: expr) { return #v is #T; }\n"
         "func hot(n) {\n"
         "  let total = 0;\n"
@@ -351,7 +351,7 @@ CASES = [
         "  }\n"
         "  return total;\n"
         "}\n"
-        "println(str(hot(100)));\n",
+        "std.io.println(str(hot(100)));\n",
         expect_debug="[jit] enter hot",
     ),
     case(
@@ -393,7 +393,7 @@ CASES = [
         "import std;\n"
         "func hot(n) {\n"
         "  let total = 0;\n"
-        "  for i in range(1000000000) {\n"
+        "  for i in std.utils.range(1000000000) {\n"
         "    total = total + i;\n"
         "    if (i == 2) { break; }\n"
         "  }\n"
@@ -402,7 +402,7 @@ CASES = [
         "  }\n"
         "  return total + n;\n"
         "}\n"
-        "println(str(hot(1)));\n",
+        "std.io.println(str(hot(1)));\n",
         expect_debug="[jit] enter hot",
     ),
 ]

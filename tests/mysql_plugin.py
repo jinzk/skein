@@ -82,20 +82,20 @@ def test_abi():
     check(
         "mysql plugin version",
         "import mysql;\n"
-        "println(mysql.VERSION);\n"
-        "println(mysql.library_version());\n",
+        "std.io.println(mysql.VERSION);\n"
+        "std.io.println(mysql.library_version());\n",
         stdout_all=["0.1.0"],
     )
     check(
         "mysql type helpers",
         "import mysql;\n"
-        'println(mysql.as_int("42"));\n'
-        'println(mysql.as_int(""));\n'
-        'println(mysql.as_float("3.5"));\n'
-        'println(mysql.as_float(null));\n'
-        'println(mysql.as_bool("1"));\n'
-        'println(mysql.as_bool("0"));\n'
-        "println(mysql.as_bool(null));\n",
+        'std.io.println(mysql.as_int("42"));\n'
+        'std.io.println(mysql.as_int(""));\n'
+        'std.io.println(mysql.as_float("3.5"));\n'
+        'std.io.println(mysql.as_float(null));\n'
+        'std.io.println(mysql.as_bool("1"));\n'
+        'std.io.println(mysql.as_bool("0"));\n'
+        "std.io.println(mysql.as_bool(null));\n",
         stdout_all=["42", "null", "3.5", "null",
                     "true", "false", "null"],
     )
@@ -105,7 +105,7 @@ def test_abi():
         "import mysql;\n"
         'mysql.connect("127.0.0.1", "nobody", "wrong", "missing", 1) '
         "on error(e) {\n"
-        "  println(std.error.kind(e));\n"
+        "  std.io.println(std.error.kind(e));\n"
         "  recover null;\n"
         "}\n",
         stdout="runtime",
@@ -116,7 +116,7 @@ def test_abi():
         f"std.native.load({skein_string(os.path.abspath(PLUGIN))});\n"
         "import skein.mysql as native;\n"
         "native.connect(1, 2, 3, 4) on error(e) {\n"
-        "  println(std.error.kind(e));\n"
+        "  std.io.println(std.error.kind(e));\n"
         "  recover null;\n"
         "}\n",
         stdout="runtime",
@@ -127,7 +127,7 @@ def test_abi():
         f"std.native.load({skein_string(os.path.abspath(PLUGIN))});\n"
         "import skein.mysql as native;\n"
         "native.query_task(1) on error(e) {\n"
-        "  println(std.error.kind(e));\n"
+        "  std.io.println(std.error.kind(e));\n"
         "  recover null;\n"
         "}\n",
         stdout="runtime",
@@ -136,9 +136,9 @@ def test_abi():
         "mysql plugin unload keeps live bindings",
         "import std;\n"
         "import mysql;\n"
-        "println(mysql.VERSION);\n"
+        "std.io.println(mysql.VERSION);\n"
         'std.native.unload("skein.mysql");\n'
-        "println(mysql.library_version());\n",
+        "std.io.println(mysql.library_version());\n",
         stdout="0.1.0",
     )
     check(
@@ -180,7 +180,7 @@ def test_integration(config):
         "import std;\n"
         "import mysql;\n"
         f"let c = mysql.connect({connect_args});\n"
-        "println(c.ping());\n"
+        "std.io.println(c.ping());\n"
         "c.execute(\"DROP TABLE IF EXISTS skein_plugin_test\");\n"
         "c.execute(\"CREATE TABLE skein_plugin_test ("
         "id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(64), "
@@ -188,40 +188,40 @@ def test_integration(config):
         "let quoted = c.quote(\"O'Reilly\");\n"
         "c.execute(\"INSERT INTO skein_plugin_test (name, note, payload) "
         "VALUES ('\" + quoted + \"', NULL, X'0102FF')\");\n"
-        "println(c.affected_rows());\n"
-        "println(c.insert_id());\n"
+        "std.io.println(c.affected_rows());\n"
+        "std.io.println(c.insert_id());\n"
         "let r = c.query(\"SELECT id, name, note, payload "
         "FROM skein_plugin_test\");\n"
         "std.native.unload(\"skein.mysql\");\n"
-        "println(r.fields());\n"
-        "println(r.count());\n"
+        "std.io.println(r.fields());\n"
+        "std.io.println(r.count());\n"
         "let rows = r.rows();\n"
-        "println(r.count());\n"
-        "println(rows[0][\"name\"]);\n"
-        "println(rows[0][\"note\"] == null);\n"
-        "println(type_name(rows[0][\"payload\"]));\n"
-        "println(mysql.as_int(rows[0][\"id\"]));\n"
-        "println(mysql.as_int(rows[0][\"note\"]));\n"
-        "println(mysql.as_float(\"3.5\"));\n"
-        "println(mysql.as_bool(\"1\"));\n"
+        "std.io.println(r.count());\n"
+        "std.io.println(rows[0][\"name\"]);\n"
+        "std.io.println(rows[0][\"note\"] == null);\n"
+        "std.io.println(std.type.name(rows[0][\"payload\"]));\n"
+        "std.io.println(mysql.as_int(rows[0][\"id\"]));\n"
+        "std.io.println(mysql.as_int(rows[0][\"note\"]));\n"
+        "std.io.println(mysql.as_float(\"3.5\"));\n"
+        "std.io.println(mysql.as_bool(\"1\"));\n"
         "let at = c.query_task(\"SELECT 42 AS answer\");\n"
-        "println(type_name(at));\n"
+        "std.io.println(std.type.name(at));\n"
         "let ar = mysql.wrap_result(at);\n"
-        "println(ar.rows()[0][\"answer\"]);\n"
+        "std.io.println(ar.rows()[0][\"answer\"]);\n"
         "ar.close();\n"
         "let failed = c.query_task(\"SELECT * FROM skein_missing_table\");\n"
         "let caught = std.task.catch(failed).wait();\n"
-        "println(std.result.is_err(caught));\n"
-        "println(c.last_error() != \"\");\n"
+        "std.io.println(std.result.is_err(caught));\n"
+        "std.io.println(c.last_error() != \"\");\n"
         "let cancelled = c.query_task(\"SELECT 1\");\n"
         "std.task.cancel(cancelled);\n"
         "let ccaught = std.task.catch(cancelled).wait();\n"
-        "println(std.result.is_err(ccaught));\n"
+        "std.io.println(std.result.is_err(ccaught));\n"
         "c.execute(\"SELECT * FROM skein_missing_table\") on error(e) {\n"
-        "  println(std.error.kind(e));\n"
+        "  std.io.println(std.error.kind(e));\n"
         "  recover null;\n"
         "}\n"
-        "println(c.last_error() != \"\");\n"
+        "std.io.println(c.last_error() != \"\");\n"
         "c.execute(\"DROP TABLE skein_plugin_test\");\n"
         "r.close();\n"
         "c.close();\n"
@@ -319,10 +319,10 @@ def test_source_module():
         main = os.path.join(project, "main.skein")
         with open(main, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(
-                'import "skein.contrib/mysql" as mysql;\n'
-                "println(mysql.VERSION);\n"
-                'println(mysql.library_version() != "");\n'
-                "println(mysql.wrap_result != null);\n"
+                'import std;\nimport "skein.contrib/mysql" as mysql;\n'
+                "std.io.println(mysql.VERSION);\n"
+                'std.io.println(mysql.library_version() != "");\n'
+                "std.io.println(mysql.wrap_result != null);\n"
             )
 
         denied = cli(main)

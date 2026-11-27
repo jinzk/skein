@@ -14,20 +14,20 @@ BIN = os.path.abspath(sys.argv[1])
 
 SERVER = """import std;
 
-let s = std.http.listen("127.0.0.1", 0);
-println(s["port"]);
+let s = std.http.listen(\"127.0.0.1\", 0);
+std.io.println(s[\"port\"]);
 std.io.flush(std.io.stdout);
 
 func handle(req) {
-    if (req["path"] == "/slow") {
+    if (req[\"path\"] == \"/slow\") {
         std.task.sleep(1200).wait();
-        return {"status": 200, "headers": {}, "body": "slow-ok"};
+        return {\"status\": 200, \"headers\": {}, \"body\": \"slow-ok\"};
     }
-    if (req["path"] == "/stuck") {
+    if (req[\"path\"] == \"/stuck\") {
         std.task.sleep(30000).wait();
-        return {"status": 200, "headers": {}, "body": "late"};
+        return {\"status\": 200, \"headers\": {}, \"body\": \"late\"};
     }
-    return {"status": 200, "headers": {}, "body": "ok"};
+    return {\"status\": 200, \"headers\": {}, \"body\": \"ok\"};
 }
 
 std.http.serve(s, handle);
@@ -35,13 +35,13 @@ std.http.serve(s, handle);
 
 PROCESS_SERVER = """import std;
 
-let s = std.http.listen("127.0.0.1", 0);
+let s = std.http.listen(\"127.0.0.1\", 0);
 let ps = std.http.serve_processes(
-    s, 2, "@WORKER@", {"strategy": "reuse_port"});
-println(s["port"]);
+    s, 2, \"@WORKER@\", {\"strategy\": \"reuse_port\"});
+std.io.println(s[\"port\"]);
 std.io.flush(std.io.stdout);
 let served = ps.join();
-print("served=" + str(served) + "\\n");
+std.io.print(\"served=\" + str(served) + \"\\n\");
 """
 
 WORKER = """import std;
@@ -57,14 +57,14 @@ func handle(req) {
 
 DISPATCH_SERVER = """import std;
 
-let s = std.http.listen("127.0.0.1", 0);
+let s = std.http.listen(\"127.0.0.1\", 0);
 let ps = std.http.serve_processes(
-    s, 2, "@WORKER@", {"strategy": "dispatch"});
-println(s["port"]);
+    s, 2, \"@WORKER@\", {\"strategy\": \"dispatch\"});
+std.io.println(s[\"port\"]);
 std.io.flush(std.io.stdout);
 std.task.sleep(1500).wait();
 let served = ps.shutdown();
-print("served=" + str(served) + "\\n");
+std.io.print(\"served=\" + str(served) + \"\\n\");
 """
 
 DISPATCH_WORKER = """import std;

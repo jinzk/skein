@@ -78,6 +78,7 @@ d[(1, "a")]
 `std.dict_key.DictHashable` 允许 struct/enum 跳过字段递归检查，使用自定义 hash：
 
 ```skein
+import std;
 import std.dict_key;
 
 struct User {
@@ -171,6 +172,7 @@ d[k]              // 查找失败
 如果不需要 `d[user]` 语法，而只是想按字段建立索引，优先使用显式投影：
 
 ```skein
+import std;
 let by_id = std.dict.index_by(users, func(u) { return u.id; });
 by_id[user.id]
 ```

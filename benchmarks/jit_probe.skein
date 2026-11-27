@@ -4,4 +4,4 @@ func ping(n) {
 
 ping(1);
 ping(2);
-print(ping(3));
+std.io.print(ping(3));

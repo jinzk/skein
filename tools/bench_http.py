@@ -62,11 +62,11 @@ def build_server(mode, workers, requests, strategy, worker_path):
         f'"{escape_skein_path(worker_path)}", {option_text});\n'
     )
     lines.extend([
-        'println(s["port"]);\n',
+        'std.io.println(s["port"]);\n',
         "std.io.flush(std.io.stdout);\n",
-        'println("ready");\n',
+        'std.io.println("ready");\n',
         "std.io.flush(std.io.stdout);\n",
-        'println("served=" + str(srv.join()));\n',
+        'std.io.println("served=" + str(srv.join()));\n',
     ])
     return "".join(lines)
 

@@ -84,7 +84,7 @@ ts_test("traits generic hashable constraint", func() {
 
 ts_test("traits generic iterable constraint", func() {
   ts_eq(trait_need_iter([1, 2]).len(), 2);
-  ts_eq(len(trait_need_iter("ab")), 2);
+  ts_eq(std.utils.len(trait_need_iter("ab")), 2);
   ts_eq(trait_need_iter(TraitRange {
     start: 1, end: 3, extra: []
   }).start, 1);
@@ -105,13 +105,13 @@ ts_test("traits proto iter dispatch", func() {
 
   let chars: Iterable = "xy";
   let got = std.iter.collect(chars.iter());
-  ts_eq(len(got), 2);
+  ts_eq(std.utils.len(got), 2);
   ts_eq(str(got[0]), "x");
   ts_eq(str(got[1]), "y");
 
   let d: Iterable = {"a": 1, "b": 2};
   let entries = std.iter.collect(d.iter());
-  ts_eq(len(entries), 2);
+  ts_eq(std.utils.len(entries), 2);
   ts_eq(entries[0][0], "a");
   ts_eq(entries[0][1], 1);
 

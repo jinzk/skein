@@ -80,7 +80,8 @@ build\skein.exe
 把下面内容保存为 `hello.skein`：
 
 ```skein
-print("hello, skein");
+import std;
+std.io.print("hello, skein");
 ```
 
 然后运行：
@@ -164,7 +165,7 @@ func add(a: int, b: int): int {
 ```skein
 import std;
 
-let squares = (range(0, 10)
+let squares = (std.utils.range(0, 10)
   |> std.iter.filter(x -> x % 2 == 0)
   |> std.iter.map(x -> x * x)
   |> std.iter.collect());
@@ -190,6 +191,7 @@ let desc = match (event) {
 `struct` 声明数据和方法，`impl` 可追加方法，`proto` 声明结构式接口；枚举支持带载荷变体和穷尽匹配：
 
 ```skein
+import std;
 proto Drawable {
   func draw(self);
 }
@@ -203,7 +205,7 @@ struct Point {
   }
 
   func draw(self) {
-    print("point " + str(self.area()));
+    std.io.print("point " + str(self.area()));
   }
 }
 
@@ -234,7 +236,7 @@ func work(n) {
 
 let t = launch work(21);
 let value = wait t;       // 等价于 t.wait()
-print(value);
+std.io.print(value);
 
 let total = std.task.scope(func() {
   let a = launch work(1);
@@ -255,8 +257,9 @@ let total = std.task.scope(func() {
 `fail` 抛错，`on error` 在表达式边界恢复，`recover` 的值成为整个表达式的结果：
 
 ```skein
+import std;
 let n = parse_positive("0") on error(e) {
-  print("bad input: " + str(e));
+  std.io.print("bad input: " + str(e));
   recover 0;
 };
 ```
@@ -314,6 +317,7 @@ std.http.close(server);
 字符串按 UTF-8 处理，支持 Unicode 标识符；归一化是显式的，不会在比较或拼接时隐式发生：
 
 ```skein
+import std;
 let café = "café";
 let nfc = std.unicode.normalize(café, "nfc");
 let folded = std.unicode.casefold("Straße");
@@ -373,6 +377,7 @@ cp -r skills/skein ~/.config/opencode/skills/
 ## 项目结构
 
 ```text
+import std;
 src/
   platform/      L0  OS 原语：platform.*、platform_posix.cpp、platform_win.cpp、
                   dynamic_library.*、runtime_state.*

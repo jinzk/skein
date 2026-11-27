@@ -37,9 +37,9 @@ def run_cases():
                      "import pkg;\n"
                      'include "shared/helpers.skein";\n'
                      'include "shared/helpers.skein";\n'
-                     'println(greet("main"));\n'
-                     "println(str(header_value));\n"
-                     "println(pkg.inside());\n")
+                     'std.io.println(greet("main"));\n'
+                     "std.io.println(str(header_value));\n"
+                     "std.io.println(pkg.inside());\n")
         proc = run_file(main)
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout.splitlines() == [
@@ -51,8 +51,8 @@ def run_cases():
               "import std;\n"
               "struct T { x: int; }\n"
               "func describe() {\n"
-              "  return type_package(T { x: 1 }) + \"|\" +\n"
-              "         type_module_name(T { x: 1 });\n"
+              "  return std.type.package_name(T { x: 1 }) + \"|\" +\n"
+              "         std.type.module_name(T { x: 1 });\n"
               "}\n")
         write(tmp, "pkg.skein",
               "package pkg {\n"
@@ -63,22 +63,22 @@ def run_cases():
               "import std;\n"
               "struct M { x: int; }\n"
               "func describe_main() {\n"
-              "  return type_package(M { x: 1 }) + \"|\" +\n"
-              "         type_module_name(M { x: 1 });\n"
+              "  return std.type.package_name(M { x: 1 }) + \"|\" +\n"
+              "         std.type.module_name(M { x: 1 });\n"
               "}\n")
         main = write(tmp, "main.skein",
                      "import std;\n"
                      "import pkg;\n"
                      'include "shared/main_types.skein";\n'
-                     "println(describe_main());\n"
-                     "println(pkg.info());\n")
+                     "std.io.println(describe_main());\n"
+                     "std.io.println(pkg.info());\n")
         proc = run_file(main)
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout.splitlines() == ["main|", "pkg|"], proc.stdout
 
     # Package/module declarations and executable statements are rejected.
     with tempfile.TemporaryDirectory() as tmp:
-        write(tmp, "bad_exec.skein", 'println("nope");\n')
+        write(tmp, "bad_exec.skein", 'import std;\nstd.io.println("nope");\n')
         main = write(tmp, "main_exec.skein",
                      'include "bad_exec.skein";\n')
         proc = run_file(main)
@@ -96,8 +96,8 @@ def run_cases():
 
         write(tmp, "ok.skein", "func ok() { return 1; }\n")
         main = write(tmp, "main_func.skein",
-                     'func outer() {\n  include "ok.skein";\n  return 1;\n}\n'
-                     "println(str(outer()));\n")
+                     'import std;\nfunc outer() {\n  include "ok.skein";\n  return 1;\n}\n'
+                     "std.io.println(str(outer()));\n")
         proc = run_file(main)
         assert proc.returncode == 1, proc.stdout
         assert "include is only allowed at declaration level" in proc.stderr, (
@@ -122,8 +122,8 @@ def run_cases():
     with tempfile.TemporaryDirectory() as tmp:
         write(tmp, "shared/value.skein", "let shared_value = 9;\n")
         main = write(tmp, "app/main.skein",
-                     'include "../shared/value.skein";\n'
-                     "println(str(shared_value));\n")
+                     'import std;\ninclude "../shared/value.skein";\n'
+                     "std.io.println(str(shared_value));\n")
         proc = run_file(main)
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout == "9\n", repr(proc.stdout)

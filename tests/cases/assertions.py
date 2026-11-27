@@ -13,7 +13,7 @@ def run_cases():
         "import std;\n"
         'let r = std.result.capture(func() { '
         'std.assert.that!(false, "off"); });\n'
-        'println(std.error.message(std.result.error(r)));\n',
+        'std.io.println(std.error.message(std.result.error(r)));\n',
         env={**os.environ, "SKEIN_TYPECHECK": "off"},
         stdout="off",
     )

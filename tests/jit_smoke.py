@@ -134,13 +134,13 @@ def main():
 
         values = tmp_path / "values.skein"
         values.write_text(
-            "func fib(n) {\n"
+            "import std;\nfunc fib(n) {\n"
             "  if (n < 2) { return n; }\n"
             "  return fib(n - 1) + fib(n - 2);\n"
             "}\n"
             "let i = 0;\n"
             "while (i <= 20) {\n"
-            "  println(fib(i));\n"
+            "  std.io.println(fib(i));\n"
             "  i = i + 1;\n"
             "}\n",
             encoding="utf-8",
@@ -222,42 +222,42 @@ def main():
 
         top_error = tmp_path / "top_error.skein"
         top_error.write_text(
-            "let total = 0;\n"
+            "import std;\nlet total = 0;\n"
             "let i = 0;\n"
             "while (i < 2) {\n"
             '  total = total + "x";\n'
             "  i = i + 1;\n"
             "}\n"
-            "println(total);\n",
+            "std.io.println(total);\n",
             encoding="utf-8",
         )
         ok &= compare(binary, "top-level-error", top_error)
 
         tail = tmp_path / "tail.skein"
         tail.write_text(
-            "func tail(n, acc) {\n"
+            "import std;\nfunc tail(n, acc) {\n"
             "  if (n <= 0) { return acc; }\n"
             "  return tail(n - 1, acc + 1);\n"
             "}\n"
-            "println(tail(1000, 0));\n",
+            "std.io.println(tail(1000, 0));\n",
             encoding="utf-8",
         )
         ok &= compare(binary, "tail-recursion", tail)
 
         tail_deep = tmp_path / "tail_deep.skein"
         tail_deep.write_text(
-            "func tail(n, acc) {\n"
+            "import std;\nfunc tail(n, acc) {\n"
             "  if (n <= 0) { return acc; }\n"
             "  return tail(n - 1, acc + 1);\n"
             "}\n"
-            "println(tail(100000, 0));\n",
+            "std.io.println(tail(100000, 0));\n",
             encoding="utf-8",
         )
         ok &= compare(binary, "tail-deep-recursion", tail_deep)
 
         mutual_tail = tmp_path / "mutual_tail.skein"
         mutual_tail.write_text(
-            "func even(n) {\n"
+            "import std;\nfunc even(n) {\n"
             "  if (n == 0) { return true; }\n"
             "  return odd(n - 1);\n"
             "}\n"
@@ -265,14 +265,14 @@ def main():
             "  if (n == 0) { return false; }\n"
             "  return even(n - 1);\n"
             "}\n"
-            "println(even(100000));\n",
+            "std.io.println(even(100000));\n",
             encoding="utf-8",
         )
         ok &= compare(binary, "mutual-tail-recursion", mutual_tail)
 
         tail_nonjit = tmp_path / "tail_nonjit.skein"
         tail_nonjit.write_text(
-            "func target(x) {\n"
+            "import std;\nfunc target(x) {\n"
             "  let l = [1, 2, 3];\n"
             "  let s = 0;\n"
             "  for (let v in l) { s = s + v; }\n"
@@ -282,7 +282,7 @@ def main():
             "  if (n <= 0) { return 0; }\n"
             "  return target(n);\n"
             "}\n"
-            "println(tail(10));\n",
+            "std.io.println(tail(10));\n",
             encoding="utf-8",
         )
         ok &= compare(binary, "tail-call-non-jit-target", tail_nonjit)
@@ -299,21 +299,21 @@ def main():
 
         ops = tmp_path / "ops.skein"
         ops.write_text(
-            "func calc(n) {\n"
+            "import std;\nfunc calc(n) {\n"
             "  let x = n; x *= 3; x += 4; x -= 2; x /= 2;\n"
             "  let y = x % 5;\n"
             "  let z = n << 2; z = z | 1; z = z ^ 3; z = z & 7;\n"
             "  let a = n; a++; ++a;\n"
             "  return x + y + z + a;\n"
             "}\n"
-            "println(calc(7));\n",
+            "std.io.println(calc(7));\n",
             encoding="utf-8",
         )
         ok &= compare(binary, "compound-and-bitops", ops)
 
         ops_param = tmp_path / "ops_param.skein"
         ops_param.write_text(
-            "func calc(p, xs, i) {\n"
+            "import std;\nfunc calc(p, xs, i) {\n"
             "  p += 2;\n"
             "  xs[i] += 3;\n"
             "  let a = p++;\n"
@@ -325,9 +325,9 @@ def main():
             "  return m[0][1];\n"
             "}\n"
             "let xs = [10, 20];\n"
-            "println(calc(1, xs, 1));\n"
-            "println(xs);\n"
-            "println(nested([[1, 2], [3, 4]]));\n",
+            "std.io.println(calc(1, xs, 1));\n"
+            "std.io.println(xs);\n"
+            "std.io.println(nested([[1, 2], [3, 4]]));\n",
             encoding="utf-8",
         )
         ok &= compare(binary, "compound-param-index", ops_param)
@@ -346,7 +346,7 @@ def main():
 
         global_ops = tmp_path / "global_ops.skein"
         global_ops.write_text(
-            "let g = 1;\n"
+            "import std;\nlet g = 1;\n"
             "func f(n) {\n"
             "  g += n; g++; ++g;\n"
             "  let x = -n;\n"
@@ -355,8 +355,8 @@ def main():
             "  if (y) { return g + x + z; }\n"
             "  return 0;\n"
             "}\n"
-            "println(f(3));\n"
-            "println(g);\n",
+            "std.io.println(f(3));\n"
+            "std.io.println(g);\n",
             encoding="utf-8",
         )
         ok &= compare(binary, "global-compound-unary", global_ops)
@@ -372,8 +372,8 @@ def main():
 
         pattern_error = tmp_path / "pattern_error.skein"
         pattern_error.write_text(
-            "func add([a, b]) { return a + b; }\n"
-            "println(add([1, 2]));\n"
+            "import std;\nfunc add([a, b]) { return a + b; }\n"
+            "std.io.println(add([1, 2]));\n"
             "add([1]);\n",
             encoding="utf-8",
         )
@@ -381,8 +381,8 @@ def main():
 
         pattern_dict_error = tmp_path / "pattern_dict_error.skein"
         pattern_dict_error.write_text(
-            "func pair({x, y}) { return x + y; }\n"
-            'println(pair({"x": 1, "y": 2}));\n'
+            "import std;\nfunc pair({x, y}) { return x + y; }\n"
+            'std.io.println(pair({"x": 1, "y": 2}));\n'
             'pair({"x": 1});\n',
             encoding="utf-8",
         )
@@ -392,10 +392,10 @@ def main():
         suspend_gen.write_text(
             "import std;\n"
             "func work(n) { yield n + 1; }\n"
-            'println(std.generator.next(work(1))["value"]);\n'
-            'println(std.generator.next(work(2))["value"]);\n'
+            'std.io.println(std.generator.next(work(1))["value"]);\n'
+            'std.io.println(std.generator.next(work(2))["value"]);\n'
             "func gen() { yield 1; yield 2; }\n"
-            "for (let x in gen()) { println(x); }\n",
+            "for (let x in gen()) { std.io.println(x); }\n",
             encoding="utf-8",
         )
         ok &= compare(binary, "suspend-generator", suspend_gen)
@@ -412,7 +412,7 @@ def main():
         # inner closure is JIT-compiled; the outer function still creates it.
         closure_ops = tmp_path / "closure_ops.skein"
         closure_ops.write_text(
-            "func make_counter(start) {\n"
+            "import std;\nfunc make_counter(start) {\n"
             "  let n = start;\n"
             "  func step() {\n"
             "    let before = n;\n"
@@ -427,10 +427,10 @@ def main():
             "let i = 0;\n"
             "while (i < 300) {\n"
             "  let r = c();\n"
-            "  if (i == 0) { println(r); }\n"
+            "  if (i == 0) { std.io.println(r); }\n"
             "  i = i + 1;\n"
             "}\n"
-            "println(str(i));\n"
+            "std.io.println(str(i));\n"
             "func make_tail(base) {\n"
             "  func step(n) {\n"
             "    if (n <= 0) { return base; }\n"
@@ -438,7 +438,7 @@ def main():
             "  }\n"
             "  return step;\n"
             "}\n"
-            "println(str(make_tail(7)(100000)));\n",
+            "std.io.println(str(make_tail(7)(100000)));\n",
             encoding="utf-8",
         )
         ok &= compare(binary, "closure-upvalues", closure_ops)
@@ -455,7 +455,7 @@ def main():
         # upvalues are captured into cells and closed when the frame returns.
         closure_create = tmp_path / "closure_create.skein"
         closure_create.write_text(
-            "func make_adder(x) {\n"
+            "import std;\nfunc make_adder(x) {\n"
             "  func add(y) { return x + y; }\n"
             "  return add;\n"
             "}\n"
@@ -472,13 +472,13 @@ def main():
             "  total = total + add(1);\n"
             "  i = i + 1;\n"
             "}\n"
-            "println(str(total));\n"
+            "std.io.println(str(total));\n"
             "let k = 0;\n"
             "while (k < 200) {\n"
             "  let pair = make_pair();\n"
             "  let a = pair[0]();\n"
             "  let b = pair[0]();\n"
-            "  if (k == 0) { println(str(a) + str(b) + str(pair[1]())); }\n"
+            "  if (k == 0) { std.io.println(str(a) + str(b) + str(pair[1]())); }\n"
             "  k = k + 1;\n"
             "}\n",
             encoding="utf-8",
@@ -498,15 +498,15 @@ def main():
         # run a hot loop.  Loopless helpers must stay interpreted.
         loop_first = tmp_path / "loop_first.skein"
         loop_first.write_text(
-            "func count(n) {\n"
+            "import std;\nfunc count(n) {\n"
             "  let total = 0;\n"
             "  let i = 0;\n"
             "  while (i < n) { total = total + i; i = i + 1; }\n"
             "  return total;\n"
             "}\n"
             "func flat(n) { return n + 1; }\n"
-            "println(str(count(10)));\n"
-            "println(str(flat(1)));\n",
+            "std.io.println(str(count(10)));\n"
+            "std.io.println(str(flat(1)));\n",
             encoding="utf-8",
         )
         ok &= compare(binary, "loop-first-call", loop_first, threshold="100")
@@ -568,7 +568,7 @@ def main():
             "func sum_dict() {\n"
             "  let total = 0;\n"
             "  for (let k, v in {\"a\": 1, \"b\": 2, \"c\": 3}) {\n"
-            "    total = total + len(k) + v;\n"
+            "    total = total + std.utils.len(k) + v;\n"
             "  }\n"
             "  return total;\n"
             "}\n"
@@ -625,15 +625,15 @@ def main():
             "  }\n"
             "  return total;\n"
             "}\n"
-            "println(str(sum_list(5)));\n"
-            "println(str(sum_dict()));\n"
-            "println(str(sum_text()));\n"
-            "println(str(sum_deque()));\n"
-            "println(str(sum_heap()));\n"
-            "println(str(sum_set()));\n"
-            "println(str(sum_gen(6)));\n"
-            "println(str(nested()));\n"
-            "println(str(early_exit()));\n"
+            "std.io.println(str(sum_list(5)));\n"
+            "std.io.println(str(sum_dict()));\n"
+            "std.io.println(str(sum_text()));\n"
+            "std.io.println(str(sum_deque()));\n"
+            "std.io.println(str(sum_heap()));\n"
+            "std.io.println(str(sum_set()));\n"
+            "std.io.println(str(sum_gen(6)));\n"
+            "std.io.println(str(nested()));\n"
+            "std.io.println(str(early_exit()));\n"
             "let i = 0;\n"
             "while (i < 200) {\n"
             "  sum_list(4);\n"
@@ -673,13 +673,13 @@ def main():
         )
         name_main = pkg_dir / "main.skein"
         name_main.write_text(
-            "import demo;\n"
+            "import std;\nimport demo;\n"
             "let i = 0;\n"
             "let last = 0;\n"
             "while (i < 200) { last = demo.bump(); i = i + 1; }\n"
-            "println(str(last));\n"
-            "println(str(demo.add(10)));\n"
-            "println(str(demo.value));\n",
+            "std.io.println(str(last));\n"
+            "std.io.println(str(demo.add(10)));\n"
+            "std.io.println(str(demo.value));\n",
             encoding="utf-8",
         )
         ok &= compare(binary, "name-mode", name_main)
@@ -710,15 +710,15 @@ def main():
             "while (i < 300) {\n"
             "  let r = app.dispatch({\"method\": \"GET\",\n"
             "                        \"path\": \"/users/\" + str(i % 7)});\n"
-            "  sum = sum + len(r[\"body\"]);\n"
+            "  sum = sum + std.utils.len(r[\"body\"]);\n"
             "  i = i + 1;\n"
             "}\n"
-            "println(str(sum));\n"
-            "println(str(app.dispatch({\"method\": \"GET\", \"path\": \"/static\"})"
+            "std.io.println(str(sum));\n"
+            "std.io.println(str(app.dispatch({\"method\": \"GET\", \"path\": \"/static\"})"
             "[\"body\"]));\n"
-            "println(str(app.dispatch({\"method\": \"POST\", \"path\": \"/static\"})"
+            "std.io.println(str(app.dispatch({\"method\": \"POST\", \"path\": \"/static\"})"
             "[\"status\"]));\n"
-            "println(str(app.dispatch({\"method\": \"GET\", \"path\": \"/missing\"})"
+            "std.io.println(str(app.dispatch({\"method\": \"GET\", \"path\": \"/missing\"})"
             "[\"status\"]));\n",
             encoding="utf-8",
         )
@@ -754,9 +754,9 @@ def main():
             "  if (name_of(i % 3) == \"r\") { total = total + 1; }\n"
             "  i = i + 1;\n"
             "}\n"
-            "println(str(total));\n"
-            "println(str(name_of(1)));\n"
-            "println(str(pick(2)));\n",
+            "std.io.println(str(total));\n"
+            "std.io.println(str(name_of(1)));\n"
+            "std.io.println(str(pick(2)));\n",
             encoding="utf-8",
         )
         ok &= compare(binary, "enum-field-or-enum", enum_ops)
@@ -772,7 +772,7 @@ def main():
         # Index assignment whose base is a captured (upvalue) container.
         upvalue_index = tmp_path / "upvalue_index.skein"
         upvalue_index.write_text(
-            "func make() {\n"
+            "import std;\nfunc make() {\n"
             "  let store = {\"n\": 0};\n"
             "  func bump(k) {\n"
             "    store[k] = store[k] + 1;\n"
@@ -784,8 +784,8 @@ def main():
             "let i = 0;\n"
             "let total = 0;\n"
             "while (i < 300) { total = total + bump(\"n\"); i = i + 1; }\n"
-            "println(str(total));\n"
-            "println(str(bump(\"n\")));\n",
+            "std.io.println(str(total));\n"
+            "std.io.println(str(bump(\"n\")));\n",
             encoding="utf-8",
         )
         ok &= compare(binary, "upvalue-index-write", upvalue_index)
@@ -814,12 +814,12 @@ def main():
             "  hits = hits + v;\n"
             "  i = i + 1;\n"
             "}\n"
-            "println(str(hits));\n"
-            "println(str(maybe(0)));\n"
+            "std.io.println(str(hits));\n"
+            "std.io.println(str(maybe(0)));\n"
             "let caught = maybe(5) on error(e) {\n"
             "  recover std.error.message(e);\n"
             "};\n"
-            "println(caught);\n",
+            "std.io.println(caught);\n",
             encoding="utf-8",
         )
         ok &= compare(binary, "fail-catch", fail_probe)
@@ -874,13 +874,13 @@ def main():
             "    recover {\"message\": std.error.message(e)};\n"
             "  };\n"
             "}\n"
-            "println(str(nested(1)));\n"
-            "println(str(pass_outer()));\n"
-            "println(str(handler_throws()));\n"
-            "println(str(outer_catches_error()));\n"
-            "println(str(use_result(0)));\n"
-            "println(str(use_result(5)));\n"
-            "println(boxed(1)[\"message\"]);\n"
+            "std.io.println(str(nested(1)));\n"
+            "std.io.println(str(pass_outer()));\n"
+            "std.io.println(str(handler_throws()));\n"
+            "std.io.println(str(outer_catches_error()));\n"
+            "std.io.println(str(use_result(0)));\n"
+            "std.io.println(str(use_result(5)));\n"
+            "std.io.println(boxed(1)[\"message\"]);\n"
             "let i = 0;\n"
             "let total = 0;\n"
             "while (i < 200) {\n"
@@ -888,7 +888,7 @@ def main():
             "          handler_throws() + outer_catches_error();\n"
             "  i = i + 1;\n"
             "}\n"
-            "println(str(total));\n",
+            "std.io.println(str(total));\n",
             encoding="utf-8",
         )
         ok &= compare(binary, "handler-ops", handler_ops)
@@ -907,15 +907,15 @@ def main():
         defer_ops.write_text(
             "import std;\n"
             "func basic(n) {\n"
-            "  defer print(\"d1:\" + str(n) + \";\");\n"
-            "  defer print(\"d2;\");\n"
+            "  defer std.io.print(\"d1:\" + str(n) + \";\");\n"
+            "  defer std.io.print(\"d2;\");\n"
             "  return n * 2;\n"
             "}\n"
             "func block(n) {\n"
             "  let total = 0;\n"
             "  let i = 0;\n"
             "  while (i < n) {\n"
-            "    defer print(\"iter\" + str(i) + \";\");\n"
+            "    defer std.io.print(\"iter\" + str(i) + \";\");\n"
             "    total = total + i;\n"
             "    i = i + 1;\n"
             "  }\n"
@@ -923,41 +923,41 @@ def main():
             "}\n"
             "func captured() {\n"
             "  let x = 1;\n"
-            "  defer print(\"x=\" + str(x) + \";\");\n"
+            "  defer std.io.print(\"x=\" + str(x) + \";\");\n"
             "  x = 9;\n"
             "  return x;\n"
             "}\n"
             "func outer() {\n"
             "  let y = 1;\n"
             "  func inner() {\n"
-            "    defer print(\"y=\" + str(y) + \";\");\n"
+            "    defer std.io.print(\"y=\" + str(y) + \";\");\n"
             "    y = y + 1;\n"
             "    return y;\n"
             "  }\n"
             "  return inner();\n"
             "}\n"
             "func early(n) {\n"
-            "  defer print(\"early;\");\n"
+            "  defer std.io.print(\"early;\");\n"
             "  if (n > 0) { return 1; }\n"
             "  return 2;\n"
             "}\n"
             "func failing() {\n"
-            "  defer print(\"cleanup;\");\n"
+            "  defer std.io.print(\"cleanup;\");\n"
             "  fail \"boom\";\n"
             "}\n"
             "func caller() {\n"
             "  return failing() on error(e) {\n"
-            "    print(\"caught;\");\n"
+            "    std.io.print(\"caught;\");\n"
             "    recover 1;\n"
             "  };\n"
             "}\n"
-            "println(str(basic(3)));\n"
-            "println(str(block(3)));\n"
-            "println(str(captured()));\n"
-            "println(str(outer()));\n"
-            "println(str(early(1)));\n"
-            "println(str(early(0)));\n"
-            "println(str(caller()));\n"
+            "std.io.println(str(basic(3)));\n"
+            "std.io.println(str(block(3)));\n"
+            "std.io.println(str(captured()));\n"
+            "std.io.println(str(outer()));\n"
+            "std.io.println(str(early(1)));\n"
+            "std.io.println(str(early(0)));\n"
+            "std.io.println(str(caller()));\n"
             "let i = 0;\n"
             "while (i < 100) {\n"
             "  basic(1);\n"
@@ -985,11 +985,11 @@ def main():
             "let xs = [1, 2, 3];\n"
             "let total = 0;\n"
             "for (let x in xs) { total = total + add(x, 1); }\n"
-            "println(str(total));\n"
+            "std.io.println(str(total));\n"
             "let i = 0;\n"
             "while (i < 200) { total = total + add(i, 2); i = i + 1; }\n"
-            "println(str(total));\n"
-            "println(str(add(xs[0], xs[2])));\n",
+            "std.io.println(str(total));\n"
+            "std.io.println(str(add(xs[0], xs[2])));\n",
             encoding="utf-8",
         )
         ok &= compare(binary, "top-level-statements", top_level)
@@ -1026,10 +1026,10 @@ def main():
             "  return x > 0;\n"
             "}\n"
             "let mapped = std.list.map([1, 2, 3], heavy);\n"
-            "println(str(std.list.len(mapped)));\n"
-            "println(str(std.list.filter([1, 2, 3], pred)));\n"
-            "println(str(std.list.sort([3, 1, 2], cmp)));\n"
-            "println(str(std.list.reduce([1, 2, 3],\n"
+            "std.io.println(str(std.list.len(mapped)));\n"
+            "std.io.println(str(std.list.filter([1, 2, 3], pred)));\n"
+            "std.io.println(str(std.list.sort([3, 1, 2], cmp)));\n"
+            "std.io.println(str(std.list.reduce([1, 2, 3],\n"
             "                            func(a, b) { return heavy(a) + b; }, 0)));\n",
             encoding="utf-8",
         )
@@ -1045,7 +1045,7 @@ def main():
 
         closure_const = tmp_path / "closure_const.skein"
         closure_const.write_text(
-            "func make_const() {\n"
+            "import std;\nfunc make_const() {\n"
             "  const c = 5;\n"
             "  func set() { c = 9; return c; }\n"
             "  return set;\n"
@@ -1056,7 +1056,7 @@ def main():
             "  let r = f() on error(e) { recover 0; };\n"
             "  i = i + 1;\n"
             "}\n"
-            "println(\"ok\");\n",
+            "std.io.println(\"ok\");\n",
             encoding="utf-8",
         )
         ok &= compare(binary, "closure-const-error", closure_const)
@@ -1090,7 +1090,7 @@ def main():
             "}\n"
             "pool.close();\n"
             "pool.join();\n"
-            "println(str(total));\n",
+            "std.io.println(str(total));\n",
             encoding="utf-8",
         )
         ok &= compare(binary, "native-wait", native_wait)
@@ -1171,11 +1171,11 @@ def main():
     with tempfile.TemporaryDirectory(prefix="skein-jit-default-") as tmp:
         default_probe = Path(tmp) / "default_probe.skein"
         default_probe.write_text(
-            "func ping(n) { return n + 1; }\n"
+            "import std;\nfunc ping(n) { return n + 1; }\n"
             "let i = 0;\n"
             "let total = 0;\n"
             "while (i < 20) { total = ping(total); i = i + 1; }\n"
-            "println(total);\n",
+            "std.io.println(total);\n",
             encoding="utf-8",
         )
         default_env = dict(os.environ)

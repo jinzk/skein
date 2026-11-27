@@ -121,7 +121,7 @@ def thread_driver_source(worker, rounds, workers, jobs):
         "}\n"
         f"for (let i = 0; i < {rounds}; i = i + 1) {{\n"
         "  let value = soak_round(i);\n"
-        f'  print("{ROUND_PREFIX}"); print(i); print(" "); println(value);\n'
+        f'  std.io.print("{ROUND_PREFIX}"); std.io.print(i); std.io.print(" "); std.io.println(value);\n'
         "  std.io.flush(std.io.stdout);\n"
         "}\n"
     )
@@ -135,10 +135,10 @@ def http_driver_source(worker, workers, total_requests):
         f"{skein_string(worker)}, "
         '{"max_requests": ' + str(total_requests) +
         ', "strategy": "dispatch"});\n'
-        'println(server["port"]);\n'
+        'std.io.println(server["port"]);\n'
         "std.io.flush(std.io.stdout);\n"
         "let served = threads.join();\n"
-        f'print("{SERVED_PREFIX}"); println(served);\n'
+        f'std.io.print("{SERVED_PREFIX}"); std.io.println(served);\n'
     )
 
 

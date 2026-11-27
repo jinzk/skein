@@ -6,7 +6,7 @@ package auth {
     encoded = std.string.replace(encoded, "+", "-");
     encoded = std.string.replace(encoded, "/", "_");
     while (std.string.ends_with(encoded, "=")) {
-      encoded = std.string.substr(encoded, 0, len(encoded) - 1);
+      encoded = std.string.substr(encoded, 0, std.utils.len(encoded) - 1);
     }
     return encoded;
   }
@@ -14,15 +14,15 @@ package auth {
   func _b64url_decode_bytes(text) {
     let encoded = std.string.replace(text, "-", "+");
     encoded = std.string.replace(encoded, "_", "/");
-    while (len(encoded) % 4 != 0) {
+    while (std.utils.len(encoded) % 4 != 0) {
       encoded = encoded + "=";
     }
     return std.encoding.base64_decode(encoded);
   }
 
   func _b64url_valid(text) {
-    if (kind_of(text) != "string" || text == "" ||
-        len(text) % 4 == 1) {
+    if (std.type.kind_of(text) != "string" || text == "" ||
+        std.utils.len(text) % 4 == 1) {
       return false;
     }
     for (let c in text) {
@@ -56,14 +56,14 @@ package auth {
   }
 
   export func constant_time_equal(a, b) {
-    if (a == null || b == null || kind_of(a) != kind_of(b) ||
-        (kind_of(a) != "string" && kind_of(a) != "bytes") ||
-        len(a) != len(b)) {
+    if (a == null || b == null || std.type.kind_of(a) != std.type.kind_of(b) ||
+        (std.type.kind_of(a) != "string" && std.type.kind_of(a) != "bytes") ||
+        std.utils.len(a) != std.utils.len(b)) {
       return false;
     }
     let different = 0;
     let i = 0;
-    while (i < len(a)) {
+    while (i < std.utils.len(a)) {
       if (a[i] != b[i]) {
         different = 1;
       }
@@ -143,7 +143,7 @@ package auth {
       return id;
     };
     let get = func(id) {
-      if (id == null || kind_of(id) != "string") {
+      if (id == null || std.type.kind_of(id) != "string") {
         return null;
       }
       let data = cache_client.get(key(id));
@@ -153,7 +153,7 @@ package auth {
       return std.json.parse(std.bytes.to_string(data));
     };
     let set = func(id, value) {
-      if (id == null || kind_of(id) != "string" ||
+      if (id == null || std.type.kind_of(id) != "string" ||
           !cache_client.exists(key(id))) {
         return false;
       }
@@ -161,7 +161,7 @@ package auth {
       return cache_client.set(key(id), encoded, {"ttl_ms": ttl * 1000});
     };
     let remove = func(id) {
-      if (id == null || kind_of(id) != "string") {
+      if (id == null || std.type.kind_of(id) != "string") {
         return false;
       }
       return cache_client.delete(key(id)) > 0;
@@ -192,20 +192,20 @@ package auth {
 
   export func new_store(options = {}) {
     let ttl = std.dict.get(options, "ttl", 3600);
-    if (kind_of(ttl) != "int" || ttl <= 0) {
+    if (std.type.kind_of(ttl) != "int" || ttl <= 0) {
       fail("auth.new_store ttl must be a positive integer");
     }
     let cookie_name = std.dict.get(options, "cookie_name", "sid");
-    if (kind_of(cookie_name) != "string" || cookie_name == "") {
+    if (std.type.kind_of(cookie_name) != "string" || cookie_name == "") {
       fail("auth.new_store cookie_name must be a non-empty string");
     }
     let cache_client = std.dict.get(options, "cache", null);
     if (cache_client != null) {
-      if (kind_of(cache_client) != "struct") {
+      if (std.type.kind_of(cache_client) != "struct") {
         fail("auth.new_store cache must be a std.cache client");
       }
       let prefix = std.dict.get(options, "prefix", "skein:session:");
-      if (kind_of(prefix) != "string" || prefix == "") {
+      if (std.type.kind_of(prefix) != "string" || prefix == "") {
         fail("auth.new_store prefix must be a non-empty string");
       }
       return _cache_store(cache_client, prefix, ttl, cookie_name);
@@ -223,7 +223,7 @@ package auth {
     };
 
     let get = func(id) {
-      if (id == null || kind_of(id) != "string") {
+      if (id == null || std.type.kind_of(id) != "string") {
         return null;
       }
       let record = _dict_get(sessions, id);
@@ -238,7 +238,7 @@ package auth {
     };
 
     let set = func(id, value) {
-      if (id == null || kind_of(id) != "string") {
+      if (id == null || std.type.kind_of(id) != "string") {
         return false;
       }
       let record = _dict_get(sessions, id);
@@ -251,7 +251,7 @@ package auth {
     };
 
     let remove = func(id) {
-      if (id == null || kind_of(id) != "string" ||
+      if (id == null || std.type.kind_of(id) != "string" ||
           !std.dict.has(sessions, id)) {
         return false;
       }
@@ -330,7 +330,7 @@ package auth {
   export func bearer(req) {
     let headers = req["headers"];
     let authorization = std.dict.get(headers, "authorization", null);
-    if (authorization == null || kind_of(authorization) != "string") {
+    if (authorization == null || std.type.kind_of(authorization) != "string") {
       return null;
     }
     if (!std.string.starts_with(authorization, "Bearer ")) {
@@ -349,17 +349,17 @@ package auth {
       return null;
     }
     let value = std.result.value(parsed);
-    if (kind_of(value) != "dict") {
+    if (std.type.kind_of(value) != "dict") {
       return null;
     }
     return value;
   }
 
   func _audience_matches(claim, expected) {
-    if (kind_of(claim) == "string") {
+    if (std.type.kind_of(claim) == "string") {
       return claim == expected;
     }
-    if (kind_of(claim) == "list") {
+    if (std.type.kind_of(claim) == "list") {
       for (let item in claim) {
         if (item == expected) {
           return true;
@@ -370,13 +370,13 @@ package auth {
   }
 
   export func jwt_sign(payload, secret, ttl = 3600) {
-    if (kind_of(payload) != "dict") {
+    if (std.type.kind_of(payload) != "dict") {
       fail("auth.jwt_sign payload must be a dict");
     }
-    if (kind_of(secret) != "string" || secret == "") {
+    if (std.type.kind_of(secret) != "string" || secret == "") {
       fail("auth.jwt_sign secret must be a non-empty string");
     }
-    if (kind_of(ttl) != "int" || ttl <= 0) {
+    if (std.type.kind_of(ttl) != "int" || ttl <= 0) {
       fail("auth.jwt_sign ttl must be a positive integer");
     }
     let claims = {};
@@ -400,12 +400,12 @@ package auth {
   }
 
   export func jwt_verify(token, secret, options = {}) {
-    if (kind_of(token) != "string" || kind_of(secret) != "string" ||
+    if (std.type.kind_of(token) != "string" || std.type.kind_of(secret) != "string" ||
         secret == "") {
       return null;
     }
     let parts = std.string.split(token, ".");
-    if (len(parts) != 3 || !_b64url_valid(parts[0]) ||
+    if (std.utils.len(parts) != 3 || !_b64url_valid(parts[0]) ||
         !_b64url_valid(parts[1]) || !_b64url_valid(parts[2])) {
       return null;
     }
@@ -426,7 +426,7 @@ package auth {
     }
 
     let clock_skew = std.dict.get(options, "clock_skew", 0);
-    if (kind_of(clock_skew) != "int" || clock_skew < 0) {
+    if (std.type.kind_of(clock_skew) != "int" || clock_skew < 0) {
       fail("auth.jwt_verify clock_skew must be a non-negative integer");
     }
     let now = std.time.now();
@@ -478,11 +478,11 @@ package auth {
 
   export func auth_middleware(store, secret, options = {}) {
     let required = std.dict.get(options, "required", true);
-    if (kind_of(required) != "bool") {
+    if (std.type.kind_of(required) != "bool") {
       fail("auth.auth_middleware required must be a bool");
     }
     let jwt_options = std.dict.get(options, "jwt", {});
-    if (kind_of(jwt_options) != "dict") {
+    if (std.type.kind_of(jwt_options) != "dict") {
       fail("auth.auth_middleware jwt must be a dict");
     }
     return func(req) {
@@ -498,17 +498,17 @@ package auth {
   }
 
   func _required_values(value, what) {
-    if (kind_of(value) == "string") {
+    if (std.type.kind_of(value) == "string") {
       if (value == "") {
         fail("auth." + what + " must not be empty");
       }
       return [value];
     }
-    if (kind_of(value) != "list" || len(value) == 0) {
+    if (std.type.kind_of(value) != "list" || std.utils.len(value) == 0) {
       fail("auth." + what + " must be a string or non-empty list");
     }
     for (let item in value) {
-      if (kind_of(item) != "string" || item == "") {
+      if (std.type.kind_of(item) != "string" || item == "") {
         fail("auth." + what + " entries must be non-empty strings");
       }
     }
@@ -516,17 +516,17 @@ package auth {
   }
 
   func _identity_values(identity, field) {
-    if (identity == null || kind_of(identity) != "dict") {
+    if (identity == null || std.type.kind_of(identity) != "dict") {
       return null;
     }
     return std.dict.get(identity, field, null);
   }
 
   func _value_has(values, target) {
-    if (kind_of(values) == "string") {
+    if (std.type.kind_of(values) == "string") {
       return values == target;
     }
-    if (kind_of(values) != "list") {
+    if (std.type.kind_of(values) != "list") {
       return false;
     }
     for (let item in values) {
@@ -547,11 +547,11 @@ package auth {
 
   func _require_field(store, secret, field, required, options) {
     let all = std.dict.get(options, "all", false);
-    if (kind_of(all) != "bool") {
+    if (std.type.kind_of(all) != "bool") {
       fail("auth.require_* all must be a bool");
     }
     let jwt_options = std.dict.get(options, "jwt", {});
-    if (kind_of(jwt_options) != "dict") {
+    if (std.type.kind_of(jwt_options) != "dict") {
       fail("auth.require_* jwt must be a dict");
     }
     return func(req) {
@@ -607,10 +607,10 @@ package auth {
   }
 
   export func sign_token(value, secret, ttl = 3600) {
-    if (kind_of(secret) != "string" || secret == "") {
+    if (std.type.kind_of(secret) != "string" || secret == "") {
       fail("auth.sign_token secret must be a non-empty string");
     }
-    if (kind_of(ttl) != "int" || ttl <= 0) {
+    if (std.type.kind_of(ttl) != "int" || ttl <= 0) {
       fail("auth.sign_token ttl must be a positive integer");
     }
     let payload = std.json.stringify({
@@ -623,12 +623,12 @@ package auth {
   }
 
   export func verify_token(token, secret) {
-    if (kind_of(token) != "string" || kind_of(secret) != "string" ||
+    if (std.type.kind_of(token) != "string" || std.type.kind_of(secret) != "string" ||
         secret == "") {
       return null;
     }
     let parts = std.string.split(token, ".");
-    if (len(parts) != 2 || parts[0] == "" || parts[1] == "") {
+    if (std.utils.len(parts) != 2 || parts[0] == "" || parts[1] == "") {
       return null;
     }
     let expected = std.crypto.hmac_sha256(secret, parts[0]);
@@ -640,7 +640,7 @@ package auth {
       return null;
     }
     let payload = std.result.value(parsed);
-    if (kind_of(payload) != "dict" || !std.dict.has(payload, "expires")) {
+    if (std.type.kind_of(payload) != "dict" || !std.dict.has(payload, "expires")) {
       return null;
     }
     if (payload["expires"] <= std.time.now()) {

@@ -25,7 +25,7 @@ ts_test("route static params empty", func() {
   let seen = {"params": null};
   app.get("/static", func(req) {
     seen["params"] = req["params"];
-    return {"status": 200, "body": str(len(req["params"]))};
+    return {"status": 200, "body": str(std.utils.len(req["params"]))};
   });
   let resp = app.dispatch(ts_route_req("GET", "/static"));
   ts_eq(seen["params"], {});
@@ -181,7 +181,7 @@ ts_test("route inspect", func() {
   app.get("/a", func(req) { return null; });
   app.post("/b/:id", func(req) { return null; });
   let items = app.inspect();
-  ts_eq(len(items), 2);
+  ts_eq(std.utils.len(items), 2);
   ts_eq(items[0]["method"] + " " + items[0]["pattern"], "GET /a");
   ts_eq(items[1]["method"] + " " + items[1]["pattern"], "POST /b/:id");
 });
@@ -270,13 +270,13 @@ ts_test("route long wildcard path", func() {
     return {"status": 200, "body": req["params"]["path"]};
   });
   let path = "/files";
-  for (let i in range(200)) {
+  for (let i in std.utils.range(200)) {
     path = path + "/" + str(i);
   }
   let resp = app.dispatch(ts_route_req("GET", path));
   ts_eq(resp["status"], 200);
   let expected = "";
-  for (let i in range(200)) {
+  for (let i in std.utils.range(200)) {
     if (i > 0) {
       expected = expected + "/";
     }
@@ -287,13 +287,13 @@ ts_test("route long wildcard path", func() {
 
 ts_test("route many routes", func() {
   let app = route.new();
-  for (let i in range(1000)) {
+  for (let i in std.utils.range(1000)) {
     app.get("/r" + str(i), func(req) {
       return {"status": 200, "body": "ok"};
     });
   }
   ts_eq(app.dispatch(ts_route_req("GET", "/r999"))["body"], "ok");
-  ts_eq(len(app.inspect()), 1000);
+  ts_eq(std.utils.len(app.inspect()), 1000);
 });
 
 ts_test("route param name conflict", func() {
@@ -329,7 +329,7 @@ ts_test("route empty param name", func() {
 ts_test("route pattern depth limit", func() {
   let app = route.new();
   let pattern = "";
-  for (let i in range(33)) {
+  for (let i in std.utils.range(33)) {
     pattern = pattern + "/s" + str(i);
   }
   ts_error(func() {

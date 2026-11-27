@@ -13,9 +13,9 @@ let conn = mysql.connect(
   int(env("SKEIN_TEST_MYSQL_PORT", "3306")),
 );
 
-println(mysql.VERSION);
-println(conn.ping());
+std.io.println(mysql.VERSION);
+std.io.println(conn.ping());
 let result = conn.query("SELECT VERSION() AS version");
-println(result.rows());
+std.io.println(result.rows());
 result.close();
 conn.close();

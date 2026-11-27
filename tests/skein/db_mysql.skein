@@ -20,7 +20,7 @@ ts_test("mysql exec and query", func() {
     db,
     "SELECT id, name, score, amount, ok, data, note FROM skein_db_mysql WHERE id = ?",
     [1]);
-  ts_eq(len(rows), 1);
+  ts_eq(std.utils.len(rows), 1);
   ts_eq(rows[0]["id"], 1);
   ts_eq(rows[0]["name"], "alice");
   ts_eq(rows[0]["score"], 1.5);
@@ -31,7 +31,7 @@ ts_test("mysql exec and query", func() {
 
   let all_rows = std.db.query(
     db, "SELECT id, name FROM skein_db_mysql ORDER BY id");
-  ts_eq(len(all_rows), 1);
+  ts_eq(std.utils.len(all_rows), 1);
   ts_eq(all_rows[0]["name"], "alice");
 
   let updated = std.db.exec(
@@ -50,13 +50,13 @@ ts_test("mysql transaction", func() {
   std.db.begin(db);
   std.db.exec(db, "INSERT INTO skein_db_mysql_tx VALUES (?)", [1]);
   std.db.rollback(db);
-  ts_eq(len(std.db.query(db, "SELECT * FROM skein_db_mysql_tx")), 0);
+  ts_eq(std.utils.len(std.db.query(db, "SELECT * FROM skein_db_mysql_tx")), 0);
 
   std.db.begin(db);
   std.db.exec(db, "INSERT INTO skein_db_mysql_tx VALUES (?)", [2]);
   std.db.commit(db);
   let rows = std.db.query(db, "SELECT n FROM skein_db_mysql_tx");
-  ts_eq(len(rows), 1);
+  ts_eq(std.utils.len(rows), 1);
   ts_eq(rows[0]["n"], 2);
 
   std.db.close(db);
@@ -101,7 +101,7 @@ ts_test("mysql migrations", func() {
   ts_eq(first["applied"], [1, 2, 3]);
   ts_eq(first["current"], 3);
   let rows = std.db.query(db, "SELECT id, name, note FROM migrate_t");
-  ts_eq(len(rows), 1);
+  ts_eq(std.utils.len(rows), 1);
   ts_eq(rows[0]["name"], "alice");
 
   let second = std.db.migrate(db, migrations, {"table": version_table});

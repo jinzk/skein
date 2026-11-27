@@ -121,7 +121,7 @@ ts_test("lambda shorthand expression body", func() {
 });
 
 ts_test("pipe operator", func() {
-  ts_eq(range(0, 6) |> std.iter.filter(x -> x % 2 == 0) |>
+  ts_eq(std.utils.range(0, 6) |> std.iter.filter(x -> x % 2 == 0) |>
         std.iter.collect(), [0, 2, 4]);
   ts_eq([1, 2, 3] |> std.list.len, 3);
   ts_eq(std.list.map([1, 2, 3], x -> x + 1) |> std.list.len, 3);
@@ -150,7 +150,7 @@ ts_test("placeholder method", func() {
 
 ts_test("placeholder nearest call", func() {
   let value = function_triple(function_inc($), 9, 0);
-  ts_eq(kind_of(value), "list");
+  ts_eq(std.type.kind_of(value), "list");
 });
 
 ts_test("numbered placeholder repeats one argument", func() {
@@ -170,12 +170,12 @@ ts_test("numbered placeholder with fixed arguments", func() {
 
 ts_test("numbered placeholder binds nearest call", func() {
   let value = function_triple(function_inc($1), 9, 0);
-  ts_eq(kind_of(value), "list");
+  ts_eq(std.type.kind_of(value), "list");
 });
 
 ts_test("string append reuses buffer", func() {
-  ts_eq(len(function_build(3)), 3);
-  ts_eq(len(function_build(5)), 5);
+  ts_eq(std.utils.len(function_build(3)), 3);
+  ts_eq(std.utils.len(function_build(5)), 5);
   ts_eq(function_build(3), "xxx");
 });
 

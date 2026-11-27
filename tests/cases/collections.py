@@ -25,10 +25,10 @@ def run_cases():
         "import std.set;\n"
         "import std.deque;\n"
         "let s = set.from_list([2, 1, 3]);\n"
-        "println(set.values(s));\n"
-        "println(std.json.stringify(s));\n"
+        "std.io.println(set.values(s));\n"
+        "std.io.println(std.json.stringify(s));\n"
         "let d = deque.from_list([1, 2]);\n"
-        "println(deque.to_list(d));\n",
+        "std.io.println(deque.to_list(d));\n",
         stdout_all=["[2, 1, 3]", "[2,1,3]", "[1, 2]"],
     )
     check(
@@ -37,8 +37,8 @@ def run_cases():
         "import std.graph;\n"
         "import std.lru;\n"
         "let g = graph.from_edges(2, [[1, 2]]);\n"
-        "println(graph.path(g, 1, 2));\n"
-        "println(std.json.stringify(lru.new(2)));\n",
+        "std.io.println(graph.path(g, 1, 2));\n"
+        "std.io.println(std.json.stringify(lru.new(2)));\n",
         stdout_all=["{ok: true, path: [1, 2]}",
                     '{"cap":2,"map":{},"order":[]}'],
     )
@@ -47,7 +47,7 @@ def run_cases():
         "import std;\n"
         "import std.arena;\n"
         "let s = arena.from_list([1, 2]);\n"
-        "println(arena.values(s));\n",
+        "std.io.println(arena.values(s));\n",
         stdout="[1, 2]",
     )
 
@@ -57,7 +57,7 @@ def run_cases():
           "let d = {1: 'a', 2: 'b', 3: 'c'};\n"
           "d = std.dict.delete(d, 2);\n"
           "d[2] = 'z';\n"
-          "println(std.dict.keys(d));\n",
+          "std.io.println(std.dict.keys(d));\n",
           stdout_all=["[1, 3, 2]"])
     check("dict index_by",
           'import std;\n'
@@ -65,9 +65,9 @@ def run_cases():
           'let users = [User { id: 1, name: "a" }, '
           'User { id: 2, name: "b" }];\n'
           'let by_id = std.dict.index_by(users, func(u) { return u.id; });\n'
-          'println(by_id[1].name);\n'
-          'println(by_id[2].name);\n'
-          'println(std.dict.keys(by_id));\n',
+          'std.io.println(by_id[1].name);\n'
+          'std.io.println(by_id[2].name);\n'
+          'std.io.println(std.dict.keys(by_id));\n',
           stdout_all=["a", "b", "[1, 2]"])
     check("dict index_by duplicate keys last wins",
           'import std;\n'
@@ -75,8 +75,8 @@ def run_cases():
           'let users = [User { id: 1, name: "a" }, '
           'User { id: 1, name: "b" }];\n'
           'let by_id = std.dict.index_by(users, func(u) { return u.id; });\n'
-          'println(by_id[1].name);\n'
-          'println(len(by_id));\n',
+          'std.io.println(by_id[1].name);\n'
+          'std.io.println(std.utils.len(by_id));\n',
           stdout_all=["b", "1"])
     check("dict index_by composite keys",
           'import std;\n'
@@ -84,12 +84,12 @@ def run_cases():
           '{"region": "us", "id": 1}];\n'
           'let by_key = std.dict.index_by(xs, '
           'func(x) { return (x["region"], x["id"]); });\n'
-          'println(by_key[("eu", 1)]["region"]);\n'
-          'println(by_key[("us", 1)]["region"]);\n',
+          'std.io.println(by_key[("eu", 1)]["region"]);\n'
+          'std.io.println(by_key[("us", 1)]["region"]);\n',
           stdout_all=["eu", "us"])
     check("dict index_by empty list",
           'import std;\n'
-          'println(len(std.dict.index_by([], func(x) { return x; })));\n',
+          'std.io.println(std.utils.len(std.dict.index_by([], func(x) { return x; })));\n',
           stdout_all=["0"])
     check("dict index_by invalid key",
           'import std;\n'
@@ -108,7 +108,7 @@ def run_cases():
           "  d[k] += 1;\n"
           "  i = i + 1;\n"
           "}\n"
-          "println(s);\nprintln(d[0]);\n",
+          "std.io.println(s);\nstd.io.println(d[0]);\n",
           stdout_all=["1000150000", "5"])
 
 
@@ -120,10 +120,10 @@ def run_cases():
           '}\n'
           'let u = User { id: 1, cache: [] };\n'
           'let d = {u: "x"};\n'
-          'println(d[User { id: 1, cache: [] }]);\n'
-          'println(std.dict.has(d, User { id: 1, cache: [1] }));\n'
+          'std.io.println(d[User { id: 1, cache: [] }]);\n'
+          'std.io.println(std.dict.has(d, User { id: 1, cache: [1] }));\n'
           'let s = std.set.from_list([u, User { id: 1, cache: [] }]);\n'
-          'println(std.set.size(s));\n',
+          'std.io.println(std.set.size(s));\n',
           stdout_all=["x", "0", "1"])
     check("custom struct dict hash large",
           'import std;\nimport std.dict_key;\n'
@@ -134,9 +134,9 @@ def run_cases():
           'let d = {};\n'
           'let i = 0;\n'
           'while (i < 40) { d[User { id: i, cache: [] }] = i; i = i + 1; }\n'
-          'println(d[User { id: 20, cache: [] }]);\n'
-          'println(len(d));\n'
-          'println(std.dict.has(d, User { id: 39, cache: [1] }));\n',
+          'std.io.println(d[User { id: 20, cache: [] }]);\n'
+          'std.io.println(std.utils.len(d));\n'
+          'std.io.println(std.dict.has(d, User { id: 39, cache: [1] }));\n',
           stdout_all=["20", "40", "0"])
     check("custom struct key equality",
           'import std;\nimport std.dict_key;\n'
@@ -148,14 +148,14 @@ def run_cases():
           '  func key_eq(self, other): bool { return self.id == other.id; }\n'
           '}\n'
           'let d = {User { id: 1, cache: [] }: "a"};\n'
-          'println(d[User { id: 1, cache: [1] }]);\n'
-          'println(std.dict.has(d, User { id: 1, cache: [1] }));\n'
+          'std.io.println(d[User { id: 1, cache: [1] }]);\n'
+          'std.io.println(std.dict.has(d, User { id: 1, cache: [1] }));\n'
           'let s = std.set.from_list([User { id: 1, cache: [] }, '
           'User { id: 1, cache: [1] }]);\n'
-          'println(std.set.size(s));\n'
+          'std.io.println(std.set.size(s));\n'
           'let big = {};\nlet i = 0;\n'
           'while (i < 40) { big[User { id: i, cache: [] }] = i; i = i + 1; }\n'
-          'println(big[User { id: 20, cache: [1] }]);\n',
+          'std.io.println(big[User { id: 20, cache: [1] }]);\n',
           stdout_all=["a", "1", "1", "20"])
     check("custom hash keeps structural equality without KeyEquatable",
           'import std;\nimport std.dict_key;\n'
@@ -164,7 +164,7 @@ def run_cases():
           '  func dict_hash(self): int { return self.id; }\n'
           '}\n'
           'let d = {User { id: 1, cache: [] }: "a"};\n'
-          'println(std.dict.has(d, User { id: 1, cache: [1] }));\n',
+          'std.io.println(std.dict.has(d, User { id: 1, cache: [1] }));\n',
           stdout_all=["0"])
     check("custom key equality in tuple keys",
           'import std;\nimport std.dict_key;\n'
@@ -176,7 +176,7 @@ def run_cases():
           '  func key_eq(self, other): bool { return self.id == other.id; }\n'
           '}\n'
           'let d = {(User { id: 1, cache: [] }, "x"): true};\n'
-          'println(d[(User { id: 1, cache: [1] }, "x")]);\n',
+          'std.io.println(d[(User { id: 1, cache: [1] }, "x")]);\n',
           stdout_all=["true"])
     check("custom key equality return type",
           'import std.dict_key;\n'
@@ -188,7 +188,7 @@ def run_cases():
           '  func key_eq(self, other) { return 1; }\n'
           '}\n'
           'let d = {Bad { id: 1 }: 1};\n'
-          'println(d[Bad { id: 1 }]);\n',
+          'std.io.println(d[Bad { id: 1 }]);\n',
           stderr="key_eq must return a bool")
     check("custom key equality reentrancy",
           'import std.dict_key;\n'
@@ -211,7 +211,7 @@ def run_cases():
           '  func key_eq(self, other): bool { return self.id == other.id; }\n'
           '}\n'
           'let d = {A { id: 1 }: 1};\n'
-          'println(d[A { id: 1 }]);\n',
+          'std.io.println(d[A { id: 1 }]);\n',
           stderr="key_eq must not re-enter dict/set key equality")
     check("custom struct dict hash snapshot",
           'import std;\nimport std.dict_key;\n'
@@ -222,8 +222,8 @@ def run_cases():
           'let u = User { id: 1, cache: [] };\n'
           'let d = {u: 42};\n'
           'u.id = 2;\n'
-          'println(d[User { id: 1, cache: [] }]);\n'
-          'println(std.dict.has(d, User { id: 2, cache: [] }));\n',
+          'std.io.println(d[User { id: 1, cache: [] }]);\n'
+          'std.io.println(std.dict.has(d, User { id: 2, cache: [] }));\n',
           stdout_all=["42", "0"])
     check("custom struct dict hash return type",
           'import std.dict_key;\n'
@@ -260,10 +260,10 @@ def run_cases():
           '  }\n'
           '}\n'
           'let d = {E.A { xs: [] }: "a", E.B { id: 2 }: "b"};\n'
-          'println(d[E.A { xs: [] }]);\n'
-          'println(std.dict.has(d, E.A { xs: [1] }));\n'
+          'std.io.println(d[E.A { xs: [] }]);\n'
+          'std.io.println(std.dict.has(d, E.A { xs: [1] }));\n'
           'let s = std.set.from_list([E.A { xs: [] }, E.A { xs: [] }]);\n'
-          'println(std.set.size(s));\n',
+          'std.io.println(std.set.size(s));\n',
           stdout_all=["a", "0", "1"])
 
     check("arena handle must be int",
@@ -277,20 +277,20 @@ def run_cases():
           "  let r = f(match (1) { case 1 => { return 10; } default => 0; });\n"
           "  return 99;\n"
           "}\n"
-          "println(g());\n",
+          "std.io.println(g());\n",
           stdout="10")
     check("break in function argument",
           "func f(x) { return x; }\n"
           "for (let i in [1, 2, 3]) {\n"
           "  f(match (i) { case 2 => { break; } default => i; });\n"
-          "  println(i);\n"
+          "  std.io.println(i);\n"
           "}\n",
           stdout="1\n")
     check("continue in function argument",
           "func f(x) { return x; }\n"
           "for (let i in [1, 2, 3]) {\n"
           "  f(match (i) { case 2 => { continue; } default => i; });\n"
-          "  println(i);\n"
+          "  std.io.println(i);\n"
           "}\n",
           stdout="1\n3\n")
     check("break in nested call argument",
@@ -298,7 +298,7 @@ def run_cases():
           "func g(x) { return x; }\n"
           "for (let i in [1, 2, 3]) {\n"
           "  f(0, g(match (i) { case 2 => { break; } default => i; }));\n"
-          "  println(i);\n"
+          "  std.io.println(i);\n"
           "}\n",
           stdout="1\n")
     check("break through match and call temporaries",
@@ -308,18 +308,18 @@ def run_cases():
           "    case 2 => f(match (i) { case 2 => { break; } default => i; });\n"
           "    default => i;\n"
           "  };\n"
-          "  println(i);\n"
+          "  std.io.println(i);\n"
           "}\n",
           stdout="1\n")
     check("deep recursive struct print",
           "struct Node { value: int; next: Node?; }\n"
           "let n = null;\n"
-          "for (let i in range(2000)) { n = Node { value: i, next: n }; }\n"
-          "println(\"built\");\n"
-          "println(n == n);\n"
-          "println(n.value);\n"
+          "for (let i in std.utils.range(2000)) { n = Node { value: i, next: n }; }\n"
+          "std.io.println(\"built\");\n"
+          "std.io.println(n == n);\n"
+          "std.io.println(n.value);\n"
           "let s = str(n);\n"
-          "println(len(s) > 0);\n",
+          "std.io.println(std.utils.len(s) > 0);\n",
           stdout_all=["built", "true", "1999", "true"])
 
     check("unary minus", "-3+5\n", stdout="= 2")
@@ -360,8 +360,8 @@ def run_cases():
     check("divide by zero int", "1/0\n", stderr="division by zero")
     check("divide by zero float", "1.0/0\n", stderr="division by zero")
 
-    check("if float truthy", 'if (1.5) { println("yes"); }\n', stdout="yes")
-    check("if else", 'if (0) { println("yes"); } else { println("no"); }\n', stdout="no")
+    check("if float truthy", 'if (1.5) { std.io.println("yes"); }\n', stdout="yes")
+    check("if else", 'if (0) { std.io.println("yes"); } else { std.io.println("no"); }\n', stdout="no")
 
     check("zero-arg function", "func f() {\n  return 42;\n}\nf()\n", stdout="= 42")
     check(
@@ -456,7 +456,7 @@ def run_cases():
         "  let n = 0;\n"
         "  func inc() { n = n + 1; return n; }\n"
         "  func get() { return n; }\n"
-        "  let d = dict();\n"
+        "  let d = std.dict.new();\n"
         "  d[\"inc\"] = inc;\n"
         "  d[\"get\"] = get;\n"
         "  return d;\n"
@@ -522,7 +522,7 @@ def run_cases():
         "  return f;\n"
         "}\n"
         + "{ let g = make_cycle(); }\n" * 100
-        + 'println("ok");\n',
+        + 'std.io.println("ok");\n',
         stdout="ok",
     )
     check(
@@ -553,7 +553,7 @@ def run_cases():
     )
     check(
         "unicode variadic parameter",
-        "func 求和(...数字) { return len(数字); }\n求和(1, 2, 3)\n",
+        "func 求和(...数字) { return std.utils.len(数字); }\n求和(1, 2, 3)\n",
         stdout="= 3",
     )
     check(
@@ -605,7 +605,7 @@ def run_cases():
           '}\n'
           'let b = make();\n'
           + repeated_lets()
-          + 'println(b.f());\n',
+          + 'std.io.println(b.f());\n',
           stdout="42")
     check("lru closure survives cycle collection",
           'import std;\n'
@@ -618,7 +618,7 @@ def run_cases():
           'let l = make();\n'
           + repeated_lets()
           + 'let f = lru.get(l, "f")["value"];\n'
-          + 'println(f());\n',
+          + 'std.io.println(f());\n',
           stdout="42")
     check("result closure survives cycle collection",
           'import std;\n'
@@ -629,7 +629,7 @@ def run_cases():
           'let r = make();\n'
           + repeated_lets()
           + 'let f = std.result.value(r);\n'
-          + 'println(f());\n',
+          + 'std.io.println(f());\n',
           stdout="42")
 
     check("list append keeps error message",

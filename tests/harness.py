@@ -50,7 +50,7 @@ def skein_string(value):
 
 
 _STD_REFERENCE = re.compile(r"(?<![A-Za-z0-9_.])std\.")
-_STD_IMPORT = re.compile(r"\bimport\s+std\b")
+_STD_IMPORT = re.compile(r"\bimport\s+std\s*;")
 _LRU_REFERENCE = re.compile(r"(?<![A-Za-z0-9_.])lru\.")
 _LRU_IMPORT = re.compile(r"\bimport\s+std\.lru\b")
 
@@ -398,12 +398,12 @@ def check_extended_stdlib():
         'std.regex.match("a+", "aaa")\n'
         'std.regex.match("abc", "ABC", "i")\n'
         'let m = std.regex.search("(a+)(b)", "xxaaabyy");\n'
-        'print(m["text"]);\n'
-        'print(m["start"]);\n'
-        'print(m["groups"][1]);\n'
-        'print(std.regex.replace("(a+)", "xxaaabyy", "[$1]"));\n'
-        'print(std.regex.split(",", "a,b,c"));\n'
-        'len(std.regex.find_all("[0-9]+", "a1b22c333"))\n',
+        'std.io.print(m["text"]);\n'
+        'std.io.print(m["start"]);\n'
+        'std.io.print(m["groups"][1]);\n'
+        'std.io.print(std.regex.replace("(a+)", "xxaaabyy", "[$1]"));\n'
+        'std.io.print(std.regex.split(",", "a,b,c"));\n'
+        'std.utils.len(std.regex.find_all("[0-9]+", "a1b22c333"))\n',
         stdout_all=["= true", "= true", "aaab", "2", "b",
                     "xx[aaa]byy", "[a, b, c]", "= 3"],
     )
@@ -419,16 +419,16 @@ def check_extended_stdlib():
         'std.regex.match("\\\\d+", "１２３", "u")\n'
         'std.regex.match("é", "É", "iu")\n'
         'std.regex.match("a|ab", "ab")\n'
-        'len(std.regex.find_all(".", "a你b", "u"))\n'
-        'len(std.regex.find_all(".", "a你b"))\n'
-        'len(std.regex.find_all("", "ab"))\n'
+        'std.utils.len(std.regex.find_all(".", "a你b", "u"))\n'
+        'std.utils.len(std.regex.find_all(".", "a你b"))\n'
+        'std.utils.len(std.regex.find_all("", "ab"))\n'
         'let u = std.regex.search("(\\\\p{L}+)", "123中文456", "u");\n'
-        'print(u["text"]);\n'
-        'print(u["start"]);\n'
-        'print(u["end"]);\n'
-        'print(u["groups"][0]);\n'
-        'print(std.regex.replace("(\\\\p{Han}+)", "a你b", "[$1]", "u"));\n'
-        'print(std.regex.split("\\\\s+", "a\u3000b", "u"));\n'
+        'std.io.print(u["text"]);\n'
+        'std.io.print(u["start"]);\n'
+        'std.io.print(u["end"]);\n'
+        'std.io.print(u["groups"][0]);\n'
+        'std.io.print(std.regex.replace("(\\\\p{Han}+)", "a你b", "[$1]", "u"));\n'
+        'std.io.print(std.regex.split("\\\\s+", "a　b", "u"));\n'
         'let xs = std.regex.find_all("你", "a你b你c", "u");\n'
         'xs[1]["start"]\n'
         'xs[1]["end"]\n'
@@ -459,7 +459,7 @@ def check_extended_stdlib():
         '"%Y-%m-%d %H:%M:%S", true)\n'
         'std.time.now() > 0\n'
         'std.time.monotonic_ms() >= 0\n'
-        'print(std.time.sleep(0))\n',
+        'std.io.print(std.time.sleep(0))\n',
         stdout_all=["= 1970-01-01 00:00:00", "= 0", "= true", "= true",
                     "null"],
     )
@@ -475,11 +475,11 @@ def check_extended_stdlib():
         "std.random.seed(123);\n"
         'std.random.int(5, 5)\n'
         'let f = std.random.float();\n'
-        'print(f >= 0.0 && f < 1.0);\n'
+        'std.io.print(f >= 0.0 && f < 1.0);\n'
         'std.bytes.len(std.random.bytes(8))\n'
         'std.random.choice([7])\n'
-        'len(std.random.shuffle([1, 2, 3]))\n'
-        'len(std.random.uuid())\n',
+        'std.utils.len(std.random.shuffle([1, 2, 3]))\n'
+        'std.utils.len(std.random.uuid())\n',
         stdout_all=["= 5", "true", "= 8", "= 7", "= 3", "= 36"],
     )
     check(
@@ -538,9 +538,9 @@ def check_extended_stdlib():
             'let msg = std.thread.Message.from({"x": 1});\n'
             f'let t = std.thread.spawn_script({skein_string(env_worker)}, msg);\n'
             'let r = t.join();\n'
-            'print("child_before=" + r["value"]["before"]);\n'
-            'print("|child_after=" + r["value"]["after"]);\n'
-            'print("|parent=" + std.env.get("SKEIN_THREAD_ENV"));\n',
+            'std.io.print("child_before=" + r["value"]["before"]);\n'
+            'std.io.print("|child_after=" + r["value"]["after"]);\n'
+            'std.io.print("|parent=" + std.env.get("SKEIN_THREAD_ENV"));\n',
             stdout_all=["child_before=parent", "child_after=child",
                         "parent=parent"],
         )
@@ -573,9 +573,9 @@ def check_extended_stdlib():
             f"{skein_string(cwd_child)}}});\n"
             f'let t = std.thread.spawn_script({skein_string(cwd_worker)}, msg);\n'
             'let r = t.join();\n'
-            'print("child_text=" + r["value"]["text"]);\n'
-            'print("|child_exists=" + str(r["value"]["exists"]));\n'
-            'print("|parent_same=" + str(std.fs.cwd() == before));\n',
+            'std.io.print("child_text=" + r["value"]["text"]);\n'
+            'std.io.print("|child_exists=" + str(r["value"]["exists"]));\n'
+            'std.io.print("|parent_same=" + str(std.fs.cwd() == before));\n',
             stdout_all=["child_text=child-data", "child_exists=1",
                         "parent_same=true"],
         )
@@ -584,13 +584,13 @@ def check_extended_stdlib():
         with open(spawn_child, "w", encoding="utf-8") as handle:
             handle.write(
                 "import std;\n"
-                "println(\"env=\" + (std.env.get(\"SKEIN_SPAWN_ENV\") "
+                "std.io.println(\"env=\" + (std.env.get(\"SKEIN_SPAWN_ENV\") "
                 "== null ? \"null\" : "
                 "std.env.get(\"SKEIN_SPAWN_ENV\")));\n"
                 "let cwd = std.string.replace(std.fs.cwd(), \"\\\\\", \"/\");\n"
                 "let want = std.string.replace("
                 "str(std.env.get(\"SKEIN_SPAWN_CWD\")), \"\\\\\", \"/\");\n"
-                "println(\"cwd_ok=\" + str(cwd == want));\n"
+                "std.io.println(\"cwd_ok=\" + str(cwd == want));\n"
             )
         check(
             "std process spawn thread env and cwd",
@@ -602,8 +602,8 @@ def check_extended_stdlib():
             f'let p = std.process.spawn_command('
             f"{skein_string(os.path.abspath(BIN))}, "
             f'{{"args": [{skein_string(spawn_child)}]}});\n'
-            'print(std.bytes.to_string(std.io.read_line(p["stdout"])));\n'
-            'print(std.bytes.to_string(std.io.read_line(p["stdout"])));\n'
+            'std.io.print(std.bytes.to_string(std.io.read_line(p["stdout"])));\n'
+            'std.io.print(std.bytes.to_string(std.io.read_line(p["stdout"])));\n'
             "std.process.wait(p);\n",
             stdout_all=["env=from-thread", "cwd_ok=true"],
         )
@@ -631,16 +631,16 @@ def check_extended_stdlib():
             "import std;\n"
             f'std.fs.mkdir("{base}/a/b", true);\n'
             f'std.fs.write_file("{base}/a/b/x.txt", "hi");\n'
-            f'print(std.fs.listdir("{base}/a/b"));\n'
-            f'print(std.fs.stat("{base}/a/b/x.txt")["type"]);\n'
-            f'print(std.fs.stat("{base}/a/b/x.txt")["size"]);\n'
-            f'print(std.fs.path_join("{base}", "a", "b", "x.txt"));\n'
-            f'print(std.fs.path_basename("{base}/a/b/x.txt"));\n'
-            f'print(std.fs.path_dirname("{base}/a/b/x.txt"));\n'
-            f'print(std.fs.path_extname("{base}/a/b/x.txt"));\n'
-            f'print(std.fs.path_normalize("{base}/a/../a/b/./x.txt"));\n'
+            f'std.io.print(std.fs.listdir("{base}/a/b"));\n'
+            f'std.io.print(std.fs.stat("{base}/a/b/x.txt")["type"]);\n'
+            f'std.io.print(std.fs.stat("{base}/a/b/x.txt")["size"]);\n'
+            f'std.io.print(std.fs.path_join("{base}", "a", "b", "x.txt"));\n'
+            f'std.io.print(std.fs.path_basename("{base}/a/b/x.txt"));\n'
+            f'std.io.print(std.fs.path_dirname("{base}/a/b/x.txt"));\n'
+            f'std.io.print(std.fs.path_extname("{base}/a/b/x.txt"));\n'
+            f'std.io.print(std.fs.path_normalize("{base}/a/../a/b/./x.txt"));\n'
             f'std.fs.rename("{base}/a/b/x.txt", "{base}/a/b/y.txt");\n'
-            f'print(std.fs.exists("{base}/a/b/y.txt"));\n'
+            f'std.io.print(std.fs.exists("{base}/a/b/y.txt"));\n'
             f'std.fs.remove("{base}/a/b/y.txt");\n'
             f'std.fs.exists("{base}/a/b/y.txt")\n',
             stdout_all=["[x.txt]", "file", "2",
@@ -653,19 +653,19 @@ def check_extended_stdlib():
             "std process run",
             "import std;\n"
             'let r = std.process.run_command("printf hello");\n'
-            'print(r["status"]);\n'
-            'print(std.bytes.to_string(r["stdout"]));\n'
+            'std.io.print(r["status"]);\n'
+            'std.io.print(std.bytes.to_string(r["stdout"]));\n'
             'let r2 = std.process.run_command("cat", {"stdin": "abc"});\n'
-            'print(std.bytes.to_string(r2["stdout"]));\n'
+            'std.io.print(std.bytes.to_string(r2["stdout"]));\n'
             'let r3 = std.process.run_command("pwd", {"cwd": "/tmp"});\n'
-            'print(std.bytes.to_string(r3["stdout"]));\n'
+            'std.io.print(std.bytes.to_string(r3["stdout"]));\n'
             'let r4 = std.process.run_command("printf %s \\"$FOO\\"", '
             '{"env": {"FOO": "bar"}});\n'
-            'print(std.bytes.to_string(r4["stdout"]));\n'
+            'std.io.print(std.bytes.to_string(r4["stdout"]));\n'
             'let r5 = std.process.run_command("echo out; echo err >&2; exit 3");\n'
-            'print(r5["status"]);\n'
-            'print(std.bytes.to_string(r5["stdout"]));\n'
-            'print(std.bytes.to_string(r5["stderr"]));\n',
+            'std.io.print(r5["status"]);\n'
+            'std.io.print(std.bytes.to_string(r5["stdout"]));\n'
+            'std.io.print(std.bytes.to_string(r5["stderr"]));\n',
             stdout_all=["0", "hello", "abc", "/tmp", "bar", "3", "out",
                         "err"],
         )
@@ -673,9 +673,9 @@ def check_extended_stdlib():
             "std process spawn stdout",
             "import std;\n"
             'let p = std.process.spawn_command("/bin/echo", {"args": ["spawn"]});\n'
-            'print(std.process.pid(p) > 0);\n'
-            'print(std.bytes.to_string(std.io.read(p["stdout"], 4096)));\n'
-            'print(std.process.wait(p));\n',
+            'std.io.print(std.process.pid(p) > 0);\n'
+            'std.io.print(std.bytes.to_string(std.io.read(p["stdout"], 4096)));\n'
+            'std.io.print(std.process.wait(p));\n',
             stdout_all=["true", "spawn", "0"],
         )
         check(
@@ -684,8 +684,8 @@ def check_extended_stdlib():
             'let p = std.process.spawn_command("/bin/cat");\n'
             'std.io.write_all(p["stdin"], "abc");\n'
             'std.io.close(p["stdin"]);\n'
-            'print(std.bytes.to_string(std.io.read(p["stdout"], 4096)));\n'
-            'print(std.process.wait(p));\n',
+            'std.io.print(std.bytes.to_string(std.io.read(p["stdout"], 4096)));\n'
+            'std.io.print(std.process.wait(p));\n',
             stdout_all=["abc", "0"],
         )
         check(
@@ -693,9 +693,9 @@ def check_extended_stdlib():
             "import std;\n"
             'let p = std.process.spawn_command("/bin/sh", '
             '{"args": ["-c", "echo out; echo err >&2; exit 3"]});\n'
-            'print(std.bytes.to_string(std.io.read(p["stdout"], 4096)));\n'
-            'print(std.bytes.to_string(std.io.read(p["stderr"], 4096)));\n'
-            'print(std.process.wait(p));\n',
+            'std.io.print(std.bytes.to_string(std.io.read(p["stdout"], 4096)));\n'
+            'std.io.print(std.bytes.to_string(std.io.read(p["stderr"], 4096)));\n'
+            'std.io.print(std.process.wait(p));\n',
             stdout_all=["out", "err", "3"],
         )
         check(
@@ -703,32 +703,32 @@ def check_extended_stdlib():
             "import std;\n"
             'let p = std.process.spawn_command("/bin/echo", {"args": ["async"]});\n'
             'let data = std.io.read_task(p["stdout"], 4096).wait();\n'
-            'print(std.bytes.to_string(data));\n'
-            'print(std.process.wait(p));\n',
+            'std.io.print(std.bytes.to_string(data));\n'
+            'std.io.print(std.process.wait(p));\n',
             stdout_all=["async", "0"],
         )
         check(
             "std process spawn async write",
             "import std;\n"
             'let p = std.process.spawn_command("/bin/cat");\n'
-            'print(std.io.write_task(p["stdin"], "abc").wait());\n'
+            'std.io.print(std.io.write_task(p["stdin"], "abc").wait());\n'
             'std.io.close(p["stdin"]);\n'
             'let data = std.io.read_task(p["stdout"], 4096).wait();\n'
-            'print(std.bytes.to_string(data));\n'
-            'print(std.process.wait(p));\n',
+            'std.io.print(std.bytes.to_string(data));\n'
+            'std.io.print(std.process.wait(p));\n',
             stdout_all=["3", "abc", "0"],
         )
         check(
             "std process command names",
             "import std;\n"
             'let rc = std.process.run_command("/bin/echo hi");\n'
-            'print(rc["status"]); print(":");\n'
-            'print(std.bytes.to_string(rc["stdout"]));\n'
+            'std.io.print(rc["status"]); std.io.print(":");\n'
+            'std.io.print(std.bytes.to_string(rc["stdout"]));\n'
             'let p = std.process.spawn_command("/bin/echo", '
             '{"args": ["cmd"]});\n'
-            'print(std.process.pid(p) > 0); print("|");\n'
-            'print(std.bytes.to_string(std.io.read(p["stdout"], 4096)));\n'
-            'print(std.process.wait(p));\n',
+            'std.io.print(std.process.pid(p) > 0); std.io.print("|");\n'
+            'std.io.print(std.bytes.to_string(std.io.read(p["stdout"], 4096)));\n'
+            'std.io.print(std.process.wait(p));\n',
             stdout="0:hi\ntrue|cmd\n0",
         )
         check(
@@ -747,7 +747,7 @@ def check_extended_stdlib():
             "import std;\n"
             'let p = std.process.spawn_command("/bin/sleep", {"args": ["5"]});\n'
             'std.process.kill(p);\n'
-            'print(std.process.wait(p) > 0);\n',
+            'std.io.print(std.process.wait(p) > 0);\n',
             stdout="true",
         )
         check(
@@ -767,17 +767,17 @@ def check_extended_stdlib():
         "let blob = std.entry.encode(worker);\n"
         "let r = std.process.run_entry(blob, "
         'std.thread.Message.from({"n": 4}));\n'
-        'print(r["ok"]); print(":"); print(r["value"]["v"]); print("|");\n'
+        'std.io.print(r["ok"]); std.io.print(":"); std.io.print(r["value"]["v"]); std.io.print("|");\n'
         "let p = std.process.spawn_entry(blob, "
         'std.thread.Message.from({"n": 7}));\n'
-        "print(std.process.pid(p) > 0); print(\"|\");\n"
+        "std.io.print(std.process.pid(p) > 0); std.io.print(\"|\");\n"
         "let r2 = std.process.result(p, 10000);\n"
-        'print(r2["value"]["v"]); print("|");\n'
+        'std.io.print(r2["value"]["v"]); std.io.print("|");\n'
         "func bad(ctx) { missing_function(); }\n"
         "let bad_blob = std.entry.encode(bad);\n"
         "let r3 = std.process.run_entry(bad_blob, "
         "std.thread.Message.from({}));\n"
-        'print(r3["ok"]); print("|");\n',
+        'std.io.print(r3["ok"]); std.io.print("|");\n',
         stdout="true:5|true|8|false|",
     )
 
@@ -790,11 +790,11 @@ def check_extended_stdlib():
         "let blob = std.entry.encode(entry);\n"
         "let r = std.process.run_entry(blob, "
         'std.thread.Message.from({"n": 21}));\n'
-        'print(r["ok"]); print(":"); print(r["value"]["v"]); print("|");\n'
+        'std.io.print(r["ok"]); std.io.print(":"); std.io.print(r["value"]["v"]); std.io.print("|");\n'
         "let p = std.process.spawn_entry(blob, "
         'std.thread.Message.from({"n": 5}));\n'
         "let r2 = std.process.result(p, 10000);\n"
-        'print(r2["value"]["v"]); print("|");\n',
+        'std.io.print(r2["value"]["v"]); std.io.print("|");\n',
         stdout="true:42|10|",
     )
 
@@ -814,11 +814,11 @@ def check_extended_stdlib():
         "}\n"
         "let r = std.process.run_function(entry, "
         'std.thread.Message.from({"n": 21}));\n'
-        'print(r["value"]["v"]); print("|");\n'
+        'std.io.print(r["value"]["v"]); std.io.print("|");\n'
         "let p = std.process.spawn_function(entry, "
         'std.thread.Message.from({"n": 5}));\n'
         "let r2 = std.process.result(p, 10000);\n"
-        'print(r2["value"]["v"]); print("|");\n',
+        'std.io.print(r2["value"]["v"]); std.io.print("|");\n',
         stdout="42|10|",
     )
 
@@ -850,14 +850,14 @@ def check_extended_stdlib():
             "import std;\n"
             f'let p = std.process.spawn_command("{binary_path}", '
             f'{{"args": ["{worker_path}"]}});\n'
-            'print(std.bytes.to_string(std.io.read_line(p["stdout"])));\n'
+            'std.io.print(std.bytes.to_string(std.io.read_line(p["stdout"])));\n'
             'std.io.write_all(p["stdin"], std.bytes.from_string('
             '"{\\"id\\":1,\\"params\\":[2,3]}\\n"));\n'
             'std.io.flush(p["stdin"]);\n'
             'let line = std.io.read_line(p["stdout"]);\n'
-            'print(std.bytes.to_string(line));\n'
+            'std.io.print(std.bytes.to_string(line));\n'
             'std.io.close(p["stdin"]);\n'
-            'print(std.process.wait(p));\n',
+            'std.io.print(std.process.wait(p));\n',
             stdout_all=['{"ready":true,"version":1}',
                         '{"id":1,"ok":true,"result":5}', "0"],
         )
@@ -866,8 +866,8 @@ def check_extended_stdlib():
             "import std;\n"
             f'let pool = std.worker.pool(2, "{worker_path}");\n'
             'let one = std.worker.call(pool, "add", [2, 3]);\n'
-            'print(std.result.unwrap(one));\n'
-            'print(std.worker.map(pool, "add", '
+            'std.io.print(std.result.unwrap(one));\n'
+            'std.io.print(std.worker.map(pool, "add", '
             '[[1, 2], [3, 4], [5, 6]]));\n'
             'std.worker.shutdown(pool);\n',
             stdout_all=["5", "[3, 7, 11]"],
@@ -876,13 +876,13 @@ def check_extended_stdlib():
             "std.worker method interface and rpc protos",
             "import std;\n"
             f'let pool = std.worker.pool(1, "{worker_path}");\n'
-            'print(std.result.unwrap(pool.call("add", [2, 3])));\n'
+            'std.io.print(std.result.unwrap(pool.call("add", [2, 3])));\n'
             'let job = pool.submit("add", [4, 5]);\n'
-            'print(str(pool is RpcClient));\n'
-            'print(str(job is RpcJob));\n'
-            'print(std.result.unwrap(job.wait(5000)));\n'
-            'print(std.meta.protocols(pool)[0]);\n'
-            'print(std.meta.protocols(job)[0]);\n'
+            'std.io.print(str(pool is RpcClient));\n'
+            'std.io.print(str(job is RpcJob));\n'
+            'std.io.print(std.result.unwrap(job.wait(5000)));\n'
+            'std.io.print(std.meta.protocols(pool)[0]);\n'
+            'std.io.print(std.meta.protocols(job)[0]);\n'
             'pool.shutdown();\n',
             stdout_all=["5", "true", "true", "9",
                         "std.traits.RpcClient", "std.traits.RpcJob"],
@@ -904,8 +904,8 @@ def check_extended_stdlib():
             "std.rpc serve worker loop",
             "import std;\n"
             f'let pool = std.worker.pool(1, "{rpc_worker_path}");\n'
-            'print(std.result.unwrap(pool.call("add", [2, 3])));\n'
-            'print(str(std.result.is_err(pool.call("nope", []))));\n'
+            'std.io.print(std.result.unwrap(pool.call("add", [2, 3])));\n'
+            'std.io.print(str(std.result.is_err(pool.call("nope", []))));\n'
             'pool.shutdown();\n',
             stdout_all=["5", "true"],
         )
@@ -929,8 +929,8 @@ def check_extended_stdlib():
             '{"protocol": "hybrid"});\n'
             'let reply = std.result.unwrap(pool.call_bytes('
             '"echo", ["ok"], std.bytes.from_string("payload")));\n'
-            'print(reply["value"]);\n'
-            'print(std.bytes.to_string(reply["body"]));\n'
+            'std.io.print(reply["value"]);\n'
+            'std.io.print(std.bytes.to_string(reply["body"]));\n'
             'pool.shutdown();\n',
             stdout_all=["ok", "payload"],
         )
@@ -953,9 +953,9 @@ def check_extended_stdlib():
             "import std;\n"
             "import std.rpc;\n"
             "let local = rpc.server(func(method, params) { return 0; });\n"
-            "print(str(local is RpcServer));\n"
+            "std.io.print(str(local is RpcServer));\n"
             f'let pool = std.worker.pool(1, "{rpc_object_path}");\n'
-            'print(std.result.unwrap(pool.call("mul", [6, 7])));\n'
+            'std.io.print(std.result.unwrap(pool.call("mul", [6, 7])));\n'
             'pool.shutdown();\n',
             stdout_all=["true", "42"],
         )
@@ -981,14 +981,14 @@ def check_extended_stdlib():
             "std.io.close(input);\n"
             "std.io.close(output);\n"
             f'let text = std.fs.read_text("{rpc_out_path}", "utf-8");\n'
-            'print("n=" + str(n));\n'
-            'print("result=" + str(std.string.contains(text, '
+            'std.io.print("n=" + str(n));\n'
+            'std.io.print("result=" + str(std.string.contains(text, '
             '"\\"result\\":5")));\n'
-            'print("error=" + str(std.string.contains(text, '
+            'std.io.print("error=" + str(std.string.contains(text, '
             '"\\"ok\\":false")));\n'
-            'print("served=" + str(server.stats()["served"]));\n'
-            'print("errors=" + str(server.stats()["errors"]));\n'
-            'print("protocol=" + server.stats()["protocol"]);\n',
+            'std.io.print("served=" + str(server.stats()["served"]));\n'
+            'std.io.print("errors=" + str(server.stats()["errors"]));\n'
+            'std.io.print("protocol=" + server.stats()["protocol"]);\n',
             stdout_all=["n=2", "result=1", "error=1", "served=2",
                         "errors=1", "protocol=jsonl"],
         )
@@ -998,24 +998,24 @@ def check_extended_stdlib():
             "import std.rpc;\n"
             f'let conn = rpc.spawn("{binary_path}", '
             f'{{"args": ["{rpc_worker_path}"]}});\n'
-            'print("rpc=" + str(conn is RpcClient));\n'
-            'print("pid=" + str(conn.pid() > 0));\n'
-            'print("call=" + str(std.result.unwrap('
+            'std.io.print("rpc=" + str(conn is RpcClient));\n'
+            'std.io.print("pid=" + str(conn.pid() > 0));\n'
+            'std.io.print("call=" + str(std.result.unwrap('
             'conn.call("add", [2, 3]))));\n'
             'let job = conn.submit("add", [4, 5]);\n'
-            'print("jobrpc=" + str(job is RpcJob));\n'
-            'print("job=" + str(job.wait(5000)));\n'
-            'print("done=" + str(job.done()));\n'
-            'print("timeout=" + str(std.result.unwrap('
+            'std.io.print("jobrpc=" + str(job is RpcJob));\n'
+            'std.io.print("job=" + str(job.wait(5000)));\n'
+            'std.io.print("done=" + str(job.done()));\n'
+            'std.io.print("timeout=" + str(std.result.unwrap('
             'conn.call_timeout("add", [1, 1], 1000))));\n'
             'let reply = std.result.unwrap(conn.call_bytes('
             '"add", [5, 6], std.bytes.from_string("")));\n'
-            'print("bytes=" + str(reply["value"]));\n'
-            'print("calls=" + str(conn.stats()["calls"]));\n'
-            'print("errors=" + str(conn.stats()["errors"]));\n'
+            'std.io.print("bytes=" + str(reply["value"]));\n'
+            'std.io.print("calls=" + str(conn.stats()["calls"]));\n'
+            'std.io.print("errors=" + str(conn.stats()["errors"]));\n'
             "conn.close();\n"
-            'print("closed=" + str(conn.stats()["closed"]));\n'
-            'print("after=" + str(std.result.is_err('
+            'std.io.print("closed=" + str(conn.stats()["closed"]));\n'
+            'std.io.print("after=" + str(std.result.is_err('
             'conn.call("add", [1, 2]))));\n',
             stdout_all=["rpc=true", "pid=true", "call=5", "jobrpc=true",
                         "job=ok(9)", "done=true", "timeout=2", "bytes=11",
@@ -1029,10 +1029,10 @@ def check_extended_stdlib():
             f'let conn = rpc.spawn("{binary_path}", '
             f'{{"args": ["{rpc_worker_path}"]}});\n'
             'let bad = conn.call("nope", []);\n'
-            'print("err=" + str(std.result.is_err(bad)));\n'
-            'print("kind=" + std.error.kind(std.result.error(bad)));\n'
-            'print("msg=" + std.error.message(std.result.error(bad)));\n'
-            'print("errors=" + str(conn.stats()["errors"]));\n'
+            'std.io.print("err=" + str(std.result.is_err(bad)));\n'
+            'std.io.print("kind=" + std.error.kind(std.result.error(bad)));\n'
+            'std.io.print("msg=" + std.error.message(std.result.error(bad)));\n'
+            'std.io.print("errors=" + str(conn.stats()["errors"]));\n'
             "conn.close();\n",
             stdout_all=["err=true", "kind=worker",
                         "msg=unknown method nope", "errors=1"],
@@ -1046,8 +1046,8 @@ def check_extended_stdlib():
             'let conn = rpc.connect(io, {"protocol": "hybrid"});\n'
             'let reply = std.result.unwrap(conn.call_bytes('
             '"echo", ["ok"], std.bytes.from_string("payload")));\n'
-            'print("value=" + reply["value"]);\n'
-            'print("body=" + std.bytes.to_string(reply["body"]));\n'
+            'std.io.print("value=" + reply["value"]);\n'
+            'std.io.print("body=" + std.bytes.to_string(reply["body"]));\n'
             "conn.close();\n",
             stdout_all=["value=ok", "body=payload"],
         )
@@ -1083,12 +1083,12 @@ def check_extended_stdlib():
             f'let conn = rpc.spawn("{binary_path}", '
             f'{{"args": ["{rpc_codec_path}"], "encode": enc, '
             f'"decode": dec}});\n'
-            'print("call=" + str(std.result.unwrap('
+            'std.io.print("call=" + str(std.result.unwrap('
             'conn.call("add", [2, 3]))));\n'
             'let bad = conn.call("nope", []);\n'
-            'print("err=" + str(std.result.is_err(bad)));\n'
-            'print("kind=" + std.error.kind(std.result.error(bad)));\n'
-            'print("errors=" + str(conn.stats()["errors"]));\n'
+            'std.io.print("err=" + str(std.result.is_err(bad)));\n'
+            'std.io.print("kind=" + std.error.kind(std.result.error(bad)));\n'
+            'std.io.print("errors=" + str(conn.stats()["errors"]));\n'
             "conn.close();\n",
             stdout_all=["call=5", "err=true", "kind=worker", "errors=1"],
         )
@@ -1100,12 +1100,12 @@ def check_extended_stdlib():
             f'{{"args": ["{rpc_worker_path}"]}});\n'
             'let a = conn.submit("add", [1, 2]);\n'
             'let b = conn.submit("add", [3, 4]);\n'
-            'print("ids=" + str(a.id() < b.id()));\n'
-            'print("b=" + str(b.wait(5000)));\n'
-            'print("a_done=" + str(a.done()));\n'
-            'print("a=" + str(a.wait(5000)));\n'
-            'print("pending=" + str(conn.stats()["pending"]));\n'
-            'print("calls=" + str(conn.stats()["calls"]));\n'
+            'std.io.print("ids=" + str(a.id() < b.id()));\n'
+            'std.io.print("b=" + str(b.wait(5000)));\n'
+            'std.io.print("a_done=" + str(a.done()));\n'
+            'std.io.print("a=" + str(a.wait(5000)));\n'
+            'std.io.print("pending=" + str(conn.stats()["pending"]));\n'
+            'std.io.print("calls=" + str(conn.stats()["calls"]));\n'
             "conn.close();\n",
             stdout_all=["ids=true", "b=ok(7)", "a_done=true", "a=ok(3)",
                         "pending=0", "calls=2"],
@@ -1119,22 +1119,22 @@ def check_extended_stdlib():
             f'let b = rpc.spawn("{binary_path}", '
             f'{{"args": ["{rpc_worker_path}"]}});\n'
             "let p = rpc.pool([a, b]);\n"
-            'print("rpc=" + str(p is RpcClient));\n'
-            'print("clients=" + str(p.stats()["clients"]));\n'
-            'print("a=" + str(std.result.unwrap('
+            'std.io.print("rpc=" + str(p is RpcClient));\n'
+            'std.io.print("clients=" + str(p.stats()["clients"]));\n'
+            'std.io.print("a=" + str(std.result.unwrap('
             'p.call("add", [1, 2]))));\n'
-            'print("b=" + str(std.result.unwrap('
+            'std.io.print("b=" + str(std.result.unwrap('
             'p.call_timeout("add", [10, 20], 5000))));\n'
-            'print("c=" + str(std.result.unwrap('
+            'std.io.print("c=" + str(std.result.unwrap('
             'p.call("add", [100, 200]))));\n'
             'let j = p.submit("add", [4, 5]);\n'
-            'print("jobrpc=" + str(j is RpcJob));\n'
-            'print("j=" + str(std.result.unwrap(j.wait(5000))));\n'
-            'print("calls=" + str(p.stats()["calls"]));\n'
+            'std.io.print("jobrpc=" + str(j is RpcJob));\n'
+            'std.io.print("j=" + str(std.result.unwrap(j.wait(5000))));\n'
+            'std.io.print("calls=" + str(p.stats()["calls"]));\n'
             "p.close();\n"
             'let after = p.call("add", [1, 1]);\n'
-            'print("closed=" + str(p.stats()["closed"]));\n'
-            'print("after=" + str(std.result.is_err(after)));\n',
+            'std.io.print("closed=" + str(p.stats()["closed"]));\n'
+            'std.io.print("after=" + str(std.result.is_err(after)));\n',
             stdout_all=["rpc=true", "clients=2", "a=3", "b=30", "c=300",
                         "jobrpc=true", "j=9", "calls=4", "closed=true",
                         "after=true"],
@@ -1166,8 +1166,8 @@ def check_extended_stdlib():
             "for r in results {\n"
             "  sum = sum + std.result.unwrap(r);\n"
             "}\n"
-            'print("sum=" + str(sum));\n'
-            'print("calls=" + str(p.stats()["calls"]));\n'
+            'std.io.print("sum=" + str(sum));\n'
+            'std.io.print("calls=" + str(p.stats()["calls"]));\n'
             "p.close();\n",
             stdout_all=["sum=20", "calls=4"],
         )
@@ -1179,13 +1179,13 @@ def check_extended_stdlib():
             f'let conn = rpc.spawn("{binary_path}", '
             f'{{"args": ["{rpc_worker_path}"]}});\n'
             "let p = rpc.pool([native, conn]);\n"
-            'print("a=" + str(std.result.unwrap('
+            'std.io.print("a=" + str(std.result.unwrap('
             'p.call("add", [1, 2]))));\n'
-            'print("b=" + str(std.result.unwrap('
+            'std.io.print("b=" + str(std.result.unwrap('
             'p.call_timeout("add", [10, 20], 5000))));\n'
             'let j = p.submit("add", [4, 5]);\n'
-            'print("j=" + str(std.result.unwrap(j.wait(5000))));\n'
-            'print("clients=" + str(p.stats()["clients"]));\n'
+            'std.io.print("j=" + str(std.result.unwrap(j.wait(5000))));\n'
+            'std.io.print("clients=" + str(p.stats()["clients"]));\n'
             "p.close();\n",
             stdout_all=["a=3", "b=30", "j=9", "clients=2"],
         )
@@ -1204,17 +1204,17 @@ def check_extended_stdlib():
             'let r2 = p.call("add", [10, 20]);\n'
             'let r3 = p.call("add", [100, 200]);\n'
             'let r4 = p.call("add", [1000, 2000]);\n'
-            'print("r1=" + str(std.result.unwrap(r1)));\n'
-            'print("r2err=" + str(std.result.is_err(r2)));\n'
-            'print("r3=" + str(std.result.unwrap(r3)));\n'
-            'print("r4err=" + str(std.result.is_err(r4)));\n'
-            'print("open=" + str(p.health()[1]["open"]));\n'
-            'print("healthy=" + str(p.stats()["healthy"]));\n'
+            'std.io.print("r1=" + str(std.result.unwrap(r1)));\n'
+            'std.io.print("r2err=" + str(std.result.is_err(r2)));\n'
+            'std.io.print("r3=" + str(std.result.unwrap(r3)));\n'
+            'std.io.print("r4err=" + str(std.result.is_err(r4)));\n'
+            'std.io.print("open=" + str(p.health()[1]["open"]));\n'
+            'std.io.print("healthy=" + str(p.stats()["healthy"]));\n'
             'let r5 = p.call("add", [3, 4]);\n'
-            'print("r5=" + str(std.result.unwrap(r5)));\n'
+            'std.io.print("r5=" + str(std.result.unwrap(r5)));\n'
             "p.reset();\n"
-            'print("reset=" + str(p.health()[1]["failures"]));\n'
-            'print("healthy2=" + str(p.stats()["healthy"]));\n'
+            'std.io.print("reset=" + str(p.health()[1]["failures"]));\n'
+            'std.io.print("healthy2=" + str(p.stats()["healthy"]));\n'
             "p.close();\n",
             stdout_all=["r1=3", "r2err=true", "r3=300", "r4err=true",
                         "open=true", "healthy=1", "r5=7", "reset=0",
@@ -1233,12 +1233,12 @@ def check_extended_stdlib():
             '{"failure_limit": 1, "cooldown_ms": 150});\n'
             'let r1 = p.call("add", [1, 2]);\n'
             'let r2 = p.call("add", [10, 20]);\n'
-            'print("open=" + str(p.health()[1]["open"]));\n'
+            'std.io.print("open=" + str(p.health()[1]["open"]));\n'
             "std.task.sleep(200).wait();\n"
-            'print("cool=" + str(p.health()[1]["open"]));\n'
+            'std.io.print("cool=" + str(p.health()[1]["open"]));\n'
             'let r3 = p.call("add", [3, 4]);\n'
-            'print("r3=" + str(std.result.unwrap(r3)));\n'
-            'print("failures=" + str(p.health()[1]["failures"]));\n'
+            'std.io.print("r3=" + str(std.result.unwrap(r3)));\n'
+            'std.io.print("failures=" + str(p.health()[1]["failures"]));\n'
             "p.close();\n",
             stdout_all=["open=true", "cool=false", "r3=7", "failures=1"],
         )
@@ -1272,15 +1272,15 @@ def check_extended_stdlib():
             "import std.rpc;\n"
             f'let c = rpc.spawn("{binary_path}", '
             f'{{"args": ["{restart_path}"]}});\n'
-            'print("before=" + str(std.result.unwrap('
+            'std.io.print("before=" + str(std.result.unwrap('
             'c.call("add", [1, 2]))));\n'
-            'print("dieerr=" + str(std.result.is_err('
+            'std.io.print("dieerr=" + str(std.result.is_err('
             'c.call("die", [1, 2]))));\n'
             "let opened = c.reconnect();\n"
-            'print("opened=" + str(std.result.is_ok(opened)));\n'
-            'print("after=" + str(std.result.unwrap('
+            'std.io.print("opened=" + str(std.result.is_ok(opened)));\n'
+            'std.io.print("after=" + str(std.result.unwrap('
             'c.call("add", [10, 20]))));\n'
-            'print("rec=" + str(c.stats()["reconnects"]));\n'
+            'std.io.print("rec=" + str(c.stats()["reconnects"]));\n'
             "c.close();\n",
             stdout_all=["before=3", "dieerr=true", "opened=true",
                         "after=30", "rec=1"],
@@ -1293,15 +1293,15 @@ def check_extended_stdlib():
             f'{{"args": ["{restart_path}"]}});\n'
             'let p = rpc.pool([c], '
             '{"failure_limit": 1, "cooldown_ms": 100000});\n'
-            'print("before=" + str(std.result.unwrap('
+            'std.io.print("before=" + str(std.result.unwrap('
             'p.call("add", [1, 2]))));\n'
-            'print("dieerr=" + str(std.result.is_err('
+            'std.io.print("dieerr=" + str(std.result.is_err('
             'p.call("die", [3, 4]))));\n'
-            'print("failures=" + str(p.health()[0]["failures"]));\n'
-            'print("after=" + str(std.result.unwrap('
+            'std.io.print("failures=" + str(p.health()[0]["failures"]));\n'
+            'std.io.print("after=" + str(std.result.unwrap('
             'p.call("add", [10, 20]))));\n'
-            'print("rec=" + str(p.stats()["reconnects"]));\n'
-            'print("healthy=" + str(p.stats()["healthy"]));\n'
+            'std.io.print("rec=" + str(p.stats()["reconnects"]));\n'
+            'std.io.print("healthy=" + str(p.stats()["healthy"]));\n'
             "p.close();\n",
             stdout_all=["before=3", "dieerr=true", "failures=0",
                         "after=30", "rec=1", "healthy=1"],
@@ -1313,12 +1313,12 @@ def check_extended_stdlib():
             'let a = std.worker.submit(pool, "add", [1, 2]);\n'
             'let b = std.worker.submit(pool, "add", [3, 4]);\n'
             'let c = std.worker.submit(pool, "add", [5, 6]);\n'
-            'print(std.result.unwrap(std.worker.wait(a)));\n'
-            'print(std.result.unwrap(std.worker.wait(b)));\n'
-            'print(std.result.unwrap(std.worker.wait(c)));\n'
+            'std.io.print(std.result.unwrap(std.worker.wait(a)));\n'
+            'std.io.print(std.result.unwrap(std.worker.wait(b)));\n'
+            'std.io.print(std.result.unwrap(std.worker.wait(c)));\n'
             'let stats = std.worker.stats(pool);\n'
-            'print(stats["workers"]);\n'
-            'print(stats["available"]);\n'
+            'std.io.print(stats["workers"]);\n'
+            'std.io.print(stats["available"]);\n'
             'std.worker.shutdown(pool);\n',
             stdout_all=["3", "7", "11", "2", "2"],
         )
@@ -1326,13 +1326,13 @@ def check_extended_stdlib():
             "std.worker crash and timeout restart",
             "import std;\n"
             f'let pool = std.worker.pool(1, "{restart_path}");\n'
-            'print(std.result.is_err('
+            'std.io.print(std.result.is_err('
             'std.worker.call(pool, "die", [1, 2])));\n'
-            'print(std.result.unwrap('
+            'std.io.print(std.result.unwrap('
             'std.worker.call(pool, "add", [2, 3])));\n'
-            'print(std.result.is_err('
+            'std.io.print(std.result.is_err('
             'std.worker.call(pool, "slow", [1, 2], 100)));\n'
-            'print(std.result.unwrap('
+            'std.io.print(std.result.unwrap('
             'std.worker.call(pool, "add", [4, 5])));\n'
             'std.worker.shutdown(pool);\n',
             stdout_all=["true", "5", "true", "9"],
@@ -1356,7 +1356,7 @@ def check_extended_stdlib():
                 "  }\n"
                 "  let response = {\"id\": request[\"id\"], "
                 "\"ok\": true, \"result\": request[\"params\"][0], "
-                "\"body_len\": len(body)};\n"
+                "\"body_len\": std.utils.len(body)};\n"
                 "  std.io.write_all(std.io.stdout, std.bytes.from_string("
                 "std.json.stringify(response) + \"\\n\"));\n"
                 "  std.io.write_all(std.io.stdout, body);\n"
@@ -1371,8 +1371,8 @@ def check_extended_stdlib():
             '{"protocol": "hybrid"});\n'
             'let reply = std.result.unwrap(std.worker.call_bytes('
             'pool, "echo", [7], std.bytes.from_string("raw-body-123")));\n'
-            'print(reply["value"]);\n'
-            'print(std.bytes.to_string(reply["body"]));\n'
+            'std.io.print(reply["value"]);\n'
+            'std.io.print(std.bytes.to_string(reply["body"]));\n'
             'std.worker.shutdown(pool);\n',
             stdout_all=["7", "raw-body-123"],
         )
@@ -1384,8 +1384,8 @@ def check_extended_stdlib():
             'let job = std.worker.submit_bytes('
             'pool, "echo", [9], std.bytes.from_string("two"));\n'
             'let reply = std.result.unwrap(std.worker.wait(job));\n'
-            'print(reply["value"]);\n'
-            'print(std.bytes.to_string(reply["body"]));\n'
+            'std.io.print(reply["value"]);\n'
+            'std.io.print(std.bytes.to_string(reply["body"]));\n'
             'std.worker.shutdown(pool);\n',
             stdout_all=["9", "two"],
         )
@@ -1410,18 +1410,18 @@ def check_extended_stdlib():
             handle.write(
                 "import std;\n"
                 "let s = std.http.listen(\"127.0.0.1\", 0);\n"
-                "println(s[\"port\"]);\n"
+                "std.io.println(s[\"port\"]);\n"
                 "std.io.flush(std.io.stdout);\n"
                 f"let ps = std.http.serve_processes(s, 1, "
                 f"\"{serve_worker_path}\", "
                 f"{{\"strategy\": \"dispatch\", \"max_requests\": 1}});\n"
-                "println(\"server=\" + s[\"strategy\"] + \":\" + "
+                "std.io.println(\"server=\" + s[\"strategy\"] + \":\" + "
                 "s[\"platform\"] + \":\" + "
                 "str(s[\"capabilities\"][\"http1\"]));\n"
-                "println(\"ps=\" + ps.strategy + \":\" + "
+                "std.io.println(\"ps=\" + ps.strategy + \":\" + "
                 "str(ps.capabilities[\"dispatch\"]) + \":\" + "
                 "str(ps.stats()[\"workers\"]));\n"
-                "println(ps.join(5000));\n"
+                "std.io.println(ps.join(5000));\n"
             )
         server = subprocess.Popen(
             [os.path.abspath(BIN), serve_script],
@@ -1476,7 +1476,7 @@ def check_extended_stdlib():
             f'let n = std.http.serve_processes(s, 1, "{serve_worker_path}", '
             '{"strategy": "dispatch", "require": ["http2"]}) '
             "on error(e) {\n"
-            '    print("kind=" + std.error.kind(e));\n'
+            '    std.io.print("kind=" + std.error.kind(e));\n'
             "    recover null;\n"
             "};\n",
             stdout="kind=http.unsupported",
@@ -1488,7 +1488,7 @@ def check_extended_stdlib():
             f'let ps = std.http.serve_processes(s, 1, '
             f'"{serve_worker_path}", '
             '{"strategy": "dispatch", "max_requests": 0});\n'
-            'print(ps.shutdown(2000));\n',
+            'std.io.print(ps.shutdown(2000));\n',
             stdout="0",
         )
 
@@ -1523,12 +1523,12 @@ def check_extended_stdlib():
                 f"let ps = std.http.serve_processes(s, 1, "
                 f"\"{slow_worker_path}\", "
                 "{\"strategy\": \"dispatch\", \"max_requests\": 0});\n"
-                "println(s[\"port\"]);\n"
+                "std.io.println(s[\"port\"]);\n"
                 "std.io.flush(std.io.stdout);\n"
                 "std.task.wait(std.task.sleep(700));\n"
                 "let started = std.time.monotonic_ms();\n"
                 "let served = ps.shutdown(100);\n"
-                "println(\"shutdown=\" + str(served) + \":\" + "
+                "std.io.println(\"shutdown=\" + str(served) + \":\" + "
                 "str(std.time.monotonic_ms() - started));\n"
             )
         server = subprocess.Popen(
@@ -1582,19 +1582,19 @@ def check_extended_stdlib():
                 handle.write(
                     "import std;\n"
                     "let s = std.http.listen(\"127.0.0.1\", 0);\n"
-                    "println(s[\"port\"]);\n"
+                    "std.io.println(s[\"port\"]);\n"
                     "std.io.flush(std.io.stdout);\n"
                     f"let ps = std.http.serve_processes(s, 4, "
                     f"\"{workers_reuse_path}\", {{\"strategy\": "
                     f"\"reuse_port\", \"max_requests\": 8, "
                     f"\"max_connections\": 1}});\n"
-                    "println(\"info=\" + ps.strategy + \":\" + "
+                    "std.io.println(\"info=\" + ps.strategy + \":\" + "
                     "str(ps.capabilities[\"reuse_port\"]) + \":\" + "
                     "str(ps.stats()[\"workers\"]));\n"
                     "std.io.flush(std.io.stdout);\n"
                     "let served = ps.join(30000);\n"
-                    "println(\"served=\" + str(served));\n"
-                    "println(\"served_after=\" + str(ps.served));\n"
+                    "std.io.println(\"served=\" + str(served));\n"
+                    "std.io.println(\"served_after=\" + str(ps.served));\n"
                 )
             server = subprocess.Popen(
                 [os.path.abspath(BIN), workers_reuse_script],
@@ -1667,12 +1667,12 @@ def check_extended_stdlib():
                     f"let ps = std.http.serve_processes(s, 2, "
                     f"\"{slow_worker_path}\", "
                     "{\"strategy\": \"reuse_port\", \"max_requests\": 0});\n"
-                    "println(s[\"port\"]);\n"
+                    "std.io.println(s[\"port\"]);\n"
                     "std.io.flush(std.io.stdout);\n"
                     "std.time.sleep(1500);\n"
                     "let started = std.time.monotonic_ms();\n"
                     "let served = ps.shutdown(100);\n"
-                    "println(\"shutdown=\" + str(served) + \":\" + "
+                    "std.io.println(\"shutdown=\" + str(served) + \":\" + "
                     "str(std.time.monotonic_ms() - started));\n"
                 )
             server = subprocess.Popen(
@@ -1718,7 +1718,7 @@ def check_extended_stdlib():
                 f'let ts = std.http.serve_threads(s, 1, '
                 f'"{workers_reuse_path}", {{"strategy": "reuse_port", '
                 f'"max_requests": 0}});\n'
-                'print(ts.shutdown(2000));\n',
+                'std.io.print(ts.shutdown(2000));\n',
                 stdout="0",
             )
 
@@ -1728,18 +1728,18 @@ def check_extended_stdlib():
                 handle.write(
                     "import std;\n"
                     "let s = std.http.listen(\"127.0.0.1\", 0);\n"
-                    "println(s[\"port\"]);\n"
+                    "std.io.println(s[\"port\"]);\n"
                     "std.io.flush(std.io.stdout);\n"
                     f"let ps = std.http.serve_processes(s, 2, "
                     f"\"{workers_reuse_path}\", {{\"strategy\": "
                     f"\"reuse_port\"}});\n"
-                    "println(\"ready\");\n"
+                    "std.io.println(\"ready\");\n"
                     "std.io.flush(std.io.stdout);\n"
                     "std.time.sleep(1500);\n"
                     "ps.stop();\n"
-                    "println(\"stopping=\" + str(ps.stats()[\"stopping\"]));\n"
+                    "std.io.println(\"stopping=\" + str(ps.stats()[\"stopping\"]));\n"
                     "std.io.flush(std.io.stdout);\n"
-                    "println(\"served=\" + str(ps.join()));\n"
+                    "std.io.println(\"served=\" + str(ps.join()));\n"
                 )
             server = subprocess.Popen(
                 [os.path.abspath(BIN), workers_stop_script],
@@ -1813,10 +1813,10 @@ def check_extended_stdlib():
                     f"\"{workers_stream_path}\", {{\"strategy\": "
                     f"\"reuse_port\", \"stream_request_body\": true, "
                     f"\"max_requests\": 1}});\n"
-                    "println(\"info=\" + str(s[\"port\"]) + \":\" + "
+                    "std.io.println(\"info=\" + str(s[\"port\"]) + \":\" + "
                     "str(ps.capabilities[\"stream_request_body\"]));\n"
                     "std.io.flush(std.io.stdout);\n"
-                    "println(\"served=\" + str(ps.join()));\n"
+                    "std.io.println(\"served=\" + str(ps.join()));\n"
                 )
             server = subprocess.Popen(
                 [os.path.abspath(BIN), workers_stream_script],
@@ -1880,14 +1880,14 @@ def check_extended_stdlib():
             handle.write(
                 "import std;\n"
                 "let s = std.http.listen(\"127.0.0.1\", 0);\n"
-                "println(s[\"port\"]);\n"
+                "std.io.println(s[\"port\"]);\n"
                 "std.io.flush(std.io.stdout);\n"
                 f"let ps = std.http.serve_processes(s, 1, "
                 f"\"{serve_worker_path}\", {{\"strategy\": \"dispatch\", "
                 f"\"require\": [\"http2\"], "
                 f"\"on_unsupported\": \"501\", "
                 f"\"max_requests\": 1}});\n"
-                "println(ps.join());\n"
+                "std.io.println(ps.join());\n"
             )
         server = subprocess.Popen(
             [os.path.abspath(BIN), workers_501_script],
@@ -1924,12 +1924,12 @@ def check_extended_stdlib():
             handle.write(
                 "import std;\n"
                 "let s = std.http.listen(\"127.0.0.1\", 0);\n"
-                "println(s[\"port\"]);\n"
+                "std.io.println(s[\"port\"]);\n"
                 "std.io.flush(std.io.stdout);\n"
                 f"let ps = std.http.serve_processes(s, 1, "
                 f"\"{serve_worker_path}\", {{\"strategy\": \"dispatch\", "
                 f"\"max_requests\": 2}});\n"
-                "println(ps.join());\n"
+                "std.io.println(ps.join());\n"
             )
         server = subprocess.Popen(
             [os.path.abspath(BIN), workers_features_script],
@@ -1987,12 +1987,12 @@ def check_extended_stdlib():
                 "import std;\n"
                 "let s = std.http.listen(\"127.0.0.1\", 0);\n"
                 "s[\"worker_timeout_ms\"] = 10000;\n"
-                "println(s[\"port\"]);\n"
+                "std.io.println(s[\"port\"]);\n"
                 "std.io.flush(std.io.stdout);\n"
                 f"let ps = std.http.serve_processes(s, 2, "
                 f"\"{slow_path}\", {{\"strategy\": \"dispatch\", "
                 f"\"max_requests\": 2}});\n"
-                "println(ps.join());\n"
+                "std.io.println(ps.join());\n"
             )
         server = subprocess.Popen(
             [os.path.abspath(BIN), concurrent_script],
@@ -2075,15 +2075,15 @@ def check_extended_stdlib():
                 f"let ts = std.http.serve_threads(s, 2, "
                 f"\"{threads_worker_path}\", "
                 f"{{\"max_requests\": 1, \"strategy\": \"dispatch\"}});\n"
-                "println(s[\"port\"]);\n"
-                "println(\"server=\" + s[\"strategy\"] + \":\" + "
+                "std.io.println(s[\"port\"]);\n"
+                "std.io.println(\"server=\" + s[\"strategy\"] + \":\" + "
                 "s[\"platform\"] + \":\" + "
                 "str(s[\"capabilities\"][\"http1\"]));\n"
-                "println(\"caps=\" + str(ts.capabilities[\"http1\"]) + "
+                "std.io.println(\"caps=\" + str(ts.capabilities[\"http1\"]) + "
                 "\":\" + str(ts.capabilities[\"http2\"]));\n"
-                "println(\"strategy=\" + ts.strategy);\n"
+                "std.io.println(\"strategy=\" + ts.strategy);\n"
                 "std.io.flush(std.io.stdout);\n"
-                "println(\"served=\" + str(ts.join(5000)));\n"
+                "std.io.println(\"served=\" + str(ts.join(5000)));\n"
             )
         server = subprocess.Popen(
             [os.path.abspath(BIN), threads_script],
@@ -2147,7 +2147,7 @@ def check_extended_stdlib():
                 f"let ts = std.http.serve_threads(s, 2, "
                 f"\"{slow_threads_path}\", "
                 f"{{\"max_requests\": 2, \"strategy\": \"dispatch\"}});\n"
-                "println(s[\"port\"]);\n"
+                "std.io.println(s[\"port\"]);\n"
                 "std.io.flush(std.io.stdout);\n"
                 "ts.join();\n"
             )
@@ -2214,7 +2214,7 @@ def check_extended_stdlib():
                 f"\"{slow_threads_path}\", {{\"max_requests\": 1, "
                 f"\"worker_timeout_ms\": 50, "
                 f"\"strategy\": \"dispatch\"}});\n"
-                "println(s[\"port\"]);\n"
+                "std.io.println(s[\"port\"]);\n"
                 "std.io.flush(std.io.stdout);\n"
                 "ts.join();\n"
             )
@@ -2260,11 +2260,11 @@ def check_extended_stdlib():
             "std.thread capabilities",
             "import std;\n"
             'let c = std.thread.capabilities();\n'
-            'print("schema="); print(c["schema"]);\n'
-            'print("platform="); print(c["platform"]);\n'
-            'print("http1="); print(c["http1"]);\n'
-            'print("websocket="); print(c["websocket"]);\n'
-            'print("strategies="); print(len(c["strategies"]));\n',
+            'std.io.print("schema="); std.io.print(c["schema"]);\n'
+            'std.io.print("platform="); std.io.print(c["platform"]);\n'
+            'std.io.print("http1="); std.io.print(c["http1"]);\n'
+            'std.io.print("websocket="); std.io.print(c["websocket"]);\n'
+            'std.io.print("strategies="); std.io.print(std.utils.len(c["strategies"]));\n',
             stdout_all=["schema=1", "platform=", "http1=true",
                         "websocket=false", "strategies="],
         )
@@ -2273,7 +2273,7 @@ def check_extended_stdlib():
             "import std;\n"
             'let c = std.http.thread_capabilities('
             '{"strategy": "dispatch"});\n'
-            'print(c["strategy"] + ":" + str(c["http2"]) + ":" + '
+            'std.io.print(c["strategy"] + ":" + str(c["http2"]) + ":" + '
             'str(c["stream_request_body"]));\n',
             stdout="dispatch:false:false",
         )
@@ -2283,7 +2283,7 @@ def check_extended_stdlib():
                 "import std;\n"
                 'let c = std.http.thread_capabilities('
                 '{"strategy": "reuse_port"});\n'
-                'print(c["strategy"] + ":" + str(c["http2"]) + ":" + '
+                'std.io.print(c["strategy"] + ":" + str(c["http2"]) + ":" + '
                 'str(c["stream_request_body"]));\n',
                 stdout="reuse_port:true:true",
             )
@@ -2315,7 +2315,7 @@ def check_extended_stdlib():
                 f"\"dispatch\", \"require\": [\"http2\"], "
                 f"\"on_unsupported\": \"501\", "
                 f"\"max_requests\": 1}});\n"
-                "println(s[\"port\"]);\n"
+                "std.io.println(s[\"port\"]);\n"
                 "std.io.flush(std.io.stdout);\n"
                 "ts.join();\n"
             )
@@ -2358,7 +2358,7 @@ def check_extended_stdlib():
                 f"\"dispatch\", \"require\": [\"http2\"], "
                 f"\"on_unsupported\": \"warn\", "
                 f"\"max_requests\": 1}});\n"
-                "println(s[\"port\"]);\n"
+                "std.io.println(s[\"port\"]);\n"
                 "std.io.flush(std.io.stdout);\n"
                 "ts.join();\n"
             )
@@ -2398,7 +2398,7 @@ def check_extended_stdlib():
                 f"let ts = std.http.serve_threads(s, 1, "
                 f"\"{threads_worker_path}\", {{\"strategy\": "
                 f"\"dispatch\", \"max_requests\": 2}});\n"
-                "println(s[\"port\"]);\n"
+                "std.io.println(s[\"port\"]);\n"
                 "std.io.flush(std.io.stdout);\n"
                 "ts.join();\n"
             )
@@ -2459,7 +2459,7 @@ def check_extended_stdlib():
                 f"let ts = std.http.serve_threads(s, 1, "
                 f"\"{stream_response_worker_path}\", {{\"strategy\": "
                 f"\"dispatch\", \"max_requests\": 1}});\n"
-                "println(s[\"port\"]);\n"
+                "std.io.println(s[\"port\"]);\n"
                 "std.io.flush(std.io.stdout);\n"
                 "ts.join();\n"
             )
@@ -2527,7 +2527,7 @@ def check_extended_stdlib():
                     f"\"{crash_threads_path}\", {{\"max_requests\": 2, "
                     f"\"restart_limit\": 1, "
                     f"\"strategy\": \"dispatch\"}});\n"
-                    "println(s[\"port\"]);\n"
+                    "std.io.println(s[\"port\"]);\n"
                     "std.io.flush(std.io.stdout);\n"
                     "ts.join();\n"
                 )
@@ -2589,11 +2589,11 @@ def check_extended_stdlib():
                     f"let ts = std.http.serve_threads(s, 4, "
                     f"\"{reuse_worker_path}\", {{\"strategy\": "
                     f"\"reuse_port\", \"max_requests\": 8}});\n"
-                    "println(\"info=\" + str(s[\"port\"]) + \":\" + "
+                    "std.io.println(\"info=\" + str(s[\"port\"]) + \":\" + "
                     "ts.strategy + \":\" + "
                     "str(ts.capabilities[\"reuse_port\"]));\n"
                     "std.io.flush(std.io.stdout);\n"
-                    "println(\"served=\" + str(ts.join(30000)));\n"
+                    "std.io.println(\"served=\" + str(ts.join(30000)));\n"
                 )
             server = subprocess.Popen(
                 [os.path.abspath(BIN), reuse_script],
@@ -2673,7 +2673,7 @@ def check_extended_stdlib():
                     f"let ts = std.http.serve_threads(s, 1, "
                     f"\"{sse_worker_path}\", {{\"strategy\": "
                     f"\"reuse_port\", \"max_requests\": 1}});\n"
-                    "println(\"info=\" + str(s[\"port\"]) + \":\" + "
+                    "std.io.println(\"info=\" + str(s[\"port\"]) + \":\" + "
                     "str(ts.capabilities[\"stream_response\"]));\n"
                     "std.io.flush(std.io.stdout);\n"
                     "ts.join();\n"
@@ -2737,10 +2737,10 @@ def check_extended_stdlib():
                     f"\"{stream_worker_path}\", {{\"strategy\": "
                     f"\"reuse_port\", \"stream_request_body\": true, "
                     f"\"max_requests\": 1}});\n"
-                    "println(\"info=\" + str(s[\"port\"]) + \":\" + "
+                    "std.io.println(\"info=\" + str(s[\"port\"]) + \":\" + "
                     "str(ts.capabilities[\"stream_request_body\"]));\n"
                     "std.io.flush(std.io.stdout);\n"
-                    "println(\"served=\" + str(ts.join()));\n"
+                    "std.io.println(\"served=\" + str(ts.join()));\n"
                 )
             server = subprocess.Popen(
                 [os.path.abspath(BIN), stream_script],
@@ -2823,15 +2823,15 @@ def check_extended_stdlib():
                     handle.write(
                         "import std;\n"
                         'let s = std.http.listen("127.0.0.1", 0);\n'
-                        'println(s["port"]);\n'
+                        'std.io.println(s["port"]);\n'
                         "std.io.flush(std.io.stdout);\n"
                         f"let srv = std.http.{call}(s, 2, "
                         f"\"{worker_path}\", {{\"strategy\": "
                         f"\"reuse_port\", \"max_connections\": 1, "
                         f"\"max_requests\": 2}});\n"
-                        'println("ready");\n'
+                        'std.io.println("ready");\n'
                         "std.io.flush(std.io.stdout);\n"
-                        'println("served=" + str(srv.join()));\n'
+                        'std.io.println("served=" + str(srv.join()));\n'
                     )
                 server = subprocess.Popen(
                     [os.path.abspath(BIN), script],
@@ -2997,7 +2997,7 @@ def check_extended_stdlib():
                 "serve",
                 "import std;\n"
                 'let s = std.http.listen("127.0.0.1", 0);\n'
-                'println(s["port"]);\n'
+                'std.io.println(s["port"]);\n'
                 "std.io.flush(std.io.stdout);\n"
                 "let n = std.http.serve(s, func(req) {\n"
                 "  let ws = std.websocket.accept(req);\n"
@@ -3006,33 +3006,33 @@ def check_extended_stdlib():
                 "  std.websocket.close(ws);\n"
                 '  return {"status": 101};\n'
                 "}, 1);\n"
-                'println("served=" + str(n));\n',
+                'std.io.println("served=" + str(n));\n',
                 False)
             run_ws_case(
                 "threads",
                 "import std;\n"
                 'let s = std.http.listen("127.0.0.1", 0);\n'
-                'println(s["port"]);\n'
+                'std.io.println(s["port"]);\n'
                 "std.io.flush(std.io.stdout);\n"
                 f"let ts = std.http.serve_threads(s, 2, "
                 f"\"{ws_worker_path}\", {{\"strategy\": \"reuse_port\", "
                 f"\"max_requests\": 1}});\n"
-                'println("ready");\n'
+                'std.io.println("ready");\n'
                 "std.io.flush(std.io.stdout);\n"
-                'println("served=" + str(ts.join()));\n',
+                'std.io.println("served=" + str(ts.join()));\n',
                 True)
             run_ws_case(
                 "workers",
                 "import std;\n"
                 'let s = std.http.listen("127.0.0.1", 0);\n'
-                'println(s["port"]);\n'
+                'std.io.println(s["port"]);\n'
                 "std.io.flush(std.io.stdout);\n"
                 f"let ps = std.http.serve_processes(s, 2, "
                 f"\"{ws_worker_path}\", {{\"strategy\": \"reuse_port\", "
                 f"\"max_requests\": 1}});\n"
-                'println("ready");\n'
+                'std.io.println("ready");\n'
                 "std.io.flush(std.io.stdout);\n"
-                'println("served=" + str(ps.join()));\n',
+                'std.io.println("served=" + str(ps.join()));\n',
                 True)
 
             h2c_worker = os.path.join(
@@ -3058,10 +3058,10 @@ def check_extended_stdlib():
                         f"let srv = std.http.{call}(s, 2, "
                         f"\"{h2c_worker_path}\", {{\"strategy\": "
                         f"\"reuse_port\", \"max_requests\": 2}});\n"
-                        'println("info=" + str(s["port"]) + ":" + '
+                        'std.io.println("info=" + str(s["port"]) + ":" + '
                         'str(srv.capabilities["http2"]));\n'
                         "std.io.flush(std.io.stdout);\n"
-                        'println("served=" + str(srv.join()));\n'
+                        'std.io.println("served=" + str(srv.join()));\n'
                     )
                 server = subprocess.Popen(
                     [os.path.abspath(BIN), script],
@@ -3086,13 +3086,13 @@ def check_extended_stdlib():
                         "import std;\n"
                         f'let a = std.http2.get('
                         f'"http://127.0.0.1:{port_text}/h2");\n'
-                        'println(str(a["status"]) + " " + '
+                        'std.io.println(str(a["status"]) + " " + '
                         'a["protocol"]);\n'
-                        'println(std.bytes.to_string(a["body"]));\n'
+                        'std.io.println(std.bytes.to_string(a["body"]));\n'
                         f'let b = std.http.get('
                         f'"http://127.0.0.1:{port_text}/h1");\n'
-                        'println(str(b["status"]));\n'
-                        'println(std.bytes.to_string(b["body"]));\n',
+                        'std.io.println(str(b["status"]));\n'
+                        'std.io.println(std.bytes.to_string(b["body"]));\n',
                         timeout=20,
                     )
                     assert client.returncode == 0, client.stderr
@@ -3134,10 +3134,10 @@ def check_extended_stdlib():
                         f"let ts = std.http.serve_threads(s, 2, "
                         f"\"{threads_worker_path}\", {{\"strategy\": "
                         f"\"reuse_port\", \"max_requests\": 2}});\n"
-                        "println(\"info=\" + str(s[\"port\"]) + \":\" + "
+                        "std.io.println(\"info=\" + str(s[\"port\"]) + \":\" + "
                         "str(ts.capabilities[\"http2\"]));\n"
                         "std.io.flush(std.io.stdout);\n"
-                        "println(\"served=\" + str(ts.join()));\n"
+                        "std.io.println(\"served=\" + str(ts.join()));\n"
                     )
                 server = subprocess.Popen(
                     [os.path.abspath(BIN), h2_script],
@@ -3162,14 +3162,14 @@ def check_extended_stdlib():
                         f'let a = std.http2.get('
                         f'"https://127.0.0.1:{port_text}/h2", '
                         '{"tls": {"verify": false}});\n'
-                        'println(str(a["status"]) + " " + '
+                        'std.io.println(str(a["status"]) + " " + '
                         'a["protocol"]);\n'
-                        'println(std.bytes.to_string(a["body"]));\n'
+                        'std.io.println(std.bytes.to_string(a["body"]));\n'
                         f'let b = std.http.get('
                         f'"https://127.0.0.1:{port_text}/h1", '
                         '{"tls": {"verify": false}});\n'
-                        'println(str(b["status"]));\n'
-                        'println(std.bytes.to_string(b["body"]));\n',
+                        'std.io.println(str(b["status"]));\n'
+                        'std.io.println(std.bytes.to_string(b["body"]));\n',
                         timeout=20,
                     )
                     assert client.returncode == 0, client.stderr
@@ -3196,10 +3196,10 @@ def check_extended_stdlib():
                         f"let ps = std.http.serve_processes(s, 2, "
                         f"\"{workers_reuse_path}\", {{\"strategy\": "
                         f"\"reuse_port\", \"max_requests\": 2}});\n"
-                        "println(\"info=\" + str(s[\"port\"]) + \":\" + "
+                        "std.io.println(\"info=\" + str(s[\"port\"]) + \":\" + "
                         "str(ps.capabilities[\"http2\"]));\n"
                         "std.io.flush(std.io.stdout);\n"
-                        "println(\"served=\" + str(ps.join()));\n"
+                        "std.io.println(\"served=\" + str(ps.join()));\n"
                     )
                 server = subprocess.Popen(
                     [os.path.abspath(BIN), process_h2_script],
@@ -3224,14 +3224,14 @@ def check_extended_stdlib():
                         f'let a = std.http2.get('
                         f'"https://127.0.0.1:{port_text}/h2", '
                         '{"tls": {"verify": false}});\n'
-                        'println(str(a["status"]) + " " + '
+                        'std.io.println(str(a["status"]) + " " + '
                         'a["protocol"]);\n'
-                        'println(std.bytes.to_string(a["body"]));\n'
+                        'std.io.println(std.bytes.to_string(a["body"]));\n'
                         f'let b = std.http.get('
                         f'"https://127.0.0.1:{port_text}/h1", '
                         '{"tls": {"verify": false}});\n'
-                        'println(str(b["status"]));\n'
-                        'println(std.bytes.to_string(b["body"]));\n',
+                        'std.io.println(str(b["status"]));\n'
+                        'std.io.println(std.bytes.to_string(b["body"]));\n',
                         timeout=30,
                     )
                     assert client.returncode == 0, client.stderr
@@ -3280,8 +3280,8 @@ def check_extended_stdlib():
             deadlock_main = os.path.join(deadlock_tmp, "main.skein")
             with open(deadlock_main, "w", encoding="utf-8") as handle:
                 handle.write(
-                    "import deadlockpkg;\n"
-                    "print(deadlockpkg.value);\n"
+                    "import std;\nimport deadlockpkg;\n"
+                    "std.io.print(deadlockpkg.value);\n"
                 )
             proc = subprocess.run(
                 [os.path.abspath(BIN), deadlock_main],
@@ -3320,8 +3320,8 @@ def check_extended_stdlib():
             spawn_main = os.path.join(deadlock_tmp, "spawn_main.skein")
             with open(spawn_main, "w", encoding="utf-8") as handle:
                 handle.write(
-                    "import spawnpkg;\n"
-                    "print(spawnpkg.value);\n"
+                    "import std;\nimport spawnpkg;\n"
+                    "std.io.print(spawnpkg.value);\n"
                 )
             proc = subprocess.run(
                 [os.path.abspath(BIN), spawn_main],
@@ -3363,7 +3363,7 @@ def check_extended_stdlib():
                     "let t = std.thread.spawn_function(w, "
                     'std.thread.Message.from({"n": 4}));\n'
                     "let r = t.join();\n"
-                    'print(r["value"]["v"]);\n'
+                    'std.io.print(r["value"]["v"]);\n'
                 )
             proc = subprocess.run(
                 [os.path.abspath(BIN), transfer_main],
@@ -3392,7 +3392,7 @@ def check_extended_stdlib():
                     "}\n"
                     'std.fs.write_bytes("thread_payload.bin", '
                     "std.entry.encode(make_worker()));\n"
-                    'print("encoded");\n'
+                    'std.io.print("encoded");\n'
                 )
             decode_path = os.path.join(deadlock_tmp, "decode_main.skein")
             with open(decode_path, "w", encoding="utf-8") as handle:
@@ -3402,7 +3402,7 @@ def check_extended_stdlib():
                     "let t = std.thread.spawn_entry(blob, "
                     'std.thread.Message.from({"n": 4}));\n'
                     "let r = t.join();\n"
-                    'print(r["value"]["v"]);\n'
+                    'std.io.print(r["value"]["v"]);\n'
                 )
             enc = subprocess.run(
                 [os.path.abspath(BIN), encode_path],
@@ -3461,7 +3461,7 @@ def check_extended_stdlib():
                     "let t = std.thread.spawn_entry(blob, "
                     'std.thread.Message.from({"n": 0}));\n'
                     "let r = t.join();\n"
-                    'print(str(r["value"]["x"]) + ":" + '
+                    'std.io.print(str(r["value"]["x"]) + ":" + '
                     'str(r["value"]["y"]) + ":" + '
                     'str(r["value"]["n"]) + ":" + '
                     'str(r["value"]["m"]));\n'
@@ -3528,7 +3528,7 @@ def check_extended_stdlib():
                     "let t = std.thread.spawn_entry(blob, "
                     "std.thread.Message.from({}));\n"
                     "let r = t.join();\n"
-                    'print(str(r["value"]["add"]) + ":" + '
+                    'std.io.print(str(r["value"]["add"]) + ":" + '
                     'str(r["value"]["add2"]) + ":" + '
                     'str(r["value"]["spread"]) + ":" + '
                     'str(r["value"]["pair"]));\n'
@@ -3611,7 +3611,7 @@ def check_extended_stdlib():
                     "let t = std.thread.spawn_entry(blob, "
                     "std.thread.Message.from({}));\n"
                     "let v = t.join()[\"value\"];\n"
-                    'print("fn=" + str(v["fn"]) + "|top=" + '
+                    'std.io.print("fn=" + str(v["fn"]) + "|top=" + '
                     'str(v["top"]) + "|size=" + str(v["size"]) + '
                     '"|nested=" + str(v["nested"]) + "|items=" + '
                     'str(v["items"]) + "|deque_top=" + '
@@ -3675,7 +3675,7 @@ def check_extended_stdlib():
                     "let t = std.thread.spawn_entry(blob, "
                     "std.thread.Message.from({}));\n"
                     "let v = t.join()[\"value\"];\n"
-                    'print(str(v["sum"]) + ":" + str(v["x"]) + ":" + '
+                    'std.io.print(str(v["sum"]) + ":" + str(v["x"]) + ":" + '
                     'str(v["y"]) + ":" + str(v["n"]));\n'
                 )
             enc = subprocess.run(
@@ -3710,7 +3710,7 @@ def check_extended_stdlib():
                 "    return func(x) { return x + n; };\n"
                 "  }\n"
                 "  let x = 42;\n"
-                '  defer print("deferred=" + str(x));\n'
+                '  defer std.io.print("deferred=" + str(x));\n'
                 "  let add = make_adder(10);\n"
                 '  return {"v": add(5)};\n'
                 "}\n"
@@ -3718,7 +3718,7 @@ def check_extended_stdlib():
                 "let t = std.thread.spawn_entry(blob, "
                 "std.thread.Message.from({}));\n"
                 'let r = t.join()["value"];\n'
-                'print("result="); print(r["v"]); print("|");\n',
+                'std.io.print("result="); std.io.print(r["v"]); std.io.print("|");\n',
                 stdout_all=["deferred=42", "result=15|"],
             )
 
@@ -3748,11 +3748,11 @@ def check_extended_stdlib():
                 handle.write(
                     "import std;\n"
                     "import httpservepkg;\n"
-                    "println(httpservepkg.port);\n"
+                    "std.io.println(httpservepkg.port);\n"
                     'let r = std.http.get("http://127.0.0.1:" + '
                     'str(httpservepkg.port) + "/x");\n'
-                    'println(r["status"]);\n'
-                    "println(httpservepkg.ts.join());\n"
+                    'std.io.println(r["status"]);\n'
+                    "std.io.println(httpservepkg.ts.join());\n"
                 )
             proc = subprocess.run(
                 [os.path.abspath(BIN), http_main],
@@ -3778,14 +3778,14 @@ def check_extended_stdlib():
             'let parent = ends[0];\n'
             'let child = ends[1];\n'
             'let msg = std.thread.Message.from({"x": 1, "items": [1, 2]});\n'
-            'print("sent="); print(parent.try_send(msg));\n'
+            'std.io.print("sent="); std.io.print(parent.try_send(msg));\n'
             'let r = child.try_recv();\n'
-            'print("x="); print(r["value"].payload["x"]);\n'
-            'print("items="); print(r["value"].payload["items"]);\n'
+            'std.io.print("x="); std.io.print(r["value"].payload["x"]);\n'
+            'std.io.print("items="); std.io.print(r["value"].payload["items"]);\n'
             'parent.close();\n'
             'let r2 = child.try_recv();\n'
-            'print("empty_ok="); print(r2["ok"]);\n'
-            'print("closed="); print(r2["closed"]);\n',
+            'std.io.print("empty_ok="); std.io.print(r2["ok"]);\n'
+            'std.io.print("closed="); std.io.print(r2["closed"]);\n',
             stdout_all=["sent=true", "x=1", "items=[1, 2]",
                         "empty_ok=false", "closed=true"],
         )
@@ -3795,10 +3795,10 @@ def check_extended_stdlib():
             'let source = {"x": 1};\n'
             'let msg = std.thread.Message.from(source);\n'
             'source["x"] = 2;\n'
-            'print("after_source="); print(msg.payload["x"]);\n'
+            'std.io.print("after_source="); std.io.print(msg.payload["x"]);\n'
             'let copy = msg.payload;\n'
             'copy["x"] = 3;\n'
-            'print("after_copy="); print(msg.payload["x"]);\n',
+            'std.io.print("after_copy="); std.io.print(msg.payload["x"]);\n',
             stdout_all=["after_source=1", "after_copy=1"],
         )
         check(
@@ -3810,11 +3810,11 @@ def check_extended_stdlib():
             '{"x": 1, "items": items, "body": body});\n'
             'items[0] = 9;\n'
             'body[0] = 65;\n'
-            'print("items="); print(msg.payload["items"][0]);\n'
-            'print("body="); print(std.bytes.to_string(msg.payload["body"]));\n'
+            'std.io.print("items="); std.io.print(msg.payload["items"][0]);\n'
+            'std.io.print("body="); std.io.print(std.bytes.to_string(msg.payload["body"]));\n'
             'let view = msg.payload;\n'
             'view["items"][0] = 7;\n'
-            'print("view="); print(msg.payload["items"][0]);\n',
+            'std.io.print("view="); std.io.print(msg.payload["items"][0]);\n',
             stdout_all=["items=1", "body=ab", "view=1"],
         )
         check(
@@ -3833,7 +3833,7 @@ def check_extended_stdlib():
             'got["value"].handles["reply"].send('
             'std.thread.Message.from({"ok": true}));\n'
             'let reply = inner_parent.try_recv();\n'
-            'print("ok="); print(reply["value"].payload["ok"]);\n',
+            'std.io.print("ok="); std.io.print(reply["value"].payload["ok"]);\n',
             stdout_all=["ok=true"],
         )
         check(
@@ -3844,8 +3844,8 @@ def check_extended_stdlib():
             'for (let i = 0; i < 5; i++) {\n'
             '  parent.send(std.thread.Message.from(i));\n'
             '}\n'
-            'print("capacity="); print(parent.capacity);\n'
-            'print("length="); print(parent.length);\n',
+            'std.io.print("capacity="); std.io.print(parent.capacity);\n'
+            'std.io.print("length="); std.io.print(parent.length);\n',
             stdout_all=["capacity=-1", "length=5"],
         )
         check(
@@ -3854,26 +3854,26 @@ def check_extended_stdlib():
             'let aends = std.thread.Channel.unbounded();\n'
             'let a = aends[0];\n'
             'let arecv = aends[1];\n'
-            'print("cap="); print(a.capacity); print("|");\n'
+            'std.io.print("cap="); std.io.print(a.capacity); std.io.print("|");\n'
             'let b = std.thread.Channel(2);\n'
-            'print("b="); print(b[0].capacity); print("|");\n'
+            'std.io.print("b="); std.io.print(b[0].capacity); std.io.print("|");\n'
             'let c = std.thread.Channel(3);\n'
-            'print("c="); print(c[0].capacity); print("|");\n'
+            'std.io.print("c="); std.io.print(c[0].capacity); std.io.print("|");\n'
             'a.send(std.thread.Message.from(1));\n'
-            'print("len="); print(a.length); print("|");\n'
-            'print("sends="); print(a.total_sends); print("|");\n'
-            'print("waiters="); print(a.waiters); print("|");\n'
+            'std.io.print("len="); std.io.print(a.length); std.io.print("|");\n'
+            'std.io.print("sends="); std.io.print(a.total_sends); std.io.print("|");\n'
+            'std.io.print("waiters="); std.io.print(a.waiters); std.io.print("|");\n'
             'let r = arecv.try_recv();\n'
-            'print("recvs="); print(arecv.total_recvs); print("|");\n'
+            'std.io.print("recvs="); std.io.print(arecv.total_recvs); std.io.print("|");\n'
             'let s = a.stats;\n'
-            'print("stats="); print(s["capacity"]); print(":"); '
-            'print(s["length"]); print("|");\n'
+            'std.io.print("stats="); std.io.print(s["capacity"]); std.io.print(":"); '
+            'std.io.print(s["length"]); std.io.print("|");\n'
             'a.close();\n'
             'let empty = arecv.try_recv();\n'
-            'print("closed="); print(empty["closed"]); print("|");\n'
+            'std.io.print("closed="); std.io.print(empty["closed"]); std.io.print("|");\n'
             'let zero = std.thread.Channel(0);\n'
-            'print("try0="); print(zero[0].try_send('
-            'std.thread.Message.from(2))); print("|");\n',
+            'std.io.print("try0="); std.io.print(zero[0].try_send('
+            'std.thread.Message.from(2))); std.io.print("|");\n',
             stdout_all=["cap=-1|", "b=2|", "c=3|", "len=1|", "sends=1|",
                         "waiters=0|", "recvs=1|", "stats=-1:0|",
                         "closed=true|", "try0=false|"],
@@ -3892,11 +3892,11 @@ def check_extended_stdlib():
             'std.thread.Message.from({"v": 7}, {"ch": parent}), '
             '{"entry": "run"});\n'
             'let msg = child.recv(5000);\n'
-            'print("got="); print(msg.payload); print("|");\n'
+            'std.io.print("got="); std.io.print(msg.payload); std.io.print("|");\n'
             'let r = t.join();\n'
-            'print("ok="); print(r["ok"]); print("|");\n'
-            'print("sends="); print(parent.total_sends); print("|");\n'
-            'print("recvs="); print(child.total_recvs); print("|");\n',
+            'std.io.print("ok="); std.io.print(r["ok"]); std.io.print("|");\n'
+            'std.io.print("sends="); std.io.print(parent.total_sends); std.io.print("|");\n'
+            'std.io.print("recvs="); std.io.print(child.total_recvs); std.io.print("|");\n',
             stdout_all=["got=7|", "ok=true|", "sends=1|", "recvs=1|"],
         )
         check(
@@ -3914,17 +3914,17 @@ def check_extended_stdlib():
             'std.thread.Message.from({"v": 1}, {"ch": parent}), '
             '{"entry": "run"});\n'
             'std.time.sleep(200);\n'
-            'print("w1="); print(parent.send_waiters); print("|");\n'
+            'std.io.print("w1="); std.io.print(parent.send_waiters); std.io.print("|");\n'
             'let t2 = std.thread.spawn_source(src, '
             'std.thread.Message.from({"v": 2}, {"ch": parent}), '
             '{"entry": "run"});\n'
             'std.time.sleep(200);\n'
-            'print("w2="); print(parent.send_waiters); print("|");\n'
-            'let a = child.recv(); print("a="); print(a.payload); print("|");\n'
-            'let b = child.recv(); print("b="); print(b.payload); print("|");\n'
-            'let c = child.recv(); print("c="); print(c.payload); print("|");\n'
-            'print("j1="); print(t1.join()["ok"]); print("|");\n'
-            'print("j2="); print(t2.join()["ok"]); print("|");\n',
+            'std.io.print("w2="); std.io.print(parent.send_waiters); std.io.print("|");\n'
+            'let a = child.recv(); std.io.print("a="); std.io.print(a.payload); std.io.print("|");\n'
+            'let b = child.recv(); std.io.print("b="); std.io.print(b.payload); std.io.print("|");\n'
+            'let c = child.recv(); std.io.print("c="); std.io.print(c.payload); std.io.print("|");\n'
+            'std.io.print("j1="); std.io.print(t1.join()["ok"]); std.io.print("|");\n'
+            'std.io.print("j2="); std.io.print(t2.join()["ok"]); std.io.print("|");\n',
             stdout_all=["w1=1|", "w2=2|", "a=0|", "b=1|", "c=2|",
                         "j1=true|", "j2=true|"],
         )
@@ -3942,10 +3942,10 @@ def check_extended_stdlib():
             'std.thread.Message.from({}, {"ch": child}), '
             '{"entry": "run"});\n'
             'std.time.sleep(200);\n'
-            'print("waiters="); print(child.recv_waiters); print("|");\n'
+            'std.io.print("waiters="); std.io.print(child.recv_waiters); std.io.print("|");\n'
             'parent.close_send();\n'
             'let r = t.join();\n'
-            'print("r="); print(r); print("|");\n',
+            'std.io.print("r="); std.io.print(r); std.io.print("|");\n',
             stdout_all=["waiters=1|", "is_null: true", "closed: true"],
         )
         check(
@@ -3960,18 +3960,18 @@ def check_extended_stdlib():
             '}\n'
             'let t = std.thread.spawn_function(worker, msg);\n'
             'let r = t.join();\n'
-            'print("spawn="); print(r["value"]["top"]); print(":"); '
-            'print(r["value"]["n"]); print("|");\n'
+            'std.io.print("spawn="); std.io.print(r["value"]["top"]); std.io.print(":"); '
+            'std.io.print(r["value"]["n"]); std.io.print("|");\n'
             'let blob = std.entry.encode(worker);\n'
             'let t2 = std.thread.spawn_entry(blob, msg);\n'
             'let r2 = t2.join();\n'
-            'print("encoded="); print(r2["value"]["top"]); print(":"); '
-            'print(r2["value"]["n"]); print("|");\n'
+            'std.io.print("encoded="); std.io.print(r2["value"]["top"]); std.io.print(":"); '
+            'std.io.print(r2["value"]["n"]); std.io.print("|");\n'
             'let ends = std.thread.Channel(1);\n'
             'ends[0].send(msg);\n'
             'let got = ends[1].recv();\n'
-            'print("channel="); '
-            'print(std.heap.peek(got.payload["heap"])); print("|");\n',
+            'std.io.print("channel="); '
+            'std.io.print(std.heap.peek(got.payload["heap"])); std.io.print("|");\n',
             stdout="spawn=1:5|encoded=1:5|channel=1|",
         )
 
@@ -3993,13 +3993,13 @@ def check_extended_stdlib():
                 'let f2 = pool.submit({"n": 5});\n'
                 'let r1 = f1.wait();\n'
                 'let r2 = f2.wait();\n'
-                'print("r1="); print(r1["ok"]); print(":"); '
-                'print(r1["value"]["n"]);\n'
-                'print("r2="); print(r2["ok"]); print(":"); '
-                'print(r2["value"]["n"]);\n'
+                'std.io.print("r1="); std.io.print(r1["ok"]); std.io.print(":"); '
+                'std.io.print(r1["value"]["n"]);\n'
+                'std.io.print("r2="); std.io.print(r2["ok"]); std.io.print(":"); '
+                'std.io.print(r2["value"]["n"]);\n'
                 'let f3 = pool.submit({"n": -1});\n'
                 'let r3 = f3.wait();\n'
-                'print("fail="); print(r3["ok"]);\n'
+                'std.io.print("fail="); std.io.print(r3["ok"]);\n'
                 'pool.close();\n'
                 'pool.join();\n',
                 stdout_all=["r1=true:42", "r2=true:10", "fail=false"],
@@ -4023,8 +4023,8 @@ def check_extended_stdlib():
                 f'let pool = std.thread.pool(1, "{heap_worker_path}");\n'
                 'let f = pool.submit(msg);\n'
                 'let r = f.wait();\n'
-                'print("pool="); print(r["value"]["top"]); print(":"); '
-                'print(r["value"]["n"]);\n'
+                'std.io.print("pool="); std.io.print(r["value"]["top"]); std.io.print(":"); '
+                'std.io.print(r["value"]["n"]);\n'
                 'pool.close();\n'
                 'pool.join();\n',
                 stdout="pool=1:5",
@@ -4064,7 +4064,7 @@ def check_extended_stdlib():
                 f'let ts = std.http.serve_threads(s, 1, '
                 f'"{thread_worker_path}", '
                 '{"strategy": "dispatch", "max_requests": 0});\n'
-                'print(ts.shutdown(2000));\n',
+                'std.io.print(ts.shutdown(2000));\n',
                 stdout="0",
             )
 
@@ -4093,19 +4093,19 @@ def check_extended_stdlib():
                 f'let pool = std.thread.pool(1, "{message_worker_path}");\n'
                 'let r = pool.submit(msg.payload).wait();\n'
                 'let v = r["value"];\n'
-                'print("p="); print(v["p"].x); print(":"); '
-                'print(v["p"].text); print("|");\n'
+                'std.io.print("p="); std.io.print(v["p"].x); std.io.print(":"); '
+                'std.io.print(v["p"].text); std.io.print("|");\n'
                 'let en = match (v["e"]) { case E.B { n } => n; '
                 'default => 0; };\n'
-                'print("e="); print(en); print("|");\n'
+                'std.io.print("e="); std.io.print(en); std.io.print("|");\n'
                 'let lr = lru.get(v["l"], "a");\n'
-                'print("l="); print(lr["found"]); print(":"); '
-                'print(lr["value"]); print(":"); '
-                'print(lru.size(v["l"])); print("|");\n'
-                'print("d="); print(std.deque.size(v["d"])); print(":"); '
-                'print(std.deque.to_list(v["d"])[2]); print("|");\n'
-                'print("s="); print(std.set.size(v["s"])); print(":"); '
-                'print(std.set.has(v["s"], 8)); print("|");\n'
+                'std.io.print("l="); std.io.print(lr["found"]); std.io.print(":"); '
+                'std.io.print(lr["value"]); std.io.print(":"); '
+                'std.io.print(lru.size(v["l"])); std.io.print("|");\n'
+                'std.io.print("d="); std.io.print(std.deque.size(v["d"])); std.io.print(":"); '
+                'std.io.print(std.deque.to_list(v["d"])[2]); std.io.print("|");\n'
+                'std.io.print("s="); std.io.print(std.set.size(v["s"])); std.io.print(":"); '
+                'std.io.print(std.set.has(v["s"], 8)); std.io.print("|");\n'
                 'pool.close();\n'
                 'pool.join();\n',
                 stdout="p=42:hi|e=5|l=true:1:2|d=3:3|s=3:true|",
@@ -4130,12 +4130,12 @@ def check_extended_stdlib():
                 'let payload = {"nested": {"items": items, '
                 '"inner": {"v": 7}}};\n'
                 'let r = pool.submit(payload).wait();\n'
-                'print("child="); '
-                'print(r["value"]["nested"]["items"][0]); print(":"); '
-                'print(r["value"]["nested"]["inner"]["v"]);\n'
-                'print("parent="); '
-                'print(payload["nested"]["items"][0]); print(":"); '
-                'print(payload["nested"]["inner"]["v"]);\n'
+                'std.io.print("child="); '
+                'std.io.print(r["value"]["nested"]["items"][0]); std.io.print(":"); '
+                'std.io.print(r["value"]["nested"]["inner"]["v"]);\n'
+                'std.io.print("parent="); '
+                'std.io.print(payload["nested"]["items"][0]); std.io.print(":"); '
+                'std.io.print(payload["nested"]["inner"]["v"]);\n'
                 'pool.close();\n'
                 'pool.join();\n',
                 stdout_all=["child=99:42", "parent=1:7"],
@@ -4148,7 +4148,7 @@ def check_extended_stdlib():
                     "func main(ctx) {\n"
                     "    let id = ctx.payload[\"id\"];\n"
                     "    for (let i = 0; i < 100; i++) {\n"
-                    "        println(\"line:\" + str(id) + \":\" + "
+                    "        std.io.println(\"line:\" + str(id) + \":\" + "
                     "str(i));\n"
                     "    }\n"
                     "    return {\"id\": id};\n"
@@ -4167,7 +4167,7 @@ def check_extended_stdlib():
                 "for (let t in threads) {\n"
                 "    let r = t.join();\n"
                 "}\n"
-                'println("done");\n'
+                'std.io.println("done");\n'
             )
             proc = run(stdio_source, timeout=60)
             assert proc.returncode == 0, (proc.stdout, proc.stderr)
@@ -4206,10 +4206,10 @@ def check_extended_stdlib():
                 f'let t = std.thread.spawn_script("{spawn_worker_path}", msg);\n'
                 'let signal = ends[1].recv();\n'
                 'let r = t.join();\n'
-                'print("signal="); print(signal.payload["x"]);\n'
-                'print("ok="); print(r["ok"]); print(":"); '
-                'print(r["value"]["x"]);\n'
-                'print("alive="); print(t.is_alive());\n',
+                'std.io.print("signal="); std.io.print(signal.payload["x"]);\n'
+                'std.io.print("ok="); std.io.print(r["ok"]); std.io.print(":"); '
+                'std.io.print(r["value"]["x"]);\n'
+                'std.io.print("alive="); std.io.print(t.is_alive());\n',
                 stdout_all=["signal=5", "ok=true:5", "alive=false"],
             )
             check(
@@ -4221,14 +4221,14 @@ def check_extended_stdlib():
                 'let t = std.thread.spawn_source(src, '
                 'std.thread.Message.from({"n": 4}));\n'
                 'let r = t.join();\n'
-                'print("v1=" + str(r["value"]["v"]) + "|");\n'
+                'std.io.print("v1=" + str(r["value"]["v"]) + "|");\n'
                 'let src2 = "func run(ctx) {\\n'
                 '    return {\\"v\\": ctx.payload[\\"n\\"] * 3};\\n'
                 '}\\n";\n'
                 'let t2 = std.thread.spawn_source(src2, '
                 'std.thread.Message.from({"n": 5}), {"entry": "run"});\n'
                 'let r2 = t2.join();\n'
-                'print("v2=" + str(r2["value"]["v"]) + "|");\n',
+                'std.io.print("v2=" + str(r2["value"]["v"]) + "|");\n',
                 stdout_all=["v1=5|", "v2=15|"],
             )
             check(
@@ -4240,14 +4240,14 @@ def check_extended_stdlib():
                 "let t = std.thread.spawn_function(worker, "
                 'std.thread.Message.from({"n": 4}));\n'
                 "let r = t.join();\n"
-                'print("v=" + str(r["value"]["v"]) + "|");\n'
+                'std.io.print("v=" + str(r["value"]["v"]) + "|");\n'
                 "func plain(ctx) {\n"
                 '    return {"v": ctx.payload["n"]};\n'
                 "}\n"
                 "let t2 = std.thread.spawn_function(plain, "
                 'std.thread.Message.from({"n": 7}));\n'
                 "let r2 = t2.join();\n"
-                'print("f=" + str(r2["value"]["v"]) + "|");\n'
+                'std.io.print("f=" + str(r2["value"]["v"]) + "|");\n'
                 "func std_worker(ctx) {\n"
                 "    let items = std.list.append([1], "
                 'ctx.payload["n"]);\n'
@@ -4256,7 +4256,7 @@ def check_extended_stdlib():
                 "let t3 = std.thread.spawn_function(std_worker, "
                 'std.thread.Message.from({"n": 9}));\n'
                 "let r3 = t3.join();\n"
-                'print("s=" + str(r3["value"]["v"]) + "|");\n'
+                'std.io.print("s=" + str(r3["value"]["v"]) + "|");\n'
                 "let base = 10;\n"
                 'let config = {"factor": 3};\n'
                 "func glob_worker(ctx) {\n"
@@ -4272,7 +4272,7 @@ def check_extended_stdlib():
                 "let t5 = std.thread.spawn_function(dict_worker, "
                 'std.thread.Message.from({"n": 4}));\n'
                 "let r5 = t5.join();\n"
-                'print("g=" + str(r4["value"]["v"]) + ":" + '
+                'std.io.print("g=" + str(r4["value"]["v"]) + ":" + '
                 'str(r5["value"]["v"]) + "|");\n'
                 "let field_helper = func() { return 1; };\n"
                 "func shadow_worker(ctx) {\n"
@@ -4281,7 +4281,7 @@ def check_extended_stdlib():
                 "let t6 = std.thread.spawn_function(shadow_worker, "
                 'std.thread.Message.from({"field_helper": 4}));\n'
                 "let r6 = t6.join();\n"
-                'print("h=" + str(r6["value"]["v"]) + "|");\n',
+                'std.io.print("h=" + str(r6["value"]["v"]) + "|");\n',
                 stdout_all=["v=5|", "f=7|", "s=9|", "g=14:12|", "h=14|"],
             )
             check(
@@ -4298,7 +4298,7 @@ def check_extended_stdlib():
                 "let t = std.thread.spawn_function(w, "
                 'std.thread.Message.from({"n": 4}));\n'
                 "let r = t.join();\n"
-                'print("c=" + str(r["value"]["v"]) + "|");\n'
+                'std.io.print("c=" + str(r["value"]["v"]) + "|");\n'
                 "func make_data() {\n"
                 "    let data = [1, 2, 3];\n"
                 "    func worker(ctx) {\n"
@@ -4310,7 +4310,7 @@ def check_extended_stdlib():
                 "let t2 = std.thread.spawn_function(w2, "
                 'std.thread.Message.from({"n": 0}));\n'
                 "let r2 = t2.join();\n"
-                'print("d=" + str(r2["value"][1]) + "|");\n'
+                'std.io.print("d=" + str(r2["value"][1]) + "|");\n'
                 "func make_mut() {\n"
                 '    let state = {"n": 1};\n'
                 "    func worker(ctx) {\n"
@@ -4323,7 +4323,7 @@ def check_extended_stdlib():
                 "let t3 = std.thread.spawn_function(p[\"run\"], "
                 'std.thread.Message.from({"n": 0}));\n'
                 "let r3 = t3.join();\n"
-                'print("e=" + str(r3["value"]["v"]) + ":" + '
+                'std.io.print("e=" + str(r3["value"]["v"]) + ":" + '
                 'str(p["state"]["n"]) + "|");\n'
                 "let shadow_fn = func() { return 1; };\n"
                 "func make_shadow(n) {\n"
@@ -4337,7 +4337,7 @@ def check_extended_stdlib():
                 "let t4 = std.thread.spawn_function(w3, "
                 'std.thread.Message.from({"n": 0}));\n'
                 "let r4 = t4.join();\n"
-                'print("f=" + str(r4["value"]["v"]) + "|");\n',
+                'std.io.print("f=" + str(r4["value"]["v"]) + "|");\n',
                 stdout_all=["c=14|", "d=2|", "e=2:1|", "f=18|"],
             )
             check(
@@ -4360,7 +4360,7 @@ def check_extended_stdlib():
                 "let t = std.thread.spawn_function(w, "
                 'std.thread.Message.from({"n": 10}));\n'
                 "let r = t.join();\n"
-                'print("two=" + str(r["value"]["v"]) + "|");\n'
+                'std.io.print("two=" + str(r["value"]["v"]) + "|");\n'
                 "func helper(x) { return x * 2; }\n"
                 "func helper2(x) { return helper(x) + 1; }\n"
                 "func global_worker(ctx) {\n"
@@ -4369,7 +4369,7 @@ def check_extended_stdlib():
                 "let t2 = std.thread.spawn_function(global_worker, "
                 'std.thread.Message.from({"n": 5}));\n'
                 "let r2 = t2.join();\n"
-                'print("chain=" + str(r2["value"]["v"]) + "|");\n'
+                'std.io.print("chain=" + str(r2["value"]["v"]) + "|");\n'
                 "func even(n) { if (n == 0) { return true; } "
                 "return odd(n - 1); }\n"
                 "func odd(n) { if (n == 0) { return false; } "
@@ -4380,7 +4380,7 @@ def check_extended_stdlib():
                 "let t3 = std.thread.spawn_function(parity, "
                 'std.thread.Message.from({"n": 10}));\n'
                 "let r3 = t3.join();\n"
-                'print("mutual=" + str(r3["value"]["v"]) + "|");\n',
+                'std.io.print("mutual=" + str(r3["value"]["v"]) + "|");\n',
                 stdout_all=["two=223|", "chain=11|", "mutual=true|"],
             )
             check(
@@ -4400,7 +4400,7 @@ def check_extended_stdlib():
                 "let t = std.thread.spawn_entry(blob, "
                 'std.thread.Message.from({"n": 3}));\n'
                 "let r = t.join();\n"
-                'print("encoded=" + str(r["value"]["v"]) + "|");\n',
+                'std.io.print("encoded=" + str(r["value"]["v"]) + "|");\n',
                 stdout_all=["encoded=14|"],
             )
             check(
@@ -4434,7 +4434,7 @@ def check_extended_stdlib():
                 "let t = std.thread.spawn_entry(blob, "
                 'std.thread.Message.from({"n": 1}));\n'
                 "let r = t.join();\n"
-                'print("s=" + str(r["value"]["s"]) + "|d=" + '
+                'std.io.print("s=" + str(r["value"]["s"]) + "|d=" + '
                 'str(r["value"]["d"]) + "|l=" + str(r["value"]["l"]) + '
                 '"|m=" + str(r["value"]["m"]) + "|h=" + '
                 'str(r["value"]["h"]) + ":" + '
@@ -4465,7 +4465,7 @@ def check_extended_stdlib():
                 "let t = std.thread.spawn_function(plain, "
                 'std.thread.Message.from({"n": 7}));\n'
                 'let r = t.join();\n'
-                'print(r["value"]["v"]);\n',
+                'std.io.print(r["value"]["v"]);\n',
                 stdout="7",
             )
             check(
@@ -4475,7 +4475,7 @@ def check_extended_stdlib():
                 f'"fail": true}});\n'
                 f'let t = std.thread.spawn_script("{spawn_worker_path}", msg);\n'
                 'let r = t.join();\n'
-                'print("ok="); print(r["ok"]);\n',
+                'std.io.print("ok="); std.io.print(r["ok"]);\n',
                 stdout_all=["ok=false"],
             )
 
@@ -4486,17 +4486,17 @@ def check_extended_stdlib():
                 'let link = ends[0];\n'
                 'let child = ends[1];\n'
                 'link.send(std.thread.Message.from({"v": "p2c"}));\n'
-                'print("child="); print(child.recv().payload["v"]); '
-                'print("|");\n'
+                'std.io.print("child="); std.io.print(child.recv().payload["v"]); '
+                'std.io.print("|");\n'
                 'child.send(std.thread.Message.from({"v": "c2p"}));\n'
-                'print("parent="); print(link.recv().payload["v"]); '
-                'print("|");\n'
-                'print("closed="); print(link.closed); print("|");\n'
+                'std.io.print("parent="); std.io.print(link.recv().payload["v"]); '
+                'std.io.print("|");\n'
+                'std.io.print("closed="); std.io.print(link.closed); std.io.print("|");\n'
                 'link.close_send();\n'
-                'print("recv_null="); print(child.recv() == null); '
-                'print("|");\n'
+                'std.io.print("recv_null="); std.io.print(child.recv() == null); '
+                'std.io.print("|");\n'
                 'link.close_recv();\n'
-                'print("closed2="); print(link.closed); print("|");\n',
+                'std.io.print("closed2="); std.io.print(link.closed); std.io.print("|");\n',
                 stdout="child=p2c|parent=c2p|closed=false|"
                        "recv_null=true|closed2=true|",
             )
@@ -4508,8 +4508,8 @@ def check_extended_stdlib():
                 'let child = ends[1];\n'
                 'child.send(std.thread.Message.from({"v": 7}));\n'
                 'let r = std.thread.select([link], 1000);\n'
-                'print("index="); print(r["index"]); print(":");\n'
-                'print(r["value"].payload["v"]);\n',
+                'std.io.print("index="); std.io.print(r["index"]); std.io.print(":");\n'
+                'std.io.print(r["value"].payload["v"]);\n',
                 stdout="index=0:7",
             )
 
@@ -4533,10 +4533,10 @@ def check_extended_stdlib():
                 f'"{channel_worker_path}", '
                 f'std.thread.Message.from({{"v": 21}}), 1);\n'
                 'let reply = t.channel.recv(1000);\n'
-                'print("reply="); print(reply.payload["reply"]); '
-                'print("|");\n'
+                'std.io.print("reply="); std.io.print(reply.payload["reply"]); '
+                'std.io.print("|");\n'
                 'let r = t.join();\n'
-                'print("ok="); print(r["ok"]); print("|");\n',
+                'std.io.print("ok="); std.io.print(r["ok"]); std.io.print("|");\n',
                 stdout="reply=42|ok=true|",
             )
             check(
@@ -4555,15 +4555,15 @@ def check_extended_stdlib():
                 'msg = null;\n'
                 'std.thread.collect();\n'
                 'let after = std.thread.debug_counts();\n'
-                'print("m="); '
-                'print(after["messages"] - base["messages"]); '
-                'print("|");\n'
-                'print("c="); '
-                'print(after["channels"] - base["channels"]); '
-                'print("|");\n'
-                'print("g="); '
-                'print(after["collected"] > base["collected"]); '
-                'print("|");\n'
+                'std.io.print("m="); '
+                'std.io.print(after["messages"] - base["messages"]); '
+                'std.io.print("|");\n'
+                'std.io.print("c="); '
+                'std.io.print(after["channels"] - base["channels"]); '
+                'std.io.print("|");\n'
+                'std.io.print("g="); '
+                'std.io.print(after["collected"] > base["collected"]); '
+                'std.io.print("|");\n'
                 'let base2 = std.thread.debug_counts();\n'
                 'let pair2 = std.thread.Channel(1);\n'
                 'let parent2 = pair2[0];\n'
@@ -4577,18 +4577,18 @@ def check_extended_stdlib():
                 'dmsg = null;\n'
                 'std.thread.collect();\n'
                 'let after2 = std.thread.debug_counts();\n'
-                'print("dm="); '
-                'print(after2["messages"] - base2["messages"]); '
-                'print("|");\n'
-                'print("dc="); '
-                'print(after2["channels"] - base2["channels"]); '
-                'print("|");\n'
-                'print("dd="); '
-                'print(after2["pairs"] - base2["pairs"]); '
-                'print("|");\n'
-                'print("de="); '
-                'print(after2["endpoints"] - base2["endpoints"]); '
-                'print("|");\n',
+                'std.io.print("dm="); '
+                'std.io.print(after2["messages"] - base2["messages"]); '
+                'std.io.print("|");\n'
+                'std.io.print("dc="); '
+                'std.io.print(after2["channels"] - base2["channels"]); '
+                'std.io.print("|");\n'
+                'std.io.print("dd="); '
+                'std.io.print(after2["pairs"] - base2["pairs"]); '
+                'std.io.print("|");\n'
+                'std.io.print("de="); '
+                'std.io.print(after2["endpoints"] - base2["endpoints"]); '
+                'std.io.print("|");\n',
                 stdout="m=0|c=0|g=true|dm=0|dc=0|dd=0|de=0|",
             )
             auto_cycle_source = (
@@ -4609,15 +4609,15 @@ def check_extended_stdlib():
                 auto_cycle_source += f"let z{index} = {index};\n"
             auto_cycle_source += (
                 'let after = std.thread.debug_counts();\n'
-                'print("m="); '
-                'print(after["messages"] - base["messages"]); '
-                'print("|");\n'
-                'print("c="); '
-                'print(after["channels"] - base["channels"]); '
-                'print("|");\n'
-                'print("g="); '
-                'print(after["collected"] > base["collected"]); '
-                'print("|");\n'
+                'std.io.print("m="); '
+                'std.io.print(after["messages"] - base["messages"]); '
+                'std.io.print("|");\n'
+                'std.io.print("c="); '
+                'std.io.print(after["channels"] - base["channels"]); '
+                'std.io.print("|");\n'
+                'std.io.print("g="); '
+                'std.io.print(after["collected"] > base["collected"]); '
+                'std.io.print("|");\n'
             )
             check(
                 "std.thread automatic cycle collection",
@@ -4652,13 +4652,13 @@ def check_extended_stdlib():
                 '{"x": 1, "items": items, "body": body});\n'
                 f'let t = std.thread.spawn_script("{cow_worker_path}", msg);\n'
                 'let r = t.join();\n'
-                'print("child="); print(r["value"]["items"]); print(":"); '
-                'print(r["value"]["body"]); print(":"); '
-                'print(r["value"]["x"]);\n'
+                'std.io.print("child="); std.io.print(r["value"]["items"]); std.io.print(":"); '
+                'std.io.print(r["value"]["body"]); std.io.print(":"); '
+                'std.io.print(r["value"]["x"]);\n'
                 'let view = msg.payload;\n'
-                'print("parent="); print(view["items"][0]); print(":"); '
-                'print(std.bytes.to_string(view["body"])); print(":"); '
-                'print(view["x"]);\n',
+                'std.io.print("parent="); std.io.print(view["items"][0]); std.io.print(":"); '
+                'std.io.print(std.bytes.to_string(view["body"])); std.io.print(":"); '
+                'std.io.print(view["x"]);\n',
                 stdout_all=["child=99:Zb:42", "parent=1:ab:1"],
             )
             cow_result_worker = os.path.join(
@@ -4688,11 +4688,11 @@ def check_extended_stdlib():
                 'let out = r["value"]["shared"];\n'
                 'out["items"][0] = 99;\n'
                 'out["inner"]["v"] = 42;\n'
-                'print("result="); print(out["items"][0]); print(":"); '
-                'print(out["inner"]["v"]);\n'
-                'print("signal="); '
-                'print(signal.payload["shared"]["items"][0]); print(":"); '
-                'print(signal.payload["shared"]["inner"]["v"]);\n',
+                'std.io.print("result="); std.io.print(out["items"][0]); std.io.print(":"); '
+                'std.io.print(out["inner"]["v"]);\n'
+                'std.io.print("signal="); '
+                'std.io.print(signal.payload["shared"]["items"][0]); std.io.print(":"); '
+                'std.io.print(signal.payload["shared"]["inner"]["v"]);\n',
                 stdout_all=["result=99:42", "signal=1:7"],
             )
             check(
@@ -4705,15 +4705,15 @@ def check_extended_stdlib():
                 'let b = bends[1];\n'
                 'bsend.send(std.thread.Message.from({"v": "b"}));\n'
                 'let r = std.thread.select([a, b], 1000);\n'
-                'print("index="); print(r["index"]); print(":"); '
-                'print(r["value"].payload["v"]);\n'
+                'std.io.print("index="); std.io.print(r["index"]); std.io.print(":"); '
+                'std.io.print(r["value"].payload["v"]);\n'
                 'let empty = std.thread.Channel(1)[0];\n'
                 'let t = std.thread.select([empty], 10);\n'
-                'print("timeout="); print(t["timeout"]);\n'
+                'std.io.print("timeout="); std.io.print(t["timeout"]);\n'
                 'empty.close();\n'
                 'let c = std.thread.select([empty], 1000);\n'
-                'print("closed="); print(c["closed"]); print(":"); '
-                'print(c["index"]);\n',
+                'std.io.print("closed="); std.io.print(c["closed"]); std.io.print(":"); '
+                'std.io.print(c["index"]);\n',
                 stdout_all=["index=1:b", "timeout=true", "closed=true:0"],
             )
             check(
@@ -4727,8 +4727,8 @@ def check_extended_stdlib():
                 f'"fail": false}}, {{"signal": signal}});\n'
                 f'let t = std.thread.spawn_script("{spawn_worker_path}", msg);\n'
                 'let r = std.thread.select([empty, signal_wait], 1000);\n'
-                'print("index="); print(r["index"]); print(":"); '
-                'print(r["value"].payload["x"]);\n'
+                'std.io.print("index="); std.io.print(r["index"]); std.io.print(":"); '
+                'std.io.print(r["value"].payload["x"]);\n'
                 't.join();\n',
                 stdout_all=["index=1:7"],
             )
@@ -4739,11 +4739,11 @@ def check_extended_stdlib():
                 'let y = std.thread.Channel(1);\n'
                 'let sent = std.thread.try_broadcast([x[1], y[1]], '
                 'std.thread.Message.from({"v": 2}));\n'
-                'print("sent="); print(sent["sent"]);\n'
+                'std.io.print("sent="); std.io.print(sent["sent"]);\n'
                 'let rx = x[0].try_recv();\n'
                 'let ry = y[0].try_recv();\n'
-                'print("x="); print(rx["value"].payload["v"]);\n'
-                'print("y="); print(ry["value"].payload["v"]);\n',
+                'std.io.print("x="); std.io.print(rx["value"].payload["v"]);\n'
+                'std.io.print("y="); std.io.print(ry["value"].payload["v"]);\n',
                 stdout_all=["sent=[0, 1]", "x=2", "y=2"],
             )
 
@@ -4771,12 +4771,12 @@ def check_extended_stdlib():
                 f'let t = std.thread.spawn_script("{delay_worker_path}", '
                 f'std.thread.Message.from({{}}, {{"signal": ends[0]}}));\n'
                 'let task = launch wait_channel(ends[1]);\n'
-                'print("before|");\n'
+                'std.io.print("before|");\n'
                 'std.io.flush(std.io.stdout);\n'
                 'std.task.sleep(10).wait();\n'
-                'print("after|");\n'
+                'std.io.print("after|");\n'
                 'std.io.flush(std.io.stdout);\n'
-                'print("value="); print(task.wait());\n'
+                'std.io.print("value="); std.io.print(task.wait());\n'
                 't.join();\n',
                 stdout="before|after|value=9",
             )
@@ -4797,10 +4797,10 @@ def check_extended_stdlib():
                 'std.task.sleep(10).wait();\n'
                 'signal_send.send(std.thread.Message.from({"x": 11}));\n'
                 'let r = task.wait();\n'
-                'print("index="); print(r["index"]); print(":");\n'
-                'print(r["value"].payload["x"]);\n'
+                'std.io.print("index="); std.io.print(r["index"]); std.io.print(":");\n'
+                'std.io.print(r["value"].payload["x"]);\n'
                 'let timeout = wait_timeout(empty);\n'
-                'print("timeout="); print(timeout["timeout"]);\n',
+                'std.io.print("timeout="); std.io.print(timeout["timeout"]);\n',
                 stdout_all=["index=1:11", "timeout=true"],
             )
 
@@ -4820,13 +4820,13 @@ def check_extended_stdlib():
                 f'let pool = std.thread.pool(1, "{slow_worker_path}", '
                 '{"entry": "handle", "queue": 1});\n'
                 'let f = pool.submit({"n": 1});\n'
-                'print("cancel="); print(f.cancel());\n'
-                'print("cancel2="); print(f.cancel());\n'
+                'std.io.print("cancel="); std.io.print(f.cancel());\n'
+                'std.io.print("cancel2="); std.io.print(f.cancel());\n'
                 'let r = f.try_wait();\n'
-                'print("canceled="); print(r["canceled"]);\n'
+                'std.io.print("canceled="); std.io.print(r["canceled"]);\n'
                 'let s = pool.stats();\n'
-                'print("workers="); print(s["workers"]); print(":"); '
-                'print("alive="); print(s["alive"]);\n'
+                'std.io.print("workers="); std.io.print(s["workers"]); std.io.print(":"); '
+                'std.io.print("alive="); std.io.print(s["alive"]);\n'
                 'pool.close();\n'
                 'pool.join();\n',
                 stdout_all=["cancel=true", "cancel2=false", "canceled=true",
@@ -4859,18 +4859,18 @@ def check_extended_stdlib():
                 f"{skein_string(cancel_paths[0])}}});\n"
                 f'let f2 = pool.submit({{"n": 2, "path": '
                 f"{skein_string(cancel_paths[1])}}});\n"
-                'print("cancel=" + str(f2.cancel()) + "|");\n'
+                'std.io.print("cancel=" + str(f2.cancel()) + "|");\n'
                 'let r1 = f1.wait();\n'
-                'print("r1=" + str(r1["value"]["n"]) + "|");\n'
+                'std.io.print("r1=" + str(r1["value"]["n"]) + "|");\n'
                 f'let f3 = pool.submit({{"n": 3, "path": '
                 f"{skein_string(cancel_paths[2])}}});\n"
                 'let r3 = f3.wait();\n'
-                'print("r3=" + str(r3["value"]["n"]) + "|");\n'
-                f'print("p1=" + str(std.fs.exists('
+                'std.io.print("r3=" + str(r3["value"]["n"]) + "|");\n'
+                f'std.io.print("p1=" + str(std.fs.exists('
                 f"{skein_string(cancel_paths[0])})) + \"|\");\n"
-                f'print("p2=" + str(std.fs.exists('
+                f'std.io.print("p2=" + str(std.fs.exists('
                 f"{skein_string(cancel_paths[1])})) + \"|\");\n"
-                f'print("p3=" + str(std.fs.exists('
+                f'std.io.print("p3=" + str(std.fs.exists('
                 f"{skein_string(cancel_paths[2])})) + \"|\");\n"
                 'pool.close();\n'
                 'pool.join();\n',
@@ -4894,10 +4894,10 @@ def check_extended_stdlib():
                 '{"entry": "handle", "worker_vm": true});\n'
                 'let f = pool.submit({"n": 21});\n'
                 'let r = f.wait();\n'
-                'print("ok="); print(r["ok"]); print(":"); '
-                'print(r["value"]["n"]);\n'
+                'std.io.print("ok="); std.io.print(r["ok"]); std.io.print(":"); '
+                'std.io.print(r["value"]["n"]);\n'
                 'let s = pool.stats();\n'
-                'print("alive="); print(s["alive"]);\n'
+                'std.io.print("alive="); std.io.print(s["alive"]);\n'
                 'pool.close();\n'
                 'pool.join();\n',
                 stdout_all=["ok=true:21", "alive=2"],
@@ -4914,8 +4914,8 @@ def check_extended_stdlib():
                 "}\n"
                 f'let pool = std.thread.pool(1, "{thread_worker_path}");\n'
                 "let elapsed = run(pool);\n"
-                'print("elapsed="); print(elapsed); print("|");\n'
-                'print("under="); print(elapsed < 900); print("|");\n'
+                'std.io.print("elapsed="); std.io.print(elapsed); std.io.print("|");\n'
+                'std.io.print("under="); std.io.print(elapsed < 900); std.io.print("|");\n'
                 "pool.close();\n"
                 "pool.join();\n",
                 stdout="under=true|",
@@ -4951,17 +4951,17 @@ def check_extended_stdlib():
                     'let r1 = pool.submit({"n": 3, "crash": false}).wait();\n'
                     'let r2 = pool.submit({"n": 4, "crash": true}).wait();\n'
                     'let r3 = pool.submit({"n": 5, "crash": false}).wait();\n'
-                    'print("r1="); print(r1["ok"]); print(":"); '
-                    'print(r1["value"]["n"]);\n'
-                    'print("r2="); print(r2["ok"]); print(":"); '
-                    'print(std.error.kind(r2["error"]));\n'
-                    'print("r3="); print(r3["ok"]); print(":"); '
-                    'print(r3["value"]["n"]);\n'
+                    'std.io.print("r1="); std.io.print(r1["ok"]); std.io.print(":"); '
+                    'std.io.print(r1["value"]["n"]);\n'
+                    'std.io.print("r2="); std.io.print(r2["ok"]); std.io.print(":"); '
+                    'std.io.print(std.error.kind(r2["error"]));\n'
+                    'std.io.print("r3="); std.io.print(r3["ok"]); std.io.print(":"); '
+                    'std.io.print(r3["value"]["n"]);\n'
                     'let s = pool.stats();\n'
-                    'print("alive="); print(s["alive"]); print(":"); '
-                    'print("dead="); print(s["dead"]); print(":"); '
-                    'print("restarts="); print(s["restarts"]); print(":"); '
-                    'print("ready="); print(s["ready"]);\n'
+                    'std.io.print("alive="); std.io.print(s["alive"]); std.io.print(":"); '
+                    'std.io.print("dead="); std.io.print(s["dead"]); std.io.print(":"); '
+                    'std.io.print("restarts="); std.io.print(s["restarts"]); std.io.print(":"); '
+                    'std.io.print("ready="); std.io.print(s["ready"]);\n'
                     'pool.close();\n'
                     'pool.join();\n',
                     stdout_all=["r1=true:6", "r2=false:thread.worker_crashed",
@@ -4974,8 +4974,8 @@ def check_extended_stdlib():
                     f'let pool = std.thread.pool(1, "{crash_worker_path}", '
                     '{"entry": "main", "restart_limit": 0});\n'
                     'let r = pool.submit({"n": 4, "crash": true}).wait();\n'
-                    'print("r="); print(r["ok"]); print(":"); '
-                    'print(std.error.kind(r["error"]));\n'
+                    'std.io.print("r="); std.io.print(r["ok"]); std.io.print(":"); '
+                    'std.io.print(std.error.kind(r["error"]));\n'
                     'let f = pool.submit({"n": 5, "crash": false});\n',
                     stdout="r=false:thread.worker_crashed",
                     stderr="thread.pool_failed",
@@ -4987,12 +4987,12 @@ def check_extended_stdlib():
             "std compress roundtrips",
             "import std;\n"
             'let b = std.bytes.from_string("hello hello hello");\n'
-            'print(std.bytes.hex(std.bytes.slice(std.compress.gzip(b), 0, 2)));\n'
-            'print(std.bytes.to_string(std.compress.gunzip('
+            'std.io.print(std.bytes.hex(std.bytes.slice(std.compress.gzip(b), 0, 2)));\n'
+            'std.io.print(std.bytes.to_string(std.compress.gunzip('
             'std.compress.gzip(b))));\n'
-            'print(std.bytes.to_string(std.compress.unzlib('
+            'std.io.print(std.bytes.to_string(std.compress.unzlib('
             'std.compress.zlib(b))));\n'
-            'print(std.bytes.to_string(std.compress.inflate('
+            'std.io.print(std.bytes.to_string(std.compress.inflate('
             'std.compress.deflate(b))));\n',
             stdout_all=["1f8b", "hello hello hello", "hello hello hello",
                         "hello hello hello"],
@@ -5001,7 +5001,7 @@ def check_extended_stdlib():
 
 def check_source_encoding():
     """Verify BOM handling and --encoding for source files."""
-    script = 'print("你好");\n'
+    script = 'import std;\nstd.io.print("你好");\n'
     cases = [
         ("utf8", script.encode("utf-8"), ()),
         ("utf8 bom", b"\xef\xbb\xbf" + script.encode("utf-8"), ()),
@@ -5075,7 +5075,8 @@ def check_source_encoding():
                          .encode("gbk"))
         main_path = os.path.join(app, "main.skein")
         with open(main_path, "wb") as handle:
-            handle.write('import pkg;\nprint(pkg.value);\n'.encode("gbk"))
+            handle.write('import std;\nimport pkg;\nstd.io.print(pkg.value);\n'
+                         .encode("gbk"))
         proc = subprocess.run(
             [BIN, "--encoding", "gbk", main_path],
             text=True,

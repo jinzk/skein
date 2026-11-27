@@ -10,7 +10,7 @@ package metrics {
 
   func _label_text(labels, extra_key = null, extra_value = null) {
     let parts = [];
-    if (kind_of(labels) == "dict") {
+    if (std.type.kind_of(labels) == "dict") {
       let keys = [];
       for (let key in std.dict.keys(labels)) {
         keys = std.list.append(keys, key);
@@ -25,7 +25,7 @@ package metrics {
       parts = std.list.append(
         parts, extra_key + "=\"" + _escape_label(str(extra_value)) + "\"");
     }
-    if (len(parts) == 0) {
+    if (std.utils.len(parts) == 0) {
       return "";
     }
     return "{" + std.string.join(parts, ",") + "}";
@@ -106,7 +106,7 @@ package metrics {
     let histograms = {};
 
     let counter = func(name, labels = {}, delta = 1) {
-      if (kind_of(name) != "string" || name == "") {
+      if (std.type.kind_of(name) != "string" || name == "") {
         fail("metrics.counter name must be a non-empty string");
       }
       let key = _key(name, labels);
@@ -122,7 +122,7 @@ package metrics {
     };
 
     let gauge = func(name, labels, value) {
-      if (kind_of(name) != "string" || name == "") {
+      if (std.type.kind_of(name) != "string" || name == "") {
         fail("metrics.gauge name must be a non-empty string");
       }
       let key = _key(name, labels);
@@ -133,7 +133,7 @@ package metrics {
     };
 
     let observe = func(name, labels, value, buckets = null) {
-      if (kind_of(name) != "string" || name == "") {
+      if (std.type.kind_of(name) != "string" || name == "") {
         fail("metrics.observe name must be a non-empty string");
       }
       let key = _key(name, labels);
@@ -160,7 +160,7 @@ package metrics {
       }
       let counts = record.counts;
       let i = 0;
-      while (i < len(record.buckets)) {
+      while (i < std.utils.len(record.buckets)) {
         if (float(value) <= float(record.buckets[i])) {
           counts[i] = counts[i] + 1;
         }
@@ -189,7 +189,7 @@ package metrics {
       for (let key in std.dict.keys(histograms)) {
         let record = histograms[key];
         let i = 0;
-        while (i < len(record.buckets)) {
+        while (i < std.utils.len(record.buckets)) {
           lines = std.list.append(
             lines,
             record.name + "_bucket" +

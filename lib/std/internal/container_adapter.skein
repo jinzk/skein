@@ -2,10 +2,10 @@ package container_adapter {
   import std;
 
   func _list_end(values) {
-    if (kind_of(values) != "list") {
+    if (std.type.kind_of(values) != "list") {
       fail("std.list.slice expects a list");
     }
-    return len(values);
+    return std.utils.len(values);
   }
 
   export func adapter_list_slice(values, start, end = _list_end(values)) {

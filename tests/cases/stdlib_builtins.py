@@ -14,38 +14,34 @@ GC_STRESS_ENV = dict(os.environ, SKEIN_GC_STRESS="1")
 
 def run_cases():
     check(
-        "prelude builtins are ordinary bindings",
-        "println(str(len([1, 2, 3])));\n"
-        "let len = 7;\n"
-        "println(str(len));\n"
-        "let type_name = \"shadowed\";\n"
-        "println(type_name);\n",
-        stdout_all=["3", "7", "shadowed"],
+        "prelude bare names are removed",
+        "le" + "n([1, 2, 3])\n",
+        stderr="symbol not found len",
     )
     check(
-        "prelude builtins canonical paths",
-        "println(str(std.utils.len([1, 2, 3])));\n"
-        "println(str(std.utils.range(3)));\n"
-        "println(std.type.name(1));\n"
-        "println(kind_of(1));\n",
+        "canonical std paths replace prelude names",
+        "std.io.println(str(std.utils.len([1, 2, 3])));\n"
+        "std.io.println(str(std.utils.range(3)));\n"
+        "std.io.println(std.type.name(1));\n"
+        "std.io.println(std.type.kind_of(1));\n",
         stdout_all=["3", "[0, 1, 2]", "int"],
     )
     check(
-        "prelude builtins explicit import shadows default",
+        "selective import provides a local name",
         "import {len} from std.utils;\n"
         "import {println as out} from std.io;\n"
-        "out(str(len([1, 2])));\n",
+        "out(str(std.utils.len([1, 2])));\n",
         stdout="2",
     )
 
     constructor_source = (
-        "println(str(list()));\n"
-        "println(str(dict()));\n"
-        "println(list([1, 2]));\n"
-        'println(list("ab"));\n'
-        'println(list({"a": 1, "b": 2}));\n'
-        'println(dict({"a": 1}));\n'
-        'println(dict([["a", 1], ["b", 2]]));\n'
+        "std.io.println(str(std.list.new()));\n"
+        "std.io.println(str(std.dict.new()));\n"
+        "std.io.println(std.list.new([1, 2]));\n"
+        'std.io.println(std.list.new("ab"));\n'
+        'std.io.println(std.list.new({"a": 1, "b": 2}));\n'
+        'std.io.println(std.dict.new({"a": 1}));\n'
+        'std.io.println(std.dict.new([["a", 1], ["b", 2]]));\n'
     )
     constructor_output = [
         "[]",
@@ -57,18 +53,18 @@ def run_cases():
         "{a: 1, b: 2}",
     ]
     check(
-        "list and dict constructors are prelude values",
+        "canonical list and dict constructors",
         constructor_source,
         stdout_all=constructor_output,
     )
     check(
-        "list and dict constructors under VM",
+        "canonical constructors under VM",
         constructor_source,
         stdout_all=constructor_output,
         env=VM_ENV,
     )
     check(
-        "list and dict constructors without typecheck",
+        "canonical constructors without typecheck",
         constructor_source,
         stdout_all=constructor_output,
         env=OFF_ENV,
@@ -76,44 +72,44 @@ def run_cases():
     check(
         "canonical container constructors and first-class values",
         "import std;\n"
-        "println(std.list.new([1, 2]));\n"
-        'println(std.dict.new([["a", 1]]));\n'
+        "std.io.println(std.list.new([1, 2]));\n"
+        'std.io.println(std.dict.new([["a", 1]]));\n'
         "let make_list = std.list.new;\n"
-        'println(make_list("ab"));\n'
-        "let make_dict = dict;\n"
-        'println(make_dict({"k": 3}));\n',
+        'std.io.println(make_list("ab"));\n'
+        "let make_dict = std.dict.new;\n"
+        'std.io.println(make_dict({"k": 3}));\n',
         stdout_all=["[1, 2]", "{a: 1}", "[a, b]", "{k: 3}"],
     )
     check(
-        "container builtins are shadowable without affecting type names",
+        "local bindings named list and dict do not affect type names",
         "let list = 7;\n"
         "let dict = 8;\n"
-        "println(str(list));\n"
-        "println(str(dict));\n"
+        "std.io.println(str(list));\n"
+        "std.io.println(str(dict));\n"
         "let xs: list[int] = [1];\n"
         "let d: dict[str, int] = {\"a\": 1};\n"
-        "println(xs);\n"
-        "println(d);\n",
+        "std.io.println(xs);\n"
+        "std.io.println(d);\n",
         stdout_all=["7", "8", "[1]", "{a: 1}"],
     )
     check(
-        "function declaration shadows list constructor",
+        "function declaration named list is callable",
         "func list(x): int { return x + 1; }\n"
-        "println(str(list(1)));\n",
+        "std.io.println(str(li" + "st(1)));\n",
         stdout="2",
     )
     check(
         "container constructor rejects extra arguments",
-        "println(list(1, 2));\n",
+        "std.io.println(std.list.new(1, 2));\n",
         stderr="at most 1 argument",
     )
     check(
         "dict constructor rejects invalid pairs",
-        'println(dict([1, 2]));\n',
+        'std.io.println(std.dict.new([1, 2]));\n',
         stderr="expects an iterable of pairs",
     )
 
-    ffi_probe = run("import std;\nkind_of(std.ffi)\n")
+    ffi_probe = run("import std;\nstd.type.kind_of(std.ffi)\n")
     has_ffi = "= dict" in ffi_probe.stdout
     if sys.platform.startswith("linux") and has_ffi:
         import ctypes.util
@@ -708,7 +704,7 @@ def run_cases():
             '"args": ["i32"]}}, "constants": {"K": 5}});\n'
             'let sum = std.ffi.function(lib, "shim_point_sum");\n'
             'sum({"x": 1.0, "y": 2.0})\n'
-            "kind_of(sum)\n"
+            "std.type.kind_of(sum)\n"
             'lib.shim_point_sum({"x": 3.0, "y": 4.0})\n'
             "lib.K\n"
             "std.ffi.close(lib);\n",
@@ -1098,8 +1094,8 @@ def run_cases():
         "c.value\n"
         "c.value = 9;\n"
         "c.value\n"
-        "type_name(c)\n"
-        "print(c)\n",
+        "std.type.name(c)\n"
+        "std.io.print(c)\n",
         stdout_all=["= 5", "= 9", "= Counter", "<Counter>"],
     )
     check(
@@ -1118,7 +1114,7 @@ def run_cases():
         "f.c\n"
         "f.b = 7;\n"
         "f.b\n"
-        "type_name(h)\n",
+        "std.type.name(h)\n",
         stdout_all=["= 7", "= 287454020", "= 43981", "= 7", "= 5",
                     "= 1", "= 5", "= 9", "= 7", "= PackedHeader"],
     )
@@ -1174,7 +1170,7 @@ def run_cases():
             "  let r = f.wait();\n"
             '  out = std.list.append(out, r["value"]["v"]);\n'
             "}\n"
-            "print(out);\n"
+            "std.io.print(out);\n"
             "pool.close();\n"
             "pool.join();\n",
             stdout="[10, 11, 12, 13, 14, 15, 16, 17]",
@@ -1295,7 +1291,7 @@ def run_cases():
             "import test.dynamic;\n"
             "let s = dynamic.string_len();\n"
             "s\n"
-            "len(s)\n",
+            "std.utils.len(s)\n",
             stdout_all=["= hello", "= 5"],
         )
         check(
@@ -1304,7 +1300,7 @@ def run_cases():
             f"std.native.load({native_module});\n"
             "import test.dynamic;\n"
             "let t = dynamic.twice_async(21);\n"
-            "type_name(t)\n"
+            "std.type.name(t)\n"
             "t.wait()\n"
             "let a = dynamic.twice_async(21);\n"
             "let b = dynamic.twice_async(4);\n"
@@ -1725,8 +1721,8 @@ def run_cases():
         "std list slice default end",
         "import std;\n"
         "std.list.slice([1, 2, 3, 4], 1)\n"
-        "kind_of(std.list.slice)\n"
-        "kind_of(std.list.append)\n",
+        "std.type.kind_of(std.list.slice)\n"
+        "std.type.kind_of(std.list.append)\n",
         stdout_all=["= [2, 3, 4]", "= function", "= builtin"],
     )
     check(
@@ -1746,29 +1742,29 @@ def run_cases():
         "std container adapter defaults",
         "import std;\n"
         'std.bytes.to_string(std.bytes.slice(std.bytes.from_string("abc"), 1))\n'
-        "kind_of(std.list.sort)\n"
-        "kind_of(std.list.reduce)\n"
-        "kind_of(std.dict.get)\n"
-        "kind_of(lru.get)\n"
-        "kind_of(std.bytes.slice)\n",
+        "std.type.kind_of(std.list.sort)\n"
+        "std.type.kind_of(std.list.reduce)\n"
+        "std.type.kind_of(std.dict.get)\n"
+        "std.type.kind_of(lru.get)\n"
+        "std.type.kind_of(std.bytes.slice)\n",
         stdout_all=["= bc", "= function", "= function", "= function",
                     "= function", "= function"],
     )
     check(
         "std container adapter bindings",
         "import std;\n"
-        "kind_of(std.list.slice)\n"
-        "kind_of(std.list.sort)\n"
-        "kind_of(std.list.sort_by)\n"
-        "kind_of(std.list.is_sorted)\n"
-        "kind_of(std.list.top_k)\n"
-        "kind_of(std.list.binary_search)\n"
-        "kind_of(std.list.reduce)\n"
-        "kind_of(std.dict.get)\n"
-        "kind_of(lru.get)\n"
-        "kind_of(lru.peek)\n"
-        "kind_of(std.bytes.slice)\n"
-        "kind_of(std.raw.list.slice)\n",
+        "std.type.kind_of(std.list.slice)\n"
+        "std.type.kind_of(std.list.sort)\n"
+        "std.type.kind_of(std.list.sort_by)\n"
+        "std.type.kind_of(std.list.is_sorted)\n"
+        "std.type.kind_of(std.list.top_k)\n"
+        "std.type.kind_of(std.list.binary_search)\n"
+        "std.type.kind_of(std.list.reduce)\n"
+        "std.type.kind_of(std.dict.get)\n"
+        "std.type.kind_of(lru.get)\n"
+        "std.type.kind_of(lru.peek)\n"
+        "std.type.kind_of(std.bytes.slice)\n"
+        "std.type.kind_of(std.raw.list.slice)\n",
         stdout_all=["= function"] * 11 + ["= builtin"],
     )
     check(
@@ -1816,26 +1812,26 @@ def run_cases():
     check(
         "std encoding gbk roundtrip",
         "import std;\n"
-        'print(std.encoding.decode(std.bytes.from_hex("d6d0b9fa"), "gbk"));\n'
-        'print(std.bytes.hex(std.encoding.encode("中国", "gbk")));\n'
+        'std.io.print(std.encoding.decode(std.bytes.from_hex("d6d0b9fa"), "gbk"));\n'
+        'std.io.print(std.bytes.hex(std.encoding.encode("中国", "gbk")));\n'
         'std.encoding.supports("gbk")\n',
         stdout_all=["中国", "d6d0b9fa", "= true"],
     )
     check(
         "std encoding gbk euro",
         "import std;\n"
-        'print(std.bytes.hex(std.encoding.encode("€", "gbk")));\n'
-        'print(std.encoding.decode(std.bytes.from_hex("80"), "gbk"));\n',
+        'std.io.print(std.bytes.hex(std.encoding.encode("€", "gbk")));\n'
+        'std.io.print(std.encoding.decode(std.bytes.from_hex("80"), "gbk"));\n',
         stdout_all=["80", "€"],
     )
     check(
         "std encoding gb18030 vectors",
         "import std;\n"
-        'print(std.encoding.decode(std.bytes.from_hex("d6d0"), "gb18030"));\n'
-        'print(std.bytes.hex(std.encoding.encode("€", "gb18030")));\n'
+        'std.io.print(std.encoding.decode(std.bytes.from_hex("d6d0"), "gb18030"));\n'
+        'std.io.print(std.bytes.hex(std.encoding.encode("€", "gb18030")));\n'
         'let s = std.encoding.decode(std.bytes.from_hex("90308130"), "gb18030");\n'
-        'print(std.bytes.hex(std.encoding.encode(s, "gb18030")));\n'
-        'print(std.bytes.hex(std.encoding.encode("😀", "gb18030")));\n'
+        'std.io.print(std.bytes.hex(std.encoding.encode(s, "gb18030")));\n'
+        'std.io.print(std.bytes.hex(std.encoding.encode("😀", "gb18030")));\n'
         'std.encoding.supports("gb18030")\n',
         stdout_all=["中", "a2e3", "90308130", "9439fc36", "= true"],
     )
@@ -1848,19 +1844,19 @@ def run_cases():
     check(
         "std encoding utf16 bom",
         "import std;\n"
-        'print(std.bytes.hex(std.encoding.encode("中", "utf-16")));\n'
-        'print(std.encoding.decode(std.bytes.from_hex("fffe2d4e"), "utf-16"));\n',
+        'std.io.print(std.bytes.hex(std.encoding.encode("中", "utf-16")));\n'
+        'std.io.print(std.encoding.decode(std.bytes.from_hex("fffe2d4e"), "utf-16"));\n',
         stdout_all=["fffe2d4e", "中"],
     )
     check(
         "std encoding utf32",
         "import std;\n"
-        'print(std.bytes.hex(std.encoding.encode("中", "utf-32le")));\n'
-        'print(std.bytes.hex(std.encoding.encode("中", "utf-32be")));\n'
-        'print(std.bytes.hex(std.encoding.encode("中", "utf-32")));\n'
-        'print(std.encoding.decode(std.bytes.from_hex("2d4e0000"), "utf-32le"));\n'
-        'print(std.encoding.decode(std.bytes.from_hex("00004e2d"), "utf-32be"));\n'
-        'print(std.encoding.decode(std.bytes.from_hex("fffe00002d4e0000"), '
+        'std.io.print(std.bytes.hex(std.encoding.encode("中", "utf-32le")));\n'
+        'std.io.print(std.bytes.hex(std.encoding.encode("中", "utf-32be")));\n'
+        'std.io.print(std.bytes.hex(std.encoding.encode("中", "utf-32")));\n'
+        'std.io.print(std.encoding.decode(std.bytes.from_hex("2d4e0000"), "utf-32le"));\n'
+        'std.io.print(std.encoding.decode(std.bytes.from_hex("00004e2d"), "utf-32be"));\n'
+        'std.io.print(std.encoding.decode(std.bytes.from_hex("fffe00002d4e0000"), '
         '"utf-32"));\n',
         stdout_all=["2d4e0000", "00004e2d", "fffe00002d4e0000",
                     "中", "中", "中"],
@@ -1868,8 +1864,8 @@ def run_cases():
     check(
         "std encoding error modes",
         "import std;\n"
-        'print(std.encoding.decode(std.bytes.from_hex("ff"), "utf-8", "replace"));\n'
-        'print(std.bytes.hex(std.encoding.encode("é", "ascii", "replace")));\n'
+        'std.io.print(std.encoding.decode(std.bytes.from_hex("ff"), "utf-8", "replace"));\n'
+        'std.io.print(std.bytes.hex(std.encoding.encode("é", "ascii", "replace")));\n'
         'std.bytes.len(std.encoding.encode("é", "ascii", "ignore"))\n',
         stdout_all=["�", "3f", "= 0"],
     )
@@ -1897,14 +1893,14 @@ def run_cases():
         "std unicode normalization forms",
         "import std;\n"
         'let decomposed = std.encoding.decode(std.bytes.from_hex("65cc81"), "utf-8");\n'
-        'print(std.bytes.hex(std.encoding.encode('
+        'std.io.print(std.bytes.hex(std.encoding.encode('
         'std.unicode.normalize(decomposed, "nfc"), "utf-8")));\n'
         'let composed = std.encoding.decode(std.bytes.from_hex("c3a9"), "utf-8");\n'
-        'print(std.bytes.hex(std.encoding.encode('
+        'std.io.print(std.bytes.hex(std.encoding.encode('
         'std.unicode.normalize(composed, "nfd"), "utf-8")));\n'
         'let circled = std.encoding.decode(std.bytes.from_hex("e291a0"), "utf-8");\n'
-        'print(std.unicode.normalize(circled, "nfkc"));\n'
-        'print(std.unicode.normalize(circled, "nfkd"));\n'
+        'std.io.print(std.unicode.normalize(circled, "nfkc"));\n'
+        'std.io.print(std.unicode.normalize(circled, "nfkd"));\n'
         'std.unicode.version()\n',
         stdout_all=["c3a9", "65cc81", "1", "1", "= 16.0.0"],
     )
@@ -1933,19 +1929,19 @@ def run_cases():
         "std unicode compatibility",
         "import std;\n"
         'let ligature = std.encoding.decode(std.bytes.from_hex("efac81"), "utf-8");\n'
-        'print(std.bytes.hex(std.encoding.encode('
+        'std.io.print(std.bytes.hex(std.encoding.encode('
         'std.unicode.normalize(ligature, "nfc"), "utf-8")));\n'
-        'print(std.bytes.hex(std.encoding.encode('
+        'std.io.print(std.bytes.hex(std.encoding.encode('
         'std.unicode.normalize(ligature, "nfkc"), "utf-8")));\n'
         'let fullwidth = std.encoding.decode(std.bytes.from_hex("efbc91"), "utf-8");\n'
-        'print(std.unicode.normalize(fullwidth, "nfkc"));\n',
+        'std.io.print(std.unicode.normalize(fullwidth, "nfkc"));\n',
         stdout_all=["efac81", "6669", "1"],
     )
     check(
         "std unicode hangul",
         "import std;\n"
         'let jamo = std.encoding.decode(std.bytes.from_hex("e18480e185a1"), "utf-8");\n'
-        'print(std.bytes.hex(std.encoding.encode('
+        'std.io.print(std.bytes.hex(std.encoding.encode('
         'std.unicode.normalize(jamo, "nfc"), "utf-8")));\n',
         stdout_all=["eab080"],
     )
@@ -1953,12 +1949,12 @@ def run_cases():
         "std unicode canonical order",
         "import std;\n"
         'let angstrom = std.encoding.decode(std.bytes.from_hex("e284ab"), "utf-8");\n'
-        'print(std.bytes.hex(std.encoding.encode('
+        'std.io.print(std.bytes.hex(std.encoding.encode('
         'std.unicode.normalize(angstrom, "nfc"), "utf-8")));\n'
-        'print(std.bytes.hex(std.encoding.encode('
+        'std.io.print(std.bytes.hex(std.encoding.encode('
         'std.unicode.normalize(angstrom, "nfd"), "utf-8")));\n'
         'let marks = std.encoding.decode(std.bytes.from_hex("61cc95cc80"), "utf-8");\n'
-        'print(std.bytes.hex(std.encoding.encode('
+        'std.io.print(std.bytes.hex(std.encoding.encode('
         'std.unicode.normalize(marks, "nfd"), "utf-8")));\n',
         stdout_all=["c385", "41cc8a", "61cc80cc95"],
     )
@@ -1977,27 +1973,27 @@ def run_cases():
     check(
         "std string case mapping",
         "import std;\n"
-        'print(std.bytes.hex(std.encoding.encode('
+        'std.io.print(std.bytes.hex(std.encoding.encode('
         'std.string.to_lower("ABC"), "utf-8")));\n'
-        'print(std.bytes.hex(std.encoding.encode('
+        'std.io.print(std.bytes.hex(std.encoding.encode('
         'std.string.to_upper("abc"), "utf-8")));\n'
-        'print(std.bytes.hex(std.encoding.encode('
+        'std.io.print(std.bytes.hex(std.encoding.encode('
         'std.string.to_upper("ß"), "utf-8")));\n'
-        'print(std.bytes.hex(std.encoding.encode('
+        'std.io.print(std.bytes.hex(std.encoding.encode('
         'std.string.to_upper("Straße"), "utf-8")));\n'
-        'print(std.bytes.hex(std.encoding.encode('
+        'std.io.print(std.bytes.hex(std.encoding.encode('
         'std.string.to_upper("ﬁ"), "utf-8")));\n'
-        'print(std.bytes.hex(std.encoding.encode('
+        'std.io.print(std.bytes.hex(std.encoding.encode('
         'std.string.to_lower("ẞ"), "utf-8")));\n'
-        'print(std.bytes.hex(std.encoding.encode('
+        'std.io.print(std.bytes.hex(std.encoding.encode('
         'std.string.to_lower("İ"), "utf-8")));\n'
-        'print(std.bytes.hex(std.encoding.encode('
+        'std.io.print(std.bytes.hex(std.encoding.encode('
         'std.string.to_lower("ΟΣ"), "utf-8")));\n'
-        'print(std.bytes.hex(std.encoding.encode('
+        'std.io.print(std.bytes.hex(std.encoding.encode('
         'std.string.to_lower("ΟΣΑ"), "utf-8")));\n'
-        'print(std.bytes.hex(std.encoding.encode('
+        'std.io.print(std.bytes.hex(std.encoding.encode('
         'std.string.to_lower("Σ"), "utf-8")));\n'
-        'print(std.bytes.hex(std.encoding.encode('
+        'std.io.print(std.bytes.hex(std.encoding.encode('
         'std.string.to_lower("ΑΣ."), "utf-8")));\n'
         'std.string.to_upper("ß") == std.string.to_upper("ss")\n'
         'std.string.to_lower(std.string.to_upper("ß")) == "ss"\n'
@@ -2015,13 +2011,13 @@ def run_cases():
         'import std;\n'
         'let marked = std.encoding.decode(std.bytes.from_hex("ce91cea3cc81"), '
         '"utf-8");\n'
-        'print(std.bytes.hex(std.encoding.encode(std.string.to_lower(marked), '
+        'std.io.print(std.bytes.hex(std.encoding.encode(std.string.to_lower(marked), '
         '"utf-8")));\n'
-        "print(std.bytes.hex(std.encoding.encode(std.string.to_lower(\"Α'Σ\"), "
+        "std.io.print(std.bytes.hex(std.encoding.encode(std.string.to_lower(\"Α'Σ\"), "
         '"utf-8")));\n'
-        'print(std.bytes.hex(std.encoding.encode(std.string.to_lower("Α.Σ"), '
+        'std.io.print(std.bytes.hex(std.encoding.encode(std.string.to_lower("Α.Σ"), '
         '"utf-8")));\n'
-        'print(std.bytes.hex(std.encoding.encode(std.string.to_lower("ΑΣΑ"), '
+        'std.io.print(std.bytes.hex(std.encoding.encode(std.string.to_lower("ΑΣΑ"), '
         '"utf-8")));\n',
         stdout_all=["ceb1cf82cc81", "ceb127cf82", "ceb12ecf82",
                     "ceb1cf83ceb1"],
@@ -2043,13 +2039,13 @@ def run_cases():
     check(
         "std unicode casefold",
         "import std;\n"
-        'print(std.bytes.hex(std.encoding.encode('
+        'std.io.print(std.bytes.hex(std.encoding.encode('
         'std.unicode.casefold("Straße"), "utf-8")));\n'
-        'print(std.bytes.hex(std.encoding.encode('
+        'std.io.print(std.bytes.hex(std.encoding.encode('
         'std.unicode.casefold("STRASSE"), "utf-8")));\n'
-        'print(std.bytes.hex(std.encoding.encode('
+        'std.io.print(std.bytes.hex(std.encoding.encode('
         'std.unicode.casefold("ΟΣ"), "utf-8")));\n'
-        'print(std.bytes.hex(std.encoding.encode('
+        'std.io.print(std.bytes.hex(std.encoding.encode('
         'std.unicode.casefold("ς"), "utf-8")));\n'
         'std.unicode.casefold("Straße") == std.unicode.casefold("STRASSE")\n'
         'std.unicode.casefold("ẞ") == "ss"\n'
@@ -2064,7 +2060,7 @@ def run_cases():
         "std unicode casefold leaves normalization alone",
         "import std;\n"
         'let decomposed = std.encoding.decode(std.bytes.from_hex("65cc81"), "utf-8");\n'
-        'print(std.bytes.hex(std.encoding.encode('
+        'std.io.print(std.bytes.hex(std.encoding.encode('
         'std.unicode.casefold(decomposed), "utf-8")));\n'
         'std.unicode.casefold(decomposed) == "é"\n',
         stdout_all=["65cc81", "= false"],
@@ -2121,8 +2117,8 @@ def run_cases():
         '"send_async", "receive_async"]);\n'
         '  stale = stale + count_stale(std.ffi, ["call_async"]);\n'
         '  stale = stale + count_stale(std.type, ["module"]);\n'
-        '  println("stale=" + str(stale));\n'
-        '  println("primary=" + str(std.dict.has(std.process, "run_command")) + '
+        '  std.io.println("stale=" + str(stale));\n'
+        '  std.io.println("primary=" + str(std.dict.has(std.process, "run_command")) + '
         '"," + str(std.dict.has(std.thread, "spawn_script")) + "," + '
         'str(std.dict.has(std.io, "read_task")) + "," + '
         'str(std.dict.has(std.net, "accept_task")) + "," + '
@@ -2132,7 +2128,7 @@ def run_cases():
         'str(std.dict.has(std.type, "package_name")) + "," + '
         'str(std.dict.has(std.type, "module_name")));\n'
         "  let ends = std.thread.Channel.unbounded();\n"
-        '  println("unbounded=" + str(ends[0].capacity));\n'
+        '  std.io.println("unbounded=" + str(ends[0].capacity));\n'
         "}\n"
         "main();\n",
         stdout="stale=0\nprimary=1,1,1,1,1,1,1,1,1\nunbounded=-1\n",
@@ -2213,11 +2209,11 @@ def run_cases():
         "std json parse",
         r'''import std;
     let v = std.json.parse("{\"a\": 1, \"b\": [true, null, \"x\"], \"c\": 1.5}");
-    print(v["a"]);
-    print(v["b"][0]);
-    print(v["b"][1]);
-    print(v["b"][2]);
-    print(v["c"]);
+    std.io.print(v["a"]);
+    std.io.print(v["b"][0]);
+    std.io.print(v["b"][1]);
+    std.io.print(v["b"][2]);
+    std.io.print(v["c"]);
     ''',
         stdout_all=["1", "true", "null", "x", "1.5"],
     )
@@ -2301,13 +2297,13 @@ def run_cases():
     check(
         "break",
         "let i = 0;\n"
-        "while (i < 10) { i = i + 1; if (i == 3) { break; } println(i); }\n",
+        "while (i < 10) { i = i + 1; if (i == 3) { break; } std.io.println(i); }\n",
         stdout="1\n2\n",
     )
     check(
         "continue",
         "let i = 0;\n"
-        "while (i < 5) { i = i + 1; if (i == 2) { continue; } println(i); }\n",
+        "while (i < 5) { i = i + 1; if (i == 2) { continue; } std.io.println(i); }\n",
         stdout="1\n3\n",
     )
     check(
@@ -2315,10 +2311,10 @@ def run_cases():
         "outer: for (let i in [1, 2, 3]) {\n"
         "  for (let j in [1, 2, 3]) {\n"
         "    if (i == 2 && j == 2) { break outer; }\n"
-        "    println(str(i) + \",\" + str(j));\n"
+        "    std.io.println(str(i) + \",\" + str(j));\n"
         "  }\n"
         "}\n"
-        'println("done");\n',
+        'std.io.println("done");\n',
         stdout_all=["1,1", "1,2", "1,3", "2,1", "done"],
     )
     check(
@@ -2326,24 +2322,24 @@ def run_cases():
         "outer: for (let i in [1, 2]) {\n"
         "  for (let j in [1, 2]) {\n"
         "    if (j == 1) { continue outer; }\n"
-        "    println(\"bad\");\n"
+        "    std.io.println(\"bad\");\n"
         "  }\n"
         "}\n"
-        'println("done");\n',
+        'std.io.println("done");\n',
         stdout="done\n",
     )
     check(
         "labeled break switch",
         "sw: switch (1) {\n"
         "  case 1 => { break sw; }\n"
-        '  default => println("bad");\n'
+        '  default => std.io.println("bad");\n'
         "}\n"
-        'println("after");\n',
+        'std.io.println("after");\n',
         stdout="after\n",
     )
     check(
         "label on non-loop allowed",
-        "bad: if (1) { print(1); }\n",
+        "bad: if (1) { std.io.print(1); }\n",
         stdout="1",
     )
     check(
@@ -2357,7 +2353,7 @@ def run_cases():
         "  let x = 1;\n"
         "  unused: return x;\n"
         "}\n"
-        "println(f());\n",
+        "std.io.println(f());\n",
         stdout="1",
         stderr="label unused is never used",
     )
@@ -2393,7 +2389,7 @@ def run_cases():
     check(
         "goto cannot cross let backward",
         "func f() {\n"
-        '  top: println("x");\n'
+        '  top: std.io.println("x");\n'
         "  let x = 1;\n"
         "  goto top;\n"
         "}\n"
@@ -2403,7 +2399,7 @@ def run_cases():
     check(
         "break target must be enclosing loop",
         "func f() {\n"
-        '  done: println("x");\n'
+        '  done: std.io.println("x");\n'
         "  break done;\n"
         "  return 1;\n"
         "}\n"
@@ -2413,7 +2409,7 @@ def run_cases():
     check(
         "vm semantic function error skips AST fallback",
         "func f() {\n"
-        '  println("executed");\n'
+        '  std.io.println("executed");\n'
         "  done: break done;\n"
         "}\n"
         "f();\n",
@@ -2424,7 +2420,7 @@ def run_cases():
     check(
         "vm semantic statement error skips AST fallback",
         "{\n"
-        '  println("executed");\n'
+        '  std.io.println("executed");\n'
         "  break missing;\n"
         "}\n",
         stderr="break target missing not found",
@@ -2475,26 +2471,26 @@ def run_cases():
 
     check("fail caught with recover",
           'func f() { fail "boom"; }\n'
-          "f() on error(e) { print(e); recover 0; }\n",
+          "f() on error(e) { std.io.print(e); recover 0; }\n",
           stdout_all=["boom", "= 0"])
     check("on error handler not called on success",
           "func f() { return 1; }\n"
-          'f() on error(e) { print("bad"); recover 0; }\n',
+          'f() on error(e) { std.io.print("bad"); recover 0; }\n',
           stdout="= 1")
     check("pass propagates to outer handler",
           'func inner() { fail "x"; }\n'
           "func outer() { return inner() on error(e) { pass e; }; }\n"
-          'outer() on error(e) { print("caught " + str(e)); recover 7; }\n',
+          'outer() on error(e) { std.io.print("caught " + str(e)); recover 7; }\n',
           stdout_all=["caught x", "= 7"])
     check("fail stops loop body",
           "func f() {\n"
           "  for (let i in [1, 2, 3]) {\n"
           '    if (i == 2) { fail "loop"; }\n'
-          "    print(i);\n"
+          "    std.io.print(i);\n"
           "  }\n"
           "  return 0;\n"
           "}\n"
-          'f() on error(e) { print("E " + str(e)); recover 9; }\n',
+          'f() on error(e) { std.io.print("E " + str(e)); recover 9; }\n',
           stdout_all=["1", "E loop", "= 9"])
     check("recover value is expression result",
           'func f() { fail "x"; }\n'
@@ -2510,7 +2506,7 @@ def run_cases():
           "pass 1;\n", stderr="pass outside error handler")
     check("handler without terminal statement",
           'func f() { fail "x"; }\n'
-          "let x = f() on error(e) { print(e); };\n",
+          "let x = f() on error(e) { std.io.print(e); };\n",
           stderr="error handler must end with recover, pass, or fail")
     check("handler return exits function",
           'func f() { fail "x"; }\n'
@@ -2522,7 +2518,7 @@ def run_cases():
           "func g() {\n"
           "  for (let i in [1, 2, 3]) {\n"
           "    let x = f() on error(e) { break; };\n"
-          "    print(str(i));\n"
+          "    std.io.print(str(i));\n"
           "  }\n"
           "  return 9;\n"
           "}\n"
@@ -2544,9 +2540,9 @@ def run_cases():
           'func f() { fail "x"; }\n'
           "func g() {\n"
           "  for (let i in [1]) {\n"
-          "    defer print(\"loop\");\n"
+          "    defer std.io.print(\"loop\");\n"
           "    {\n"
-          "      defer print(\"inner\");\n"
+          "      defer std.io.print(\"inner\");\n"
           "      let x = f() on error(e) { break; };\n"
           "    }\n"
           "  }\n"
@@ -2575,7 +2571,7 @@ def run_cases():
           '  func check(self) { if (self.x < 0) { fail "negative"; } '
           "return self.x; }\n"
           "}\n"
-          'P { x: -1 }.check() on error(e) { print(e); recover 0; }\n',
+          'P { x: -1 }.check() on error(e) { std.io.print(e); recover 0; }\n',
           stdout_all=["negative", "= 0"])
     check("recover does not cross function boundary",
           'func bad() { recover 1; }\n'
@@ -2595,13 +2591,13 @@ def run_cases():
           stdout_all=["= 0", "= 6"])
     check("variadic with fixed parameters",
           "func f(a: int, ...rest: string) {\n"
-          "  return a + len(rest);\n"
+          "  return a + std.utils.len(rest);\n"
           "}\n"
           "f(1)\nf(1, \"a\", \"b\")\n",
           stdout_all=["= 1", "= 3"])
     check("variadic rest is list",
           "func f(...xs) {\n"
-          "  if (len(xs) == 0) { return null; }\n"
+          "  if (std.utils.len(xs) == 0) { return null; }\n"
           "  return xs[1];\n"
           "}\n"
           "f()\nf(10, 20)\n",
@@ -2610,7 +2606,7 @@ def run_cases():
           "func f(a: int, ...rest) { return a; }\nf()\n",
           stderr="function f expects at least 1 argument(s), got 0")
     check("variadic element type",
-          'func f(...rest: number) { return len(rest); }\nf(1, "x")\n',
+          'func f(...rest: number) { return std.utils.len(rest); }\nf(1, "x")\n',
           stderr="type error: expected number, got string")
     check("variadic must be last",
           "func f(...xs, y) { return y; }\n",
@@ -2628,7 +2624,7 @@ def run_cases():
           "P { x: 1 }.add(1, 2, 3)\n",
           stdout="= 6")
     check("variadic anonymous function",
-          "func make() { return func(...args: int) { return len(args); }; }\n"
+          "func make() { return func(...args: int) { return std.utils.len(args); }; }\n"
           "make()(1, 2, 3)\n",
           stdout="= 3")
     check("call spread",
@@ -2641,7 +2637,7 @@ def run_cases():
           "sum(...xs)\nsum(0, ...xs)\n",
           stdout_all=["= 6", "= 6"])
     check("call spread requires list",
-          "func f(...xs) { return len(xs); }\nf(...1)\n",
+          "func f(...xs) { return std.utils.len(xs); }\nf(...1)\n",
           stderr="spread expects a list, got int")
     check("protocol variadic rejected",
           "proto T { func f(self, ...args); }\n",
@@ -2670,22 +2666,22 @@ def run_cases():
           "func f(n) { return 1 + f(n + 1); }\nf(0)\n",
           stderr="maximum recursion depth")
     check("function without return yields null",
-          "func noret() { }\nprint(noret())\n", stdout="null")
+          "func noret() { }\nstd.io.print(noret())\n", stdout="null")
     check("null arithmetic", "func noret() { }\nnoret() + 1\n",
           stderr="cannot add null and int")
     check("null truthiness",
-          "func noret() { }\nif (noret()) { print(1); } else { print(2); }\n",
+          "func noret() { }\nif (noret()) { std.io.print(1); } else { std.io.print(2); }\n",
           stdout="2")
     check("null as argument",
           "func noret() { }\nfunc add(a,b) { return a+b; }\nadd(noret(), 2)\n",
           stderr="cannot add null and int")
     check("null equality", "func noret() { }\nnoret() == noret()\n",
           stdout="= true")
-    check("null literal", "print(null)\n", stdout="null")
+    check("null literal", "std.io.print(null)\n", stdout="null")
     check("null literal equality", "null == null\n", stdout="= true")
     check("null literal inequality", "null == 0\n", stdout="= false")
     check("null literal falsy",
-          "if (null) { print(1); } else { print(2); }\n", stdout="2")
+          "if (null) { std.io.print(1); } else { std.io.print(2); }\n", stdout="2")
     check("null literal arithmetic", "null + 1\n",
           stderr="cannot add null and int")
     check("null is not callable", "null()\n", stderr="cannot call null")
@@ -2716,10 +2712,10 @@ def run_cases():
           "func h(x: bool) { return x; }\nh(1 == 1)\n",
           stdout="= true")
     check("typed list",
-          "func f(x: list) { return len(x); }\nf([1,2])\n",
+          "func f(x: list) { return std.utils.len(x); }\nf([1,2])\n",
           stdout="= 2")
     check("typed dict",
-          "func f(x: dict) { return len(x); }\nf({1:2})\n",
+          "func f(x: dict) { return std.utils.len(x); }\nf({1:2})\n",
           stdout="= 1")
     check("typed string",
           'func f(x: string) { return x; }\nf("a")\n', stdout="= a")
@@ -2753,7 +2749,7 @@ def run_cases():
     check("typed any",
           "func f(x: any) { return x; }\nf(true)\n", stdout="= true")
     check("typed null",
-          "func f(x: null) { return x; }\nprint(f(null))\n",
+          "func f(x: null) { return x; }\nstd.io.print(f(null))\n",
           stdout="null")
     check("typed null rejects int",
           "func f(x: null) { return x; }\nf(1)\n",
@@ -2807,7 +2803,7 @@ def run_cases():
           "const x: int = 1;\nx = 2;\n",
           stderr="cannot assign to constant x")
     check("typed for initializer",
-          "for (let i: int = 0; i < 2; i++) { print(i); }\n",
+          "for (let i: int = 0; i < 2; i++) { std.io.print(i); }\n",
           stdout_all=["0", "1"])
     check("typed parameter reassignment",
           'func f(x: int) { x = "bad"; }\nf(1)\n',
@@ -2821,8 +2817,8 @@ def run_cases():
           "let d: dict;\n"
           "let by: bytes;\n"
           "let a: any;\n"
-          's == "" && i == 0 && f == 0.0 && !b && len(l) == 0 && '
-          "len(d) == 0 && std.bytes.len(by) == 0 && a == null\n",
+          's == "" && i == 0 && f == 0.0 && !b && std.utils.len(l) == 0 && '
+          "std.utils.len(d) == 0 && std.bytes.len(by) == 0 && a == null\n",
           stdout="= true")
     check("typed variable is shallow",
           'let a: list = [0];\na[0] = "x";\na\n', stdout='= [x]')
@@ -2869,9 +2865,9 @@ def run_cases():
           "}\n"
           "let c = Counter { n: 1 };\n"
           "let d = c.bump();\n"
-          "print(c.n);\nprint(d.n);\n"
+          "std.io.print(c.n);\nstd.io.print(d.n);\n"
           "c = c.bump();\n"
-          "print(c.n);\n",
+          "std.io.print(c.n);\n",
           stdout_all=["1", "2", "2"])
     check("struct method mutates self fields",
           "struct Box { n: int; xs: list; }\n"
@@ -2884,7 +2880,7 @@ def run_cases():
           "  }\n"
           "}\n"
           "let b = Box { n: 1, xs: [0] };\n"
-          "print(b.step());\nprint(b.n);\nprint(b.xs);\n",
+          "std.io.print(b.step());\nstd.io.print(b.n);\nstd.io.print(b.xs);\n",
           stdout_all=["4", "1", "[0]"])
     check("struct self reassignment",
           "struct A {}\n"
@@ -2949,7 +2945,7 @@ def run_cases():
           "struct Point { x: int; y: int; }\n"
           "let p = Point { x: 1, y: 2 };\n"
           "let q = Point { ...p, x: 9 };\n"
-          "print(q.x);\nprint(q.y);\nprint(p.x);\n",
+          "std.io.print(q.x);\nstd.io.print(q.y);\nstd.io.print(p.x);\n",
           stdout_all=["9", "2", "1"])
     check("struct copy-with spread first",
           "struct Point { x: int; y: int; }\n"
@@ -2969,15 +2965,15 @@ def run_cases():
           'struct Config { host: string = "localhost"; port: int = 80; }\n'
           "let a = Config {};\n"
           "let b = Config { port: 8080 };\n"
-          "print(a.host);\nprint(a.port);\n"
-          "print(b.host);\nprint(b.port);\n",
+          "std.io.print(a.host);\nstd.io.print(a.port);\n"
+          "std.io.print(b.host);\nstd.io.print(b.port);\n",
           stdout_all=["localhost", "80", "localhost", "8080"])
     check("struct field default fresh value",
           "struct S { xs: list = [0]; }\n"
           "let a = S {};\n"
           "let b = S {};\n"
           "a.xs[0] = 9;\n"
-          "print(b.xs[0]);\n",
+          "std.io.print(b.xs[0]);\n",
           stdout="0")
     check("struct field default type mismatch",
           'struct S { x: int = "bad"; }\nS {}\n',
@@ -2995,12 +2991,12 @@ def run_cases():
           stderr="field x default: default value cannot reference x")
     check("struct field default allows pattern binding shadowing",
           "struct S { x: int; y: int = match (1) { case x => x; }; }\n"
-          "print(S { x: 2 }.y);\n",
+          "std.io.print(S { x: 2 }.y);\n",
           stdout="1")
     check("struct field default allows local function shadowing",
           "struct S { x: int; f: Callable = func() { let x = 1; "
           "return x; }; }\n"
-          "print(S { x: 2 }.f());\n",
+          "std.io.print(S { x: 2 }.f());\n",
           stdout="1")
     check("struct field default nested closure cannot reference field",
           "let x = 5;\n"
@@ -3013,13 +3009,13 @@ def run_cases():
     check("struct copy-with and defaults",
           "struct S { x: int = 1; y: int = 2; }\n"
           "let q = S { ...S {}, x: 9 };\n"
-          "print(q.x);\nprint(q.y);\n",
+          "std.io.print(q.x);\nstd.io.print(q.y);\n",
           stdout_all=["9", "2"])
     check("enum field defaults",
           "enum E { A { n: int = 0; s: string = \"x\"; }; B; }\n"
-          "print(E.A {}.n);\n"
-          'print(E.A { s: "y" }.s);\n'
-          "print(E.B is E);\n",
+          "std.io.print(E.A {}.n);\n"
+          'std.io.print(E.A { s: "y" }.s);\n'
+          "std.io.print(E.B is E);\n",
           stdout_all=["0", "y", "true"])
     check("bound method value",
           "struct Point {\n"
@@ -3047,7 +3043,7 @@ def run_cases():
           "proto Drawable { func draw(self); }\n"
           "struct Point { x: int; }\n"
           "impl Point {\n"
-          "  func draw(self) { print(\"point\"); }\n"
+          "  func draw(self) { std.io.print(\"point\"); }\n"
           "}\n"
           "let p = Point { x: 1 };\n"
           "p.draw()\n"
@@ -3081,14 +3077,14 @@ def run_cases():
           "  func other(self) { return 2; }\n"
           "}\n"
           "func render(x: Drawable) { return x.draw(); }\n"
-          "println(render(Point { x: 1 }));\n"
-          "println(Point { x: 1 }.other());\n",
+          "std.io.println(render(Point { x: 1 }));\n"
+          "std.io.println(Point { x: 1 }.other());\n",
           stdout_all=["1", "2"])
     check("rpc protocols structural conformance",
           "struct Client {\n"
           "  base: int;\n"
           "  func call(self, method: string, args: list) {\n"
-          "    return self.base + len(args);\n"
+          "    return self.base + std.utils.len(args);\n"
           "  }\n"
           "  func submit(self, method: string, args: list) {\n"
           "    return self.base;\n"
@@ -3106,28 +3102,28 @@ def run_cases():
           "let c = Client { base: 4 };\n"
           "let j = Job { value: 7 };\n"
           "let s = Server { n: 3 };\n"
-          "println(str(c is RpcClient));\n"
-          "println(str(j is RpcJob));\n"
-          "println(str(s is RpcServer));\n"
-          "println(str(c is RpcJob));\n"
-          "println(str(Other { x: 1 } is RpcClient));\n"
-          "println(str(c.call(\"m\", [1, 2])));\n"
-          "println(str(j.wait(0)));\n"
-          "println(str(s.serve()));\n",
+          "std.io.println(str(c is RpcClient));\n"
+          "std.io.println(str(j is RpcJob));\n"
+          "std.io.println(str(s is RpcServer));\n"
+          "std.io.println(str(c is RpcJob));\n"
+          "std.io.println(str(Other { x: 1 } is RpcClient));\n"
+          "std.io.println(str(c.call(\"m\", [1, 2])));\n"
+          "std.io.println(str(j.wait(0)));\n"
+          "std.io.println(str(s.serve()));\n",
           stdout_all=["true", "true", "true", "false", "false",
                       "6", "7", "3"])
     check("rpc protocol typed parameter",
           "struct Client {\n"
           "  base: int;\n"
           "  func call(self, method: string, args: list) {\n"
-          "    return self.base + len(args);\n"
+          "    return self.base + std.utils.len(args);\n"
           "  }\n"
           "  func submit(self, method: string, args: list) {\n"
           "    return self.base;\n"
           "  }\n"
           "}\n"
           "func use(c: RpcClient) { return c.call(\"m\", [1, 2]); }\n"
-          "println(str(use(Client { base: 10 })));\n"
+          "std.io.println(str(use(Client { base: 10 })));\n"
           "struct Other { x: int; }\n"
           "use(Other { x: 1 });\n",
           stdout="12",
@@ -3139,8 +3135,8 @@ def run_cases():
           "}\n"
           "struct Num { n: int; func value(self): int { return self.n; } }\n"
           "func render(x: Doubler) { return x.double(); }\n"
-          "println(render(Num { n: 5 }));\n"
-          "println(Num { n: 5 } is Doubler);\n",
+          "std.io.println(render(Num { n: 5 }));\n"
+          "std.io.println(Num { n: 5 } is Doubler);\n",
           stdout_all=["10", "true"])
     check("protocol method repeated",
           "proto Drawable { func draw(self); func draw(self); }\n",
@@ -3152,14 +3148,14 @@ def run_cases():
           stderr="method repeated get")
     check("inline struct method",
           "struct Point { x: int; func get(self): int { return self.x; } }\n"
-          "println(Point { x: 3 }.get());\n",
+          "std.io.println(Point { x: 3 }.get());\n",
           stdout="3")
     check("inline and impl methods share namespace",
           "struct Point { x: int; func twice(self) -> self.x * 2; }\n"
           "impl Point { func plus(self, y) -> self.x + y; }\n"
           "let p = Point { x: 4 };\n"
-          "println(p.twice());\n"
-          "println(p.plus(3));\n",
+          "std.io.println(p.twice());\n"
+          "std.io.println(p.plus(3));\n",
           stdout_all=["8", "7"])
     check("duplicate inline method",
           "struct Point { func get(self) { return 1; } func get(self) { return 2; } }\n",
@@ -3190,15 +3186,15 @@ def run_cases():
           "    };\n"
           "  }\n"
           "}\n"
-          "print(Shape.Circle { r: 2 }.area());\n"
-          "print(Shape.Rect { w: 2, h: 3 }.area());\n",
+          "std.io.print(Shape.Circle { r: 2 }.area());\n"
+          "std.io.print(Shape.Rect { w: 2, h: 3 }.area());\n",
           stdout_all=["4", "6"])
     check("enum method value snapshot",
           "enum E { A { n: int; }; }\n"
           "impl E { func value(self) { return self.n; } }\n"
           "let e = E.A { n: 4 };\n"
           "let f = e.value;\n"
-          "print(f());\n",
+          "std.io.print(f());\n",
           stdout="4")
     check("enum protocol implementation",
           "proto Drawable { func draw(self); }\n"
@@ -3212,14 +3208,14 @@ def run_cases():
           "  }\n"
           "}\n"
           "let s: Drawable = Shape.Circle { r: 7 };\n"
-          "print(s.draw());\nprint(s is Drawable);\n",
+          "std.io.print(s.draw());\nstd.io.print(s is Drawable);\n",
           stdout_all=["7", "true"])
     check("enum protocol structural match",
           "proto D { func d(self); }\n"
           "enum E { A; }\n"
           "impl E { func d(self) { return 1; } }\n"
           "let e = E.A;\n"
-          "print(e is D);\nprint(e.d());\n",
+          "std.io.print(e is D);\nstd.io.print(e.d());\n",
           stdout_all=["true", "1"])
     check("enum protocol pattern",
           "proto D { func d(self); }\n"
@@ -3231,7 +3227,7 @@ def run_cases():
           "    default => -1;\n"
           "  };\n"
           "}\n"
-          "print(describe(E.A { n: 3 }));\n",
+          "std.io.print(describe(E.A { n: 3 }));\n",
           stdout="3")
     check("enum method field conflict",
           "enum E { A { n: int; }; B; }\n"
@@ -3248,30 +3244,30 @@ def run_cases():
           "struct Point { x: Missing; }\n", stderr="unknown type name Missing")
     check("struct switch unsupported",
           "struct Point { x: int; }\n"
-          "switch (Point { x: 1 }) { default => print(\"bad\"); }\n",
+          "switch (Point { x: 1 }) { default => std.io.print(\"bad\"); }\n",
           stderr="switch does not support Point")
 
     check("runtime kind_of",
-          "kind_of(1)\n"
-          "kind_of(1.5)\n"
-          "kind_of(true)\n"
-          'kind_of("x")\n'
-          "kind_of([1])\n"
-          "kind_of({})\n"
-          "kind_of(func() { return 1; })\n"
-          "kind_of(std.math.sqrt)\n"
-          "kind_of(null)\n",
+          "std.type.kind_of(1)\n"
+          "std.type.kind_of(1.5)\n"
+          "std.type.kind_of(true)\n"
+          'std.type.kind_of("x")\n'
+          "std.type.kind_of([1])\n"
+          "std.type.kind_of({})\n"
+          "std.type.kind_of(func() { return 1; })\n"
+          "std.type.kind_of(std.math.sqrt)\n"
+          "std.type.kind_of(null)\n",
           stdout_all=["= int", "= float", "= bool", "= string", "= list",
                       "= dict", "= function", "= builtin", "= null"])
     check("runtime type_name",
           "struct Point { x: int; }\n"
-          'type_name(1)\ntype_name("x")\ntype_name(Point { x: 1 })\n'
-          "type_name(null)\n",
+          'std.type.name(1)\nstd.type.name("x")\nstd.type.name(Point { x: 1 })\n'
+          "std.type.name(null)\n",
           stdout_all=["= int", "= string", "= Point", "= null"])
     check("runtime type_package for primitive",
-          'type_package(1) == ""\n', stdout="= true")
+          'std.type.package_name(1) == ""\n', stdout="= true")
     check("runtime type_module_name for primitive",
-          'type_module_name(1) == ""\n', stdout="= true")
+          'std.type.module_name(1) == ""\n', stdout="= true")
     check("is primitive types",
           "1 is int\n1 is number\n1 is string\n"
           "true is bool\n[1] is list\n{} is dict\n"
@@ -3291,24 +3287,24 @@ def run_cases():
           "struct Point { x: int; }\n"
           'let values = [1, "x", [2], Point { x: 3 }, null];\n'
           "for (let value in values) {\n"
-          '  if (kind_of(value) == "struct") {\n'
-          '    print("struct " + type_name(value));\n'
+          '  if (std.type.kind_of(value) == "struct") {\n'
+          '    std.io.print("struct " + std.type.name(value));\n'
           "  } else {\n"
-          "    print(kind_of(value));\n"
+          "    std.io.print(std.type.kind_of(value));\n"
           "  }\n"
           "}\n",
           stdout_all=["int", "string", "list", "struct Point", "null"])
     check("is unknown type",
           "1 is Missing\n", stderr="unknown type name Missing")
 
-    check("explicit empty return", "func f() { return; }\nprint(f())\n",
+    check("explicit empty return", "func f() { return; }\nstd.io.print(f())\n",
           stdout="null")
-    check("print returns null", "let x = print(1);\nprint(x)\n",
+    check("print returns null", "let x = std.io.print(1);\nstd.io.print(x)\n",
           stdout_all=["1", "null"])
     check("arity error after argument evaluation",
-          "func one(a) { return a; }\none(print(1), 2)\n",
+          "func one(a) { return a; }\none(std.io.print(1), 2)\n",
           stdout="1", stderr="expects 1 argument", env=OFF_ENV)
-    check("non-callable evaluates arguments", "1(print(7))\n",
+    check("non-callable evaluates arguments", "1(std.io.print(7))\n",
           stdout="7", stderr="cannot call int")
 
     check("builtin as value", "let f = std.math.sqrt;\nf(9)\n", stdout="= 3.0")
@@ -3321,7 +3317,7 @@ def run_cases():
     check("builtin equality",
           "std.math.sqrt == std.math.sqrt\nstd.math.sqrt == std.math.abs\n",
           stdout_all=["= true", "= false"])
-    check("print as value", 'let p = print;\np("ok")\n', stdout="ok")
+    check("print as value", 'let p = std.io.print;\np("ok")\n', stdout="ok")
     check("format as value",
           'let f = std.string.format;\nf("{} + {}", 1, 2)\n',
           stdout="= 1 + 2")
@@ -3339,9 +3335,9 @@ def run_cases():
             "process spawn_pipe write read",
             "import std;\n"
             'let p = std.process.spawn_pipe("/bin/cat");\n'
-            'println(str(p.write("hello\\n")));\n'
+            'std.io.println(str(p.write("hello\\n")));\n'
             "p.flush();\n"
-            "println(str(p.read_line(1000)));\n"
+            "std.io.println(str(p.read_line(1000)));\n"
             "p.close();\n",
             stdout_all=["6", "hello"],
         )
@@ -3352,7 +3348,7 @@ def run_cases():
             "let io = std.process.io(proc);\n"
             'io.write("world\\n");\n'
             "io.flush();\n"
-            "println(str(io.read_line(1000)));\n"
+            "std.io.println(str(io.read_line(1000)));\n"
             "io.close();\n"
             "std.process.close(proc);\n",
             stdout="world\n",
@@ -3377,7 +3373,7 @@ def run_cases():
     check("command_status environment override", command_status_env_test,
           stdout="= 3")
     check("command empty environment",
-          'import std;\nstd.process.command("echo hi", dict())\n',
+          'import std;\nstd.process.command("echo hi", std.dict.new())\n',
           stdout="= hi")
     check("command env type",
           'import std;\nstd.process.command("echo hi", 1)\n',
@@ -3392,7 +3388,7 @@ def run_cases():
           'import std;\nstd.process.command("echo hi", {"A=B": "x"})\n',
           stderr="invalid environment variable name")
     check("command env arity error",
-          'import std;\nstd.process.command("echo hi", dict(), 1)\n',
+          'import std;\nstd.process.command("echo hi", std.dict.new(), 1)\n',
           stderr="expects 1 or 2 arguments")
     check("command_status env type",
           'import std;\nstd.process.command_status("exit 0", 1)\n',
@@ -3420,21 +3416,21 @@ def run_cases():
           stderr="symbol not found command")
     check("command is ordinary identifier", "let command = 1;\ncommand\n",
           stdout="= 1")
-    check("input reads a line", "input()\nhello\n", stdout="= hello")
-    check("input with prompt", 'input("Name: ")\nAlice\n',
+    check("input reads a line", "std.io.input()\nhello\n", stdout="= hello")
+    check("input with prompt", 'std.io.input("Name: ")\nAlice\n',
           stdout_all=["Name: ", "= Alice"])
-    check("input with print", 'print(input("> "))\nworld\n',
+    check("input with print", 'std.io.print(std.io.input("> "))\nworld\n',
           stdout_all=["> ", "world"])
-    check("input preserves spaces", "input()\n  hi  \n", stdout="=   hi  ")
-    check("input CRLF", "input()\r\nhello\r\n", stdout="= hello")
-    check("input backspace", "input()\nhello\x7f\x7f\n", stdout="= hel")
-    check("input EOF is null", "input() == null\n", stdout="= true")
-    check("input EOF print", "print(input())\n", stdout="null")
-    check("input prompt type", "input(1)\n",
+    check("input preserves spaces", "std.io.input()\n  hi  \n", stdout="=   hi  ")
+    check("input CRLF", "std.io.input()\r\nhello\r\n", stdout="= hello")
+    check("input backspace", "std.io.input()\nhello\n", stdout="= hel")
+    check("input EOF is null", "std.io.input() == null\n", stdout="= true")
+    check("input EOF print", "std.io.print(std.io.input())\n", stdout="null")
+    check("input prompt type", "std.io.input(1)\n",
           stderr="input prompt must be a string")
-    check("input arity", 'input("a", "b")\n',
+    check("input arity", 'std.io.input("a", "b")\n',
           stderr="input expects 0 or 1 arguments")
-    check("input as value", 'let f = input;\nf("> ")\nvalue\n',
+    check("input as value", 'let f = std.io.input;\nf("> ")\nvalue\n',
           stdout_all=["> ", "= value"])
     check("read_file type error", "std.fs.read_file(1)\n",
           stderr="type error: expected string, got int")
@@ -3598,28 +3594,28 @@ def run_cases():
     check("std.fn compose",
           "import std;\n"
           "let f = std.fn.compose(func(x) -> x + 1, func(x) -> x * 2);\n"
-          "print(f(5));\n"
+          "std.io.print(f(5));\n"
           "let g = std.fn.compose("
           "func(x) -> x * 10, "
           "std.fn.compose(func(x) -> x + 1, func(x) -> x * 2));\n"
-          "print(g(3));\n",
+          "std.io.print(g(3));\n",
           stdout_all=["11", "70"])
     check("std.fn pipe",
           "import std;\n"
           "let f = std.fn.pipe(func(x) -> x + 1, func(x) -> x * 2);\n"
-          "print(f(5));\n",
+          "std.io.print(f(5));\n",
           stdout="12")
     check("std.fn partial",
           "import std;\n"
           "let add = std.fn.partial(func(a, b, c) -> a + b + c, 1, 2);\n"
-          "print(add(3));\n"
-          "print(std.fn.partial(func(a, b) -> a + b)(4, 5));\n",
+          "std.io.print(add(3));\n"
+          "std.io.print(std.fn.partial(func(a, b) -> a + b)(4, 5));\n",
           stdout_all=["6", "9"])
     check("std.fn identity and always",
           "import std;\n"
-          "print(std.fn.identity(7));\n"
+          "std.io.print(std.fn.identity(7));\n"
           "let k = std.fn.always([1, 2]);\n"
-          "print(k(9, 10));\n",
+          "std.io.print(k(9, 10));\n",
           stdout_all=["7", "[1, 2]"])
     check("std.fn errors",
           "import std;\nstd.fn.compose(1, 2);\n",
@@ -3638,28 +3634,28 @@ def run_cases():
           "import std;\n"
           "let xs = std.iter.collect(\n"
           "  std.iter.map(\n"
-          "    std.iter.filter(range(0, 10), func(x) -> x % 2 == 0),\n"
+          "    std.iter.filter(std.utils.range(0, 10), func(x) -> x % 2 == 0),\n"
           "    func(x) -> x * x));\n"
-          "print(xs);\n"
-          "print(std.iter.collect(std.iter.take(range(0, 100), 3)));\n"
-          "print(std.iter.collect(std.iter.drop([1, 2, 3, 4], 2)));\n"
-          "print(std.iter.collect(std.iter.enumerate([\"a\", \"b\"])));\n",
+          "std.io.print(xs);\n"
+          "std.io.print(std.iter.collect(std.iter.take(std.utils.range(0, 100), 3)));\n"
+          "std.io.print(std.iter.collect(std.iter.drop([1, 2, 3, 4], 2)));\n"
+          "std.io.print(std.iter.collect(std.iter.enumerate([\"a\", \"b\"])));\n",
           stdout_all=["[0, 4, 16, 36, 64]", "[0, 1, 2]", "[3, 4]",
                       "[[0, a], [1, b]]"])
     check("std.iter generator",
           "import std;\n"
           "func gen() { yield 1; yield 2; yield 3; }\n"
-          "print(std.iter.collect(std.iter.map(gen(), func(x) -> x * 10)));\n"
+          "std.io.print(std.iter.collect(std.iter.map(gen(), func(x) -> x * 10)));\n"
           "let out = [];\n"
           "for (let x in std.iter.filter(gen(), func(x) -> x > 1)) {\n"
           "  out = std.list.append(out, x);\n"
           "}\n"
-          "print(out);\n",
+          "std.io.print(out);\n",
           stdout_all=["[10, 20, 30]", "[2, 3]"])
     check("std.iter take closes source",
           "import std;\n"
-          "func gen() { defer print(\"closed\"); yield 1; yield 2; }\n"
-          "print(std.iter.collect(std.iter.take(gen(), 1)));\n",
+          "func gen() { defer std.io.print(\"closed\"); yield 1; yield 2; }\n"
+          "std.io.print(std.iter.collect(std.iter.take(gen(), 1)));\n",
           stdout_all=["closed", "[1]"])
     check("std.iter argument errors",
           "import std;\nstd.iter.take([1, 2], -1);\n",

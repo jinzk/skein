@@ -101,7 +101,7 @@ def main():
             "let t8 = std.thread.spawn_entry(method_blob, "
             'std.thread.Message.from({"n": 3}));\n'
             "let joined8 = t8.join();\n"
-            'println("pool=" + str(r1["value"]["v"]) + ":" + '
+            'std.io.println("pool=" + str(r1["value"]["v"]) + ":" + '
             'str(r2["value"]["v"]) + " thread=" + '
             'str(joined["value"]["v"]) + " src=" + '
             'str(joined2["value"]["v"]) + " proto=" + '
@@ -157,7 +157,7 @@ def main():
                 "let t = std.thread.spawn_function(w, "
                 'std.thread.Message.from({"n": 4}));\n'
                 "let r = t.join();\n"
-                'print("import=" + str(r["value"]["v"]));\n'
+                'std.io.print("import=" + str(r["value"]["v"]));\n'
             )
         proc = subprocess.run(
             [BIN, main_path],

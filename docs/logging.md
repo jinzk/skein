@@ -26,6 +26,7 @@
 ## 2. API
 
 ```text
+import std;
 std.log.new(options?)                  → logger
 std.log.trace/debug/info/warn/error(message[, fields])
 std.log.enabled(level)                 → bool
@@ -43,7 +44,8 @@ logger.flush()
 `logger` 是内置 `userdata` 类型：
 
 ```text
-kind_of(logger)   // "userdata"
+import std;
+std.type.kind_of(logger)   // "userdata"
 str(logger)       // "logger(app)" 或 "logger"
 ```
 

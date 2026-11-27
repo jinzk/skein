@@ -74,28 +74,28 @@ def run_cases():
     source = """
 import std;
 
-let s = std.http.listen("127.0.0.1", 0);
-println(str(s["port"]));
+let s = std.http.listen(\"127.0.0.1\", 0);
+std.io.println(str(s[\"port\"]));
 std.io.flush(std.io.stdout);
 let n = std.http.serve(s, func(req) {
   return std.http.json_response(200, {
-    "path": req["path"],
-    "target": req["target"],
-    "query": req["query"],
-    "cookies": req["cookies"],
-    "request_id": req["request_id"],
-    "client_ip": req["client_ip"],
-    "x_values": req["header_values"]["x-multi"],
-    "trace_id": req["trace_id"],
-    "span_id": req["span_id"],
-    "parent_span_id": req["parent_span_id"],
-    "trace_flags": req["trace_flags"],
-    "traceparent": req["traceparent"]
+    \"path\": req[\"path\"],
+    \"target\": req[\"target\"],
+    \"query\": req[\"query\"],
+    \"cookies\": req[\"cookies\"],
+    \"request_id\": req[\"request_id\"],
+    \"client_ip\": req[\"client_ip\"],
+    \"x_values\": req[\"header_values\"][\"x-multi\"],
+    \"trace_id\": req[\"trace_id\"],
+    \"span_id\": req[\"span_id\"],
+    \"parent_span_id\": req[\"parent_span_id\"],
+    \"trace_flags\": req[\"trace_flags\"],
+    \"traceparent\": req[\"traceparent\"]
   }, {
-    "Set-Cookie": ["a=1; Path=/", "b=2; Path=/"]
+    \"Set-Cookie\": [\"a=1; Path=/\", \"b=2; Path=/\"]
   });
 }, 1);
-println("served " + str(n));
+std.io.println(\"served \" + str(n));
 """
     proc, port = start_server(source, "http api context")
     try:
@@ -145,23 +145,23 @@ import std.route;
 
 let app = route.new();
 app.use_after(func(req, res) {
-  res["headers"]["X-After"] = "yes";
+  res[\"headers\"][\"X-After\"] = \"yes\";
   return res;
 });
-app.get("/err", func(req) {
-  return std.http.json_error(422, "BAD_INPUT", "name is required",
-                             {"field": "name"});
+app.get(\"/err\", func(req) {
+  return std.http.json_error(422, \"BAD_INPUT\", \"name is required\",
+                             {\"field\": \"name\"});
 });
-app.get("/ok", func(req) {
-  return std.http.json_response(200, {"ok": true});
+app.get(\"/ok\", func(req) {
+  return std.http.json_response(200, {\"ok\": true});
 });
-app.get("/boom", func(req) { fail("boom"); });
+app.get(\"/boom\", func(req) { fail(\"boom\"); });
 
-let s = std.http.listen("127.0.0.1", 0);
-println(str(s["port"]));
+let s = std.http.listen(\"127.0.0.1\", 0);
+std.io.println(str(s[\"port\"]));
 std.io.flush(std.io.stdout);
 let n = std.http.serve(s, func(req) { return app.dispatch(req); }, 3);
-println("served " + str(n));
+std.io.println(\"served \" + str(n));
 """
     proc, port = start_server(source, "http api route")
     try:
@@ -189,14 +189,14 @@ println("served " + str(n));
     source = """
 import std;
 
-let s = std.http.listen("127.0.0.1", 0);
-println(str(s["port"]));
+let s = std.http.listen(\"127.0.0.1\", 0);
+std.io.println(str(s[\"port\"]));
 std.io.flush(std.io.stdout);
-s["handler_timeout_ms"] = 50;
+s[\"handler_timeout_ms\"] = 50;
 let n = std.http.serve(s, func(req) {
   return std.task.sleep(500);
 }, 1);
-println("served " + str(n));
+std.io.println(\"served \" + str(n));
 """
     proc, port = start_server(source, "http api timeout")
     try:
@@ -211,27 +211,27 @@ println("served " + str(n));
     source = """
 import std;
 
-let s = std.http2.listen("127.0.0.1", 0);
-println(str(s["port"]));
+let s = std.http2.listen(\"127.0.0.1\", 0);
+std.io.println(str(s[\"port\"]));
 std.io.flush(std.io.stdout);
-s["handler_timeout_ms"] = 50;
+s[\"handler_timeout_ms\"] = 50;
 let n = std.http2.serve(s, func(req) {
-  if (req["path"] == "/boom") {
-    fail("boom");
+  if (req[\"path\"] == \"/boom\") {
+    fail(\"boom\");
   }
-  if (req["path"] == "/slow") {
+  if (req[\"path\"] == \"/slow\") {
     return std.task.sleep(500);
   }
   return std.http.json_response(200, {
-    "path": req["path"],
-    "query": req["query"],
-    "cookies": req["cookies"],
-    "request_id": req["request_id"]
+    \"path\": req[\"path\"],
+    \"query\": req[\"query\"],
+    \"cookies\": req[\"cookies\"],
+    \"request_id\": req[\"request_id\"]
   }, {
-    "Set-Cookie": ["x=1; Path=/", "y=2; Path=/"]
+    \"Set-Cookie\": [\"x=1; Path=/\", \"y=2; Path=/\"]
   });
 }, 3);
-println("served " + str(n));
+std.io.println(\"served \" + str(n));
 """
     proc, port = start_server(source, "http2 api context")
     try:
@@ -239,15 +239,15 @@ println("served " + str(n));
             "import std;\n"
             f'let a = std.http2.get("http://127.0.0.1:{port}/ctx?a=1",\n'
             '  {"headers": {"Cookie": "sid=abc"}});\n'
-            'println(str(a["status"]));\n'
-            'println(str(len(a["set_cookie"])));\n'
-            'println(std.bytes.to_string(a["body"]));\n'
+            'std.io.println(str(a["status"]));\n'
+            'std.io.println(str(std.utils.len(a["set_cookie"])));\n'
+            'std.io.println(std.bytes.to_string(a["body"]));\n'
             f'let b = std.http2.get("http://127.0.0.1:{port}/boom");\n'
-            'println(str(b["status"]));\n'
-            'println(std.bytes.to_string(b["body"]));\n'
+            'std.io.println(str(b["status"]));\n'
+            'std.io.println(std.bytes.to_string(b["body"]));\n'
             f'let c = std.http2.get("http://127.0.0.1:{port}/slow");\n'
-            'println(str(c["status"]));\n'
-            'println(std.bytes.to_string(c["body"]));\n'
+            'std.io.println(str(c["status"]));\n'
+            'std.io.println(std.bytes.to_string(c["body"]));\n'
         )
         assert client.returncode == 0, client.stderr
         lines = client.stdout.strip().splitlines()
@@ -286,7 +286,7 @@ println("served " + str(n));
         source = (
             "import std;\n"
             'let s = std.http.listen("127.0.0.1", 0);\n'
-            'println(s["port"]);\n'
+            'std.io.println(s["port"]);\n'
             "std.io.flush(std.io.stdout);\n"
             f'let ts = std.http.serve_threads(s, 2, "{worker_text}", '
             '{"max_requests": 1});\n'
@@ -312,7 +312,7 @@ println("served " + str(n));
         source = (
             "import std;\n"
             'let s = std.http.listen("127.0.0.1", 0);\n'
-            'println(s["port"]);\n'
+            'std.io.println(s["port"]);\n'
             "std.io.flush(std.io.stdout);\n"
             f'let ps = std.http.serve_processes(s, 1, "{worker_text}", '
             '{"max_requests": 1});\n'

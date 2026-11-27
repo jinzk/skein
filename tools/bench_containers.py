@@ -21,7 +21,7 @@ CASES = [
 let d = std.deque.new();
 let i = 0;
 while (i < {n}) { d = std.deque.push_back(d, i); i = i + 1; }
-print(std.deque.size(d));
+std.io.print(std.deque.size(d));
 """,
     },
     {
@@ -33,7 +33,7 @@ print(std.deque.size(d));
 let h = std.heap.new(func(a, b) { return a < b; });
 let i = 0;
 while (i < {n}) { h = std.heap.push(h, i); i = i + 1; }
-print(std.heap.size(h));
+std.io.print(std.heap.size(h));
 """,
     },
     {
@@ -45,7 +45,7 @@ print(std.heap.size(h));
 let xs = [];
 let i = 0;
 while (i < {n}) { xs = std.list.append(xs, i); i = i + 1; }
-print(len(xs));
+std.io.print(std.utils.len(xs));
 """,
     },
     {
@@ -57,7 +57,7 @@ print(len(xs));
 let d = {};
 let i = 0;
 while (i < {n}) { d[i] = i; i = i + 1; }
-print(len(d));
+std.io.print(std.utils.len(d));
 """,
     },
     {
@@ -71,7 +71,7 @@ let i = 0;
 while (i < {n}) { d[i] = i; i = i + 1; }
 let s = 0; i = 0;
 while (i < 4 * {n}) { s = s + d[i % {n}]; i = i + 1; }
-print(s);
+std.io.print(s);
 """,
     },
     {
@@ -85,7 +85,7 @@ let i = 0;
 while (i < {n}) { d[i] = i; i = i + 1; }
 i = 0;
 while (i < {n}) { d = std.dict.delete(d, i); i = i + 1; }
-print(len(d));
+std.io.print(std.utils.len(d));
 """,
     },
     {
@@ -97,7 +97,7 @@ print(len(d));
 let s = std.set.new();
 let i = 0;
 while (i < {n}) { s = std.set.add(s, i); i = i + 1; }
-print(std.set.size(s));
+std.io.print(std.set.size(s));
 """,
     },
     {
@@ -109,7 +109,7 @@ print(std.set.size(s));
 let d = {};
 let i = 0;
 while (i < {n}) { d[(i, i + 1)] = i; i = i + 1; }
-print(len(d));
+std.io.print(std.utils.len(d));
 """,
     },
     {
@@ -123,7 +123,7 @@ let i = 0;
 while (i < {n}) { d[(i, i + 1)] = i; i = i + 1; }
 let s = 0; i = 0;
 while (i < 4 * {n}) { s = s + d[(i % {n}, i % {n} + 1)]; i = i + 1; }
-print(s);
+std.io.print(s);
 """,
     },
     {
@@ -135,8 +135,8 @@ print(s);
 struct Key { id: int; tag: string; }
 let d = {};
 let i = 0;
-while (i < {n}) { d[Key { id: i, tag: "x" }] = i; i = i + 1; }
-print(len(d));
+while (i < {n}) { d[Key { id: i, tag: \"x\" }] = i; i = i + 1; }
+std.io.print(std.utils.len(d));
 """,
     },
     {
@@ -149,7 +149,7 @@ enum Key { Item { id: int; }; }
 let d = {};
 let i = 0;
 while (i < {n}) { d[Key.Item { id: i }] = i; i = i + 1; }
-print(len(d));
+std.io.print(std.utils.len(d));
 """,
     },
     {
@@ -165,7 +165,7 @@ impl Key {
 let d = {};
 let i = 0;
 while (i < {n}) { d[Key { id: i, cache: [] }] = i; i = i + 1; }
-print(len(d));
+std.io.print(std.utils.len(d));
 """,
     },
     {
@@ -177,7 +177,7 @@ print(len(d));
 let s = std.set.new();
 let i = 0;
 while (i < {n}) { s = std.set.add(s, (i, i + 1)); i = i + 1; }
-print(std.set.size(s));
+std.io.print(std.set.size(s));
 """,
     },
     {
@@ -194,7 +194,7 @@ impl User {
 let d = {};
 let i = 0;
 while (i < {n}) { d[User { id: i, cache: [] }] = i; i = i + 1; }
-print(len(d));
+std.io.print(std.utils.len(d));
 """,
     },
     {
@@ -216,7 +216,7 @@ while (i < 4 * {n}) {
   s = s + d[User { id: i % {n}, cache: [i] }];
   i = i + 1;
 }
-print(s);
+std.io.print(s);
 """,
     },
     {
@@ -226,11 +226,11 @@ print(s);
         "imports": ("std",),
         "src": """
 struct User { id: int; cache: list[int]; }
-let users = std.list.map(range({n}), func(i) {
+let users = std.list.map(std.utils.range({n}), func(i) {
   return User { id: i, cache: [] };
 });
 let d = std.dict.index_by(users, func(u) { return u.id; });
-print(len(d));
+std.io.print(std.utils.len(d));
 """,
     },
     {
@@ -240,11 +240,11 @@ print(len(d));
         "imports": ("std",),
         "src": """
 struct User { id: int; cache: list[int]; }
-let users = std.list.map(range({n}), func(i) {
+let users = std.list.map(std.utils.range({n}), func(i) {
   return User { id: i % 1000, cache: [] };
 });
 let d = std.dict.index_by(users, func(u) { return u.id; });
-print(len(d));
+std.io.print(std.utils.len(d));
 """,
     },
     {
@@ -253,8 +253,8 @@ print(len(d));
         "expect": "nlog",
         "imports": ("std", "std.set"),
         "src": """
-let s = std.set.from_list(range({n}));
-print(std.set.size(s));
+let s = std.set.from_list(std.utils.range({n}));
+std.io.print(std.set.size(s));
 """,
     },
     {
@@ -267,7 +267,7 @@ let edges = std.deque.new();
 let i = 1;
 while (i < {n}) { edges = std.deque.push_back(edges, [i, i + 1]); i = i + 1; }
 let g = graph.from_edges({n}, std.deque.to_list(edges));
-print(len(graph.bfs(g, 1)));
+std.io.print(std.utils.len(graph.bfs(g, 1)));
 """,
     },
     {
@@ -278,8 +278,8 @@ print(len(graph.bfs(g, 1)));
         "src": """
 let g = graph.new();
 let i = 0;
-while (i < {n}) { let r = graph.add_node(g, i); g = r["graph"]; i = i + 1; }
-print(graph.node_count(g));
+while (i < {n}) { let r = graph.add_node(g, i); g = r[\"graph\"]; i = i + 1; }
+std.io.print(graph.node_count(g));
 """,
     },
     {
@@ -288,8 +288,8 @@ print(graph.node_count(g));
         "expect": "linear",
         "imports": ("std", "std.arena"),
         "src": """
-let s = arena.from_list(range({n}));
-print(arena.size(s));
+let s = arena.from_list(std.utils.range({n}));
+std.io.print(arena.size(s));
 """,
     },
     {
@@ -300,8 +300,8 @@ print(arena.size(s));
         "src": """
 let s = arena.new();
 let i = 0;
-while (i < {n}) { let r = arena.add(s, i); s = r["arena"]; i = i + 1; }
-print(arena.size(s));
+while (i < {n}) { let r = arena.add(s, i); s = r[\"arena\"]; i = i + 1; }
+std.io.print(arena.size(s));
 """,
     },
     {
@@ -311,8 +311,8 @@ print(arena.size(s));
         "imports": ("std", "std.fsm"),
         "src": """
 let m = fsm.define(0, func(state, event) { return state + 1; });
-let ctx = m.run(m.start(), range({n}));
-print(ctx.state);
+let ctx = m.run(m.start(), std.utils.range({n}));
+std.io.print(ctx.state);
 """,
     },
     {
@@ -323,8 +323,8 @@ print(ctx.state);
         "src": """
 let l = lru.new({n});
 let i = 0;
-while (i < {n}) { let r = lru.put(l, i, i); l = r["lru"]; i = i + 1; }
-print(lru.size(l));
+while (i < {n}) { let r = lru.put(l, i, i); l = r[\"lru\"]; i = i + 1; }
+std.io.print(lru.size(l));
 """,
     },
     {
@@ -335,11 +335,11 @@ print(lru.size(l));
         "src": """
 let l = lru.new(64);
 let i = 0;
-while (i < 64) { let r = lru.put(l, i, i); l = r["lru"]; i = i + 1; }
+while (i < 64) { let r = lru.put(l, i, i); l = r[\"lru\"]; i = i + 1; }
 i = 0;
 let sum = 0;
-while (i < {n}) { let r = lru.get(l, i % 64); l = r["lru"]; sum = sum + r["value"]; i = i + 1; }
-print(sum);
+while (i < {n}) { let r = lru.get(l, i % 64); l = r[\"lru\"]; sum = sum + r[\"value\"]; i = i + 1; }
+std.io.print(sum);
 """,
     },
     {
@@ -348,8 +348,8 @@ print(sum);
         "expect": "linear",
         "imports": ("std",),
         "src": """
-let xs = range({n});
-print(len(std.list.unique(xs)));
+let xs = std.utils.range({n});
+std.io.print(std.utils.len(std.list.unique(xs)));
 """,
     },
     {
@@ -358,8 +358,8 @@ print(len(std.list.unique(xs)));
         "expect": "linear",
         "imports": ("std",),
         "src": """
-let xs = range({n});
-print(len(std.list.top_k(xs, 100)));
+let xs = std.utils.range({n});
+std.io.print(std.utils.len(std.list.top_k(xs, 100)));
 """,
     },
     {
@@ -370,7 +370,7 @@ print(len(std.list.top_k(xs, 100)));
         "src": """
 let a = {}; let b = {}; let i = 0;
 while (i < {n}) { a[i] = i; b[i] = i; i = i + 1; }
-print(a == b);
+std.io.print(a == b);
 """,
     },
 ]
@@ -408,7 +408,7 @@ def measure(binary, source, repeat, timeout):
 
 
 def baseline_source(imports):
-    return "".join(f"import {name};\n" for name in imports) + "print(1);\n"
+    return "".join(f"import {name};\n" for name in imports) + "std.io.print(1);\n"
 
 
 def main():

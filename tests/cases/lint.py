@@ -34,8 +34,8 @@ def run_lint(source, *extra, env=None):
 
 def run_cases():
     clean = run_lint(
-        "let x: int = 1;\n"
-        'println("SHOULD_NOT_PRINT");\n',
+        "import std;\nlet x: int = 1;\n"
+        'std.io.println("SHOULD_NOT_PRINT");\n',
         "--typecheck=strict",
     )
     assert clean.returncode == 0, (

@@ -10,7 +10,7 @@
 // failure instead of passing silently.
 
 func ts_show(value) {
-  if (kind_of(value) == "string") {
+  if (std.type.kind_of(value) == "string") {
     return "\"" + value + "\"";
   }
   if (value == null) {
@@ -87,9 +87,9 @@ func ts_eq(got, want) {
 // Like ts_eq, but also requires the runtime kind to match (for example int
 // versus float, which compare equal with ==).
 func ts_same(got, want) {
-  if (kind_of(got) != kind_of(want) || got != want) {
+  if (std.type.kind_of(got) != std.type.kind_of(want) || got != want) {
     ts_fail("expected " + ts_show(want) + ", got " + ts_show(got) +
-            " [" + kind_of(want) + " vs " + kind_of(got) + "]");
+            " [" + std.type.kind_of(want) + " vs " + std.type.kind_of(got) + "]");
   }
 }
 
@@ -129,16 +129,16 @@ func ts_error(thunk, fragment) {
 
 func ts_finish() {
   if (ts_only != null && ts_only != "" && ts_total == 0) {
-    print("FAIL no case matched SKEIN_TEST_CASE=" + ts_only + "\n");
+    std.io.print("FAIL no case matched SKEIN_TEST_CASE=" + ts_only + "\n");
     std.sys.exit(1);
   }
-  if (len(ts_failures) > 0) {
+  if (std.utils.len(ts_failures) > 0) {
     for (let failure in ts_failures) {
-      print("FAIL " + failure + "\n");
+      std.io.print("FAIL " + failure + "\n");
     }
-    print("failed: " + str(len(ts_failures)) + " failure(s), " +
+    std.io.print("failed: " + str(std.utils.len(ts_failures)) + " failure(s), " +
           str(ts_total) + " case(s), " + str(ts_skipped) + " skipped\n");
     std.sys.exit(1);
   }
-  print("ok: " + str(ts_total) + " case(s), " + str(ts_skipped) + " skipped\n");
+  std.io.print("ok: " + str(ts_total) + " case(s), " + str(ts_skipped) + " skipped\n");
 }

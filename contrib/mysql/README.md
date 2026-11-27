@@ -30,9 +30,10 @@ SKEIN_ALLOW_NATIVE=1 ./skein main.skein
 `main.skein`：
 
 ```text
+import std;
 import "skein.contrib/mysql" as mysql;
-println(mysql.VERSION);
-println(mysql.library_version());
+std.io.println(mysql.VERSION);
+std.io.println(mysql.library_version());
 ```
 
 第三方 module 内的 `std.native.load` 默认禁止，因此运行脚本时必须设置
@@ -143,9 +144,10 @@ Skein task。task 的结果是需要包装的 native userdata，用 `mysql.wrap_
 转成 `client.Result`：
 
 ```text
+import std;
 let t = conn.query_task("SELECT 42 AS answer");
 let result = mysql.wrap_result(t);
-println(result.rows()[0]["answer"]);
+std.io.println(result.rows()[0]["answer"]);
 result.close();
 ```
 
@@ -179,5 +181,5 @@ ctest --test-dir build -R mysql_plugin_test --output-on-failure
   复制出来的多个 `Connection` 指向同一个 MySQL 连接；
 - MySQL 连接不要跨线程共享。插件内部用 mutex 防止同一连接的并发 C API
   调用，但这不等于连接池或事务隔离；
-- 文本列通过 `new_string_len` 保留底层长度，但 Skein 的 `len()` / 字符串操作
+- 文本列通过 `new_string_len` 保留底层长度，但 Skein 的 `std.utils.len()` / 字符串操作
   基于 UTF-8 文本语义，内嵌 NUL 的展示仍可能截断；需要完整字节请用 BLOB 列。

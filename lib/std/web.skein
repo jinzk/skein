@@ -2,7 +2,7 @@ package web {
   import std;
 
   func _list_has(values, target) {
-    if (kind_of(values) != "list") {
+    if (std.type.kind_of(values) != "list") {
       return false;
     }
     for (let item in values) {
@@ -24,7 +24,7 @@ package web {
   func _header(req, name) {
     let headers = req["headers"];
     let value = std.dict.get(headers, name, null);
-    if (value == null || kind_of(value) != "string") {
+    if (value == null || std.type.kind_of(value) != "string") {
       return null;
     }
     return value;
@@ -39,7 +39,7 @@ package web {
     if (origin == null) {
       return null;
     }
-    if (kind_of(origins) == "string") {
+    if (std.type.kind_of(origins) == "string") {
       if (origins == "*" || origins == origin) {
         return origin;
       }
@@ -71,7 +71,7 @@ package web {
     }
     let expose = std.dict.get(options, "expose_headers", null);
     if (expose != null) {
-      if (kind_of(expose) == "list") {
+      if (std.type.kind_of(expose) == "list") {
         expose = std.string.join(expose, ",");
       }
       headers["Access-Control-Expose-Headers"] = expose;
@@ -131,7 +131,7 @@ package web {
       headers["Permissions-Policy"] = permissions;
     }
     let extra = std.dict.get(options, "headers", null);
-    if (extra != null && kind_of(extra) == "dict") {
+    if (extra != null && std.type.kind_of(extra) == "dict") {
       for (let key in std.dict.keys(extra)) {
         headers[key] = extra[key];
       }
@@ -159,7 +159,7 @@ package web {
       return remote;
     }
     let forwarded = std.dict.get(req, "forwarded_for", null);
-    if (forwarded == null || kind_of(forwarded) != "string") {
+    if (forwarded == null || std.type.kind_of(forwarded) != "string") {
       return remote;
     }
     let first = std.string.split(forwarded, ",")[0];
@@ -180,7 +180,7 @@ package web {
       });
     }
     let max_body = std.dict.get(options, "max_body", 4096);
-    if (kind_of(max_body) != "int" || max_body < 0) {
+    if (std.type.kind_of(max_body) != "int" || max_body < 0) {
       fail("web.error_log max_body must be a non-negative integer");
     }
     return func(req, response) {
@@ -190,14 +190,14 @@ package web {
       }
       let body = std.dict.get(response, "body", "");
       let detail = "";
-      if (kind_of(body) == "string") {
+      if (std.type.kind_of(body) == "string") {
         detail = body;
-      } else if (kind_of(body) == "bytes") {
+      } else if (std.type.kind_of(body) == "bytes") {
         detail = std.bytes.to_string(body);
       } else if (body != null) {
         detail = std.json.stringify(body);
       }
-      if (len(detail) > max_body) {
+      if (std.utils.len(detail) > max_body) {
         detail = std.string.substr(detail, 0, max_body);
       }
       logger.error("request_failed", {
@@ -245,9 +245,9 @@ package web {
       let now = std.time.now_ms();
       let body = std.dict.get(response, "body", null);
       let size = 0;
-      if (body != null && (kind_of(body) == "string" ||
-                           kind_of(body) == "bytes")) {
-        size = len(body);
+      if (body != null && (std.type.kind_of(body) == "string" ||
+                           std.type.kind_of(body) == "bytes")) {
+        size = std.utils.len(body);
       }
       logger.info("request", {
         "request_id": std.dict.get(req, "request_id", null),
@@ -366,10 +366,10 @@ package web {
   export func rate_limit(options = {}) {
     let limit = std.dict.get(options, "limit", 100);
     let window_ms = std.dict.get(options, "window_ms", 60000);
-    if (kind_of(limit) != "int" || limit <= 0) {
+    if (std.type.kind_of(limit) != "int" || limit <= 0) {
       fail("web.rate_limit limit must be a positive integer");
     }
-    if (kind_of(window_ms) != "int" || window_ms <= 0) {
+    if (std.type.kind_of(window_ms) != "int" || window_ms <= 0) {
       fail("web.rate_limit window_ms must be a positive integer");
     }
     let key_fn = std.dict.get(options, "key_fn", null);
@@ -381,11 +381,11 @@ package web {
     let message = std.dict.get(options, "message", "too many requests");
     let cache_client = std.dict.get(options, "cache", null);
     if (cache_client != null) {
-      if (kind_of(cache_client) != "struct") {
+      if (std.type.kind_of(cache_client) != "struct") {
         fail("web.rate_limit cache must be a std.cache client");
       }
       let prefix = std.dict.get(options, "prefix", "skein:rate:");
-      if (kind_of(prefix) != "string" || prefix == "") {
+      if (std.type.kind_of(prefix) != "string" || prefix == "") {
         fail("web.rate_limit prefix must be a non-empty string");
       }
       let shared_check = func(req) {

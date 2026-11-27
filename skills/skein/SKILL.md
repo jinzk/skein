@@ -28,7 +28,7 @@ skein -i                          # REPL
 import std;
 
 func main() {
-  println("hello");
+  std.io.println("hello");
 }
 
 main();
@@ -83,12 +83,13 @@ if x {
 ### 3. 条件括号可以省略，但 body 必须是块
 
 ```skein
+import std;
 let x = 3;
 
 if x > 0 {
-  println("positive");
+  std.io.println("positive");
 } else {
-  println("other");
+  std.io.println("other");
 }
 
 while x > 0 {
@@ -98,7 +99,7 @@ while x > 0 {
 
 - 省略条件括号时，`if` / `while` / `for` / `switch` / `match` 的 body 必须是
   `{ ... }`，不能写单条语句；
-- 带括号的形式仍支持单条语句：`if (x > 0) println("positive");`；
+- 带括号的形式仍支持单条语句：`if (x > 0) std.io.println("positive");`；
 - 条件里的 dict、struct、函数、`match` 等复合字面量必须加括号：
   `if (d == {"a": 1}) { ... }`；
 - 条件本身以 `(` 开头时按带括号形式解析。
@@ -106,16 +107,17 @@ while x > 0 {
 ### 4. for 和 for-in
 
 ```skein
+import std;
 for x in [1, 2, 3] {
-  print(x);
+  std.io.print(x);
 }
 
 for key, value in {"a": 1, "b": 2} {
-  println(key + "=" + str(value));
+  std.io.println(key + "=" + str(value));
 }
 
 for let i = 0; i < 3; i = i + 1 {
-  println(str(i));
+  std.io.println(str(i));
 }
 ```
 
@@ -132,7 +134,7 @@ for let i = 0; i < 3; i = i + 1 {
 import std;
 
 std.iter.for_each(["a", "b"], func(i, value) {
-  println(str(i) + ":" + value);
+  std.io.println(str(i) + ":" + value);
 });
 ```
 
@@ -150,6 +152,7 @@ set / deque / heap / generator 接收 `(index, value)`，dict 接收
 ### 6. match 是表达式
 
 ```skein
+import std;
 func describe(n) {
   return match n {
     case 0 => "zero";
@@ -158,7 +161,7 @@ func describe(n) {
   };
 }
 
-println(describe(2));
+std.io.println(describe(2));
 ```
 
 - 表达式 arm 以 `;` 结尾，块 arm 不用；
@@ -169,6 +172,7 @@ println(describe(2));
 ### 7. struct 和 enum
 
 ```skein
+import std;
 struct Point {
   x: int;
   y: int;
@@ -181,7 +185,7 @@ impl Point {
 }
 
 let p = Point { x: 3, y: 4 };
-println(str(p.length_sq()));
+std.io.println(str(p.length_sq()));
 ```
 
 - 构造用 `Point { x: 1, y: 2 }`；字段有默认值时可写 `Config {}`；
@@ -196,9 +200,10 @@ println(str(p.length_sq()));
 ### 8. 字符串没有插值
 
 ```skein
+import std;
 let name = "skein";
-println("hello, " + name);
-println("n=" + str(42));
+std.io.println("hello, " + name);
+std.io.println("n=" + str(42));
 ```
 
 `+` 用于数值加法、字符串/char 拼接和 list 拼接。数字、bool、list 等和
@@ -210,8 +215,8 @@ string 混合拼接时先套 `str()`，否则报 `cannot add string and int`。
 import std;
 
 let d = {"a": 1};
-println(str(std.dict.has(d, "a")));
-println(str(std.dict.get(d, "b", 0)));
+std.io.println(str(std.dict.has(d, "a")));
+std.io.println(str(std.dict.get(d, "b", 0)));
 ```
 
 `d["missing"]` 报 `runtime error: key not found`。需要默认值时用
@@ -220,6 +225,7 @@ println(str(std.dict.get(d, "b", 0)));
 ### 10. 错误处理
 
 ```skein
+import std;
 func parse_positive(text) {
   let n = int(text);
   if n <= 0 {
@@ -229,11 +235,11 @@ func parse_positive(text) {
 }
 
 let n = parse_positive("0") on error(e) {
-  println("bad input: " + str(e));
+  std.io.println("bad input: " + str(e));
   recover 0;
 };
 
-println(str(n));
+std.io.println(str(n));
 ```
 
 - `fail expr;` 抛出错误，`fail;` 抛出空错误；

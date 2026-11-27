@@ -60,7 +60,7 @@ def check_usage_errors():
 
     with tempfile.TemporaryDirectory(prefix="skein-watch-bad-") as tmp:
         script_path = os.path.join(tmp, "app.skein")
-        write_text(script_path, "print(1);\n")
+        write_text(script_path, "import std;\nstd.io.print(1);\n")
         proc = subprocess.run(
             [BIN, "--watch", "--watch-dir", os.path.join(tmp, "missing"),
              script_path],

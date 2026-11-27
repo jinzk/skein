@@ -52,7 +52,7 @@ def run_case(tmp, name, worker_source, expected, gc_stress):
         "}\n"
         "pool.close();\n"
         "pool.join();\n"
-        "println(str(total));\n"
+        "std.io.println(str(total));\n"
     )
     env = os.environ.copy()
     env["SKEIN_VM"] = "1"

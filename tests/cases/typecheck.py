@@ -18,7 +18,7 @@ def run_cases():
           "let xs: list[int] = [1, 2];\n"
           "xs[0] = 3;\n"
           "xs += [4];\n"
-          "println(xs);\n",
+          "std.io.println(xs);\n",
           stdout_all=["[3, 2, 4]"])
 
     check("generic list literal element error",
@@ -44,13 +44,13 @@ def run_cases():
     check("compound assignment widens untyped target",
           "let x = 1;\n"
           "x += 2.5;\n"
-          "println(x);\n",
+          "std.io.println(x);\n",
           stdout_all=["3.5"])
 
     check("compound list accepts tuple",
           "let xs: list[int] = [1];\n"
           "xs += (2, 3);\n"
-          "println(xs);\n",
+          "std.io.println(xs);\n",
           stdout_all=["[1, 2, 3]"])
 
     check("compound int rejects float result",
@@ -88,13 +88,13 @@ def run_cases():
     check("generic dict initialization and insert",
           "let d: dict[int, int] = {1: 2};\n"
           "d[3] = 4;\n"
-          "println(d);\n",
+          "std.io.println(d);\n",
           stdout_all=["{1: 2, 3: 4}"])
 
     check("generic dict float keys",
           "let d: dict[float, int] = {1.5: 1};\n"
           "d[2.5] = 2;\n"
-          "println(d[1.5]);\nprintln(d[2.5]);\n",
+          "std.io.println(d[1.5]);\nstd.io.println(d[2.5]);\n",
           stdout_all=["1", "2"])
 
     check("generic dict key error",
@@ -140,7 +140,7 @@ def run_cases():
           "struct User { id: int; cache: list[int]; }\n"
           "impl User { func dict_hash(self): int { return self.id; } }\n"
           "let d: dict[User, int] = {};\n"
-          "println(len(d));\n",
+          "std.io.println(std.utils.len(d));\n",
           stdout="0", not_stderr="type warning")
 
     check("set element contract custom hash",
@@ -149,7 +149,7 @@ def run_cases():
           "struct User { id: int; cache: list[int]; }\n"
           "impl User { func dict_hash(self): int { return self.id; } }\n"
           "let s: set[User] = std.set.from_list([]);\n"
-          "println(std.set.size(s));\n",
+          "std.io.println(std.set.size(s));\n",
           stdout="0", not_stderr="type warning")
 
     check("key_eq without dict_hash keeps structural key",
@@ -158,7 +158,7 @@ def run_cases():
           "impl User { func key_eq(self, other): bool "
           "{ return self.id == other.id; } }\n"
           "let d: dict[User, int] = {};\n"
-          "println(len(d));\n",
+          "std.io.println(std.utils.len(d));\n",
           stdout="0", not_stderr="type warning")
 
     check("dict hash impl must precede use",
@@ -219,7 +219,7 @@ def run_cases():
            "let y = identity[\n"
            "  int\n"
            "](3);\n"
-           "println(str(y));\n",
+           "std.io.println(str(y));\n",
            stdout="3")
 
     check("multiline explicit generic function value",
@@ -227,7 +227,7 @@ def run_cases():
            "let g = identity[\n"
            "  int\n"
            "];\n"
-           "println(str(g(4)));\n",
+           "std.io.println(str(g(4)));\n",
            stdout="4")
 
     check("multiline explicit generic struct literal",
@@ -235,7 +235,7 @@ def run_cases():
            "let b = Box[\n"
            "  int\n"
            "] { value: 5 };\n"
-           "println(str(b.value));\n",
+           "std.io.println(str(b.value));\n",
            stdout="5")
 
     check("generic type marker union constraint",
@@ -480,7 +480,7 @@ def run_cases():
           stderr="type error: expected int, got string")
 
     check("generic function parameter error",
-          "func f(xs: list[int]) { println(xs); }\n"
+          "func f(xs: list[int]) { std.io.println(xs); }\n"
           'f([1, "a"]);\n',
           stderr="type error: expected int, got string")
 
@@ -505,20 +505,20 @@ def run_cases():
 
     check("nullable generic element",
           "let xs: list[int?] = [1, null];\n"
-          "println(xs);\n",
+          "std.io.println(xs);\n",
           stdout_all=["[1, null]"])
 
     check("generic implicit any warning",
           "func raw() { return [1]; }\n"
           "let xs: list[int] = raw();\n"
-          "println(xs);\n",
+          "std.io.println(xs);\n",
           stderr="type warning: implicit any assigned to list[int]",
           env=WARN_ENV)
 
     check("generic as suppresses warning",
           "func raw() { return [1]; }\n"
           "let xs: list[int] = raw() as list[int];\n"
-          "println(xs);\n",
+          "std.io.println(xs);\n",
           not_stderr="type warning",
           env=WARN_ENV)
 
@@ -531,20 +531,20 @@ def run_cases():
     check("generic loose suppresses any warning",
           "func raw() { return [1]; }\n"
           "let xs: list[int] = raw();\n"
-          "println(xs);\n",
+          "std.io.println(xs);\n",
           not_stderr="type warning",
           env=LOOSE_ENV)
 
     check("unannotated let infers container type",
           "let raw = [1, 2];\n"
           "let xs: list[int] = raw;\n"
-          "println(xs);\n",
+          "std.io.println(xs);\n",
           not_stderr="type warning")
 
     check("unannotated container mutation stays dynamic",
           "let xs = [1];\n"
           'xs[0] = "a";\n'
-          "println(xs);\n",
+          "std.io.println(xs);\n",
           not_stderr="type error")
 
     check("unannotated method receiver is checked",
@@ -577,7 +577,7 @@ def run_cases():
     check("generic strict accepts explicit as",
           "let raw = [1];\n"
           "let xs: list[int] = raw as list[int];\n"
-          "println(xs);\n",
+          "std.io.println(xs);\n",
           not_stderr="type error",
           env=STRICT_ENV)
 
@@ -588,7 +588,7 @@ def run_cases():
 
     check("generic generic args rejected in is",
           "let xs = [1];\n"
-          "println(xs is list[int]);\n",
+          "std.io.println(xs is list[int]);\n",
           stderr="generic type arguments are not allowed in 'is'")
 
     check("generic arity error",
@@ -602,7 +602,7 @@ def run_cases():
 
     check("generic cast result indexing",
           "let raw = [1];\n"
-          "println((raw as list[int])[0]);\n",
+          "std.io.println((raw as list[int])[0]);\n",
           stdout_all=["1"])
 
     check("generic as is not an lvalue",
@@ -619,7 +619,7 @@ def run_cases():
           "func numbers(): list[int] { return [1, 2]; }\n"
           "let xs: list[int] = numbers();\n"
           "xs[0] = 3;\n"
-          "println(xs);\n",
+          "std.io.println(xs);\n",
           stdout_all=["[3, 2]"])
 
     check("return annotation checks container literal",
@@ -642,13 +642,13 @@ def run_cases():
 
     check("nullable return annotation accepts missing value",
           "func maybe(): int? { return; }\n"
-          "println(maybe());\n",
+          "std.io.println(maybe());\n",
           stdout_all=["null"])
 
     check("expression body return annotation",
           "func numbers(): list[int] -> [1, 2];\n"
           "let xs: list[int] = numbers();\n"
-          "println(xs);\n",
+          "std.io.println(xs);\n",
           stdout_all=["[1, 2]"])
 
     check("method return annotation checks body",
@@ -659,34 +659,34 @@ def run_cases():
     check("return annotation any warning",
           "func raw() { return [1]; }\n"
           "func numbers(): list[int] { return raw(); }\n"
-          "println(numbers());\n",
+          "std.io.println(numbers());\n",
           stderr="type warning: implicit any assigned to list[int]",
           env=WARN_ENV)
 
     check("return annotation as suppresses warning",
           "func raw() { return [1]; }\n"
           "func numbers(): list[int] { return raw() as list[int]; }\n"
-          "println(numbers());\n",
+          "std.io.println(numbers());\n",
           not_stderr="type warning",
           env=WARN_ENV)
 
     check("function without return annotation stays any",
           "func numbers() { return [1, 2]; }\n"
           "let xs: list[int] = numbers();\n"
-          "println(xs);\n",
+          "std.io.println(xs);\n",
           stderr="type warning: implicit any assigned to list[int]",
           env=WARN_ENV)
 
     check("return annotation callable accepts builtin",
           "func get_fn(): Callable { return std.math.sqrt; }\n"
-          "println(get_fn()(9));\n",
+          "std.io.println(get_fn()(9));\n",
           stdout_all=["3"])
 
     check("function type syntax",
           "let f: (int) -> int = func(x: int): int -> x * 2;\n"
           "let g: () -> int = func(): int -> 7;\n"
-          "println(f(3));\n"
-          "println(g());\n",
+          "std.io.println(f(3));\n"
+          "std.io.println(g());\n",
           stdout_all=["6", "7"])
 
     check("nested function type syntax",
@@ -694,20 +694,20 @@ def run_cases():
           "struct S { f: ((int) -> int) -> int; }\n"
           "let s = S { f: func(x: (int) -> int): int -> x(2) };\n"
           "let n = s.f(func(y: int): int -> y * 3);\n"
-          "println(n);\n"
-          "println(std.meta.fields(s));\n",
+          "std.io.println(n);\n"
+          "std.io.println(std.meta.fields(s));\n",
           stdout_all=["6", "((int) -> int) -> int"])
 
     check("function type in container and parameter",
           "let fs: list[(int) -> int] = [func(x: int): int -> x];\n"
           "func apply(f: (int) -> int, x: int): int { return f(x); }\n"
-          "println(fs[0](4));\n"
-          "println(apply(func(x: int): int -> x + 1, 4));\n",
+          "std.io.println(fs[0](4));\n"
+          "std.io.println(apply(func(x: int): int -> x + 1, 4));\n",
           stdout_all=["4", "5"])
 
     check("function type accepts builtin",
           "let f: (number) -> number = std.math.sqrt;\n"
-          "println(f(9));\n",
+          "std.io.println(f(9));\n",
           not_stderr="type warning",
           stdout_all=["3"])
 
@@ -716,9 +716,9 @@ def run_cases():
           "let f: (number) -> int = std.math.floor;\n"
           "let g: (int, int) -> int = std.math.gcd;\n"
           "let h: (string) -> string = std.string.trim;\n"
-          "println(f(2.9));\n"
-          "println(g(12, 18));\n"
-          "println(h(\"  x  \"));\n",
+          "std.io.println(f(2.9));\n"
+          "std.io.println(g(12, 18));\n"
+          "std.io.println(h(\"  x  \"));\n",
           stdout_all=["2", "6", "x"])
 
     check("builtin signature argument check",
@@ -727,7 +727,7 @@ def run_cases():
 
     check("function type assignment and call",
           "let f: (int) -> int = func(x: int): int -> x * 2;\n"
-          "println(f(3));\n",
+          "std.io.println(f(3));\n",
           stdout_all=["6"])
 
     check("function type return mismatch",
@@ -740,18 +740,18 @@ def run_cases():
 
     check("function type guides short lambda parameters",
           "let f: (int) -> int = x -> x * 2;\n"
-          "println(f(3));\n"
+          "std.io.println(f(3));\n"
           'f("a");\n',
           stderr="type error: expected int, got string")
 
     check("function type parameter variance",
           "let f: (int) -> int = func(x: number): int -> 1;\n"
-          "println(f(2));\n",
+          "std.io.println(f(2));\n",
           stdout_all=["1"])
 
     check("function type return covariance",
           "let f: (int) -> number = func(x: int): int -> x;\n"
-          "println(f(2));\n",
+          "std.io.println(f(2));\n",
           stdout_all=["2"])
 
     check("function type narrow return rejected",
@@ -767,22 +767,22 @@ def run_cases():
           "struct S { cb: (int) -> int; }\n"
           "let s: S = S { cb: func(x: int): int -> x + 1 };\n"
           "let fs: list[(int) -> int] = [func(x: int): int -> x];\n"
-          "println(s.cb(2));\n"
-          "println(fs[0](2));\n"
+          "std.io.println(s.cb(2));\n"
+          "std.io.println(fs[0](2));\n"
           'fs[0]("a");\n',
           stderr="type error: expected int, got string")
 
     check("function type any warning",
           "func raw() { return func(x: int): int -> x; }\n"
           "let f: (int) -> int = raw();\n"
-          "println(f(2));\n",
+          "std.io.println(f(2));\n",
           stderr="type warning: implicit any assigned to (int) -> int",
           env=WARN_ENV)
 
     check("function type as suppresses warning",
           "func raw() { return func(x: int): int -> x; }\n"
           "let f: (int) -> int = raw() as (int) -> int;\n"
-          "println(f(2));\n",
+          "std.io.println(f(2));\n",
           not_stderr="type warning",
           env=WARN_ENV)
 
@@ -794,7 +794,7 @@ def run_cases():
 
     check("function type is rejected in is",
           "let f = func(x) { return x; };\n"
-          "println(f is (int) -> int);\n",
+          "std.io.println(f is (int) -> int);\n",
           stderr="function type signatures are not allowed in 'is'")
 
     check("function call scalar argument check",
@@ -878,8 +878,8 @@ def run_cases():
           "  xs, func(x: int): int -> x % 2);\n"
           "let sorted: list[int] = std.list.sort_by(\n"
           "  xs, func(x: int): int -> 0 - x);\n"
-          "println(ys); println(zs); println(total);\n"
-          "println(groups); println(sorted);\n",
+          "std.io.println(ys); std.io.println(zs); std.io.println(total);\n"
+          "std.io.println(groups); std.io.println(sorted);\n",
           stdout_all=["[1, 2, 3]", "[2, 3]", "6",
                       "{1: [1, 3], 0: [2]}", "[3, 2, 1]"])
 
@@ -899,7 +899,7 @@ def run_cases():
           "import std;\n"
           "let f = std.list.append;\n"
           "let ys: list[int] = f([1], 2);\n"
-          "println(ys);\n",
+          "std.io.println(ys);\n",
           stdout="[1, 2]", not_stderr="type warning")
 
     check("polymorphic builtin value element mismatch",
@@ -912,7 +912,7 @@ def run_cases():
           "import std;\n"
           "let f: (list[int], int) -> list[int] = std.list.append;\n"
           "let ys: list[int] = f([2], 3);\n"
-          "println(ys);\n",
+          "std.io.println(ys);\n",
           stdout="[2, 3]", not_stderr="type warning")
 
     check("polymorphic builtin value bad signature",
@@ -925,7 +925,7 @@ def run_cases():
           "import std;\n"
           "let f = std.list.map;\n"
           "let ys: list[int] = f([1, 2], x -> x * 2);\n"
-          "println(ys);\n",
+          "std.io.println(ys);\n",
           stdout="[2, 4]", not_stderr="type warning")
 
     check("polymorphic map callback mismatch",
@@ -938,14 +938,14 @@ def run_cases():
           "import std;\n"
           "let f = std.dict.keys;\n"
           'let ks: list[string] = f({"a": 1});\n'
-          "println(ks);\n",
+          "std.io.println(ks);\n",
           stdout="[a]", not_stderr="type warning")
 
     check("polymorphic set from_list value",
           "import std;\n"
           "let f = std.set.from_list;\n"
           "let s: set[int] = f([1, 2]);\n"
-          "println(std.set.values(s));\n",
+          "std.io.println(std.set.values(s));\n",
           stdout="[1, 2]", not_stderr="type warning")
 
     check("function type arity check",
@@ -965,39 +965,39 @@ def run_cases():
           "let f = std.list.sort;\n"
           "let ys: list[int] = f([2, 1], "
           "func(a: int, b: int): int -> a - b);\n"
-          "println(xs); println(ys);\n",
+          "std.io.println(xs); std.io.println(ys);\n",
           stdout_all=["[1, 2]", "[1, 2]"])
 
     check("default parameter function type",
           "func f(a: int, b: int = 1): int { return a + b; }\n"
           "let g: (int) -> int = f;\n"
-          "println(g(3));\n",
+          "std.io.println(g(3));\n",
           stdout="4", not_stderr="type warning")
 
     check("default parameter as callback",
           "func add(a: int, b: int = 1): int { return a + b; }\n"
           "func apply(f: (int) -> int): int { return f(3); }\n"
-          "println(apply(add));\n",
+          "std.io.println(apply(add));\n",
           stdout="4", not_stderr="type warning")
 
     check("variadic function as callback",
-          "func count(...xs: int): int { return len(xs); }\n"
+          "func count(...xs: int): int { return std.utils.len(xs); }\n"
           "func apply(f: (int, int) -> int): int { return f(1, 2); }\n"
-          "println(apply(count));\n",
+          "std.io.println(apply(count));\n",
           stdout="2", not_stderr="type warning")
 
     check("variadic callback rest type",
-          "func count(...xs: int): int { return len(xs); }\n"
+          "func count(...xs: int): int { return std.utils.len(xs); }\n"
           "func apply(f: (string) -> int): int { return f(\"x\"); }\n"
           "apply(count);\n",
           stderr="type error: expected (string) -> int, "
                  "got (...int) -> int")
 
     check("variadic function value rest check",
-          "func count(...xs: int): int { return len(xs); }\n"
+          "func count(...xs: int): int { return std.utils.len(xs); }\n"
           "let f = count;\n"
           "let g: (int, int) -> int = f;\n"
-          "println(g(1, 2));\n"
+          "std.io.println(g(1, 2));\n"
           'f(1, "a");\n',
           stdout="2", stderr="type error: expected int, got string")
 
@@ -1016,7 +1016,7 @@ def run_cases():
           "import std;\n"
           'let g = std.iter.map({"a": 1}, '
           "func(entry) -> entry[1]);\n"
-          "println(std.iter.collect(g));\n",
+          "std.io.println(std.iter.collect(g));\n",
           stdout="[1]")
 
     check("fn compose and pipe types",
@@ -1029,7 +1029,7 @@ def run_cases():
           "let g: (int) -> string = p("
           "func(x: int): int -> x + 1, "
           "func(x: int): string -> str(x));\n"
-          "println(f(1)); println(g(1));\n",
+          "std.io.println(f(1)); std.io.println(g(1));\n",
           stdout_all=["2", "2"])
 
     check("fn compose shape mismatch",
@@ -1057,18 +1057,18 @@ def run_cases():
           "import std;\n"
           "let inner = std.fn.compose("
           "func(x: bool): int -> 1, "
-          "func(x: string): bool -> len(x) > 0);\n"
+          "func(x: string): bool -> std.utils.len(x) > 0);\n"
           "let outer = std.fn.compose("
           "func(x: int): string -> str(x), inner);\n"
           "let f: (string) -> string = outer;\n"
-          "println(f(\"a\"));\n",
+          "std.io.println(f(\"a\"));\n",
           stdout="1", not_stderr="type warning")
 
     check("function result type",
           "func fetch(x: int): string { return \"ok\"; }\n"
           "let s: string = fetch(1);\n"
           "let f: (int) -> string = fetch;\n"
-          "println(s); println(f(2));\n",
+          "std.io.println(s); std.io.println(f(2));\n",
           stdout_all=["ok", "ok"], not_stderr="type warning")
 
     check("function result mismatch",
@@ -1080,13 +1080,13 @@ def run_cases():
     check("launch task void",
           "func noop(): void { let x = 1; }\n"
           "let t: task[void] = launch noop();\n"
-          "println(str(t.wait()));\n",
+          "std.io.println(str(t.wait()));\n",
           stdout="null", not_stderr="type warning")
 
     check("launch task any",
           "func work(n) { return n + 1; }\n"
           "let t: task[any] = launch work(41);\n"
-          "println(t.wait());\n",
+          "std.io.println(t.wait());\n",
           stdout="42", not_stderr="type warning")
 
     check("task invariant mismatch",
@@ -1101,7 +1101,7 @@ def run_cases():
           "  return a + b;\n"
           "};\n"
           "let t: task[int] = launch add(1, 2);\n"
-          "println(t.wait());\n",
+          "std.io.println(t.wait());\n",
           stdout="3", not_stderr="type warning")
 
     check("method result type",
@@ -1113,7 +1113,7 @@ def run_cases():
           "let s: string = b.get(2);\n"
           "let f = b.get;\n"
           "let g: (int) -> string = f;\n"
-          "println(s); println(g(3));\n",
+          "std.io.println(s); std.io.println(g(3));\n",
           stdout_all=["ok", "ok"], not_stderr="type warning")
 
     check("task wait builtins",
@@ -1122,7 +1122,7 @@ def run_cases():
           "let ts: list[task[string]] = [launch fetch(1), launch fetch(2)];\n"
           "let rs: list[string] = std.task.wait_all(ts);\n"
           "let s: string = std.task.wait(launch fetch(3));\n"
-          "println(rs); println(s);\n",
+          "std.io.println(rs); std.io.println(s);\n",
           stdout_all=["[ok, ok]", "ok"], not_stderr="type warning")
 
     check("task detach builtin type",
@@ -1130,7 +1130,7 @@ def run_cases():
           "func fetch(): string { return \"ok\"; }\n"
           "let d: task[string] = std.task.detach(launch fetch());\n"
           "let s: string = d.wait();\n"
-          "println(s);\n",
+          "std.io.println(s);\n",
           stdout="ok", not_stderr="type warning")
 
     check("generator element type",
@@ -1138,7 +1138,7 @@ def run_cases():
           "func parts() { yield \"hello\"; yield \"world\"; }\n"
           "let g: generator[string] = parts();\n"
           "let xs: list[string] = std.iter.collect(g);\n"
-          "println(xs);\n",
+          "std.io.println(xs);\n",
           stdout="[hello, world]", not_stderr="type warning")
 
     check("generator element mismatch",
@@ -1165,14 +1165,14 @@ def run_cases():
           "import std;\n"
           "let make = func() { yield 1; yield 2; };\n"
           "let g: generator[int] = make();\n"
-          "println(std.iter.collect(g));\n"
+          "std.io.println(std.iter.collect(g));\n"
           "struct Box { n: int; }\n"
           "impl Box {\n"
           "  func nums(self) { yield self.n; yield self.n + 1; }\n"
           "}\n"
           "let b: Box = Box { n: 5 };\n"
           "let h: generator[int] = b.nums();\n"
-          "println(std.iter.collect(h));\n",
+          "std.io.println(std.iter.collect(h));\n",
           stdout_all=["[1, 2]", "[5, 6]"], not_stderr="type warning")
 
     check("iter generators",
@@ -1182,7 +1182,7 @@ def run_cases():
           "  std.iter.map(nums(), func(x: int): string -> str(x)));\n"
           "let filtered: list[int] = std.iter.collect(\n"
           "  std.iter.filter(nums(), func(x: int): bool -> x > 1));\n"
-          "println(mapped); println(filtered);\n",
+          "std.io.println(mapped); std.io.println(filtered);\n",
           stdout_all=["[1, 2, 3]", "[2, 3]"], not_stderr="type warning")
 
     check("generator annotation mismatch",
@@ -1199,7 +1199,7 @@ def run_cases():
           "}\n"
           "let g: generator[int] = gen();\n"
           "let xs: list[int] = std.iter.collect(g);\n"
-          "println(xs);\n",
+          "std.io.println(xs);\n",
           stdout="[1, 2]", not_stderr="type warning")
 
     check("generator yielded values",
@@ -1210,7 +1210,7 @@ def run_cases():
           "  yield fetch(3);\n"
           "}\n"
           "let xs: list[int] = std.iter.collect(gen());\n"
-          "println(xs);\n",
+          "std.io.println(xs);\n",
           stdout="[1, 6]", not_stderr="type warning")
 
     check("generator send type inference",
@@ -1220,8 +1220,8 @@ def run_cases():
           "  yield x + \"!\";\n"
           "}\n"
           "let g: generator[string, string] = echo();\n"
-          "println(std.generator.next(g, \"hi\"));\n"
-          "println(std.generator.next(g, \"!\"));\n",
+          "std.io.println(std.generator.next(g, \"hi\"));\n"
+          "std.io.println(std.generator.next(g, \"!\"));\n",
           stdout_all=["a", "!!"], not_stderr="type warning")
 
     check("generator send value mismatch",
@@ -1238,10 +1238,10 @@ def run_cases():
           "func typed(): generator[int, string] {\n"
           "  yield 1;\n"
           "  let x = yield 2;\n"
-          "  yield len(x);\n"
+          "  yield std.utils.len(x);\n"
           "}\n"
           "let g: generator[int, string] = typed();\n"
-          "println(std.generator.next(g, \"ok\"));\n",
+          "std.io.println(std.generator.next(g, \"ok\"));\n",
           stdout="1", not_stderr="type warning")
 
     check("generator declared yield mismatch",
@@ -1258,7 +1258,7 @@ def run_cases():
           "let [n, s] = p;\n"
           "let zs: list[int] = [n];\n"
           "let ws: list[string] = [s];\n"
-          "println(xs); println(ys); println(zs); println(ws);\n",
+          "std.io.println(xs); std.io.println(ys); std.io.println(zs); std.io.println(ws);\n",
           stdout_all=["[1]", "[a]", "[1]", "[a]"], not_stderr="type warning")
 
     check("pair literal mismatch",
@@ -1276,7 +1276,7 @@ def run_cases():
           "let first = pairs[0];\n"
           "let xs: list[int] = [first[0]];\n"
           "let ys: list[string] = [first[1]];\n"
-          "println(xs); println(ys);\n",
+          "std.io.println(xs); std.io.println(ys);\n",
           stdout_all=["[1]", "[a]"], not_stderr="type warning")
 
     check("items and enumerate pair types",
@@ -1285,7 +1285,7 @@ def run_cases():
           "std.dict.items({\"a\": 1});\n"
           "let e: generator[pair[int, int]] = "
           "std.iter.enumerate([10, 20]);\n"
-          "println(items); println(std.iter.collect(e));\n",
+          "std.io.println(items); std.io.println(std.iter.collect(e));\n",
           stdout_all=["[[a, 1]]", "[[0, 10], [1, 20]]"],
           not_stderr="type warning")
 
@@ -1295,7 +1295,7 @@ def run_cases():
           "x = \"a\";\n"
           "let xs = [1, \"a\"];\n"
           "let ys: list[union[int, string]] = xs;\n"
-          "println(ys);\n",
+          "std.io.println(ys);\n",
           stdout="[1, a]", not_stderr="type warning")
 
     check("union mismatch",
@@ -1316,31 +1316,31 @@ def run_cases():
           "let c: int? = b;\n"
           "let d: union[int, null];\n"
           "let e: union[int, string, null];\n"
-          "println(a); println(b); println(c); println(d); println(e);\n",
+          "std.io.println(a); std.io.println(b); std.io.println(c); std.io.println(d); std.io.println(e);\n",
           stdout_all=["null", "null", "null", "null", "null"],
           not_stderr="type warning")
 
     check("nullable union function type",
           "func f(x: int?): int? -> x;\n"
           "let g: (union[int, null]) -> union[int, null] = f;\n"
-          "println(g(1));\n",
+          "std.io.println(g(1));\n",
           stdout="1", not_stderr="type warning")
 
     check("nullable union runtime check",
-          "func f(x: union[int, null]) { println(x); }\n"
+          "func f(x: union[int, null]) { std.io.println(x); }\n"
           "let a: any = true;\n"
           "f(a);\n",
           stderr="runtime error: function f argument 1 (x) expects int?, got bool")
 
     check("nullable union suffix accepts null",
           "func f(x: union[int, string]?) {\n"
-          "  if (x == null) { println(\"null\"); }\n"
-          "  else if (x is int) { println(\"int\"); }\n"
-          "  else { println(\"string\"); }\n"
+          "  if (x == null) { std.io.println(\"null\"); }\n"
+          "  else if (x is int) { std.io.println(\"int\"); }\n"
+          "  else { std.io.println(\"string\"); }\n"
           "}\n"
           "let y: union[int, string]?;\n"
           "f(null); f(1); f(\"s\");\n"
-          "println(y);\n",
+          "std.io.println(y);\n",
           stdout_all=["null", "int", "string", "null"],
           not_stderr="type warning")
 
@@ -1449,7 +1449,7 @@ def run_cases():
           "let xs = [1, \"a\", true];\n"
           "let ys: list[union[int, string, bool]] = xs;\n"
           "let z: union[int, string, bool, null] = null;\n"
-          "println(ys); println(z);\n",
+          "std.io.println(ys); std.io.println(z);\n",
           stdout_all=["[1, a, true]", "null"], not_stderr="type warning")
 
     check("flat union narrowing",
@@ -1476,14 +1476,14 @@ def run_cases():
           "let zs: list[bool] = [t[2]];\n"
           "let [a, b] = p;\n"
           "let [c, d, e] = t;\n"
-          "println(xs); println(ys); println(zs); println(a); println(e);\n",
+          "std.io.println(xs); std.io.println(ys); std.io.println(zs); std.io.println(a); std.io.println(e);\n",
           stdout_all=["[1]", "[a]", "[true]", "1", "true"],
           not_stderr="type warning")
 
     check("tuple type annotations",
           "let p: pair[int, string] = (1, \"a\");\n"
           "let t: tuple[int, string, bool] = (1, \"a\", true);\n"
-          "println(p); println(t);\n",
+          "std.io.println(p); std.io.println(t);\n",
           stdout_all=["[1, a]", "[1, a, true]"], not_stderr="type warning")
 
     check("tuple length mismatch",
@@ -1501,13 +1501,13 @@ def run_cases():
           "  return v;\n"
           "}\n"
           "let p: pair[int, string] = id((1, \"a\"));\n"
-          "println(p);\n",
+          "std.io.println(p);\n",
           stdout="[1, a]", not_stderr="type warning")
 
     check("tuple match subject",
           "match (1, \"a\") {\n"
-          "  case [n, s] => println(n);\n"
-          "  default => println(\"no\");\n"
+          "  case [n, s] => std.io.println(n);\n"
+          "  default => std.io.println(\"no\");\n"
           "};\n",
           stdout="1")
 
@@ -1592,7 +1592,7 @@ def run_cases():
           "    path as list[int], to);\n"
           "  return out;\n"
           "}\n"
-          "println(walk(1, 2));\n",
+          "std.io.println(walk(1, 2));\n",
           stdout="[2, 1, 2]")
 
     check("map infers expression lambda result",
@@ -1760,7 +1760,7 @@ def run_cases():
                "import std.cache;\n"
                "import std.kv;\n"
                "import std.fsm;\n"
-               'println("ok");\n',
+               'std.io.println("ok");\n',
                env=embedded_env)
     assert proc.returncode == 0, proc.stderr
     assert "type error" not in proc.stderr, proc.stderr

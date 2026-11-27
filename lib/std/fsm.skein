@@ -65,7 +65,7 @@ package fsm {
       t.gens[slot] = t.gens[slot] + 1;
       t.slots[slot] = _Node { value: value, prev: prev };
     } else {
-      slot = len(t.slots);
+      slot = std.utils.len(t.slots);
       t.slots[slot] = _Node { value: value, prev: prev };
       t.gens[slot] = 0;
     }
@@ -78,7 +78,7 @@ package fsm {
     let slot = id & _MASK;
     let gen = id >> 32;
 
-    if (slot < 0 || slot >= len(t.slots)) {
+    if (slot < 0 || slot >= std.utils.len(t.slots)) {
       fail("stale fsm history handle");
     }
     if (t.gens[slot] != gen) {
@@ -95,7 +95,7 @@ package fsm {
     let slot = id & _MASK;
     let gen = id >> 32;
 
-    if (slot < 0 || slot >= len(t.slots)) {
+    if (slot < 0 || slot >= std.utils.len(t.slots)) {
       return false;
     }
     if (t.gens[slot] != gen) {
@@ -108,7 +108,7 @@ package fsm {
     let slot = id & _MASK;
     let gen = id >> 32;
 
-    if (slot < 0 || slot >= len(t.slots)) {
+    if (slot < 0 || slot >= std.utils.len(t.slots)) {
       fail("stale fsm history handle");
     }
     if (t.gens[slot] != gen || t.slots[slot] == null) {
@@ -123,14 +123,14 @@ package fsm {
   }
 
   func _t_check(t) {
-    if (len(t.slots) != len(t.gens)) {
+    if (std.utils.len(t.slots) != std.utils.len(t.gens)) {
       return false;
     }
-    if (t.alive < 0 || t.alive > len(t.slots)) {
+    if (t.alive < 0 || t.alive > std.utils.len(t.slots)) {
       return false;
     }
-    for (let i in range(len(t.slots))) {
-      if (t.slots[i] != null && kind_of(t.slots[i]) != "struct") {
+    for (let i in std.utils.range(std.utils.len(t.slots))) {
+      if (t.slots[i] != null && std.type.kind_of(t.slots[i]) != "struct") {
         return false;
       }
     }
@@ -138,7 +138,7 @@ package fsm {
   }
 
   func _decode_state(value, decode) {
-    if (kind_of(value) != "dict") {
+    if (std.type.kind_of(value) != "dict") {
       return value;
     }
     if (decode != null) {
@@ -154,7 +154,7 @@ package fsm {
     let slots = std.deque.new();
     let gens = std.deque.new();
     let i = 0;
-    while (i < len(t.slots)) {
+    while (i < std.utils.len(t.slots)) {
       let node = t.slots[i];
       if (node == null) {
         slots = std.deque.push_back(slots, null);
@@ -182,7 +182,7 @@ package fsm {
     let slots = {};
     let gens = {};
     let i = 0;
-    while (i < len(source_slots)) {
+    while (i < std.utils.len(source_slots)) {
       let item = source_slots[i];
       if (item == null) {
         slots[i] = null;
@@ -205,13 +205,13 @@ package fsm {
   }
 
   export func define(initial, step, on_transition = null) {
-    if (kind_of(step) != "function" && kind_of(step) != "builtin") {
+    if (std.type.kind_of(step) != "function" && std.type.kind_of(step) != "builtin") {
       fail("step must be callable");
     }
 
     if (on_transition != null &&
-        kind_of(on_transition) != "function" &&
-        kind_of(on_transition) != "builtin") {
+        std.type.kind_of(on_transition) != "function" &&
+        std.type.kind_of(on_transition) != "builtin") {
       fail("on_transition must be callable");
     }
 
@@ -219,9 +219,9 @@ package fsm {
       _initial: initial,
       _step: step as Callable,
       _on_transition: on_transition as Callable,
-      _kind: kind_of(initial),
-      _name: type_name(initial),
-      _package_name: type_package(initial)
+      _kind: std.type.kind_of(initial),
+      _name: std.type.name(initial),
+      _package_name: std.type.package_name(initial)
     };
   }
 
@@ -244,11 +244,11 @@ package fsm {
       let next = self._step(ctx.state, event);
 
       if (self._kind == "enum" || self._kind == "struct") {
-        if (kind_of(next) != self._kind ||
-            type_name(next) != self._name ||
-            type_package(next) != self._package_name) {
+        if (std.type.kind_of(next) != self._kind ||
+            std.type.name(next) != self._name ||
+            std.type.package_name(next) != self._package_name) {
           fail("step must return " + self._name + ", got " +
-               kind_of(next) + " " + type_name(next));
+               std.type.kind_of(next) + " " + std.type.name(next));
         }
       }
 
@@ -270,11 +270,11 @@ package fsm {
         let next = self._step(ctx.state, event);
 
         if (self._kind == "enum" || self._kind == "struct") {
-          if (kind_of(next) != self._kind ||
-              type_name(next) != self._name ||
-              type_package(next) != self._package_name) {
+          if (std.type.kind_of(next) != self._kind ||
+              std.type.name(next) != self._name ||
+              std.type.package_name(next) != self._package_name) {
             fail("step must return " + self._name + ", got " +
-                 kind_of(next) + " " + type_name(next));
+                 std.type.kind_of(next) + " " + std.type.name(next));
           }
         }
 
@@ -292,7 +292,7 @@ package fsm {
           ctx._history.gens[slot] = ctx._history.gens[slot] + 1;
           ctx._history.slots[slot] = _Node { value: next, prev: ctx._head };
         } else {
-          slot = len(ctx._history.slots);
+          slot = std.utils.len(ctx._history.slots);
           ctx._history.slots[slot] = _Node { value: next, prev: ctx._head };
           ctx._history.gens[slot] = 0;
         }
@@ -336,7 +336,7 @@ package fsm {
   }
 
   export func redo(ctx) {
-    let n = len(ctx._redo);
+    let n = std.utils.len(ctx._redo);
     if (n == 0) {
       return ctx;
     }

@@ -55,13 +55,13 @@ def simple_expr():
 def statement():
     kind = rng.randrange(9)
     if kind == 0:
-        return f"print({simple_expr()});"
+        return f"std.io.print({simple_expr()});"
     if kind == 1:
         return f"x = {simple_expr()};"
     if kind == 2:
         return f"y = x + {rng.randint(0, 9)};"
     if kind == 3:
-        return f"if (x < {rng.randint(-5, 20)}) {{ print(x); }} else {{ print(y); }}"
+        return f"if (x < {rng.randint(-5, 20)}) {{ std.io.print(x); }} else {{ std.io.print(y); }}"
     if kind == 4:
         return (
             "let i = 0;\n"
@@ -73,7 +73,7 @@ def statement():
         return (
             "let total = 0;\n"
             f"for (let v in [{items}]) {{ total = total + v; }}\n"
-            "print(total);"
+            "std.io.print(total);"
         )
     if kind == 6:
         return (
@@ -81,19 +81,19 @@ def statement():
             "  case [a, b] => a + b;\n"
             "  default => 0;\n"
             "};\n"
-            "print(r);"
+            "std.io.print(r);"
         )
     if kind == 7:
         return (
             f"func add(a, b) {{ return a + b; }}\n"
-            f"print(add(x, {rng.randint(0, 9)}));"
+            f"std.io.print(add(x, {rng.randint(0, 9)}));"
         )
     return (
         "func make(n) {\n"
         "  return func(v) { return v + n; };\n"
         "}\n"
         f"let f = make({rng.randint(0, 9)});\n"
-        "print(f(x));"
+        "std.io.print(f(x));"
     )
 
 
@@ -112,9 +112,9 @@ def struct_program():
         "let b = Point { x: 5 };\n"
         "let c = Point { ...a, y: 9 };\n"
         "let f = b.sum;\n"
-        "print(a.sum());\n"
-        "print(f());\n"
-        "print(c.x + c.y);\n"
+        "std.io.print(a.sum());\n"
+        "std.io.print(f());\n"
+        "std.io.print(c.x + c.y);\n"
     )
 
 
@@ -123,42 +123,42 @@ def enum_program():
         "enum E { A { n: int = 0; s: string = \"x\"; }; B; }\n"
         "let a = E::A {};\n"
         "let b = E::A { n: 7 };\n"
-        "print(a.n);\n"
-        "print(b.n);\n"
-        "print(a.s);\n"
-        "print(E::B is E);\n"
+        "std.io.print(a.n);\n"
+        "std.io.print(b.n);\n"
+        "std.io.print(a.s);\n"
+        "std.io.print(E::B is E);\n"
     )
 
 
 def empty_program():
     return (
-        "print(len([]));\n"
-        "print(len({}));\n"
-        "print(len(\"\"));\n"
-        "print(str([]));\n"
-        "print(str({}));\n"
-        "print([][0] on error(e) { recover \"caught\"; });\n"
-        "print({\"k\": 1}[\"missing\"] on error(e) { recover \"miss\"; });\n"
+        "std.io.print(std.utils.len([]));\n"
+        "std.io.print(std.utils.len({}));\n"
+        "std.io.print(std.utils.len(\"\"));\n"
+        "std.io.print(str([]));\n"
+        "std.io.print(str({}));\n"
+        "std.io.print([][0] on error(e) { recover \"caught\"; });\n"
+        "std.io.print({\"k\": 1}[\"missing\"] on error(e) { recover \"miss\"; });\n"
     )
 
 
 def overflow_program():
     return (
-        "print(9223372036854775807 + 1);\n"
-        "print(-9223372036854775807 - 2);\n"
-        "print(1.0e308 * 10.0);\n"
-        "print(-1.0e308 * 10.0);\n"
+        "std.io.print(9223372036854775807 + 1);\n"
+        "std.io.print(-9223372036854775807 - 2);\n"
+        "std.io.print(1.0e308 * 10.0);\n"
+        "std.io.print(-1.0e308 * 10.0);\n"
     )
 
 
 def error_program():
     return rng.choice([
-        "print(1 / 0);\n",
-        "struct S { x: int; }\nlet s = S { x: 1 };\nprint(s.y);\n",
-        "print([1, 2][9]);\n",
+        "std.io.print(1 / 0);\n",
+        "struct S { x: int; }\nlet s = S { x: 1 };\nstd.io.print(s.y);\n",
+        "std.io.print([1, 2][9]);\n",
         "func f() { fail \"boom\"; }\nf();\n",
         "func f(a) { return a; }\nf();\n",
-        "print(1 + \"x\");\n",
+        "std.io.print(1 + \"x\");\n",
     ])
 
 
@@ -171,10 +171,10 @@ def generator_program():
         "  return 99;\n"
         "}\n"
         "let g = gen(3);\n"
-        "print(std.generator.next(g)[\"value\"]);\n"
-        "print(std.generator.next(g)[\"value\"]);\n"
-        "print(std.generator.next(g)[\"value\"]);\n"
-        "print(std.generator.next(g)[\"value\"]);\n"
+        "std.io.print(std.generator.next(g)[\"value\"]);\n"
+        "std.io.print(std.generator.next(g)[\"value\"]);\n"
+        "std.io.print(std.generator.next(g)[\"value\"]);\n"
+        "std.io.print(std.generator.next(g)[\"value\"]);\n"
         "std.generator.close(g);\n"
     )
 
@@ -183,9 +183,9 @@ def task_program():
     return (
         "import std;\n"
         "func inc(x) -> x + 1;\n"
-        "print(wait launch inc(3));\n"
-        "print(wait launch inc(wait launch inc(4)));\n"
-        "print(wait launch inc(6));\n"
+        "std.io.print(wait launch inc(3));\n"
+        "std.io.print(wait launch inc(wait launch inc(4)));\n"
+        "std.io.print(wait launch inc(6));\n"
     )
 
 
@@ -201,15 +201,15 @@ def closure_scope_program():
         "let f = make(1);\n"
         "let g = f(2);\n"
         "let h = f(3);\n"
-        "print(g());\n"
-        "print(h());\n"
+        "std.io.print(g());\n"
+        "std.io.print(h());\n"
     )
 
 
 def defer_error_program():
     return (
         "func run(n) {\n"
-        "  defer print(\"done\");\n"
+        "  defer std.io.print(\"done\");\n"
         "  let i = 0;\n"
         "  let total = 0;\n"
         "  while (i < n) {\n"
@@ -218,7 +218,7 @@ def defer_error_program():
         "  }\n"
         "  return total;\n"
         "}\n"
-        "print(run(3));\n"
+        "std.io.print(run(3));\n"
     )
 
 
@@ -227,8 +227,8 @@ def pattern_default_program():
         "func pat([a, b], c = 1, ...rest) {\n"
         "  return [a, b, c, rest];\n"
         "}\n"
-        "print(pat([2, 3]));\n"
-        "print(pat([4, 5], 6, 7, 8));\n"
+        "std.io.print(pat([2, 3]));\n"
+        "std.io.print(pat([4, 5], 6, 7, 8));\n"
     )
 
 
@@ -238,7 +238,7 @@ def match_binding_program():
         "  case {a, ...rest} => [a, rest];\n"
         "  default => [];\n"
         "};\n"
-        "print(r);\n"
+        "std.io.print(r);\n"
     )
 
 
@@ -360,6 +360,8 @@ def main():
             break
 
         source = program()
+        if "std." in source and "import std;" not in source:
+            source = "import std;\n" + source
         try:
             if differs(args.binary, source):
                 report_failure(args.binary, source)

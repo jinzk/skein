@@ -80,6 +80,7 @@ name! x     // 单个 NAME 参数
 ### 3.1 断言
 
 ```text
+import std;
 std.assert.that!(condition[, message])
 std.assert.schema!(value, spec)
 ```
@@ -87,6 +88,7 @@ std.assert.schema!(value, spec)
 展开为普通运行时调用：
 
 ```text
+import std;
 std.assert.that(condition[, message])
 std.assert.schema(value, spec)
 ```
@@ -109,6 +111,7 @@ error!("message"[, fields])
 `info!("done", {"ms": elapsed()})` 展开为：
 
 ```text
+import std;
 if (std.log.enabled("info")) {
   std.log.info("done", {"ms": elapsed()});
 }
@@ -148,6 +151,7 @@ capture! { statements }
 展开为：
 
 ```text
+import std;
 std.result.capture(func() { statements })
 ```
 
@@ -174,6 +178,7 @@ wait!(task)
 `fail expr` / `recover expr` / `pass expr` 一致；`wait!(t)` 展开为 `t.wait()`。
 
 ```text
+import std;
 let r = std.result.capture! { std.error.fail!("boom"); };
 let v = wait launch work();
 let w = wait!(t);

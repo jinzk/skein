@@ -27,6 +27,7 @@ std.net.resolve("localhost")
 数学补充：
 
 ```text
+import std;
 std.math.pi / e / tau
 
 std.math.sign(-3)          // -1
@@ -48,7 +49,7 @@ import std;
 let s = std.net.tcp_connect("127.0.0.1", 8080);
 std.net.send(s, "hello");
 let data = std.net.recv(s, 4096);
-print(std.bytes.to_string(data));
+std.io.print(std.bytes.to_string(data));
 std.net.close(s);
 ```
 
@@ -81,6 +82,7 @@ reuse_port  bool，默认 false
 地址查询：
 
 ```text
+import std;
 std.net.local_addr(socket)
 std.net.peer_addr(socket)
 ```
@@ -96,6 +98,7 @@ std.net.peer_addr(socket)
 异步网络：
 
 ```text
+import std;
 let t = std.net.tcp_connect_task("127.0.0.1", 8080, 1000);
 let socket = std.task.wait(t);
 ```
@@ -135,6 +138,7 @@ std.task.wait_all([a, b])
 Task API：
 
 ```text
+import std;
 std.task.sleep(ms)            → task
 std.task.yield()              → task
 std.task.scope(fn)            → value
@@ -156,6 +160,7 @@ std.task.bounded_parallel_map(items, limit, fn) → list[result]
 `std.task.scope(fn)` 把 `fn` 放进一个子 task/fiber 中执行。`fn` 返回后，scope 会等待其内部所有未 detach 的子任务，再返回 `fn` 的结果：
 
 ```skein
+import std;
 let v = std.task.scope(func() {
   launch work(1);   // 不需要显式 wait
   launch work(2);
@@ -218,12 +223,12 @@ import std;
 func work(n) { return n + 1; }
 
 let t = launch work(41);
-println(t.wait());     // 42
-println(t.done());     // true
+std.io.println(t.wait());     // 42
+std.io.println(t.done());     // true
 
 func fetch() { std.task.sleep(10).wait(); return "ok"; }
 let f = launch fetch();
-println(f.wait());
+std.io.println(f.wait());
 ```
 
 Task 方法：
@@ -276,6 +281,7 @@ std.bytes.to_string(r["body"])
 带 headers 和 timeout：
 
 ```text
+import std;
 let r = std.http.get("http://127.0.0.1:8080/api", {
   "headers": {"Accept": "application/json"},
   "timeout_ms": 1000
@@ -285,6 +291,7 @@ let r = std.http.get("http://127.0.0.1:8080/api", {
 POST：
 
 ```text
+import std;
 let r = std.http.post("http://127.0.0.1:8080/items", "hello", {
   "headers": {"Content-Type": "text/plain"},
   "timeout_ms": 1000
@@ -294,6 +301,7 @@ let r = std.http.post("http://127.0.0.1:8080/items", "hello", {
 自定义方法：
 
 ```text
+import std;
 let r = std.http.request("DELETE", "http://127.0.0.1:8080/items/1", {
   "timeout_ms": 1000
 });
@@ -302,6 +310,7 @@ let r = std.http.request("DELETE", "http://127.0.0.1:8080/items/1", {
 task-returning 客户端：
 
 ```text
+import std;
 let t = std.http.get_task("http://127.0.0.1:8080/api");
 let r = t.wait();
 
@@ -317,6 +326,7 @@ task-returning 客户端返回 task，可以 `.wait()`、`std.task.catch`、`std
 HTTPS 同步客户端：
 
 ```text
+import std;
 let r = std.http.get("https://example.com/", {
   "tls": {
     "ca_file": "/etc/ssl/certs/ca-certificates.crt",
@@ -331,6 +341,7 @@ let r = std.http.get("https://example.com/", {
 HTTPS 同步服务端：
 
 ```text
+import std;
 let s = std.http.listen_tls("127.0.0.1", 8443, "cert.pem", "key.pem");
 let req = std.http.accept(s, 5000);
 std.http.respond(req, 200, {"Content-Type": "text/plain"}, "secure");
@@ -340,6 +351,7 @@ std.http.close(s);
 mTLS 服务端可以在 `listen_tls` 的第 6 个参数传入选项：
 
 ```text
+import std;
 let s = std.http.listen_tls("127.0.0.1", 8443, "cert.pem", "key.pem", 0, {
   "client_ca_file": "ca.pem",
   "client_auth": "required"
@@ -352,6 +364,7 @@ let s = std.http.listen_tls("127.0.0.1", 8443, "cert.pem", "key.pem", 0, {
 SNI 多证书通过 `certs` 选项传入，形状与 `std.tls.server` 相同：
 
 ```text
+import std;
 let s = std.http.listen_tls("127.0.0.1", 8443, "default.pem", "default-key.pem", 0, {
   "certs": [
     {"server_name": "api.example.com", "cert_file": "api.pem",
@@ -368,6 +381,7 @@ reuse_port 组合生效。
 HTTP/1.1 服务端：
 
 ```text
+import std;
 let s = std.http.listen("127.0.0.1", 8080);
 
 let req = std.http.accept(s, 5000);
@@ -382,6 +396,7 @@ std.http.close(s);
 task-returning 服务端：
 
 ```text
+import std;
 let s = std.http.listen("127.0.0.1", 8080);
 
 let req = std.http.accept_task(s, 5000).wait();
@@ -398,6 +413,7 @@ std.http.close(s);
 客户端：
 
 ```text
+import std;
 let r = std.http.get(url, {
   "upgrade": true,
   "headers": {"Upgrade": "websocket"}
@@ -413,6 +429,7 @@ if (r["upgraded"]) {
 服务端：
 
 ```text
+import std;
 let req = std.http.accept(s, 5000);
 let stream = std.http.upgrade(req, {"X-Test": "yes"});
 
@@ -430,6 +447,7 @@ std.io.close(stream);
 WebSocket：
 
 ```text
+import std;
 std.websocket.connect(url[, options])          → ws
 std.websocket.connect_task(url[, options])    → task
 std.websocket.accept(request)                  → ws
@@ -444,12 +462,13 @@ std.websocket.close(ws[, code[, reason]])      → bool
 客户端：
 
 ```text
+import std;
 let ws = std.websocket.connect("ws://127.0.0.1:8080/");
 
 std.websocket.send(ws, "hello");
 
 let msg = std.websocket.receive(ws);
-print(msg["type"] + ": " + msg["data"]);
+std.io.print(msg["type"] + ": " + msg["data"]);
 
 std.websocket.close(ws);
 ```
@@ -457,6 +476,7 @@ std.websocket.close(ws);
 服务端（`std.http.serve` / `serve_threads` reuse_port）：
 
 ```text
+import std;
 let req = std.http.accept(s, 5000);
 let ws = std.websocket.accept(req);
 
@@ -491,6 +511,7 @@ close  → {"type": "close", "code": int, "reason": string}
 keep-alive 服务端：
 
 ```text
+import std;
 let s = std.http.listen("127.0.0.1", 8080);
 
 let served = std.http.serve(s, func(req) {
@@ -523,6 +544,7 @@ std.http.close(s);
 主进程 + 进程 worker 处理：
 
 ```text
+import std;
 std.http.serve_processes(server, workers, script[, options])
   -> ProcessServer
 
@@ -592,13 +614,14 @@ import std;
 let s = std.http.listen("127.0.0.1", 8080);
 let ps = std.http.serve_processes(
   s, 4, "worker.skein", {"max_requests": 1000});
-print(ps.strategy);
+std.io.print(ps.strategy);
 let served = ps.join();
 ```
 
 进程内线程池处理：
 
 ```text
+import std;
 std.http.serve_threads(server, workers, script[, options])
   -> ThreadServer
 
@@ -676,8 +699,8 @@ import std;
 let s = std.http.listen("127.0.0.1", 8080);
 let ts = std.http.serve_threads(
   s, 4, "worker.skein", {"max_requests": 1000});
-print(ts.strategy);
-print(ts.capabilities["http1"]);
+std.io.print(ts.strategy);
+std.io.print(ts.capabilities["http1"]);
 let served = ts.join();
 ```
 
@@ -712,6 +735,7 @@ let served = ts.join();
 `require` 示例：
 
 ```skein
+import std;
 let ts = std.http.serve_threads(
   s, 4, "worker.skein",
   {"strategy": "reuse_port",
@@ -786,6 +810,7 @@ lifecycle:
 流式 body：
 
 ```text
+import std;
 func parts() {
   yield "hello";
   yield " ";
@@ -798,7 +823,7 @@ let sent = std.http.post(url, {
 
 let received = std.http.get(url, {
   "on_body": func(chunk) {
-    print("chunk: " + std.bytes.to_string(chunk));
+    std.io.print("chunk: " + std.bytes.to_string(chunk));
   }
 });
 ```
@@ -813,6 +838,7 @@ let received = std.http.get(url, {
 服务端也可以返回流式响应：
 
 ```text
+import std;
 func parts() {
   yield "hello";
   yield " ";
@@ -836,10 +862,11 @@ let served = std.http.serve(s, func(req) {
 服务端请求 body 流式回调：
 
 ```text
+import std;
 let s = std.http.listen("127.0.0.1", 8080);
 
 s["on_request_body"] = func(chunk) {
-  print(std.bytes.to_string(chunk));
+  std.io.print(std.bytes.to_string(chunk));
 };
 ```
 
@@ -852,6 +879,7 @@ s["on_request_body"] = func(chunk) {
 handler 拉取请求 body：
 
 ```text
+import std;
 let s = std.http.listen("127.0.0.1", 8080);
 s["stream_request_body"] = true;
 
@@ -922,11 +950,13 @@ return {
 JSON 响应 helper：
 
 ```text
+import std;
 std.http.json_response(status, value[, headers]) -> response
 std.http.json_error(status, code, message[, details]) -> response
 ```
 
 ```skein
+import std;
 return std.http.json_response(200, {"ok": true});
 
 return std.http.json_error(422, "BAD_INPUT", "name is required",
@@ -939,6 +969,7 @@ return std.http.json_error(422, "BAD_INPUT", "name is required",
 Cookie helper：
 
 ```text
+import std;
 std.http.set_cookie(name, value[, options]) -> string
 ```
 
@@ -947,6 +978,7 @@ std.http.set_cookie(name, value[, options]) -> string
 删除 Cookie（自动设置 `Max-Age=0`）。返回值可直接放进响应 headers：
 
 ```skein
+import std;
 return {
   "status": 200,
   "headers": {
@@ -979,6 +1011,7 @@ return {
 重定向：
 
 ```text
+import std;
 let r = std.http.get(url, {
   "follow_redirects": true,
   "max_redirects": 5
@@ -999,6 +1032,7 @@ let r = std.http.get(url, {
 Cookie：
 
 ```text
+import std;
 let jar = {};
 
 let r = std.http.get(url, {"cookie_jar": jar});
@@ -1036,8 +1070,9 @@ host_only
 压缩：
 
 ```text
+import std;
 let r = std.http.get(url, {"decompress": true});
-print(std.bytes.to_string(r["body"]));
+std.io.print(std.bytes.to_string(r["body"]));
 ```
 
 - `decompress` 默认 `false`；
@@ -1057,6 +1092,7 @@ print(std.bytes.to_string(r["body"]));
 客户端：
 
 ```text
+import std;
 let r = std.http.get(url, {
   "max_header_bytes": 65536,
   "max_headers": 100,
@@ -1067,6 +1103,7 @@ let r = std.http.get(url, {
 服务端：
 
 ```text
+import std;
 let s = std.http.listen("127.0.0.1", 8080);
 
 s["max_header_bytes"] = 65536;
@@ -1083,6 +1120,7 @@ s["max_connections"] = 100;
 HTTP/2：
 
 ```text
+import std;
 std.http2.request(method, url[, options]) → response
 std.http2.get(url[, options])           → response
 std.http2.post(url[, body[, options]])  → response
@@ -1100,14 +1138,15 @@ std.http2.close(server)
 客户端：
 
 ```text
+import std;
 let a = std.http2.get("https://example.com/", {
   "headers": {"Accept": "text/plain"},
   "tls": {"verify": true, "ca_file": "/etc/ssl/certs/ca-certificates.crt",
           "cert_file": "client-cert.pem", "key_file": "client-key.pem"}
 });
 
-print(str(a["status"]) + " " + a["protocol"]);
-print(std.bytes.to_string(a["body"]));
+std.io.print(str(a["status"]) + " " + a["protocol"]);
+std.io.print(std.bytes.to_string(a["body"]));
 
 let b = std.http2.post("https://example.com/echo", "payload");
 let c = std.http2.get_task("https://example.com/async").wait();
@@ -1116,6 +1155,7 @@ let c = std.http2.get_task("https://example.com/async").wait();
 批量并发请求（同一连接、多个 stream）：
 
 ```text
+import std;
 let responses = std.http2.request_many([
   {"url": "https://example.com/a"},
   {"url": "https://example.com/b", "method": "POST", "body": "payload"},
@@ -1138,6 +1178,7 @@ let responses2 = std.http2.request_many_task([
 服务端：
 
 ```text
+import std;
 let s = std.http2.listen("127.0.0.1", 8080);
 
 let served = std.http2.serve(s, func(req) {
@@ -1192,6 +1233,7 @@ HTTP/2 SETTINGS 与 flow control：
 客户端：
 
 ```text
+import std;
 let a = std.http2.get(url, {
   "settings": {"initial_window_size": 1048576}
 });
@@ -1200,6 +1242,7 @@ let a = std.http2.get(url, {
 服务端：
 
 ```text
+import std;
 let s = std.http2.listen("127.0.0.1", 8080);
 
 s["settings"] = {
@@ -1226,6 +1269,7 @@ enable_push              // 仅客户端，bool
 TLS：
 
 ```text
+import std;
 std.tls.client(stream, server_name[, options]) → tls_stream
 std.tls.server(stream, cert_file, key_file[, options]) → tls_stream
 std.tls.alpn(tls_stream)                       → string
@@ -1237,6 +1281,7 @@ std.tls.server_name(tls_stream)                → string
 客户端：
 
 ```text
+import std;
 let socket = std.net.tcp_connect("127.0.0.1", 8443, 1000);
 
 let tls = std.tls.client(socket, "example.com", {
@@ -1253,6 +1298,7 @@ std.io.close(tls);
 服务端：
 
 ```text
+import std;
 let listener = std.net.tcp_listen("127.0.0.1", 8443);
 let client = std.net.accept(listener, 5000);
 
@@ -1283,6 +1329,7 @@ certs           // 服务端 SNI 证书列表，见下节
 mTLS：
 
 ```text
+import std;
 // 服务端要求客户端证书
 let tls = std.tls.server(client, "cert.pem", "key.pem", {
   "client_ca_file": "ca.pem",
@@ -1306,6 +1353,7 @@ let tls = std.tls.client(socket, "example.com", {
 SNI 多证书（服务端）：
 
 ```text
+import std;
 let tls = std.tls.server(client, "default-cert.pem", "default-key.pem", {
   "certs": [
     {"server_name": "api.example.com", "cert_file": "api.pem",
@@ -1327,6 +1375,7 @@ let tls = std.tls.server(client, "default-cert.pem", "default-key.pem", {
 会话复用与内省：
 
 ```text
+import std;
 std.tls.reused(tls)          // 本次握手是否复用了会话
 std.tls.peer_subject(tls)    // 对端证书 CN；无证书时为空字符串
 std.tls.server_name(tls)     // 服务端收到的 SNI；客户端为空字符串
@@ -1345,6 +1394,7 @@ OCSP / 吊销检查：Skein 不实现自定义 OCSP 拉取或 stapling，证书�
 `std.tls.alpn(stream)` 返回握手后协商出的协议：
 
 ```text
+import std;
 std.tls.alpn(tls)   // "h2" / "http/1.1" / ""
 ```
 
@@ -1397,6 +1447,7 @@ let db = b.wait();
 表达式起始 contextual keyword，只接受调用表达式：
 
 ```text
+import std;
 // 旧写法不再解析
 // async func old_fetch(port) { return await ...; }
 
@@ -1406,7 +1457,7 @@ func fetch(port) {
 }
 let same = await fetch(8080);
 let t = launch fetch(8080);
-println(t.wait());
+std.io.println(t.wait());
 ```
 
 生成器：
@@ -1449,8 +1500,9 @@ true
 - `return` 的返回值作为生成器结束时 `{done: true, value: ...}` 的 value；
 - 可以直接迭代生成器：
   ```text
+import std;
   for (let x in numbers()) {
-    print(x);
+    std.io.print(x);
   }
   ```
 - `std.generator.next(g[, value])` 支持向生成器发送值；第一次 `next` 的发送值会被忽略；
@@ -1467,6 +1519,7 @@ true
 向生成器发送值：
 
 ```text
+import std;
 func echo() {
   let x = yield 1;
   yield x + 1;
@@ -1480,10 +1533,11 @@ std.generator.next(g, 10)   // {done: false, value: 11}
 关闭生成器：
 
 ```text
+import std;
 func worker() {
-  defer print("cleanup");
+  defer std.io.print("cleanup");
   yield 1;
-  print("not reached after close");
+  std.io.print("not reached after close");
 }
 
 let g = worker();
@@ -1496,6 +1550,7 @@ std.generator.next(g)       // {done: true, value: null}
 错误传播：
 
 ```text
+import std;
 func broken() {
   fail std.error.new("io", "generator boom");
   yield 1;
@@ -1503,8 +1558,8 @@ func broken() {
 
 let g = broken();
 let v = std.generator.next(g) on error(e) {
-  print(std.error.kind(e));    // io
-  print(str(e));               // generator boom
+  std.io.print(std.error.kind(e));    // io
+  std.io.print(str(e));               // generator boom
   recover 0;
 };
 ```
@@ -1512,6 +1567,7 @@ let v = std.generator.next(g) on error(e) {
 没有 `std.generator.throw`。需要从外部注入错误时，用 `next(g, error)` 发送一个 `error` 值，生成器内部再显式 `fail` 它：
 
 ```text
+import std;
 func worker() {
   let signal = yield 1;
   if (signal is error) {
@@ -1524,8 +1580,8 @@ let g = worker();
 std.generator.next(g)
 
 let v = std.generator.next(g, std.error.new("cancel", "stop")) on error(e) {
-  print(std.error.kind(e));    // cancel
-  print(str(e));               // stop
+  std.io.print(std.error.kind(e));    // cancel
+  std.io.print(str(e));               // stop
   recover 0;
 };
 ```
@@ -1553,6 +1609,7 @@ str(e)
 `fail` 和 `std.result.err` 会自动把普通值包装成 `error`：
 
 ```text
+import std;
 fail "boom";              // error(kind="fail", message="boom")
 std.result.err("boom");   // error(kind="error", message="boom")
 1 / 0;                    // error(kind="runtime", message="division by zero")
@@ -1574,9 +1631,10 @@ std.result.error(r)
 `on error` 同时捕获显式 `fail`、运行时错误和 `result.err`：
 
 ```text
+import std;
 let v = (1 / 0) on error(e) {
-  print(std.error.kind(e));   // runtime
-  print(str(e));              // division by zero
+  std.io.print(std.error.kind(e));   // runtime
+  std.io.print(str(e));              // division by zero
   recover 42;
 };
 ```
@@ -1584,13 +1642,14 @@ let v = (1 / 0) on error(e) {
 `on error` 也是 `result` 的统一消费语法：
 
 ```text
+import std;
 func parse(s) {
   if (s == "") { return std.result.err("empty"); }
   return std.result.ok(42);
 }
 
 let n = parse(input) on error(e) {
-  print(str(e));
+  std.io.print(str(e));
   recover 0;
 };
 ```
@@ -1629,11 +1688,12 @@ let v = do {
 配合 `on error`：
 
 ```text
+import std;
 let n = do {
   let a = parse(input);
   a * 2;
 } on error(e) {
-  print(str(e));
+  std.io.print(str(e));
   recover 0;
 };
 ```
@@ -1643,6 +1703,7 @@ let n = do {
 `std.result.unwrap` 在 `err` 时通过 `fail` 抛出，因此可以被 `on error` 捕获：
 
 ```text
+import std;
 let v = std.result.unwrap(std.result.err("boom")) on error(e) {
   recover str(e);
 };
@@ -1651,17 +1712,19 @@ let v = std.result.unwrap(std.result.err("boom")) on error(e) {
 task 错误恢复：
 
 ```text
+import std;
 let t = std.net.tcp_connect_task("127.0.0.1", 1, 1000);
 let r = std.task.catch(t).wait();
 
 if (std.result.is_err(r)) {
-  print(std.result.error(r));
+  std.io.print(std.result.error(r));
 }
 ```
 
 Result API：
 
 ```text
+import std;
 std.result.ok(value)          → result
 std.result.err(message)       → result
 std.result.is_ok(result)      → bool
@@ -1702,6 +1765,7 @@ std.error.format_trace(error) → string
 ## 断言
 
 ```text
+import std;
 std.assert.that(condition[, message]) → bool
 std.assert.schema(value, spec)        → bool
 ```
@@ -1722,6 +1786,7 @@ std.assert.schema(value, spec)        → bool
 示例：
 
 ```text
+import std;
 std.assert.that(age >= 0, "age must be non-negative");
 
 std.assert.schema({"name": "alice", "age": 20}, {
@@ -1736,6 +1801,7 @@ std.assert.schema([1, 2, 3], ["int"]);
 ## 日志
 
 ```text
+import std;
 std.log.new(options?)                 → logger
 std.log.trace/debug/info/warn/error(message[, fields])
 std.log.enabled(level)                → bool
@@ -1785,6 +1851,7 @@ writer:   func(record)                                    // 自定义输出，�
 defer：
 
 ```text
+import std;
 func work() {
   let h = std.fs.open("x");
   defer std.fs.close(h);
@@ -1831,7 +1898,7 @@ std.ffi.call(lib, "memcpy", "void",
              ["buffer", "bytes", "usize"],
              [buf, data, 5]);
 
-print(std.bytes.to_string(std.ffi.buffer_bytes(buf, 5)));
+std.io.print(std.bytes.to_string(std.ffi.buffer_bytes(buf, 5)));
 std.ffi.buffer_free(buf);
 std.ffi.close(lib);
 ```
@@ -1954,6 +2021,7 @@ std.ffi.call_address(fn, "i32", ["i32", "i32"], [9, 4]);
 或 `ffi.cast` 使用：
 
 ```skein
+import std;
 let sym = std.ffi.symbol(lib, "strlen");
 std.ffi.call_address(sym, "usize", ["cstring"], ["hello"]);
 ```
@@ -1978,6 +2046,7 @@ std.ffi.call_variadic(lib, "log_message", "i32",
 manifest 声明 `"variadic": true` 后，也可以只传固定参数：
 
 ```text
+import std;
 std.ffi.call(lib, "log_message", ["value"]);
 std.ffi.call_variadic(lib, "log_message", ["value"],
                       ["i32", "f64"], [7, 2.5]);
@@ -2135,7 +2204,7 @@ func point_sort(base: *Point, n: usize, cmp: Compare) retains cmp;
 import std;
 
 let name = std.native.load("./libexample.so");
-print(name);              // example.math
+std.io.print(name);              // example.math
 
 import example.math;
 example.math.add(1, 2);
@@ -2263,6 +2332,7 @@ skein --check-ffi ./libshape.so shape.ffi.json
 模块：
 
 ```text
+import std;
 std.list
 std.fn
 std.iter
@@ -2328,13 +2398,14 @@ std.rpc（内嵌 Skein 源码包）
 `std.fsm` 是内嵌 Skein 源码标准库，源码位于 `lib/std/fsm.skein`，构建时嵌入解释器，不需要安装额外文件：
 
 ```text
+import std;
 import std.fsm;
 
 let m = fsm.define(0, func(state, event) { return state + event; });
 let ctx = m.start();
 ctx = m.run(ctx, [1, 2, 3]);
-print(ctx.state);          // 6
-print(fsm.history(ctx));   // [0, 1, 3, 6]
+std.io.print(ctx.state);          // 6
+std.io.print(fsm.history(ctx));   // [0, 1, 3, 6]
 ctx = fsm.undo(ctx);       // state 3
 ctx = fsm.redo(ctx);       // state 6
 ```
@@ -2352,6 +2423,7 @@ API：包级 `define`；`Machine` 方法 `initial` / `start` / `step` / `run`；
 `snapshot` 返回普通 dict，可 JSON 持久化；`restore` 重建历史并校验。枚举状态在 JSON 往返时通过 `std.enum.decode` 自动恢复：
 
 ```text
+import std;
 let json = std.json.stringify(fsm.snapshot(ctx));
 ctx = fsm.restore(std.json.parse(json));
 ```
@@ -2359,6 +2431,7 @@ ctx = fsm.restore(std.json.parse(json));
 struct 状态可以传解码回调：
 
 ```text
+import std;
 ctx = fsm.restore(std.json.parse(json), func(v) {
   return std.struct.decode(v, "S");
 });
@@ -2375,6 +2448,7 @@ let p = std.struct.decode({"x": 1, "y": 2}, "Point");
 泛型类型使用显式类型描述符：
 
 ```text
+import std;
 struct Box[T any] { value: T; }
 let a = std.struct.decode({"value": 1}, "Box[int]");
 let b = std.struct.decode({"value": [1, 2]}, "Box[list[int]]");
@@ -2390,6 +2464,7 @@ let b = std.struct.decode({"value": [1, 2]}, "Box[list[int]]");
 动态消息可使用自描述 envelope：
 
 ```text
+import std;
 let env = std.struct.encode(box, "Box[int]");
 // {"$version": 1, "$type": "Box[int]", "payload": {...}}
 
@@ -2405,6 +2480,7 @@ let option = std.enum.decode(env);
 `std.enum.tag(value)` 返回 `module.Enum.Variant` 规范字符串，丢弃载荷，可直接作 dict key：
 
 ```text
+import std;
 enum E { A { n: int; }; }
 std.enum.tag(E.A { n: 1 })   // "main.E.A"
 std.enum.tag(E.A { n: 2 })   // "main.E.A"
@@ -2415,6 +2491,7 @@ std.enum.tag(E.A { n: 2 })   // "main.E.A"
 `std.ref` 提供 `ref T` / `weak T` 句柄的配套操作：
 
 ```text
+import std;
 std.ref.set(target, value)   // 替换整个目标内容；target.* = value 的等价形式
 std.ref.upgrade(weak)        // weak T? -> ref T?，目标已回收时返回 null
 std.ref.snapshot(value)      // 递归得到普通值快照，可跨线程发送
@@ -2432,10 +2509,10 @@ import std;
 
 struct Point { x: int; y: int = 0; }
 let info = std.meta.type_info("Point");
-print(info["kind"]);                  // struct
-print(info["fields"][0]["name"]);     // x
-print(std.meta.fields(Point { x: 1 }));
-print(std.meta.has_type("int"));      // true
+std.io.print(info["kind"]);                  // struct
+std.io.print(info["fields"][0]["name"]);     // x
+std.io.print(std.meta.fields(Point { x: 1 }));
+std.io.print(std.meta.has_type("int"));      // true
 ```
 
 `std.meta.type_info(type)` 接受 struct/enum 实例、内建类型值或类型名字符串；
@@ -2455,6 +2532,7 @@ print(std.meta.has_type("int"));      // true
 泛型类型通过显式类型描述符查询：
 
 ```text
+import std;
 std.meta.generic_info("Box[int]")   // 参数名、实参、是否实例化
 std.meta.type_args("Box[int]")      // ["int"]
 std.meta.type_params("Box[int]")    // ["T"]
@@ -2468,6 +2546,7 @@ std.meta.type_args(box_value)       // null；运行时值不携带类型实参
 内建容器同样参与统一查询：
 
 ```text
+import std;
 std.meta.type_params("list")          // ["T"]
 std.meta.type_args("list[int]")       // ["int"]
 std.meta.type_args("dict[string, list[int]]")
@@ -2481,6 +2560,7 @@ std.meta.type_info("list[int]")       // kind=builtin, name=list
 `std.lru` 是内嵌 Skein 源码包（`lib/std/lru.skein`），需要 `import std.lru;`：
 
 ```text
+import std;
 import std.lru;
 
 let l = lru.new(2);
@@ -2501,6 +2581,7 @@ API：`new` / `get` / `peek` / `put` / `delete` / `has` / `keys` / `values` / `s
 `std.dict_key` 是内嵌 Skein 源码包（`lib/std/dict_key.skein`），定义自定义 struct/enum key hash 接口。完整的 key 规则见 [key-semantics.md](key-semantics.md)：
 
 ```text
+import std;
 import std.dict_key;
 
 struct User {
@@ -2539,6 +2620,7 @@ struct User {
 fast path，泛型类型变量仍使用显式方法调用。
 
 ```text
+import std;
 struct Counter {
   value: int;
   func op_add(self, rhs: Counter): Counter {
@@ -2608,6 +2690,7 @@ function、builtin、bound method、native callable
 ```
 
 ```text
+import std;
 func apply(fn: Callable, x: int) {
   return fn(x);
 }
@@ -2676,6 +2759,7 @@ job.done
 `std.rpc` 提供 worker 服务端循环，支持 `jsonl` 和 `hybrid`：
 
 ```text
+import std;
 import std.rpc;
 
 rpc.serve(func(method, params) {
@@ -2707,6 +2791,7 @@ rpc.serve(func(method, params, body) {
 `options` 支持自定义传输流：
 
 ```text
+import std;
 rpc.serve(handler[, options])
 rpc.server(handler[, options]) -> rpc.Server
 rpc.spawn(command[, options]) -> rpc.Connection
@@ -2729,6 +2814,7 @@ options:
 可以配合文件句柄、socket 或进程 pipe 使用：
 
 ```text
+import std;
 let input = std.fs.open("requests.jsonl", "rb");
 let output = std.fs.open("responses.jsonl", "w+b");
 
@@ -2743,6 +2829,7 @@ server.serve();
 自定义 framing：
 
 ```text
+import std;
 func enc(frame: dict): string {
   return "RPC1 " + std.json.stringify(frame);
 }
@@ -2791,6 +2878,7 @@ server.stats();        // {"served": ..., "errors": ..., "protocol": "jsonl"}
 客户端也可以不经过 worker pool，直接建立单连接：
 
 ```text
+import std;
 let conn = rpc.spawn("skein", {"args": ["worker.skein"]});
 
 // 或复用已有管道：
@@ -2924,6 +3012,7 @@ struct Range {
 `Iterable` 使用严格 conformance：用户类型的 `iter` 必须返回 `generator[T]`。返回 `list[int]` 等值的类型不满足该约束；请改为 `return std.list.iter(self.xs);` 或使用 `yield`。
 
 ```text
+import std;
 struct Box {
   xs: list[int];
 
@@ -2938,8 +3027,9 @@ func collect[T Iterable](x: T) { ... }
 用户类型满足 `Iterable` 后，可以直接用于 `for in`：
 
 ```text
+import std;
 for x in (Range { start: 1, end: 4 }) {
-  print(x);
+  std.io.print(x);
 }
 ```
 
@@ -2955,6 +3045,7 @@ for x in (Range { start: 1, end: 4 }) {
 `std.set` / `std.deque` / `std.heap` 是原生实现（`import std.set` / `import std.deque` / `import std.heap` 仍然可用，也可以直接使用对应的 `std.*`）：
 
 ```text
+import std;
 import std.set;
 let s = set.from_list([1, 2, 2, 3]);
 set.size(s)          // 3
@@ -2976,6 +3067,7 @@ heap.peek(h)         // 1
 `std.route` 是显式注册的 Web 路由：
 
 ```text
+import std;
 import std.route;
 
 let app = route.new();
@@ -3001,6 +3093,7 @@ app.dispatch({"method": "GET", "path": "/users/42"});
 `std.password` 提供 Argon2id 密码哈希：
 
 ```skein
+import std;
 import std.password;
 
 let encoded = std.password.hash("secret", {
@@ -3039,6 +3132,7 @@ std.db.close(db);
 PostgreSQL 使用 URI：
 
 ```skein
+import std;
 let db = std.db.open(
   "postgresql://user:password@localhost:5432/app",
   {"connect_timeout_ms": 5000});
@@ -3050,6 +3144,7 @@ std.db.close(db);
 MySQL / MariaDB 也使用 URI：
 
 ```skein
+import std;
 let db = std.db.open(
   "mysql://user:password@localhost:3306/app",
   {"connect_timeout_ms": 5000});
@@ -3063,6 +3158,7 @@ std.db.close(db);
 API：
 
 ```text
+import std;
 std.db.open(path_or_uri[, options]) -> db
 std.db.exec(db, sql[, params]) -> {changes, last_insert_rowid}
 std.db.query(db, sql[, params]) -> list[dict]
@@ -3094,6 +3190,7 @@ pool.acquire() / pool.release(db) / pool.stats() / pool.close()
 Migration：
 
 ```skein
+import std;
 let migrations = [
   {"version": 1, "name": "create_users",
    "up": "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)"},
@@ -3117,6 +3214,7 @@ let result = std.db.migrate(db, migrations);
 Connection pool：
 
 ```skein
+import std;
 let pool = std.db.pool("postgresql://user:password@localhost/app",
                        {"max": 8});
 let db = pool.acquire();
@@ -3140,6 +3238,7 @@ pool.close();
 `std.cache` 提供 Redis / Valkey 的最小 TTL key-value 客户端：
 
 ```skein
+import std;
 import std.cache;
 
 let c = cache.open("redis://127.0.0.1:6379");
@@ -3185,6 +3284,7 @@ client.close() -> bool
 `std.kv` 是嵌入式持久化 KV，当前默认后端为 SQLite 单文件：
 
 ```skein
+import std;
 import std.kv;
 
 let store = kv.open("app.kv");
@@ -3233,6 +3333,7 @@ store.backend -> string
 `std.auth` 提供 Cookie Session、CSRF、HMAC token 和 JWT 的基础能力：
 
 ```skein
+import std;
 import std.auth;
 
 let store = auth.new_store({"ttl": 3600, "cookie_name": "sid"});
@@ -3290,6 +3391,7 @@ let denied = auth.unauthorized_response("login required");
 `std.web` 提供 CORS、安全响应头、可信代理客户端 IP 和限流：
 
 ```skein
+import std;
 import std.web;
 
 let cors = web.cors({
@@ -3348,6 +3450,7 @@ let ip = web.client_ip(req, {
 `std.metrics` 提供进程内 Prometheus 指标：
 
 ```skein
+import std;
 import std.metrics;
 
 let registry = metrics.new();
@@ -3379,6 +3482,7 @@ registry.reset()
 `std.graph` 提供有向图和常用算法：
 
 ```text
+import std;
 import std.graph;
 
 let g = graph.new();
@@ -3422,6 +3526,7 @@ API：`new` / `add_node` / `add_nodes` / `remove_node` / `has_node` / `get_node`
 `std.arena` 提供带 generation 的稳定句柄：
 
 ```text
+import std;
 import std.arena;
 
 let s = arena.new();
@@ -3441,6 +3546,7 @@ API：`new` / `from_list` / `add` / `get` / `set` / `remove` / `has` / `size` / 
 `"posix"` 或 `"windows"`，因此可以在 Linux 上完整测试 Windows 路径：
 
 ```text
+import std;
 import std.path;
 
 let p = path.parse("C:/Users/alice/../notes.txt", "windows");
@@ -3516,13 +3622,13 @@ drive-relative 的 `C:foo` 和普通相对路径为 `false`。
 
 `std.list` / `std.dict` 的规范构造器为 `new`：无参数返回空容器，单参数从
 可迭代对象构造（list 复制元素，dict 接受 dict 或由长度 2 的 pair/list 组成的
-可迭代对象）。裸写 `list(x)` / `dict(x)` 是 `std.list.new(x)` /
-`std.dict.new(x)` 的 prelude 别名，值作用域可遮蔽；类型注解中的 `list[T]` /
-`dict[K, V]` 始终按类型命名空间解析。
+可迭代对象）。裸名 `list` / `dict` 不再是值绑定，构造必须写 `std.list.new(x)` /
+`std.dict.new(x)`；类型注解中的 `list[T]` / `dict[K, V]` 始终按类型命名空间解析。
 
 `std.list` 新增常用算法：
 
 ```text
+import std;
 std.list.new([1, 2])                     // [1, 2]
 std.list.slice(xs, start, length)         // length 省略时到末尾
 std.list.unique([1, 2, 1, 3, 2])        // [1, 2, 3]
@@ -3564,15 +3670,15 @@ import std;
 
 std.iter.collect(
   std.iter.map(
-    std.iter.filter(range(0, 10), func(x) -> x % 2 == 0),
+    std.iter.filter(std.utils.range(0, 10), func(x) -> x % 2 == 0),
     func(x) -> x * x))              // [0, 4, 16, 36, 64]
 
-std.iter.collect(std.iter.take(range(0, 100), 3))  // [0, 1, 2]
+std.iter.collect(std.iter.take(std.utils.range(0, 100), 3))  // [0, 1, 2]
 std.iter.collect(std.iter.drop([1, 2, 3, 4], 2))   // [3, 4]
 std.iter.collect(std.iter.enumerate(["a", "b"]))   // [[0, a], [1, b]]
 
-std.iter.for_each([10, 20], func(i, x) { println(str(i) + ":" + str(x)); })
-std.iter.for_each({"a": 1}, func(k, v) { println(k + "=" + str(v)); })
+std.iter.for_each([10, 20], func(i, x) { std.io.println(str(i) + ":" + str(x)); })
+std.iter.for_each({"a": 1}, func(k, v) { std.io.println(k + "=" + str(v)); })
 
 func gen() { yield 1; yield 2; yield 3; }
 std.iter.collect(std.iter.map(gen(), func(x) -> x * 10))
@@ -3584,6 +3690,7 @@ std.iter.collect(std.iter.map(gen(), func(x) -> x * 10))
 容器提供显式惰性迭代器；它们返回 generator，不改变原容器的 eager 方法：
 
 ```text
+import std;
 std.list.iter(xs)          // generator[T]
 std.dict.iter(d)           // generator[pair[K, V]]
 std.dict.iter_keys(d)      // generator[K]
@@ -3609,6 +3716,7 @@ entry pair，string/bytes 产出 char/byte，generator 产出自身元素。
 `std.iter.take` / `map` / `filter` 组合。`for` 直接消费这些 generator：
 
 ```text
+import std;
 for k in std.dict.iter_keys(d) { ... }
 for (k, v) in std.dict.iter(d) { ... }
 ```
@@ -3629,6 +3737,7 @@ q.push_back(3)
 当前提供的函数：
 
 ```text
+import std;
 std.list.new
 std.list.len
 std.list.iter
@@ -4189,7 +4298,7 @@ std.thread.capabilities
 - `std` 是内置包，不参与文件系统查找，也不需要满足目录名规则；
 - `std` 名称保留，不能通过源码包覆盖；
 - `std.*` 是规范形式；使用 `import std;` 后通过 `std.list`、`std.string` 等方式访问；
-- 保留的无 `import` 裸名只来自 prelude 默认 import（`len` / `range` / `print` / `println` / `input` / `kind_of` / `type_name` / `type_package` / `type_module_name` / `type_source` / `list` / `dict`），不是全局兼容别名，可被局部绑定或显式 import 遮蔽；
+- 原 prelude 裸名（`len` / `range` / `print` / `println` / `input` / `kind_of` / `type_name` / `type_package` / `type_module_name` / `type_source` / `list` / `dict`）已移除；必须先 `import std;` 再使用对应的 `std.*` 规范路径；
 - 数学、字符串、格式化、文件与 bytes 的旧全局函数（如 `find`、`split`、`bytes_*`、`file_*`）已移除，请改用对应的 `std.math` / `std.string` / `std.fs` / `std.bytes` 函数；
 - `std` 导入得到的是命名空间副本，修改自己的副本不会污染内置缓存；
 - 新函数只通过 `std.*` 提供，不再增加全局函数名；
@@ -4234,7 +4343,7 @@ std.thread.capabilities
 - `std.process` 提供命令执行和状态查询；
 - `std.process.spawn_pipe(command[, options])` 返回 `process_io`，复用子进程已有的 stdin/stdout pipe；`std.process.io(process)` 可包装已有进程句柄；
 - `process_io` 提供 `write(bytes|string)` / `flush()` / `read_line([timeout_ms])` / `read_exact(size[, timeout_ms])` / `close()` / `wait([timeout_ms])` / `kill([signal])` / `pid` / `process`；`spawn_pipe` 返回的对象拥有进程，`io(process)` 只借用进程，进程生命周期仍由原句柄管理；
-- `std.type` 提供 `kind_of`、`type_name`、`type_package`、`type_module_name`、`type_source`；
+- `std.type` 提供 `kind_of`、`name`、`package_name`、`module_name`、`source`；
 - `std.ref` 提供 `ref` / `weak` 句柄的替换、升级和值快照；
 - `std.meta` 提供只读类型反射，查询字段、变体、方法和 proto；
 - `std.net` 提供同步和 task 形式异步的 TCP/DNS，数据使用 `bytes`，底层由 libuv 驱动；
@@ -4265,18 +4374,19 @@ std.thread.capabilities
 - `std.result.capture` 捕获同步 `fail` 和运行时错误；task 使用 `std.task.catch`；
 - 显式 `std.generator.close(g)` 会执行生成器的 `defer`；被直接丢弃的挂起生成器不会执行，但会打印 warning；
 - DNS 超时依赖 libuv 取消系统解析请求，极端情况下可能延迟返回；
-- 裸名 prelude 绑定与 `std.*` 是同一批内置函数的两个入口；新代码优先使用规范路径 `std.*`。
+- 内置函数只通过 `std.*` 提供，原 prelude 裸名入口已移除。
 
 ### 控制台输入
 
-`input([prompt])` 从 stdin 读取一行，返回字符串（不含末尾换行）；`std.io.input` 与全局 `input` 是同一个函数。
+`std.io.input([prompt])` 从 stdin 读取一行，返回字符串（不含末尾换行）；原全局 `input` 已移除。
 
 ```text
-let name = input("Name: ");
+import std;
+let name = std.io.input("Name: ");
 if (name == null) {
-  println("no input");
+  std.io.println("no input");
 } else {
-  println("hello " + name);
+  std.io.println("hello " + name);
 }
 ```
 
@@ -4291,10 +4401,10 @@ if (name == null) {
 ```text
 import std;
 
-let parts = std.string.split(input("x y: "));
+let parts = std.string.split(std.io.input("x y: "));
 let x = int(parts[0]);
 let y = int(parts[1]);
-println(x + y);
+std.io.println(x + y);
 ```
 
 ### 流式读写
@@ -4326,15 +4436,16 @@ std.io.close(buffered)
 socket 异步流：
 
 ```text
+import std;
 let s = std.net.tcp_connect("127.0.0.1", 8080);
 
 std.io.write_task(s, "hello", 1000).wait();
 
 let data = std.io.read_task(s, 4096, 1000).wait();
 if (data == null) {
-  print("closed");
+  std.io.print("closed");
 } else {
-  print(std.bytes.to_string(data));
+  std.io.print(std.bytes.to_string(data));
 }
 
 std.io.close(s);
@@ -4343,6 +4454,7 @@ std.io.close(s);
 文件异步流：
 
 ```text
+import std;
 let f = std.fs.open("data.bin", "rb");
 
 let first = std.io.read_task(f, 4096).wait();
@@ -4352,6 +4464,7 @@ std.io.close(f);
 ```
 
 ```text
+import std;
 let f = std.fs.open("out.bin", "w+b");
 
 let n = std.io.write_task(f, std.bytes.from_string("hello")).wait();
@@ -4359,6 +4472,7 @@ std.io.close(f);
 ```
 
 ```text
+import std;
 std.io.read(stream, max_bytes[, timeout_ms])  → bytes / null
 std.io.write(stream, data[, timeout_ms])      → int
 std.io.write_all(stream, data[, timeout_ms])  → int

@@ -18,7 +18,7 @@ def run_cases():
         'func boom() { fail("must not run"); }\n'
         'std.log.set_level("error");\n'
         'info!("hidden", {"x": boom()});\n'
-        'println("guard-ok");\n'
+        'std.io.println("guard-ok");\n'
     )
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.splitlines() == ["guard-ok"], proc.stdout
@@ -36,7 +36,7 @@ def run_cases():
         'std.log.set_level("error");\n'
         'error!("bad", {"x": 1});\n'
         'let v = info!("guarded");\n'
-        'println(str(v));\n'
+        'std.io.println(str(v));\n'
     )
     assert proc.returncode == 0, proc.stderr
     assert " ERROR bad x=1" in proc.stderr, proc.stderr
@@ -55,7 +55,7 @@ def run_cases():
         "import std;\n"
         'let lg = std.log.new({"output": "stdout", "level": "trace"});\n'
         'func get_logger() {\n'
-        '  println("get");\n'
+        '  std.io.println("get");\n'
         '  return lg;\n'
         '}\n'
         'log_to!(get_logger(), "debug", "once");\n'
@@ -66,7 +66,7 @@ def run_cases():
 
     check(
         "macro unary not preserved",
-        'import std;\nprintln(str(!(1 == 2)));\n',
+        'import std;\nstd.io.println(str(!(1 == 2)));\n',
         stdout="true",
     )
     check(
@@ -81,7 +81,7 @@ def run_cases():
     )
     check(
         "macro mixed invocation rejects block",
-        'import std;\ninfo!("x") { println(1); };\n',
+        'import std;\ninfo!("x") { std.io.println(1); };\n',
         stderr="does not accept a block",
     )
 
@@ -90,7 +90,7 @@ def run_cases():
         'import std;\n'
         'std.log.set_level("error");\n'
         'std.log.error!("bad");\n'
-        'println("log-ok");\n',
+        'std.io.println("log-ok");\n',
         stdout="log-ok",
         stderr=" ERROR bad",
     )
@@ -106,17 +106,17 @@ def run_cases():
         "canonical capture and control macros",
         'import std;\n'
         'let r = std.result.capture! { std.error.fail!("bad"); };\n'
-        'println(str(std.result.is_err(r)));\n',
+        'std.io.println(str(std.result.is_err(r)));\n',
         stdout="true",
     )
     check(
         "zero-argument and single-name macro shorthand",
         'import std;\n'
         'let r = capture! { fail!; };\n'
-        'println(str(std.result.is_err(r)));\n'
+        'std.io.println(str(std.result.is_err(r)));\n'
         'let msg = "boom";\n'
         'let s = capture! { fail! msg; };\n'
-        'println(str(std.result.is_err(s)));\n',
+        'std.io.println(str(std.result.is_err(s)));\n',
         stdout_all=["true", "true"],
     )
     check(
@@ -126,8 +126,8 @@ def run_cases():
         'let seven = 7;\n'
         'let a = boom() on error(e) { recover! seven; };\n'
         'let b = boom() on error(e) { std.error.recover!(7); };\n'
-        'println(str(a));\n'
-        'println(str(b));\n',
+        'std.io.println(str(a));\n'
+        'std.io.println(str(b));\n',
         stdout_all=["7", "7"],
     )
     check(
@@ -135,10 +135,10 @@ def run_cases():
         'func f(): int { return 42; }\n'
         'let t = launch f();\n'
         'let u = launch f();\n'
-        'println(str(wait!(t)));\n'
-        'println(str(wait! u));\n'
+        'std.io.println(str(wait!(t)));\n'
+        'std.io.println(str(wait! u));\n'
         'let v = launch f();\n'
-        'println(str(std.task.wait!(v)));\n',
+        'std.io.println(str(std.task.wait!(v)));\n',
         stdout_all=["42", "42", "42"],
     )
     check(
@@ -148,7 +148,7 @@ def run_cases():
     )
     check(
         "control macro rejects block",
-        'import std;\nfail! { println(1); };\n',
+        'import std;\nfail! { std.io.println(1); };\n',
         stderr="does not accept a block",
     )
     check(
@@ -167,7 +167,7 @@ def run_cases():
         "user macro expr fragment",
         'macro twice(x: expr) { return #x * 2; }\n'
         'func test(): int { return twice!(1 + 2); }\n'
-        'println(str(test()));\n',
+        'std.io.println(str(test()));\n',
         stdout="6",
     )
     check(
@@ -178,7 +178,7 @@ def run_cases():
         '  let g = keep!(identity[int]);\n'
         '  return g(7);\n'
         '}\n'
-        'println(str(test()));\n',
+        'std.io.println(str(test()));\n',
         stdout="7",
     )
     check(
@@ -190,9 +190,9 @@ def run_cases():
         '}\n'
         'func test(): int {\n'
         '  let outer = 100;\n'
-        '  return set_name!(v, 1 + 2) { println(str(outer)); };\n'
+        '  return set_name!(v, 1 + 2) { std.io.println(str(outer)); };\n'
         '}\n'
-        'println(str(test()));\n',
+        'std.io.println(str(test()));\n',
         stdout="100\n3",
     )
     check(
@@ -200,7 +200,7 @@ def run_cases():
         'func add3(a: int, b: int, c: int): int { return a + b + c; }\n'
         'macro call_all(f: expr, args: expr...) { return #f(#args...); }\n'
         'func test(): int { return call_all!(add3, 1, 2, 3); }\n'
-        'println(str(test()));\n',
+        'std.io.println(str(test()));\n',
         stdout="6",
     )
     check(
@@ -247,7 +247,7 @@ def run_cases():
         'macro inc(x: expr) { #x + 1; }\n'
         'macro twice(x: expr) { inc!(#x) * 2; }\n'
         'func test(): int { return twice!(5); }\n'
-        'println(str(test()));\n',
+        'std.io.println(str(test()));\n',
         stdout="12",
     )
     check(
@@ -259,9 +259,9 @@ def run_cases():
         '}\n'
         'func test(): int {\n'
         '  let tmp = 100;\n'
-        '  return wrap!(2) { println(str(tmp)); };\n'
+        '  return wrap!(2) { std.io.println(str(tmp)); };\n'
         '}\n'
-        'println(str(test()));\n',
+        'std.io.println(str(test()));\n',
         stdout="100\n2",
     )
     check(
@@ -274,8 +274,8 @@ def run_cases():
         '  std.log.info!("canonical");\n'
         '  return 7;\n'
         '}\n'
-        'println(str(bare()));\n'
-        'println(str(canonical()));\n',
+        'std.io.println(str(bare()));\n'
+        'std.io.println(str(canonical()));\n',
         stdout="101\n7",
         stderr=" INFO  canonical",
     )
@@ -289,8 +289,8 @@ def run_cases():
         '  std.log.error!("canonical");\n'
         '  return 7;\n'
         '}\n'
-        'println(str(bare()));\n'
-        'println(str(canonical()));\n',
+        'std.io.println(str(bare()));\n'
+        'std.io.println(str(canonical()));\n',
         stdout="101\n7",
         stderr=" ERROR canonical",
     )
@@ -302,8 +302,8 @@ def run_cases():
         'let error = 2;\n'
         'let b = Box { on: on, error: error };\n'
         'func f() { fail "x"; }\n'
-        'println(str(b.on + b.error));\n'
-        'println(str(f() on error(e) { recover on + error; }));\n',
+        'std.io.println(str(b.on + b.error));\n'
+        'std.io.println(str(f() on error(e) { recover on + error; }));\n',
         stdout="3\n3",
     )
     check(
@@ -333,14 +333,14 @@ def run_cases():
         "user macro type fragment annotation",
         'macro make(T: type, v: expr) { let x: #T = #v; return x; }\n'
         'func test(): int { return make!(int, 7); }\n'
-        'println(str(test()));\n',
+        'std.io.println(str(test()));\n',
         stdout="7",
     )
     check(
         "user macro type fragment cast",
         'macro cast_it(T: type, v: expr) { let x = #v as #T; return x; }\n'
         'func test(): int { return cast_it!(int, 7); }\n'
-        'println(str(test()));\n',
+        'std.io.println(str(test()));\n',
         stdout="7",
     )
     check(
@@ -349,14 +349,14 @@ def run_cases():
         'struct D { func draw(self) { } }\n'
         'macro is_p(P: type, v: expr) { return #v is #P; }\n'
         'func test(): bool { let d = D { }; return is_p!(Drawable, d); }\n'
-        'println(str(test()));\n',
+        'std.io.println(str(test()));\n',
         stdout="true",
     )
     check(
         "user macro type fragment nullable",
         "macro nullable(T: type, v: expr) { let x: #T? = #v; return x == null; }\n"
         "func test(): bool { return nullable!(int, 7); }\n"
-        "println(str(test()));\n",
+        "std.io.println(str(test()));\n",
         stdout="false",
     )
     check(
@@ -367,7 +367,7 @@ def run_cases():
         "  return 1;\n"
         "}\n"
         "func test(): int { return wrappers!(int); }\n"
-        "println(str(test()));\n",
+        "std.io.println(str(test()));\n",
         stdout="1",
     )
     check(
@@ -377,14 +377,14 @@ def run_cases():
         "  return f(7);\n"
         "}\n"
         "func test(): int { return mkfn!(int); }\n"
-        "println(str(test()));\n",
+        "std.io.println(str(test()));\n",
         stdout="7",
     )
     check(
         "user macro type fragment explicit generic type",
         'macro make(T: type, v: expr) { let x = #v as #T; return x; }\n'
         'func test(): list[int] { return make!(type(list[int]), [1, 2, 3]); }\n'
-        'println(str(test()[1]));\n',
+        'std.io.println(str(test()[1]));\n',
         stdout="2",
     )
     check(
@@ -393,7 +393,7 @@ def run_cases():
         'func test(): (int) -> int {\n'
         '  return make!(type((int) -> int), func(x: int): int -> x * 2);\n'
         '}\n'
-        'println(str(test()(5)));\n',
+        'std.io.println(str(test()(5)));\n',
         stdout="10",
     )
     check(
@@ -401,55 +401,55 @@ def run_cases():
         'macro inner(T: type) { let x = 1 as #T; return x; }\n'
         'macro outer(T: type) { return inner!(type(#T)); }\n'
         'func test(): int { return outer!(int); }\n'
-        'println(str(test()));\n',
+        'std.io.println(str(test()));\n',
         stdout="1",
     )
     check(
         "user macro type fragment must be a type name",
         'macro bad(T: type) { return 1; }\n'
         'func test(): int { return bad!(1 + 2); }\n'
-        'println(str(test()));\n',
+        'std.io.println(str(test()));\n',
         stderr="type fragment expects a type name",
     )
     check(
         "user macro type fragment cannot be a value",
         'macro bad(T: type) { let x = #T; return 1; }\n'
         'func test(): int { return bad!(int); }\n'
-        'println(str(test()));\n',
+        'std.io.println(str(test()));\n',
         stderr="type fragment cannot be used as a value or name",
     )
     check(
         "user macro expr fragment cannot be a type",
         'macro bad(T: expr, v: expr) { let x: #T = #v; return x; }\n'
         'func test(): int { return bad!(int, 7); }\n'
-        'println(str(test()));\n',
+        'std.io.println(str(test()));\n',
         stderr="macro fragment cannot be used here",
     )
     check(
         "user macro type argument requires a type fragment",
         'macro bad(v: expr) { return #v; }\n'
         'func test(): int { return bad!(type(int)); }\n'
-        'println(str(test()));\n',
+        'std.io.println(str(test()));\n',
         stderr="type argument requires a type fragment",
     )
     check(
         "user macro type argument rejects expression syntax",
         'macro bad(T: type) { let x = 1 as #T; return x; }\n'
         'func test(): int { return bad!(type(1 + 2)); }\n'
-        'println(str(test()));\n',
+        'std.io.println(str(test()));\n',
         stderr="syntax error",
     )
     check(
         "builtin macro rejects type argument",
         'info!(type(int));\n'
-        'println("ok");\n',
+        'std.io.println("ok");\n',
         stderr="does not accept type arguments",
     )
     check(
         "user macro type fragment rejects variadic",
         'macro bad(T: type...) { return 1; }\n'
         'func test(): int { return bad!(int); }\n'
-        'println(str(test()));\n',
+        'std.io.println(str(test()));\n',
         stderr="only expr parameters support '...'",
     )
     check(
@@ -460,21 +460,21 @@ def run_cases():
         '  return x.value;\n'
         '}\n'
         'func test(): int { return make!(int, 7); }\n'
-        'println(str(test()));\n',
+        'std.io.println(str(test()));\n',
         stdout="7",
     )
     check(
         "user macro cannot generate declarations",
         'macro bad() { func f() { return 1; } return f(); }\n'
         'func test(): int { return bad!(); }\n'
-        'println(str(test()));\n',
+        'std.io.println(str(test()));\n',
         stderr="macro template cannot generate declarations",
     )
     check(
         "user macro cannot generate struct declarations",
         'macro bad() { struct S { x: int; } return 1; }\n'
         'func test(): int { return bad!(); }\n'
-        'println(str(test()));\n',
+        'std.io.println(str(test()));\n',
         stderr="macro template cannot generate declarations",
     )
     check(
@@ -482,14 +482,14 @@ def run_cases():
         'proto P { func f(self); }\n'
         'macro bad() { impl P { } return 1; }\n'
         'func test(): int { return bad!(); }\n'
-        'println(str(test()));\n',
+        'std.io.println(str(test()));\n',
         stderr="macro template cannot generate declarations",
     )
     check(
         "user macro cannot generate generic declarations",
         'macro bad() { func f[T any]() { return 1; } return 1; }\n'
         'func test(): int { return bad!(); }\n'
-        'println(str(test()));\n',
+        'std.io.println(str(test()));\n',
         stderr="macro template cannot generate generic syntax",
     )
     check(
@@ -497,7 +497,7 @@ def run_cases():
         'func id[T any](x: T) { return x; }\n'
         'macro call(v: expr) { return id[int](#v); }\n'
         'func test(): int { return call!(7); }\n'
-        'println(str(test()));\n',
+        'std.io.println(str(test()));\n',
         stdout="7",
     )
     check(
@@ -505,7 +505,7 @@ def run_cases():
         'func id[T any](x: T) { return x; }\n'
         'macro get() { let g = id[int]; return g(7); }\n'
         'func test(): int { return get!(); }\n'
-        'println(str(test()));\n',
+        'std.io.println(str(test()));\n',
         stdout="7",
     )
     check(
@@ -629,7 +629,7 @@ def run_cases():
         'struct Box[T any] { value: T; }\n'
         'macro bad(T: expr) { let b = Box[#T] { value: 1 }; return 1; }\n'
         'func test(): int { return bad!(int); }\n'
-        'println(str(test()));\n',
+        'std.io.println(str(test()));\n',
         stderr="macro fragment cannot be used here",
     )
     check(
@@ -637,21 +637,21 @@ def run_cases():
         'struct Box[T any] { value: T; }\n'
         'macro bad(T: type) { let b = Box[#Z] { value: 1 }; return 1; }\n'
         'func test(): int { return bad!(int); }\n'
-        'println(str(test()));\n',
+        'std.io.println(str(test()));\n',
         stderr="unknown macro placeholder",
     )
     check(
         "user macro type fragment cannot reach introspection",
-        'macro bad(T: type) { let k = kind_of(#T); return 1; }\n'
+        'macro bad(T: type) { let k = std.type.kind_of(#T); return 1; }\n'
         'func test(): int { return bad!(int); }\n'
-        'println(str(test()));\n',
+        'std.io.println(str(test()));\n',
         stderr="type fragment cannot be used as a value or name",
     )
     check(
         "user macro allows anonymous function expressions",
         'macro mk() { let f = func(x) { return x; }; return f(7); }\n'
         'func test(): int { return mk!(); }\n'
-        'println(str(test()));\n',
+        'std.io.println(str(test()));\n',
         stdout="7",
     )
     check(
@@ -667,14 +667,14 @@ def run_cases():
     check(
         "recursive user macro",
         'macro bad(x: expr) { return bad!(#x); }\n'
-        'println(str(bad!(1)));\n',
+        'std.io.println(str(bad!(1)));\n',
         stderr="recursive user macro calls are not allowed",
     )
     check(
         "mutually recursive user macros",
         'macro a(x: expr) { return b!(#x); }\n'
         'macro b(x: expr) { return a!(#x); }\n'
-        'println(str(a!(1)));\n',
+        'std.io.println(str(a!(1)));\n',
         stderr="recursive user macro calls are not allowed",
     )
     check(
@@ -688,7 +688,7 @@ def run_cases():
     check(
         "user macro wrong arity",
         'macro one(x: expr) { return #x; }\n'
-        'println(str(one!(1, 2)));\n',
+        'std.io.println(str(one!(1, 2)));\n',
         stderr="macro expects a different number of arguments",
     )
     check(
@@ -700,15 +700,15 @@ def run_cases():
     check(
         "user macro zero arguments",
         'macro forty_two() { 42; }\n'
-        'println(str(forty_two!()));\n'
-        'println(str(forty_two!));\n',
+        'std.io.println(str(forty_two!()));\n'
+        'std.io.println(str(forty_two!));\n',
         stdout="42\n42",
     )
     check(
         "user macro shorthand single name",
         'macro plus_one(x: expr) { #x + 1; }\n'
         'let x = 5;\n'
-        'println(str(plus_one! x));\n',
+        'std.io.println(str(plus_one! x));\n',
         stdout="6",
     )
 
@@ -721,25 +721,25 @@ def run_cases():
         'let s = "twice!(21)";\n'
         '// twice!(99)\n'
         'let twice = 7;\n'
-        'println(s);\n'
-        'println(str(twice));\n',
+        'std.io.println(s);\n'
+        'std.io.println(str(twice));\n',
         stdout="twice!(21)\n7",
     )
     check(
         "G5 unused macro is neither executed nor typechecked",
         'macro side() {\n'
         '  let x: int = "not checked before expansion";\n'
-        '  println("TEMPLATE RAN");\n'
+        '  std.io.println("TEMPLATE RAN");\n'
         '  return x;\n'
         '}\n'
-        'println("DONE");\n',
+        'std.io.println("DONE");\n',
         stdout="DONE",
     )
     check(
         "G5 macro is not a first-class value",
         'macro twice(x: expr) { return #x * 2; }\n'
         'let f = twice;\n'
-        'println(str(f(2)));\n',
+        'std.io.println(str(f(2)));\n',
         stderr="symbol not found twice",
     )
     check(
@@ -756,7 +756,7 @@ def run_cases():
     )
     check(
         "user macro type fragment cannot reach type_name",
-        'macro bad(T: type) { let k = type_name(#T); return 1; }\n'
+        'macro bad(T: type) { let k = std.type.name(#T); return 1; }\n'
         'func test(): int { return bad!(int); }\n',
         stderr="type fragment cannot be used as a value or name",
     )
@@ -784,7 +784,7 @@ def run_cases():
             return run_file(write("main.skein", source))
 
         write("util.skein",
-              'println("UTIL RAN");\n'
+              'import std;\nstd.io.println("UTIL RAN");\n'
               'package util {\n'
               '  export func twice() { return 7; }\n'
               '  export macro twice(x: expr) { #x * 2; }\n'
@@ -798,26 +798,26 @@ def run_cases():
               '}\n')
 
         proc = run_main(
-            'import {twice, twice! as t} from util;\n'
+            'import std;\nimport {twice, twice! as t} from util;\n'
             'func test(): int { return t!(21) + twice(); }\n'
-            'println(str(test()));\n')
+            'std.io.println(str(test()));\n')
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout.splitlines() == ["UTIL RAN", "49"], proc.stdout
 
         proc = run_main(
-            'import {triple!} from util;\n'
+            'import std;\nimport {triple!} from util;\n'
             'func test(): int { return triple!(7); }\n'
-            'println(str(test()));\n')
+            'std.io.println(str(test()));\n')
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout.splitlines() == ["21"], proc.stdout
 
         proc = run_main(
-            'import {wrap2!} from util;\n'
+            'import std;\nimport {wrap2!} from util;\n'
             'func test(): int {\n'
             '  let tmp = 100;\n'
             '  return wrap2!(1 + 2) { tmp = 999; };\n'
             '}\n'
-            'println(str(test()));\n')
+            'std.io.println(str(test()));\n')
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout.splitlines() == ["3"], proc.stdout
 
@@ -832,15 +832,15 @@ def run_cases():
               '  export macro typed() { let x: P = types.make(); return x.x; }\n'
               '}\n')
         write("typed_main.skein",
-              'import types;\n'
+              'import std;\nimport types;\n'
               'import types as lib;\n'
               'import {typed!} from types;\n'
               'struct P { y: string; }\n'
               'macro is_p(P: type, v: expr) { return #v is #P; }\n'
               'func test(): bool { return is_p!(lib.D, lib.make()); }\n'
               'func test_typed(): int { return typed!(); }\n'
-              'println(str(test()));\n'
-              'println(str(test_typed()));\n')
+              'std.io.println(str(test()));\n'
+              'std.io.println(str(test_typed()));\n')
         proc = run_file(os.path.join(tmp, "typed_main.skein"))
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout.splitlines() == ["true", "7"], proc.stdout
@@ -855,13 +855,13 @@ def run_cases():
               '  export macro six(x: expr) { scale!(#x) * 2; }\n'
               '}\n')
         proc = run_main(
-            'import {six!} from chain;\n'
+            'import std;\nimport {six!} from chain;\n'
             'func test(): int { return six!(7); }\n'
-            'println(str(test()));\n')
+            'std.io.println(str(test()));\n')
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout.splitlines() == ["42"], proc.stdout
 
-        proc = run_main('import {missing!} from util;\nprintln(1);\n')
+        proc = run_main('import std;\nimport {missing!} from util;\nstd.io.println(1);\n')
         assert proc.returncode != 0, proc.stdout
         assert "macro not exported by package: missing" in proc.stderr, \
             proc.stderr
@@ -876,7 +876,7 @@ def run_cases():
               '  import {am!} from a;\n'
               '  export macro bm(x: expr) { am!(#x); }\n'
               '}\n')
-        proc = run_main('import {am!} from a;\nprintln(1);\n')
+        proc = run_main('import std;\nimport {am!} from a;\nstd.io.println(1);\n')
         assert proc.returncode != 0, proc.stdout
         assert "cyclic macro import" in proc.stderr, proc.stderr
 
@@ -890,20 +890,20 @@ def run_cases():
               '  import {am!} from a2;\n'
               '  export macro bm(x: expr) { am!(#x); }\n'
               '}\n')
-        proc = run_main('import {am!} from a2;\nprintln(1);\n')
+        proc = run_main('import std;\nimport {am!} from a2;\nstd.io.println(1);\n')
         assert proc.returncode != 0, proc.stdout
         assert "cyclic macro import" in proc.stderr, proc.stderr
 
         proc = run_main(
-            'import {twice!} from util;\n'
+            'import std;\nimport {twice!} from util;\n'
             'macro twice(x: expr) { #x * 3; }\n'
             'func test(): int { return twice!(7); }\n'
-            'println(str(test()));\n')
+            'std.io.println(str(test()));\n')
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout.splitlines() == ["21"], proc.stdout
 
         proc = run_main(
-            'import {twice!, twice! as twice} from util;\nprintln(1);\n')
+            'import std;\nimport {twice!, twice! as twice} from util;\nstd.io.println(1);\n')
         assert proc.returncode != 0, proc.stdout
         assert "duplicate import alias" in proc.stderr, proc.stderr
 
@@ -915,7 +915,7 @@ def run_cases():
             'import std;\n'
             'std.log.set_level("error");\n'
             'import {info!} from shadow;\n'
-            'println(str(info!(1)));\n'
+            'std.io.println(str(info!(1)));\n'
             'std.log.info!("bad");\n')
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout.splitlines() == ["2"], proc.stdout

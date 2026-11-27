@@ -103,7 +103,7 @@ ts_test("meta protocol info", func() {
   ts_eq(std.meta.type_info("MetaProtocolP")["protocols"],
         ["main.MetaProtocolD", "std.traits.Hashable"]);
   ts_eq(std.meta.type_info("MetaProtocolD")["kind"], "proto");
-  ts_eq(len(std.meta.type_info("MetaProtocolD")["methods"][0]["params"]), 0);
+  ts_eq(std.utils.len(std.meta.type_info("MetaProtocolD")["methods"][0]["params"]), 0);
   ts_eq(std.meta.fields("MetaProtocolD"), []);
   ts_eq(std.meta.variants("MetaProtocolD"), []);
 });
@@ -152,7 +152,7 @@ ts_test("meta builtin name table", func() {
 
 ts_test("meta kind tag is not a type name", func() {
   ts_error(func() {
-    return std.meta.type_info(kind_of(MetaKindP { x: 1 }));
+    return std.meta.type_info(std.type.kind_of(MetaKindP { x: 1 }));
   }, "unknown type struct");
 });
 

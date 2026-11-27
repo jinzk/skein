@@ -28,8 +28,8 @@ def run_cases():
         "key scalar golden",
         "import std;\n"
         "let d = {1: 'i', true: 'b'};\n"
-        "println(d[1]);\n"
-        "println(d[true]);\n",
+        "std.io.println(d[1]);\n"
+        "std.io.println(d[true]);\n",
         stdout_all=["i", "b"],
     )
 
@@ -53,8 +53,8 @@ def run_cases():
             f'let t = std.thread.spawn_script({skein_string(worker)}, '
             'std.thread.Message.from({"d": d, "k": b}));\n'
             "let r = t.join();\n"
-            'println(str(r["ok"]));\n'
-            'println(str(r["value"]));\n',
+            'std.io.println(str(r["ok"]));\n'
+            'std.io.println(str(r["value"]));\n',
             stdout_all=["true", "x"],
         )
 
@@ -78,8 +78,8 @@ def run_cases():
             f'let t = std.thread.spawn_script({skein_string(method_worker)}, '
             'std.thread.Message.from({"u": User { id: 7 }}));\n'
             "let r = t.join();\n"
-            'println(str(r["ok"]));\n'
-            'println(str(r["value"]));\n',
+            'std.io.println(str(r["ok"]));\n'
+            'std.io.println(str(r["value"]));\n',
             stdout_all=["true", "user:7"],
         )
         check(
@@ -92,8 +92,8 @@ def run_cases():
             f'let t = std.thread.spawn_script({skein_string(method_worker)}, '
             'std.thread.Message.from({"u": User { id: 7 }}));\n'
             "let r = t.join();\n"
-            'println(str(r["ok"]));\n'
-            'println(str(r["value"]));\n',
+            'std.io.println(str(r["ok"]));\n'
+            'std.io.println(str(r["value"]));\n',
             stdout_all=["true", "user:7"],
         )
 
@@ -111,8 +111,8 @@ def run_cases():
         'let t = std.thread.spawn_entry(blob, '
         'std.thread.Message.from({"u": User { id: 8 }}));\n'
         "let r = t.join();\n"
-        'println(str(r["ok"]));\n'
-        'println(str(r["value"]));\n',
+        'std.io.println(str(r["ok"]));\n'
+        'std.io.println(str(r["value"]));\n',
         stdout_all=["true", "user:8"],
     )
 
@@ -130,8 +130,8 @@ def run_cases():
         'let t = std.thread.spawn_entry(blob, '
         'std.thread.Message.from({"u": User { id: 8 }}));\n'
         "let r = t.join();\n"
-        'println(str(r["ok"]));\n'
-        'println(str(r["value"]));\n',
+        'std.io.println(str(r["ok"]));\n'
+        'std.io.println(str(r["value"]));\n',
         stdout_all=["true", "user:8"],
     )
 
@@ -156,7 +156,7 @@ def run_cases():
         "}\n"
         "for (let t in tasks) {\n"
         "  let r = t.join();\n"
-        '  println(str(r["value"]));\n'
+        '  std.io.println(str(r["value"]));\n'
         "}\n",
         stdout_all=[f"user:{i}" for i in range(8)],
     )
@@ -176,7 +176,7 @@ def run_cases():
         'let t = std.thread.spawn_entry(blob, '
         'std.thread.Message.from({"d": d, "k": b}));\n'
         "let r = t.join();\n"
-        'println(str(r["ok"]));\n'
-        'println(str(r["value"]));\n',
+        'std.io.println(str(r["ok"]));\n'
+        'std.io.println(str(r["value"]));\n',
         stdout_all=["true", "x"],
     )

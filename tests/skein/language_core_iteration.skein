@@ -54,7 +54,7 @@ ts_test("for in without let dict pairs", func() {
 
 ts_test("for in without let range builtin", func() {
   let out = [];
-  for i in range(3) {
+  for i in std.utils.range(3) {
     out = std.list.append(out, i);
   }
   ts_eq(out, [0, 1, 2]);
@@ -62,7 +62,7 @@ ts_test("for in without let range builtin", func() {
 
 ts_test("for in constant range with start and step", func() {
   let out = [];
-  for i in range(5, 3, -2) {
+  for i in std.utils.range(5, 3, -2) {
     out = std.list.append(out, i);
   }
   ts_eq(out, [5, 3, 1]);
@@ -79,7 +79,7 @@ ts_test("for in constant range via std.utils", func() {
 ts_test("for in nonconstant range still works", func() {
   let n = 3;
   let out = [];
-  for i in range(n) {
+  for i in std.utils.range(n) {
     out = std.list.append(out, i);
   }
   ts_eq(out, [0, 1, 2]);
@@ -87,7 +87,7 @@ ts_test("for in nonconstant range still works", func() {
 
 ts_test("for in large constant range is lazy", func() {
   let n = 0;
-  for i in range(1000000000) {
+  for i in std.utils.range(1000000000) {
     n = n + 1;
     if (i == 2) {
       break;
@@ -98,7 +98,7 @@ ts_test("for in large constant range is lazy", func() {
 
 ts_test("for in constant range at int64 boundary", func() {
   let out = [];
-  for i in range(9223372036854775805, 3) {
+  for i in std.utils.range(9223372036854775805, 3) {
     out = std.list.append(out, i);
   }
   ts_eq(out, [9223372036854775805, 9223372036854775806,
@@ -107,8 +107,8 @@ ts_test("for in constant range at int64 boundary", func() {
 
 ts_test("for in constant range label continue", func() {
   let out = [];
-  outer: for i in range(2) {
-    for j in range(2) {
+  outer: for i in std.utils.range(2) {
+    for j in std.utils.range(2) {
       if (j == 1) {
         continue outer;
       }
@@ -120,7 +120,7 @@ ts_test("for in constant range label continue", func() {
 
 ts_test("for in constant range closure capture", func() {
   let fs = [];
-  for i in range(3) {
+  for i in std.utils.range(3) {
     fs = std.list.append(fs, func() -> i);
   }
   let out = [];
@@ -155,7 +155,7 @@ ts_test("for in without let iterable uses outer binding", func() {
     out = std.list.append(out, x);
   }
   ts_eq(out, [4, 5]);
-  ts_eq(len(x), 2);
+  ts_eq(std.utils.len(x), 2);
 });
 
 ts_test("for in without let string", func() {

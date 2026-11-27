@@ -72,7 +72,7 @@ def run_cases():
     )
     check(
         "diagnostic label on non-loop",
-        "x: if (1) { print(1); }\n",
+        "x: if (1) { std.io.print(1); }\n",
         stdout="1",
     )
     check(
@@ -82,10 +82,10 @@ def run_cases():
         "func middle() { inner(); }\n"
         "func outer() { middle(); }\n"
         "let value = outer() on error(e) {\n"
-        "  println(str(len(std.error.trace(e))));\n"
-        '  println(std.error.trace(e)[0]["function"]);\n'
-        '  println(str(std.error.location(e)["line"]));\n'
-        "  println(std.error.format_trace(e));\n"
+        "  std.io.println(str(std.utils.len(std.error.trace(e))));\n"
+        '  std.io.println(std.error.trace(e)[0]["function"]);\n'
+        '  std.io.println(str(std.error.location(e)["line"]));\n'
+        "  std.io.println(std.error.format_trace(e));\n"
         "  recover null;\n"
         "};\n",
         stdout_all=[
@@ -101,10 +101,10 @@ def run_cases():
         'func inner() { std.string.replace("a", "", "b"); }\n'
         "func middle() { inner(); }\n"
         "middle() on error(e) {\n"
-        "  println(std.error.kind(e));\n"
-        "  println(str(len(std.error.trace(e))));\n"
-        '  println(str(std.error.location(e)["line"]));\n'
-        "  println(std.error.format_trace(e));\n"
+        "  std.io.println(std.error.kind(e));\n"
+        "  std.io.println(str(std.utils.len(std.error.trace(e))));\n"
+        '  std.io.println(str(std.error.location(e)["line"]));\n'
+        "  std.io.println(std.error.format_trace(e));\n"
         "  recover null;\n"
         "};\n",
         stdout_all=[
@@ -117,23 +117,23 @@ def run_cases():
         "diagnostic user error has no trace",
         "import std;\n"
         'let e = std.error.new("custom", "boom");\n'
-        "println(str(std.error.location(e)));\n"
-        "println(str(len(std.error.trace(e))));\n"
-        "println(std.error.format_trace(e));\n",
+        "std.io.println(str(std.error.location(e)));\n"
+        "std.io.println(str(std.utils.len(std.error.trace(e))));\n"
+        "std.io.println(std.error.format_trace(e));\n",
         stdout_all=["null", "0", "custom: boom"],
     )
     check(
         "diagnostic private field",
         "struct Box { _value: int; }\n"
         "let box = Box { _value: 1 };\n"
-        "println(box._value);\n",
+        "std.io.println(box._value);\n",
         stderr="runtime error: private member _value",
     )
     check(
         "diagnostic private method",
         "struct Box { func _secret(self) { return 1; } }\n"
         "let box = Box {};\n"
-        "println(box._secret());\n",
+        "std.io.println(box._secret());\n",
         stderr="runtime error: private member _secret",
     )
 
@@ -175,22 +175,24 @@ def run_cases():
               "  }\n"
               "}\n")
         ok = write("ok.skein",
+                   "import std;\n"
                    "import privpkg;\n"
                    "let box = privpkg.make(3);\n"
-                   "println(privpkg.hidden_value(box));\n"
-                   "println(box.reveal());\n"
+                   "std.io.println(privpkg.hidden_value(box));\n"
+                   "std.io.println(box.reveal());\n"
                    "let outer = privpkg.make_outer();\n"
                    "let poked = privpkg.poke_outer(outer);\n"
-                   "println(privpkg.describe_outer(poked));\n")
+                   "std.io.println(privpkg.describe_outer(poked));\n")
         proc = run_file(ok)
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout.splitlines() == ["3", "3", "9"], proc.stdout
 
         for member, source in (
-            ("_value", "println(box._value);\n"),
-            ("_secret", "println(box._secret());\n"),
+            ("_value", "std.io.println(box._value);\n"),
+            ("_secret", "std.io.println(box._secret());\n"),
         ):
             bad = write("bad_" + member.lstrip("_") + ".skein",
+                        "import std;\n"
                         "import privpkg;\n"
                         "let box = privpkg.make(3);\n" + source)
             proc = run_file(bad)

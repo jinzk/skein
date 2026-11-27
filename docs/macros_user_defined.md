@@ -119,8 +119,8 @@ G3 边界在定义期执行：模板体不得生成 `struct` / `enum` / `proto` 
 展开时递归替换占位符并复制，不回读源码文本。非 `type` 片段进入泛型实参仍报
 `macro fragment cannot be used here`。匿名函数表达式 `func(x) {...}` 是普通表达式，
 仍然允许。这些限制只作用于模板体：调用点传入的表达式片段可以是 `identity[int]`
-这类已绑定泛型值，宏会原样克隆。类型片段不能进入反射 builtin，`kind_of(#T)` /
-`type_name(#T)` 等报 `type fragment cannot be used as a value or name`。宏生成的显式
+这类已绑定泛型值，宏会原样克隆。类型片段不能进入反射 builtin，`std.type.kind_of(#T)` /
+`std.type.name(#T)` 等报 `type fragment cannot be used as a value or name`。宏生成的显式
 泛型应用仍走普通 typechecker 约束检查，类型实参不满足声明的约束时报错；宏不创建或
 改变约束。
 
@@ -129,8 +129,9 @@ G3 边界在定义期执行：模板体不得生成 `struct` / `enum` / `proto` 
 调用形式与第一批内置宏完全一致：
 
 ```text
+import std;
 with_value!(x, 1 + 2) {
-  println(str(x));
+  std.io.println(str(x));
 }
 
 call_all!(add, 1, 2, 3);
@@ -291,6 +292,7 @@ Parser 维护一个 `MacroTable`，键为宏名，值为已验证的 `MacroTempl
 例：
 
 ```text
+import std;
 macro wrap(value: expr, body: block) {
   let tmp = #value;
   #body
@@ -299,7 +301,7 @@ macro wrap(value: expr, body: block) {
 
 let tmp = 1;
 wrap!(2) {
-  println(str(tmp));   // 指向调用点的 tmp，而不是宏内部的 tmp
+  std.io.println(str(tmp));   // 指向调用点的 tmp，而不是宏内部的 tmp
 }
 ```
 
@@ -444,7 +446,7 @@ builtin，调用点已有的泛型值仍可通过 `expr` 片段传入。
    `wait!`（`std.task.wait!`，展开为 `#expr.wait()`）。落地第 3.3 节的
    `name!` / `name! x` 两种简写；旧 bare 形式暂时并行，后续阶段再 deprecate。
 5. **P2.3（已完成）**：`list` / `dict` 改为默认 import，新增 `std.list.new` /
-   `std.dict.new`；`list(x)` / `dict(x)` 解析为对应构造器，值作用域可遮蔽，
+   `std.dict.new`；`std.list.new(x)` / `std.dict.new(x)` 解析为对应构造器，值作用域可遮蔽，
    类型命名空间保持独立。不做 `list!` / `dict!` / `try!`。
 6. **P3.1（已完成）**：`wait` 退出保留字；`launch` / `wait` / `await` 改为表达式起始 contextual
    keyword。`launch f()` 启动 task，`await f()` 等价 `wait launch f()` 并要求

@@ -29,17 +29,17 @@ def main():
             f'let ts = std.http.serve_threads(s, 2, "{worker_text}", '
             '{"strategy": "dispatch", "max_requests": 200, '
             '"max_per_connection": 10});\n'
-            'println(s["port"]);\n'
+            'std.io.println(s["port"]);\n'
             "std.io.flush(std.io.stdout);\n"
             "let served = ts.join(15000);\n"
             "ts = null;\n"
             "std.thread.collect();\n"
             "let after = std.thread.debug_counts();\n"
-            'print("served=" + str(served) + "|");\n'
-            'print("m=" + str(after["messages"] - base["messages"]) + "|");\n'
-            'print("c=" + str(after["channels"] - base["channels"]) + "|");\n'
-            'print("d=" + str(after["pairs"] - base["pairs"]) + "|");\n'
-            'print("e=" + str(after["endpoints"] - base["endpoints"]) + "|");\n'
+            'std.io.print("served=" + str(served) + "|");\n'
+            'std.io.print("m=" + str(after["messages"] - base["messages"]) + "|");\n'
+            'std.io.print("c=" + str(after["channels"] - base["channels"]) + "|");\n'
+            'std.io.print("d=" + str(after["pairs"] - base["pairs"]) + "|");\n'
+            'std.io.print("e=" + str(after["endpoints"] - base["endpoints"]) + "|");\n'
         )
         server = subprocess.Popen(
             [BIN],

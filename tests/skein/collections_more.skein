@@ -346,10 +346,10 @@ ts_test("list unique and group_by", func() {
 });
 
 ts_test("list unique large and non-hashable", func() {
-  let xs = range(20000);
-  ts_eq(len(std.list.unique(xs)), 20000);
+  let xs = std.utils.range(20000);
+  ts_eq(std.utils.len(std.list.unique(xs)), 20000);
   let ys = std.list.map(xs, func(i) { return i % 1000; });
-  ts_eq(len(std.list.unique(ys)), 1000);
+  ts_eq(std.utils.len(std.list.unique(ys)), 1000);
   ts_eq(std.list.unique([[1], [1], [2]]), [[1], [2]]);
 });
 
@@ -430,7 +430,7 @@ ts_test("list zip and top_k", func() {
 });
 
 ts_test("list top_k large and full", func() {
-  let xs = range(20000);
+  let xs = std.utils.range(20000);
   ts_eq(std.list.top_k(xs, 5), [0, 1, 2, 3, 4]);
   ts_eq(std.list.top_k([3, 1, 2], 10), [1, 2, 3]);
   ts_eq(std.list.top_k(["b", "a", "c"], 2), ["a", "b"]);

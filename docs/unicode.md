@@ -22,6 +22,7 @@
 ## 2. API
 
 ```text
+import std;
 std.unicode.normalize(text, form)      → string
 std.unicode.is_normalized(text, form)  → bool
 std.unicode.version()                  → string
@@ -169,6 +170,7 @@ to_lower(to_upper("ß")) == "ss"          // 回不到 "ß"
 大小写不敏感比较的推荐流程：
 
 ```text
+import std;
 std.unicode.normalize(std.unicode.casefold(
     std.unicode.normalize(text, "nfc")), "nfc")
 ```

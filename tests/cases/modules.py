@@ -19,15 +19,21 @@ def write(tmp, rel, text):
     return path
 
 
+def with_std(main_source):
+    if "std." in main_source and "import std;" not in main_source:
+        return "import std;\n" + main_source
+    return main_source
+
+
 def run_module(tmp, main_source, expected):
-    main = write(tmp, "main.skein", main_source)
+    main = write(tmp, "main.skein", with_std(main_source))
     proc = run_file(main)
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.splitlines() == expected, proc.stdout
 
 
 def run_module_error(tmp, main_source, expected_error):
-    main = write(tmp, "main.skein", main_source)
+    main = write(tmp, "main.skein", with_std(main_source))
     proc = run_file(main)
     assert proc.returncode != 0, proc.stdout
     assert expected_error in proc.stderr, proc.stderr
@@ -136,7 +142,8 @@ def native_extern_policy(tmp):
         "}\n",
     )
     main = write(tmp, "main.skein",
-                 "import extlib;\nprintln(extlib.sum());\n")
+                 "import std;\nimport extlib;\n"
+                 "std.io.println(extlib.sum());\n")
     denied = subprocess.run([BIN, main], env=os.environ, cwd=tmp,
                             capture_output=True, text=True, encoding="utf-8",
                             errors="replace")
@@ -158,13 +165,13 @@ def run_cases():
         directory_module(tmp)
         run_module(
             tmp,
-            "import math;\n"
+            "import std;\nimport math;\n"
             "import math.helpers as h;\n"
-            "println(str(math.add(2, 3)));\n"
-            "println(str(math.sum([4, 5])));\n"
-            "println(str(math.normalize(41)));\n"
-            "println(str(math.helpers.tag()));\n"
-            "println(str(h.tag()));\n",
+            "std.io.println(str(math.add(2, 3)));\n"
+            "std.io.println(str(math.sum([4, 5])));\n"
+            "std.io.println(str(math.normalize(41)));\n"
+            "std.io.println(str(math.helpers.tag()));\n"
+            "std.io.println(str(h.tag()));\n",
             ["5", "10", "42", "helpers", "helpers"],
         )
         run_module_error(
@@ -179,25 +186,25 @@ def run_cases():
         )
         run_module_error(
             tmp,
-            "import math;\nprintln(str(math.hidden));\n",
+            "import std;\nimport math;\nstd.io.println(str(math.hidden));\n",
             "key not found",
         )
         run_module_error(
             tmp,
-            "import math;\nprintln(str(math.helpers.hidden_helper()));\n",
+            "import std;\nimport math;\nstd.io.println(str(math.helpers.hidden_helper()));\n",
             "key not found",
         )
         run_module(
             tmp,
-            "import {add, normalize as norm} from math;\n"
-            "println(str(add(2, 3)));\n"
-            "println(str(norm(41)));\n",
+            "import std;\nimport {add, normalize as norm} from math;\n"
+            "std.io.println(str(add(2, 3)));\n"
+            "std.io.println(str(norm(41)));\n",
             ["5", "42"],
         )
         run_module_error(
             tmp,
-            "import {add} from math;\n"
-            "println(str(math.add(1, 2)));\n",
+            "import std;\nimport {add} from math;\n"
+            "std.io.println(str(math.add(1, 2)));\n",
             "symbol not found math",
         )
         run_module_error(
@@ -227,7 +234,7 @@ def run_cases():
         )
         run_module(
             tmp,
-            "let from = 7;\nprintln(str(from));\n",
+            "import std;\nlet from = 7;\nstd.io.println(str(from));\n",
             ["7"],
         )
         run_module(
@@ -241,8 +248,8 @@ def run_cases():
             "let t = std.thread.spawn_entry(blob, "
             'std.thread.Message.from({"x": 41}));\n'
             "let r = t.join();\n"
-            'println(str(r["ok"]));\n'
-            'println(str(r["value"]["v"]));\n',
+            'std.io.println(str(r["ok"]));\n'
+            'std.io.println(str(r["value"]["v"]));\n',
             ["true", "42"],
         )
         run_module(
@@ -255,8 +262,8 @@ def run_cases():
             "let blob = std.entry.encode(worker);\n"
             "let r = std.process.run_entry(blob, "
             'std.thread.Message.from({"x": 41}));\n'
-            'println(str(r["ok"]));\n'
-            'println(str(r["value"]["v"]));\n',
+            'std.io.println(str(r["ok"]));\n'
+            'std.io.println(str(r["value"]["v"]));\n',
             ["true", "42"],
         )
 
@@ -264,11 +271,11 @@ def run_cases():
         file_module(tmp)
         run_module(
             tmp,
-            "import math;\n"
-            "println(str(math.add(1, 2)));\n"
-            "println(str(math.sum([3, 4])));\n"
-            "println(str(math.normalize(5)));\n"
-            "println(str(math.helpers.normalize(6)));\n",
+            "import std;\nimport math;\n"
+            "std.io.println(str(math.add(1, 2)));\n"
+            "std.io.println(str(math.sum([3, 4])));\n"
+            "std.io.println(str(math.normalize(5)));\n"
+            "std.io.println(str(math.helpers.normalize(6)));\n",
             ["3", "14", "10", "12"],
         )
 
@@ -285,17 +292,17 @@ def run_cases():
         )
         run_module(
             tmp,
-            "import {Point, Color, make} from aa;\n"
+            "import std;\nimport {Point, Color, make} from aa;\n"
             "let p: Point = make();\n"
-            "println(str(p.x));\n"
-            "println(Color.Blue);\n",
+            "std.io.println(str(p.x));\n"
+            "std.io.println(Color.Blue);\n",
             ["7", "Color.Blue"],
         )
         run_module(
             tmp,
-            "import {Point as P, make} from aa;\n"
+            "import std;\nimport {Point as P, make} from aa;\n"
             "let p: P = P { x: 9 };\n"
-            "println(str(p.x));\n",
+            "std.io.println(str(p.x));\n",
             ["9"],
         )
         run_module_error(
@@ -491,7 +498,8 @@ def run_cases():
         write(tmp, "mods/aa/leaf.skein",
               'package leaf { export let v = 7; }\n')
         module_main = write(
-            tmp, "app2/main.skein", "import aa;\nprintln(str(aa.v));\n")
+            tmp, "app2/main.skein",
+            "import std;\nimport aa;\nstd.io.println(str(aa.v));\n")
         proc = subprocess.run(
             [BIN, "-I", mods, module_main],
             text=True,
@@ -546,7 +554,7 @@ def run_cases():
             "app/aa/bb.skein",
             "package bb {\n"
             "  export struct T { x: int; }\n"
-            "  export func describe() { return type_package(T { x: 1 }); }\n"
+            "  export func describe() { return std.type.package_name(T { x: 1 }); }\n"
             "  export func module_of() {\n"
             "    return std.meta.type_info(T { x: 1 })[\"module\"];\n"
             "  }\n"
@@ -556,9 +564,10 @@ def run_cases():
         main = write(
             tmp,
             "app/main.skein",
+            "import std;\n"
             "import aa.bb;\n"
-            "println(bb.describe());\n"
-            "println(\"[\" + bb.module_of() + \"]\");\n",
+            "std.io.println(bb.describe());\n"
+            "std.io.println(\"[\" + bb.module_of() + \"]\");\n",
         )
         proc = run_file(main)
         assert proc.returncode == 0, proc.stderr
@@ -575,7 +584,7 @@ def run_cases():
             "import std;\n"
             "package add {\n"
             "  export struct T { x: int; }\n"
-            "  export func describe() { return type_package(T { x: 1 }); }\n"
+            "  export func describe() { return std.type.package_name(T { x: 1 }); }\n"
             "  export func module_of() {\n"
             "    return std.meta.type_info(T { x: 1 })[\"module\"];\n"
             "  }\n"
@@ -584,9 +593,10 @@ def run_cases():
         module_main = write(
             tmp,
             "app/module_main.skein",
+            "import std;\n"
             "import @math;\n"
-            "println(math.describe());\n"
-            "println(math.module_of());\n",
+            "std.io.println(math.describe());\n"
+            "std.io.println(math.module_of());\n",
         )
         proc = run_file(module_main)
         assert proc.returncode == 0, proc.stderr

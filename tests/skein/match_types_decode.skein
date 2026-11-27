@@ -63,7 +63,7 @@ ts_test("std.enum.decode", func() {
   let s = std.json.stringify(EnumDecodeE.A { n: 1 });
   let e = std.enum.decode(std.json.parse(s));
   ts_eq(str(e), "EnumDecodeE.A { n: 1 }");
-  ts_eq(kind_of(e), "enum");
+  ts_eq(std.type.kind_of(e), "enum");
   ts_eq(match (e) {
     case EnumDecodeE.A {n} => n;
     default => 0;
@@ -120,7 +120,7 @@ ts_test("std.enum.decode options only", func() {
 ts_test("std.struct.decode", func() {
   let p = std.struct.decode({"x": 1, "y": 2}, "StructDecodeXY");
   ts_eq(str(p), "StructDecodeXY { x: 1, y: 2 }");
-  ts_eq(kind_of(p), "struct");
+  ts_eq(std.type.kind_of(p), "struct");
   ts_eq(p.x, 1);
 });
 

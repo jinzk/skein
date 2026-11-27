@@ -55,7 +55,7 @@ def run_cases():
 
     proc = run(
         "import std;\n"
-        'let lg = std.log.new({"writer": func(record) { print(record); }, '
+        'let lg = std.log.new({"writer": func(record) { std.io.print(record); }, '
         '"name": "w"});\n'
         'lg.info("captured", {"x": 1});\n'
         'lg.debug("hidden");\n'
@@ -89,8 +89,8 @@ def run_cases():
     proc = run(
         "import std;\n"
         'let lg = std.log.new({"name": "app"});\n'
-        "println(kind_of(lg));\n"
-        "println(str(lg));\n"
+        "std.io.println(std.type.kind_of(lg));\n"
+        "std.io.println(str(lg));\n"
     )
     assert "userdata" in proc.stdout, proc.stdout
     assert "logger(app)" in proc.stdout, proc.stdout
@@ -156,11 +156,11 @@ def run_cases():
     proc = run(
         "import std;\n"
         'std.log.set_level("warn");\n'
-        'println(str(std.log.enabled("debug")));\n'
-        'println(str(std.log.enabled("error")));\n'
+        'std.io.println(str(std.log.enabled("debug")));\n'
+        'std.io.println(str(std.log.enabled("error")));\n'
         'let lg = std.log.new({"level": "trace"});\n'
-        'println(str(lg.enabled("trace")));\n'
-        'println(str(lg.enabled("info")));\n'
+        'std.io.println(str(lg.enabled("trace")));\n'
+        'std.io.println(str(lg.enabled("info")));\n'
     )
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.splitlines() == [

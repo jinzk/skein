@@ -154,7 +154,7 @@ def run_cases():
         main = write(
             project,
             "main.skein",
-            'import "example.test/util/json";\nprintln(json.answer());\n',
+            'import std;\nimport "example.test/util/json";\nstd.io.println(json.answer());\n',
         )
         executed = run_skein([main], env=env, cwd=project)
         assert executed.returncode == 0, executed.stderr
@@ -163,7 +163,7 @@ def run_cases():
         alias_main = write(
             project,
             "alias.skein",
-            'import "example.test/util/api";\nprintln(api.answer());\n',
+            'import std;\nimport "example.test/util/api";\nstd.io.println(api.answer());\n',
         )
         alias_executed = run_skein([alias_main], env=env, cwd=project)
         assert alias_executed.returncode == 0, alias_executed.stderr
@@ -172,8 +172,8 @@ def run_cases():
         selective_main = write(
             project,
             "selective.skein",
-            'import {answer} from "example.test/util/json";\n'
-            "println(answer());\n",
+            'import std;\nimport {answer} from "example.test/util/json";\n'
+            "std.io.println(answer());\n",
         )
         selective_executed = run_skein(
             [selective_main], env=env, cwd=project
@@ -228,7 +228,7 @@ def run_cases():
         download_main = write(
             download_project,
             "main.skein",
-            'import "example.test/util/json";\nprintln(json.answer());\n',
+            'import std;\nimport "example.test/util/json";\nstd.io.println(json.answer());\n',
         )
         download_run = run_skein(
             [download_main], env=download_env, cwd=download_project)
@@ -278,7 +278,7 @@ def run_cases():
         offline_main = write(
             offline,
             "main.skein",
-            'import "example.test/util/json" as json;\nprintln("ok");\n',
+            'import std;\nimport "example.test/util/json" as json;\nstd.io.println("ok");\n',
         )
         offline_env = env.copy()
         offline_env["SKEINMODCACHE"] = os.path.join(root, "empty-cache")
@@ -294,7 +294,7 @@ def run_cases():
         nodeps_main = write(
             nodeps,
             "main.skein",
-            'import "example.test/util/json" as json;\nprintln("unreachable");\n',
+            'import std;\nimport "example.test/util/json" as json;\nstd.io.println("unreachable");\n',
         )
         missing = run_skein([nodeps_main], env=env, cwd=nodeps)
         assert missing.returncode != 0, missing.stdout
@@ -352,7 +352,7 @@ def run_cases():
         invalid = write(
             root,
             "invalid.skein",
-            'import "util";\nprintln("unreachable");\n',
+            'import std;\nimport "util";\nstd.io.println("unreachable");\n',
         )
         invalid_run = run_skein([invalid], env=env)
         assert invalid_run.returncode != 0, invalid_run.stdout
@@ -452,7 +452,7 @@ def run_cases():
         diamond_main = write(
             diamond_project,
             "main.skein",
-            'import "example.test/c/value";\nprintln(value.get());\n',
+            'import std;\nimport "example.test/c/value";\nstd.io.println(value.get());\n',
         )
         diamond_run = run_skein([diamond_main], env=diamond_env, cwd=diamond_project)
         assert diamond_run.returncode == 0, diamond_run.stderr
@@ -479,7 +479,7 @@ def run_cases():
         v2_main = write(
             diamond_project,
             "v2main.skein",
-            'import "example.test/c/v2/value";\nprintln(value.get());\n',
+            'import std;\nimport "example.test/c/v2/value";\nstd.io.println(value.get());\n',
         )
         v2_run = run_skein([v2_main], env=v2_env, cwd=diamond_project)
         assert v2_run.returncode == 0, v2_run.stderr
@@ -525,7 +525,7 @@ def run_cases():
         template_main = write(
             template_project,
             "main.skein",
-            'import "example.test/util/json";\nprintln(json.answer());\n',
+            'import std;\nimport "example.test/util/json";\nstd.io.println(json.answer());\n',
         )
         template_run = run_skein(
             [template_main], env=template_env, cwd=template_project)
@@ -558,7 +558,7 @@ def run_cases():
         version_main = write(
             version_project,
             "main.skein",
-            'import "example.test/util/json";\nprintln(json.answer());\n',
+            'import std;\nimport "example.test/util/json";\nstd.io.println(json.answer());\n',
         )
         version_run = run_skein(
             [version_main], env=version_env, cwd=version_project)
@@ -889,7 +889,7 @@ def run_cases():
             'import "example.test/util/json";\n'
             f'std.fs.write_text("{ready_skein}", "ready", "utf-8");\n'
             "std.time.sleep(1200);\n"
-            "println(json.answer());\n",
+            "std.io.println(json.answer());\n",
         )
         script = subprocess.Popen(
             [harness.BIN, holder],

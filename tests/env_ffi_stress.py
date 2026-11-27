@@ -97,9 +97,9 @@ def pool_isolation(tmp):
         "  let want = \"worker-\" + str(r[\"value\"][\"n\"]);\n"
         "  if (r[\"value\"][\"env\"] != want) { bad = bad + 1; }\n"
         "}\n"
-        "println(\"bad=\" + str(bad));\n"
-        "println(\"parent_env=\" + std.env.get(\"SKEIN_STRESS_ENV\", \"\"));\n"
-        "println(\"parent_cwd_same=\" + str(std.fs.cwd() == parent_cwd));\n"
+        "std.io.println(\"bad=\" + str(bad));\n"
+        "std.io.println(\"parent_env=\" + std.env.get(\"SKEIN_STRESS_ENV\", \"\"));\n"
+        "std.io.println(\"parent_cwd_same=\" + str(std.fs.cwd() == parent_cwd));\n"
         "pool.close();\n"
         "pool.join();\n"
     )
@@ -138,9 +138,9 @@ def spawn_inheritance(tmp):
         "std.thread.Message.from({}));\n"
         "let r = t.join();\n"
         "if (!r[\"ok\"]) { fail r[\"error\"]; }\n"
-        "println(\"child_env=\" + r[\"value\"][\"env\"]);\n"
-        "println(\"child_cwd=\" + r[\"value\"][\"cwd\"]);\n"
-        "println(\"parent_env=\" + std.env.get(\"SKEIN_INHERIT\", \"\"));\n"
+        "std.io.println(\"child_env=\" + r[\"value\"][\"env\"]);\n"
+        "std.io.println(\"child_cwd=\" + r[\"value\"][\"cwd\"]);\n"
+        "std.io.println(\"parent_env=\" + std.env.get(\"SKEIN_INHERIT\", \"\"));\n"
     )
     proc = run_source(source)
     ok = check("spawn inheritance", proc, [
@@ -163,8 +163,8 @@ def child_process_worker(tmp):
     with open(probe, "w", encoding="utf-8") as handle:
         handle.write(
             "import std;\n"
-            "println(\"env=\" + std.env.get(\"SKEIN_CHILD_ENV\", \"\"));\n"
-            "println(\"cwd=\" + std.fs.cwd());\n"
+            "std.io.println(\"env=\" + std.env.get(\"SKEIN_CHILD_ENV\", \"\"));\n"
+            "std.io.println(\"cwd=\" + std.fs.cwd());\n"
         )
     worker = os.path.join(directory, "worker.skein")
     with open(worker, "w", encoding="utf-8") as handle:
@@ -197,9 +197,9 @@ def child_process_worker(tmp):
         f'"bin": "{bin_text}", "probe": "{probe_text}"}});\n'
         "let r = f.wait();\n"
         "if (!r[\"ok\"]) { fail r[\"error\"]; }\n"
-        "println(r[\"value\"][\"out\"]);\n"
-        "println(\"status=\" + r[\"value\"][\"status\"]);\n"
-        "println(\"err=\" + r[\"value\"][\"err\"]);\n"
+        "std.io.println(r[\"value\"][\"out\"]);\n"
+        "std.io.println(\"status=\" + r[\"value\"][\"status\"]);\n"
+        "std.io.println(\"err=\" + r[\"value\"][\"err\"]);\n"
         "pool.close();\n"
         "pool.join();\n"
     )
@@ -255,10 +255,10 @@ def ffi_concurrency(tmp):
         "  if (!r[\"ok\"]) { fail r[\"error\"]; }\n"
         "  if (r[\"value\"][\"value\"] != 5) {\n"
         "    bad = bad + 1;\n"
-        "    println(\"bad_value=\" + str(r[\"value\"][\"value\"]));\n"
+        "    std.io.println(\"bad_value=\" + str(r[\"value\"][\"value\"]));\n"
         "  }\n"
         "}\n"
-        "println(\"ffi_bad=\" + str(bad));\n"
+        "std.io.println(\"ffi_bad=\" + str(bad));\n"
         "pool.close();\n"
         "pool.join();\n"
     )

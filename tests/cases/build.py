@@ -120,9 +120,10 @@ def run_cases():
         assert fetched.returncode == 0, fetched.stderr
 
         main = write(project, "main.skein",
+                     "import std;\n"
                      'import "' + MODULE + '/api";\n'
                      "import nativeutil;\n"
-                     "println(nativeutil.twice(21));\n")
+                     "std.io.println(nativeutil.twice(21));\n")
 
         # Before building there is no artifact.
         missing = run_skein([main], dict(env, SKEIN_ALLOW_NATIVE="1"),

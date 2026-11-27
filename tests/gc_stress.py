@@ -8,7 +8,7 @@ BIN = sys.argv[1]
 
 SOURCE = """
 import std;
-func boom() { fail "boom"; }
+func boom() { fail \"boom\"; }
 func make(n) {
   let x = n;
   func f() { return x; }
@@ -16,22 +16,22 @@ func make(n) {
 }
 func slow_make(v) {
   let t = 0;
-  for (let i in range(2000)) { t = t + i; }
+  for (let i in std.utils.range(2000)) { t = t + i; }
   return make(v);
 }
 func slow_true(v) {
   let t = 0;
-  for (let i in range(2000)) { t = t + i; }
+  for (let i in std.utils.range(2000)) { t = t + i; }
   return true;
 }
 func slow_key(v) {
   let t = 0;
-  for (let i in range(2000)) { t = t + i; }
+  for (let i in std.utils.range(2000)) { t = t + i; }
   return v;
 }
 func slow_cmp(a, b) {
   let t = 0;
-  for (let i in range(2000)) { t = t + i; }
+  for (let i in std.utils.range(2000)) { t = t + i; }
   if (a < b) { return -1; }
   if (a > b) { return 1; }
   return 0;
@@ -39,7 +39,7 @@ func slow_cmp(a, b) {
 func make_one(n) { return func(pad) { return n + pad; }; }
 func slow_make_one(v) {
   let t = 0;
-  for (let i in range(2000)) { t = t + i; }
+  for (let i in std.utils.range(2000)) { t = t + i; }
   return make_one(v);
 }
 func apply_pair(a, b, pad) { return a(pad) + b(pad); }
@@ -57,31 +57,31 @@ while (i < 2000) {
   total = total + v();
   i = i + 1;
 }
-println("loop " + str(total));
+std.io.println(\"loop \" + str(total));
 
 /* Builtin accumulators keep user values only in C++ locals while the
  * callback runs; they must be registered as GC roots. */
 let mapped = std.list.map([1, 2, 3], slow_make);
 let map_total = 0;
 for (let f in mapped) { map_total = map_total + f(); }
-println("map " + str(map_total));
+std.io.println(\"map \" + str(map_total));
 
 let kept = std.list.filter([1, 2, 3], slow_true);
-println("filter " + str(std.list.len(kept)));
+std.io.println(\"filter \" + str(std.list.len(kept)));
 
-println("reduce " + str(std.list.reduce([1, 2, 3], func(a, b) { return a + b; }, 0)));
+std.io.println(\"reduce \" + str(std.list.reduce([1, 2, 3], func(a, b) { return a + b; }, 0)));
 
 let uniq = std.list.unique_by([1, 1, 2, 3], slow_key);
-println("unique " + str(std.list.len(uniq)));
+std.io.println(\"unique \" + str(std.list.len(uniq)));
 
 let sorted = std.list.sort([3, 1, 2], slow_cmp);
-println("sort " + str(sorted));
+std.io.println(\"sort \" + str(sorted));
 
 let top = std.list.top_k([5, 4, 3], 2, slow_cmp);
-println("top " + str(top));
+std.io.println(\"top \" + str(top));
 
 let groups = std.list.group_by([1, 2, 3], func(v) { return v % 2; });
-println("groups " + str(std.list.len(std.dict.keys(groups))));
+std.io.println(\"groups \" + str(std.list.len(std.dict.keys(groups))));
 
 func stage(n) {
   let x = n;
@@ -89,13 +89,13 @@ func stage(n) {
 }
 let chain = std.fn.compose(stage(100), stage(200));
 let chained = chain(func() { return 1; })();
-println("compose " + str(chained));
+std.io.println(\"compose \" + str(chained));
 
 let captured = std.result.capture(func() {
   let x = 9;
   return func() { return x; };
 });
-println("capture " + str(std.result.value(captured)()));
+std.io.println(\"capture \" + str(std.result.value(captured)()));
 
 /* Closure upvalue cells: closed after the creator returns, and open while
  * the creator frame is still running. */
@@ -108,7 +108,7 @@ let counter = make_counter(0);
 let counter_total = 0;
 let k = 0;
 while (k < 200) { counter_total = counter_total + counter(); k = k + 1; }
-println("closure " + str(counter_total));
+std.io.println(\"closure \" + str(counter_total));
 
 func open_cell_total() {
   let n = 0;
@@ -118,7 +118,7 @@ func open_cell_total() {
   while (i < 100) { total = total + step(); i = i + 1; }
   return total;
 }
-println("open " + str(open_cell_total()));
+std.io.println(\"open \" + str(open_cell_total()));
 
 func make_many(start) {
   let n = start;
@@ -132,7 +132,7 @@ while (m < 200) {
   made = made + c();
   m = m + 1;
 }
-println("make " + str(made));
+std.io.println(\"make \" + str(made));
 
 /* Iterator state keeps the iterable reachable for the loop's lifetime. */
 func iter_total(n) {
@@ -141,17 +141,17 @@ func iter_total(n) {
   while (i < n) { xs = std.list.append(xs, i); i = i + 1; }
   let total = 0;
   for (let x in xs) { total = total + x; }
-  for (let k, v in {"a": 1, "b": 2}) { total = total + len(k) + v; }
+  for (let k, v in {\"a\": 1, \"b\": 2}) { total = total + std.utils.len(k) + v; }
   return total;
 }
 let iter_sum = 0;
 let it = 0;
 while (it < 200) { iter_sum = iter_sum + iter_total(4); it = it + 1; }
-println("iter " + str(iter_sum));
+std.io.println(\"iter \" + str(iter_sum));
 
 /* Handlers keep the captured error and recover value alive across unwinds. */
 func handler_fail(n) {
-  if (n > 0) { fail "handler boom"; }
+  if (n > 0) { fail \"handler boom\"; }
   return n;
 }
 func handler_total(n) {
@@ -163,7 +163,7 @@ func handler_total(n) {
   }
   return total;
 }
-println("handler " + str(handler_total(50)));
+std.io.println(\"handler \" + str(handler_total(50)));
 
 /* Deferred assignments capture slots; their cells must stay rooted. */
 func defer_total(n) {
@@ -175,7 +175,7 @@ func defer_total(n) {
   }
   return total;
 }
-println("defer " + str(defer_total(50)));
+std.io.println(\"defer \" + str(defer_total(50)));
 
 /* Lazy iterators and generator parameters live in C++ state until the
  * generator runs; they must be registered on the generator value. */
@@ -186,7 +186,7 @@ func make_adder(n) {
 let lazy = std.iter.map([1, 2, 3], make_adder(10));
 let lazy_total = 0;
 std.iter.for_each(lazy, func(v) { lazy_total = lazy_total + v; });
-println("lazy " + str(lazy_total));
+std.io.println(\"lazy \" + str(lazy_total));
 
 func gen_echo(v) {
   yield v;
@@ -195,12 +195,12 @@ func gen_echo(v) {
 }
 let gen = gen_echo(slow_make(5));
 let gen_first = std.generator.next(gen);
-println("generator " + str(gen_first["value"]()));
+std.io.println(\"generator \" + str(gen_first[\"value\"]()));
 std.generator.next(gen);
 /* Direct AST calls collect arguments into C++ locals. A nested VM/JIT call
  * must not clear the scope of an earlier closure argument. */
 let pair_total = apply_pair(make_one(1), slow_make_one(2), 0);
-println("pair " + str(pair_total));
+std.io.println(\"pair \" + str(pair_total));
 
 /* A member call frees its receiver while the JIT slot is still rooted. */
 struct Holder {
@@ -209,7 +209,7 @@ struct Holder {
 }
 let holder = Holder { f: make_one(3) };
 let member_total = holder.run(make_one(4), 0, slow_key(0));
-println("member " + str(member_total));
+std.io.println(\"member \" + str(member_total));
 
 /* Native owners hold script values in C++ state.  Their visitors must keep
  * captured scopes alive, including when a detached method outlives the
@@ -262,7 +262,7 @@ println("dbquery " +
 println("dbclose " + str(pool_release(db)) + " " + str(pool_close()));
 
 let churn = slow_true(0);
-println("churn " + str(churn));
+std.io.println(\"churn \" + str(churn));
 """
 
 EXPECTED = [

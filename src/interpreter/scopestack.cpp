@@ -11,8 +11,6 @@
 #include <string_view>
 #include <vector>
 
-#include "builtin_ids.h"
-
 static thread_local scope_context fallback_context;
 static thread_local scope_context *active_context = NULL;
 static thread_local bool tearing_down = false;
@@ -139,12 +137,12 @@ void pushscope() {
 
 void pushscope_isolated() {
     scope_context &context = active_scope_context();
-    /* Isolated scopes hide the caller's globals but still see prelude values
-     * through the global scope's parent. */
-    std::shared_ptr<scope_t> prelude =
+    /* Isolated scopes hide the caller's globals and see no implicit bindings;
+     * packages must import what they use. */
+    std::shared_ptr<scope_t> root =
         context.global_scope ? context.global_scope->parent
                              : std::shared_ptr<scope_t>();
-    push_scope_impl(false, prelude);
+    push_scope_impl(false, root);
 }
 
 void pushscope_closure(const std::shared_ptr<scope_t> &parent) {
@@ -156,49 +154,20 @@ void initscope() {
     initscope(active_scope_context());
 }
 
-/* Ordinary builtins are prelude values rather than reserved words.  They live
- * in a parent of the global scope so local declarations and explicit imports
- * shadow them without colliding with the global symbol table. */
-static void install_prelude_symbols(const std::shared_ptr<scope_t> &prelude) {
-    static const struct {
-        const char *name;
-        int id;
-    } builtins[] = {
-        {"len", B_len},
-        {"range", B_range},
-        {"print", B_print},
-        {"println", B_println},
-        {"input", B_input},
-        {"kind_of", B_kind_of},
-        {"type_name", B_type_name},
-        {"type_package", B_type_package},
-        {"type_module_name", B_type_module_name},
-        {"type_source", B_type_source},
-        {"list", B_list},
-        {"dict", B_dict},
-    };
-    for (const auto &entry : builtins) {
-        struct symbol *sym = newsym(entry.name);
-        sym->val = newbuiltinval(entry.id);
-        sym->is_const = true;
-        sym->scope_owned = true;
-        prelude->syms.insert(sym);
-    }
-}
-
 void initscope(scope_context &context) {
     if (context.current) return;
     structtype_install_builtin_protocols();
-    std::shared_ptr<scope_t> prelude = std::make_shared<scope_t>();
-    prelude->parent.reset();
-    prelude->is_function = false;
-    prelude->is_global = false;
-    prelude->ret = NULL;
-    prelude->function_scope = NULL;
-    install_prelude_symbols(prelude);
+    /* Keep an empty root scope so isolated package scopes have a stable
+     * parent.  Builtins are only available through explicit std.* imports. */
+    std::shared_ptr<scope_t> root = std::make_shared<scope_t>();
+    root->parent.reset();
+    root->is_function = false;
+    root->is_global = false;
+    root->ret = NULL;
+    root->function_scope = NULL;
 
     std::shared_ptr<scope_t> s = std::make_shared<scope_t>();
-    s->parent = prelude;
+    s->parent = root;
     s->is_function = false;
     s->is_global = true;
     s->ret = NULL;

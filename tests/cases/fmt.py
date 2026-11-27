@@ -11,17 +11,17 @@ import harness
 MESSY = (
     "import std;\n"
     "func add(a:int,b:int):int{return a+b;}\n"
-    'if(true){println("x+y");}else{println("no");}\n'
+    'if(true){std.io.println("x+y");}else{std.io.println("no");}\n'
     "let xs:list[int]=[1,2,3];// trailing\n"
-    "print(xs);\n"
+    "std.io.print(xs);\n"
 )
 
 EXPECTED = (
     "import std;\n"
     "func add(a: int, b: int): int { return a + b; }\n"
-    'if (true) { println("x+y"); } else { println("no"); }\n'
+    'if (true) { std.io.println("x+y"); } else { std.io.println("no"); }\n'
     "let xs: list[int] = [1, 2, 3];  // trailing\n"
-    "print(xs);\n"
+    "std.io.print(xs);\n"
 )
 
 
@@ -85,7 +85,7 @@ def run_cases():
         "let x:int=1; // trailing\n"
         "\n"
         "\n"
-        "print(x);\n"
+        "std.io.print(x);\n"
     )
     comment_expected = (
         "#!/usr/bin/env skein\n"
@@ -93,7 +93,7 @@ def run_cases():
         "// header\n"
         "let x: int = 1;  // trailing\n"
         "\n"
-        "print(x);\n"
+        "std.io.print(x);\n"
     )
     comment_path = write_temp(comment_source)
     try:
@@ -112,8 +112,8 @@ def run_cases():
     finally:
         os.unlink(invalid_path)
 
-    crlf_source = "let x:int=1;\nprint(x);\n"
-    crlf_expected = "let x: int = 1;\r\nprint(x);\r\n"
+    crlf_source = "let x:int=1;\nstd.io.print(x);\n"
+    crlf_expected = "let x: int = 1;\r\nstd.io.print(x);\r\n"
     crlf_path = write_temp(crlf_source, newline="\r\n")
     try:
         result = run_fmt(crlf_path)
@@ -121,7 +121,7 @@ def run_cases():
         assert result.stdout == crlf_expected.encode("utf-8"), repr(result.stdout)
 
         formatted_path = write_temp(
-            "let x: int = 1;\nprint(x);\n", newline="\r\n"
+            "let x: int = 1;\nstd.io.print(x);\n", newline="\r\n"
         )
         try:
             check = run_fmt("--check", formatted_path)
@@ -213,7 +213,7 @@ def run_cases():
         "let b=2;\n"
         "fail! b;\n"
         "let t=launch f();\n"
-        "println(str(wait! t));\n"
+        "std.io.println(str(wait! t));\n"
         "let v=await f();\n"
     )
     macro_expected = (
@@ -225,7 +225,7 @@ def run_cases():
         "let b = 2;\n"
         "fail! b;\n"
         "let t = launch f();\n"
-        "println(str(wait! t));\n"
+        "std.io.println(str(wait! t));\n"
         "let v = await f();\n"
     )
     macro_path = write_temp(macro_source)
@@ -250,13 +250,13 @@ def run_cases():
         "macro twice(x:expr){return #x*2;}\n"
         "macro call_all(f:expr,args:expr...){return #f(#args...);}\n"
         "macro scoped(n:ident,b:block){let #n=1;#b}\n"
-        "println(str(twice!(3)));\n"
+        "std.io.println(str(twice!(3)));\n"
     )
     user_macro_expected = (
         "macro twice(x: expr) { return #x * 2; }\n"
         "macro call_all(f: expr, args: expr...) { return #f(#args...); }\n"
         "macro scoped(n: ident, b: block) { let #n = 1; #b}\n"
-        "println(str(twice!(3)));\n"
+        "std.io.println(str(twice!(3)));\n"
     )
     user_macro_path = write_temp(user_macro_source)
     try:

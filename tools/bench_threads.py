@@ -90,7 +90,7 @@ def pool_driver_source(worker, workers, jobs, batch):
         "let elapsed = std.time.monotonic_ms() - t0;\n"
         "pool.close();\n"
         "pool.join();\n"
-        'print("TIME "); print(elapsed); print(" TOTAL "); println(total);\n'
+        'std.io.print("TIME "); std.io.print(elapsed); std.io.print(" TOTAL "); std.io.println(total);\n'
     )
 
 
@@ -121,7 +121,7 @@ def channel_driver_source(messages):
         'ends[0].send(std.thread.Message.from({"i": 0, "stop": true}));\n'
         "worker.join();\n"
         "let elapsed = std.time.monotonic_ms() - t0;\n"
-        'print("TIME "); print(elapsed); print(" TOTAL "); println(0);\n'
+        'std.io.print("TIME "); std.io.print(elapsed); std.io.print(" TOTAL "); std.io.println(0);\n'
     )
 
 
@@ -140,7 +140,7 @@ def spawn_driver_source(threads):
         '  if (r["ok"]) { total = total + r["value"]["n"]; }\n'
         "}\n"
         "let elapsed = std.time.monotonic_ms() - t0;\n"
-        'print("TIME "); print(elapsed); print(" TOTAL "); println(total);\n'
+        'std.io.print("TIME "); std.io.print(elapsed); std.io.print(" TOTAL "); std.io.println(total);\n'
     )
 
 

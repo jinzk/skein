@@ -62,7 +62,7 @@ ts_test("iter macro let form scoping", func() {
 
 ts_test("iter macro other builtin iterables", func() {
   let chars = std.iter.collect(iter!("ab"));
-  ts_eq(len(chars), 2);
+  ts_eq(std.utils.len(chars), 2);
   ts_eq(str(chars[0]), "a");
   ts_eq(str(chars[1]), "b");
   ts_eq(std.iter.collect(iter!(std.bytes.from_hex("00ff"))), [0, 255]);

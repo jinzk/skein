@@ -52,7 +52,7 @@ package kv {
   }
 
   func _as_bytes(value, what) {
-    let kind = kind_of(value);
+    let kind = std.type.kind_of(value);
     if (kind == "bytes") {
       return value;
     }
@@ -63,11 +63,11 @@ package kv {
   }
 
   func _valid_table(name) {
-    if (kind_of(name) != "string" || name == "" || len(name) > 64) {
+    if (std.type.kind_of(name) != "string" || name == "" || std.utils.len(name) > 64) {
       return false;
     }
     let i = 0;
-    while (i < len(name)) {
+    while (i < std.utils.len(name)) {
       let c = name[i];
       if (c == '_') {
         i = i + 1;
@@ -91,7 +91,7 @@ package kv {
   }
 
   func _prefix_upper(prefix) {
-    let i = len(prefix) - 1;
+    let i = std.utils.len(prefix) - 1;
     while (i >= 0) {
       let current = std.bytes.get(prefix, i);
       if (current < 255) {
@@ -117,7 +117,7 @@ package kv {
       let k = _as_bytes(key, "key");
       let rows = std.db.query(
         db, "SELECT value FROM " + table + " WHERE key = ?", [k]);
-      if (len(rows) == 0) {
+      if (std.utils.len(rows) == 0) {
         return null;
       }
       return rows[0]["value"];
@@ -132,16 +132,16 @@ package kv {
       let k = _as_bytes(key, "key");
       let rows = std.db.query(
         db, "SELECT 1 AS found FROM " + table + " WHERE key = ?", [k]);
-      return len(rows) > 0;
+      return std.utils.len(rows) > 0;
     };
     let scan = func(prefix = "", limit = 0) {
       let p = _as_bytes(prefix, "prefix");
-      if (kind_of(limit) != "int" || limit < 0) {
+      if (std.type.kind_of(limit) != "int" || limit < 0) {
         fail("std.kv scan limit must be a non-negative integer");
       }
       let sql = "SELECT key, value FROM " + table;
       let params = [];
-      if (len(p) > 0) {
+      if (std.utils.len(p) > 0) {
         let upper = _prefix_upper(p);
         if (upper == null) {
           sql = sql + " WHERE key >= ?";
@@ -198,7 +198,7 @@ package kv {
   }
 
   func _open_options(options) {
-    if (kind_of(options) == "dict") {
+    if (std.type.kind_of(options) == "dict") {
       return options;
     }
     if (options is OpenOptions) {
@@ -215,7 +215,7 @@ package kv {
   }
 
   export func open(path, options = {}) {
-    if (kind_of(path) != "string" || path == "") {
+    if (std.type.kind_of(path) != "string" || path == "") {
       fail("std.kv.open expects a non-empty path");
     }
     if (std.string.starts_with(path, "rocksdb://") ||

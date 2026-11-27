@@ -40,7 +40,7 @@
 | 断言与内置语法宏（M10） | 已完成 | 第一批已完成：`std.assert` / `std.log.enabled` 与 assert、日志、`capture!` 内置 AST 宏已落地并通过全量验证；`list!` / `dict!` / `try!` 已决定不实现；用户自定义宏不在 M10 |
 | 用户自定义宏与保留字清理（M11，P1 / P2 / P3.1 / P4 含跨包 / P5.1–P5.5 / G1–G6 已完成） | 已完成 | AST 级静态模板、受限片段、hygienic、声明先于使用。`proto`、`import {name} from pkg`、prelude 默认 import、`list` / `dict` 构造器、`fail!` / `recover!` / `pass!` / `wait!` 宏、`launch` / `wait` / `await` 表达式起始 contextual、用户宏 v1 与跨包 `export macro` / `import {name!} from pkg;`，以及 `on` / `error` handler-scoped contextual、`as` / `ref` / `weak` / `is` contextual 均已落地；G1–G6 完成泛型实参 AST 化、受限 `type` 片段、占位符泛型实参、定义期边界强化、formatter / lint / LSP / VM-JIT 同步与核心约束验收；设计见 [`docs/macros_user_defined.md`](macros_user_defined.md) |
 | 操作符重载（O0–O4） | O0–O4 已完成 | 自引用 proto 约束、`std.ops` 协议、算术/相等/比较运算符重写，以及标准库算法接入 `Comparable` 均已落地，见 2.9 |
-| 标准库 API 清理（P0–P4） | 已完成 | prelude 默认 import 文档、`kv.StoreApi`、`std.ops` 组合协议、`kv.OpenOptions`、`graph` 的 `result` envelope 与 `fsm.MachineApi` 门面已落地；下一轮按实际使用数据再评估 |
+| 标准库 API 清理（P0–P4 与旧入口移除） | 已完成 | `kv.StoreApi`、`std.ops` 组合协议、`kv.OpenOptions`、`graph` 的 `result` envelope 与 `fsm.MachineApi` 门面已落地；`std.string.split_ws`、`fsm` 包级旧入口和 prelude 裸名绑定已移除，统一使用 `std.*` 规范路径 |
 | `std.cache`（M7）/ `std.kv` | 已完成 | 维护；Valkey 独立 CI 服务可按需补 |
 | FFI 平台 CI / fuzz | 按需 | Windows x64（MinGW/MSVC）进入正式发布；32 位 / ARM 与 fuzz 按需，见 `architecture.md` |
 
@@ -64,7 +64,8 @@
   以及核心约束验收
 - 标准库 API 清理 P0–P4：文档对齐默认 import 语义、`kv.StoreApi` 门面、
   `std.ops` 组合约束、`kv.OpenOptions` 具名选项，以及 `graph` 的内置泛型
-  `result` envelope 入口；后续补齐 `fsm.MachineApi` 门面并移除旧包级函数调用
+  `result` envelope 入口；随后移除 `std.string.split_ws`、`fsm` 包级旧入口和
+  prelude 裸名绑定，所有调用统一到 `std.*` / `MachineApi`
 
 ### 1.2 推荐执行顺序
 
@@ -338,15 +339,16 @@ Windows x64 MinGW/MSVC CI 发布门槛。
 `proto` 语义（已实现）：
 
 ```skein
+import std;
 proto Drawable {
   func draw(self);
-  func describe(self) { print("drawable"); }
+  func describe(self) { std.io.print("drawable"); }
 }
 
 struct Point {}
 
 impl Point {
-  func draw(self) { print("point"); }
+  func draw(self) { std.io.print("point"); }
 }
 
 func render(x: Drawable) { x.draw(); }
@@ -368,6 +370,7 @@ render(Point {});   // 有匹配的 draw(self)，自动满足
 `ref` / `weak` 语义（已实现）：
 
 ```skein
+import std;
 struct Node {
   value: int;
   next: ref Node? = null;   // 强引用，拥有后继
@@ -380,7 +383,7 @@ let b = ref Node { value: 2 };
 a.next = b;       // 强边：a -> b
 b.prev = a;       // 弱边：b -> a，不构成所有权环
 b.value = 9;
-print(a.next.value);  // 9，引用不是值快照
+std.io.print(a.next.value);  // 9，引用不是值快照
 ```
 
 规则：
@@ -461,6 +464,7 @@ GC 接入（已实现）：
 新模型：
 
 ```skein
+import std;
 let ends = std.thread.Channel(2);
 let parent = ends[0];
 let child = ends[1];
@@ -528,7 +532,7 @@ keyword（`in` / `export` / `import` / `package` / `include`）已完成。其�
    `fail` / `recover` / `pass` / `wait` 的规范形式改为宏，旧关键字形式暂时并行；
    追加 `name!` 与 `name! x` 两种宏简写；用户宏可遮蔽裸名。
 5. **P2.3（已完成）** `list` / `dict` 改为默认 import，规范路径为
-   `std.list.new` / `std.dict.new`；`list(x)` / `dict(x)` 解析为对应构造器，
+   `std.list.new` / `std.dict.new`；`std.list.new(x)` / `std.dict.new(x)` 解析为对应构造器，
    值作用域可遮蔽且类型命名空间保持独立；不做 `list!` / `dict!` / `try!`。
 6. **P3.1（已完成）** `wait` 退出保留字，`launch` / `wait` / `await` 改为表达式
     起始 contextual keyword，
@@ -578,7 +582,7 @@ M11 继续保持“宏不替代泛型声明”的边界。当前可用组合是�
    定义点捕获并通过 AST clone 复制。此时 `type` 片段放进泛型实参仍被拒绝，
    该限制由 G6 放开。
    `impl Box[int]` 本身在 parser 阶段就是语法错误。类型片段不能进入反射 builtin
-   （`kind_of(#T)` 等报
+   （`std.type.kind_of(#T)` 等报
    `type fragment cannot be used as a value or name`），不做类型计算或类型内省。
    限制只针对模板体：调用点已有的泛型值仍可经 `expr` 片段传入，匿名函数表达式
    仍可作为普通表达式出现在模板里。
@@ -670,8 +674,8 @@ M11 继续保持“宏不替代泛型声明”的边界。当前可用组合是�
   与同值 int 等价
 - 10 种复合赋值运算符；静态检查按运算符推导结果类型，JIT 覆盖
   param / index 目标
-- 默认类型检查启用时，`for ... in range(...)` 的参数是编译期整数常量表达式
-  时走计数循环，不物化 list；`range()` 在其他上下文仍返回 list
+- 默认类型检查启用时，`for ... in std.utils.range(...)` 的参数是编译期整数常量表达式
+  时走计数循环，不物化 list；`std.utils.range()` 在其他上下文仍返回 list
 - task / generator、线程、Channel
 - `wait e` task 前缀等待语法：等价于 `e.wait()`，支持 `wait launch f()`；
   `.` 后的关键字与内置名按普通成员名解析
@@ -915,6 +919,7 @@ struct string_value_t {
 实测（100k 次）：
 
 ```text
+import std;
 改前 s = s + "x"           680 ms
 改后 VM / AST              20–26 ms
 std.string.builder          29 ms

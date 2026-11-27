@@ -427,6 +427,7 @@ struct Node[T any] {
 API：
 
 ```skein
+import std;
 std.meta.generic_info("Box[int]")
 std.meta.type_args("Box[int]")
 std.meta.type_params("Box[int]")

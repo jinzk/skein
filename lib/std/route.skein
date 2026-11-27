@@ -111,7 +111,7 @@ package route {
   }
 
   func _parse_pattern(pattern) {
-    if (kind_of(pattern) != "string") {
+    if (std.type.kind_of(pattern) != "string") {
       fail("route pattern must be a string");
     }
 
@@ -138,7 +138,7 @@ package route {
       }
     }
 
-    if (len(segs) > _MAX_SEGMENTS) {
+    if (std.utils.len(segs) > _MAX_SEGMENTS) {
       fail("route pattern is too deep");
     }
     return segs;
@@ -160,7 +160,7 @@ package route {
   }
 
   func _check_route(node, segs, i, method, pattern) {
-    if (i >= len(segs)) {
+    if (i >= std.utils.len(segs)) {
       if (std.dict.has(node.handlers, method)) {
         fail("duplicate route " + method + " " + pattern);
       }
@@ -204,7 +204,7 @@ package route {
   }
 
   func _insert_route(node, segs, i, method, handler) {
-    if (i >= len(segs)) {
+    if (i >= std.utils.len(segs)) {
       _node_set_handler(node, method, handler);
       return;
     }
@@ -253,7 +253,7 @@ package route {
   }
 
   func _walk(node, parts, si, method, params) {
-    if (si >= len(parts)) {
+    if (si >= std.utils.len(parts)) {
       if (std.dict.has(node.handlers, method) ||
           std.dict.has(node.handlers, "*")) {
         return {"ok": true, "node": node, "params": params};
@@ -311,12 +311,12 @@ package route {
   }
 
   func _walk_any(node, parts, si) {
-    if (si >= len(parts)) {
-      if (len(node.handlers) > 0) {
+    if (si >= std.utils.len(parts)) {
+      if (std.utils.len(node.handlers) > 0) {
         return true;
       }
       let wild = node.wild;
-      if (wild != null && len(wild.handlers) > 0) {
+      if (wild != null && std.utils.len(wild.handlers) > 0) {
         return true;
       }
       return false;
@@ -335,7 +335,7 @@ package route {
     }
 
     let wild = node.wild;
-    if (wild != null && len(wild.handlers) > 0) {
+    if (wild != null && std.utils.len(wild.handlers) > 0) {
       return true;
     }
 
@@ -351,13 +351,13 @@ package route {
   }
 
   func _validate_request(req) {
-    if (kind_of(req) != "dict") {
+    if (std.type.kind_of(req) != "dict") {
       fail("route.dispatch expects a request dict");
     }
-    if (!std.dict.has(req, "method") || kind_of(req["method"]) != "string") {
+    if (!std.dict.has(req, "method") || std.type.kind_of(req["method"]) != "string") {
       fail("route.dispatch requires a string method");
     }
-    if (!std.dict.has(req, "path") || kind_of(req["path"]) != "string") {
+    if (!std.dict.has(req, "path") || std.type.kind_of(req["path"]) != "string") {
       fail("route.dispatch requires a string path");
     }
   }
@@ -370,10 +370,10 @@ package route {
     let entries = std.deque.new();
 
     let add = func(method, pattern, handler) {
-      if (kind_of(method) != "string") {
+      if (std.type.kind_of(method) != "string") {
         fail("route method must be a string");
       }
-      if (kind_of(handler) != "function" && kind_of(handler) != "builtin") {
+      if (std.type.kind_of(handler) != "function" && std.type.kind_of(handler) != "builtin") {
         fail("route handler must be callable");
       }
 
@@ -434,9 +434,9 @@ package route {
 
     let apply_after = func(req, response) {
       let i = 0;
-      while (i < len(afterware)) {
+      while (i < std.utils.len(afterware)) {
         let value = afterware[i](req, response);
-        if (type_name(value) == "task") {
+        if (std.type.name(value) == "task") {
           value = value.wait();
         }
         if (value != null) {
@@ -459,9 +459,9 @@ package route {
       }
 
       let i = index;
-      while (i < len(middlewares)) {
+      while (i < std.utils.len(middlewares)) {
         let value = middlewares[i](req);
-        if (type_name(value) == "task") {
+        if (std.type.name(value) == "task") {
           value = value.wait();
         }
         if (value != null) {
@@ -471,7 +471,7 @@ package route {
       }
 
       let response = route_request(req);
-      if (type_name(response) == "task") {
+      if (std.type.name(response) == "task") {
         return resume_after(req, response);
       }
       return apply_after(req, response);
@@ -481,9 +481,9 @@ package route {
       _validate_request(req);
 
       let i = 0;
-      while (i < len(middlewares)) {
+      while (i < std.utils.len(middlewares)) {
         let value = middlewares[i](req);
-        if (type_name(value) == "task") {
+        if (std.type.name(value) == "task") {
           return resume(req, i + 1, value);
         }
         if (value != null) {
@@ -492,23 +492,23 @@ package route {
         i = i + 1;
       }
       let response = route_request(req);
-      if (type_name(response) == "task") {
+      if (std.type.name(response) == "task") {
         return resume_after(req, response);
       }
       return apply_after(req, response);
     };
 
     let use = func(middleware) {
-      if (kind_of(middleware) != "function" &&
-          kind_of(middleware) != "builtin") {
+      if (std.type.kind_of(middleware) != "function" &&
+          std.type.kind_of(middleware) != "builtin") {
         fail("route middleware must be callable");
       }
       middlewares = std.list.append(middlewares, middleware);
     };
 
     let use_after = func(middleware) {
-      if (kind_of(middleware) != "function" &&
-          kind_of(middleware) != "builtin") {
+      if (std.type.kind_of(middleware) != "function" &&
+          std.type.kind_of(middleware) != "builtin") {
         fail("route after middleware must be callable");
       }
       afterware = std.list.append(afterware, middleware);

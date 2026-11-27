@@ -228,7 +228,7 @@ package rpc {
       return std.json.stringify(frame);
     }
     let encoded = encode(frame);
-    if (kind_of(encoded) != "string") {
+    if (std.type.kind_of(encoded) != "string") {
       fail("rpc encode must return a string");
     }
     return encoded;
@@ -239,14 +239,14 @@ package rpc {
   func _decode_line(options, line) {
     let decode = std.dict.get(options, "decode", null);
     let text = line;
-    if (kind_of(text) == "bytes") {
+    if (std.type.kind_of(text) == "bytes") {
       text = std.bytes.to_string(text);
     }
     if (decode == null) {
       return std.json.parse(text);
     }
     let frame = decode(text);
-    if (kind_of(frame) != "dict") {
+    if (std.type.kind_of(frame) != "dict") {
       fail("rpc decode must return a dict");
     }
     return frame;
@@ -431,7 +431,7 @@ package rpc {
           "protocol": state["protocol"],
           "closed": state["closed"],
           "owns": state["owns"],
-          "pending": len(state["pending"])
+          "pending": std.utils.len(state["pending"])
         };
       },
       options: options
@@ -442,10 +442,10 @@ package rpc {
     let hybrid = protocol == "hybrid";
     let request = {"id": id, "method": method, "params": params};
     if (hybrid) {
-      request["body_len"] = len(body);
+      request["body_len"] = std.utils.len(body);
     }
     io.write(_encode_line(options, request) + "\n");
-    if (hybrid && len(body) > 0) {
+    if (hybrid && std.utils.len(body) > 0) {
       io.write(body);
     }
     io.flush();
@@ -533,7 +533,7 @@ package rpc {
   //   failure_limit: consecutive failures before opening a circuit (0 disables)
   //   cooldown_ms:   how long an open circuit blocks a client
   export func pool(clients, options = {}) {
-    if (len(clients) == 0) {
+    if (std.utils.len(clients) == 0) {
       fail("rpc.pool requires at least one client");
     }
     let failure_limit = std.dict.get(options, "failure_limit", 3);
@@ -566,7 +566,7 @@ package rpc {
       if (state["closed"]) {
         fail("rpc pool is closed");
       }
-      let n = len(clients);
+      let n = std.utils.len(clients);
       let now = std.time.monotonic_ms();
       let start = state["next"] % n;
       let i = 0;
@@ -593,7 +593,7 @@ package rpc {
         return false;
       }
       let reopened = std.result.unwrap(captured);
-      if (kind_of(reopened) != "result" ||
+      if (std.type.kind_of(reopened) != "result" ||
           std.result.is_err(reopened) ||
           std.result.unwrap(reopened) != true) {
         return false;
@@ -685,7 +685,7 @@ package rpc {
     let health_snapshot = func() {
       let now = std.time.monotonic_ms();
       let out = [];
-      for i in range(len(state["health"])) {
+      for i in std.utils.range(std.utils.len(state["health"])) {
         let h = state["health"][i];
         out = std.list.append(out, {
           "index": i,
@@ -720,13 +720,13 @@ package rpc {
       _stats: func() {
         let now = std.time.monotonic_ms();
         let healthy = 0;
-        for i in range(len(state["health"])) {
+        for i in std.utils.range(std.utils.len(state["health"])) {
           if (is_open(i, now) == false) {
             healthy = healthy + 1;
           }
         }
         return {
-          "clients": len(clients),
+          "clients": std.utils.len(clients),
           "calls": state["calls"],
           "errors": state["errors"],
           "reconnects": state["reconnects"],
@@ -736,7 +736,7 @@ package rpc {
       },
       _health: health_snapshot,
       _reset: func() {
-        for i in range(len(state["health"])) {
+        for i in std.utils.range(std.utils.len(state["health"])) {
           state["health"][i]["failures"] = 0;
           state["health"][i]["open_until"] = 0;
         }
@@ -821,7 +821,7 @@ package rpc {
   // A throwing handler is reported as an ok:false response and the loop
   // continues with the next request.
   func _serve(handler, options) {
-    if (kind_of(handler) != "function" && kind_of(handler) != "builtin") {
+    if (std.type.kind_of(handler) != "function" && std.type.kind_of(handler) != "builtin") {
       fail("rpc handler must be callable");
     }
     let protocol = std.dict.get(options, "protocol", "jsonl");
@@ -882,7 +882,7 @@ package rpc {
         let value = std.result.unwrap(call);
         response = {"id": id, "ok": true};
         if (hybrid) {
-          if (kind_of(value) == "dict" && std.dict.has(value, "value")) {
+          if (std.type.kind_of(value) == "dict" && std.dict.has(value, "value")) {
             response["result"] = value["value"];
             if (std.dict.has(value, "body")) {
               response_body = value["body"];
@@ -890,7 +890,7 @@ package rpc {
           } else {
             response["result"] = value;
           }
-          response["body_len"] = len(response_body);
+          response["body_len"] = std.utils.len(response_body);
         } else {
           response["result"] = value;
         }
@@ -911,7 +911,7 @@ package rpc {
       }
 
       std.io.write_all(output, _encode_line(options, response) + "\n");
-      if (len(response_body) > 0) {
+      if (std.utils.len(response_body) > 0) {
         std.io.write_all(output, response_body);
       }
       std.io.flush(output);

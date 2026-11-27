@@ -10,8 +10,8 @@ package lru {
   }
 
   func _check_cap(cap) {
-    if (kind_of(cap) != "int") {
-      fail("std.lru.new expects an int capacity, got " + kind_of(cap));
+    if (std.type.kind_of(cap) != "int") {
+      fail("std.lru.new expects an int capacity, got " + std.type.kind_of(cap));
     }
     if (cap < 1) {
       fail("std.lru.new capacity must be at least 1");
@@ -19,7 +19,7 @@ package lru {
   }
 
   func _check_key(key) {
-    let kind = kind_of(key);
+    let kind = std.type.kind_of(key);
     if (kind == "int" || kind == "float" || kind == "bool" ||
         kind == "string" || kind == "char" || kind == "byte" ||
         kind == "bytes" || kind == "null" || kind == "list" ||

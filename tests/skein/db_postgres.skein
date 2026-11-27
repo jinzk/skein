@@ -18,7 +18,7 @@ ts_test("postgres exec and query", func() {
 
   let rows = std.db.query(
     db, "SELECT id, name, score, ok, data FROM skein_db_test");
-  ts_eq(len(rows), 1);
+  ts_eq(std.utils.len(rows), 1);
   ts_eq(rows[0]["id"], 1);
   ts_eq(rows[0]["name"], "alice");
   ts_eq(rows[0]["score"], 1.5);
@@ -45,13 +45,13 @@ ts_test("postgres transaction", func() {
   std.db.begin(db);
   std.db.exec(db, "INSERT INTO skein_db_tx VALUES ($1)", [1]);
   std.db.rollback(db);
-  ts_eq(len(std.db.query(db, "SELECT * FROM skein_db_tx")), 0);
+  ts_eq(std.utils.len(std.db.query(db, "SELECT * FROM skein_db_tx")), 0);
 
   std.db.begin(db);
   std.db.exec(db, "INSERT INTO skein_db_tx VALUES ($1)", [2]);
   std.db.commit(db);
   let rows = std.db.query(db, "SELECT n FROM skein_db_tx");
-  ts_eq(len(rows), 1);
+  ts_eq(std.utils.len(rows), 1);
   ts_eq(rows[0]["n"], 2);
 
   std.db.close(db);
@@ -96,7 +96,7 @@ ts_test("postgres migrations", func() {
   ts_eq(first["applied"], [1, 2, 3]);
   ts_eq(first["current"], 3);
   let rows = std.db.query(db, "SELECT id, name, note FROM migrate_t");
-  ts_eq(len(rows), 1);
+  ts_eq(std.utils.len(rows), 1);
   ts_eq(rows[0]["name"], "alice");
 
   let second = std.db.migrate(db, migrations, {"table": version_table});

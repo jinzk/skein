@@ -145,11 +145,11 @@ ts_test("empty list literal assignment", func() {
 });
 
 ts_test("empty dict builtin", func() {
-  ts_eq(dict(), {});
+  ts_eq(std.dict.new(), {});
 });
 
 ts_test("empty list builtin", func() {
-  ts_eq(list(), []);
+  ts_eq(std.list.new(), []);
 });
 
 ts_test("multi-line empty dict", func() {
@@ -191,7 +191,7 @@ ts_test("nested index assignment", func() {
 });
 
 ts_test("nested dict assignment", func() {
-  let d = {"a": dict()};
+  let d = {"a": std.dict.new()};
   d["a"]["b"] = 42;
   ts_eq(d, {"a": {"b": 42}});
 });

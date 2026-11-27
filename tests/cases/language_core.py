@@ -50,20 +50,20 @@ def run_cases():
     )
     check(
         "iteration golden output",
-        "for x in [1, 2] { println(x); }\n",
+        "for x in [1, 2] { std.io.println(x); }\n",
         stdout="1\n2\n",
     )
     check(
         "in is a contextual keyword",
         "let in = 7;\n"
-        "println(in);\n"
-        "for in in [1, 2] { println(in); }\n",
+        "std.io.println(in);\n"
+        "for in in [1, 2] { std.io.println(in); }\n",
         stdout="7\n1\n2\n",
     )
     check(
         "export is a contextual keyword",
         "let export = 7;\n"
-        "println(export);\n",
+        "std.io.println(export);\n",
         stdout="7\n",
     )
     check(
@@ -72,7 +72,7 @@ def run_cases():
         "let package = 8;\n"
         "let module = 9;\n"
         "let include = 10;\n"
-        "println(import + package + module + include);\n",
+        "std.io.println(import + package + module + include);\n",
         stdout="34\n",
     )
     check(
@@ -83,13 +83,13 @@ def run_cases():
     )
     check(
         "switch golden output",
-        "switch (2) { case 1 => println(\"one\"); "
-        "case 2, 3 => println(\"two or three\"); }\n",
+        "switch (2) { case 1 => std.io.println(\"one\"); "
+        "case 2, 3 => std.io.println(\"two or three\"); }\n",
         stdout="two or three",
     )
     check(
         "match golden output",
-        "println(match (2) { case 2 => \"two\"; default => \"other\"; });\n",
+        "std.io.println(match (2) { case 2 => \"two\"; default => \"other\"; });\n",
         stdout="two",
     )
     check(
@@ -102,31 +102,31 @@ def run_cases():
     check(
         "defaults golden output",
         "func f(a, b = a + 1) { return b; }\n"
-        "println(f(10));\n",
+        "std.io.println(f(10));\n",
         stdout="11",
     )
     check(
         "functions golden output",
         "func f(x) -> x * 2;\n"
-        "println(f(21));\n",
+        "std.io.println(f(21));\n",
         stdout="42",
     )
     check(
         "protocols golden output",
         "proto G { func d(self) { return \"g\"; } }\n"
         "struct S { x: int; }\n"
-        "println(S { x: 1 }.d());\n",
+        "std.io.println(S { x: 1 }.d());\n",
         stdout="g",
     )
     check(
         "protocol is ordinary identifier",
-        "let protocol = 7;\nprintln(protocol);\n",
+        "let protocol = 7;\nstd.io.println(protocol);\n",
         stdout="7",
     )
     check(
         "headers golden output",
         "let x = true;\n"
-        "if x { println(\"yes\"); }\n",
+        "if x { std.io.println(\"yes\"); }\n",
         stdout="yes",
     )
 
@@ -156,25 +156,25 @@ def run_cases():
           "for x in [1, 2] { let y: string = x; }\n",
           stderr="variable y expects string, got int")
     check("for in without let requires block",
-          "let xs = [1, 2];\nfor x in xs println(x);\n",
+          "let xs = [1, 2];\nfor x in xs std.io.println(x);\n",
           stderr="syntax error")
     check("for in without let struct literal requires parens",
           "struct P { x: int = 1; }\n"
-          'for p in P { x: 1 } { println(p.x); }\n',
+          'for p in P { x: 1 } { std.io.println(p.x); }\n',
           stderr="syntax error")
     check("mutually recursive plain struct fields require ref",
           "struct A { b: B? = null; }\n"
           "struct B { a: A? = null; }\n",
           stderr="mutually recursive fields require ref B? or weak B?")
     check("for in without let two vars require pair or dict",
-          "for k, v in [1, 2] { println(k); }\n",
+          "for k, v in [1, 2] { std.io.println(k); }\n",
           stderr="two-variable for-in over list[int] requires pair/tuple elements")
     check("for in without let rejects three variables over dict",
-          'for a, b, c in ({"a": 1}) { println(a); }\n',
+          'for a, b, c in ({"a": 1}) { std.io.println(a); }\n',
           stderr="tuple pattern expects 3 element(s), got 2")
     check("if condition composite literal needs parens",
           'let d = {"a": 1};\n'
-          'if d == {"a": 1} { println("yes"); }\n',
+          'if d == {"a": 1} { std.io.println("yes"); }\n',
           stderr="syntax error")
     check("std.iter.for_each requires callable",
           "import std;\nstd.iter.for_each([1], 42)\n",
@@ -184,7 +184,7 @@ def run_cases():
           stderr="std.iter.for_each expects 2 arguments")
     check("std.iter.for_each rejects three callback parameters",
           "import std;\n"
-          "std.iter.for_each([1], func(a, b, c) { print(a); })\n",
+          "std.iter.for_each([1], func(a, b, c) { std.io.print(a); })\n",
           stderr="callback must accept 1 or 2 parameters")
     check("std.iter.for_each propagates callback errors",
           "import std;\n"
@@ -216,8 +216,8 @@ def run_cases():
     check("do block expression declaration and empty",
           "let a = do { let x = 5; };\n"
           "let b = do { };\n"
-          "print(\"a=\" + str(a));\n"
-          "print(\"b=\" + str(b));\n",
+          "std.io.print(\"a=\" + str(a));\n"
+          "std.io.print(\"b=\" + str(b));\n",
           stdout_all=["a=null", "b=null"])
     check("do block expression in expression context",
           "let v = 1 + do { 3; };\nv\n",
@@ -303,18 +303,18 @@ def run_cases():
           "  };\n"
           "  total = total + v;\n"
           "}\n"
-          "print(total);\n"
-          "print(i);\n",
+          "std.io.print(total);\n"
+          "std.io.print(i);\n",
           stdout_all=["40", "4"])
     check("do block expression then while",
           "let v = do { 7; };\n"
           "let i = 0;\n"
           "while (i < 2) { i = i + 1; }\n"
-          "print(v);\n"
-          "print(i);\n",
+          "std.io.print(v);\n"
+          "std.io.print(i);\n",
           stdout_all=["7", "2"])
     check("do while must share closing brace line",
-          'do {\n  print("x");\n}\nwhile (false);\n',
+          'do {\n  std.io.print("x");\n}\nwhile (false);\n',
           stderr="while must be on the same line as the preceding '}'")
     check("struct body brace must share header line",
           "func f() {\n"
@@ -329,7 +329,7 @@ def run_cases():
           "func f() {\n"
           "  switch (1)\n"
           "  {\n"
-          '    case 1 => print("x");\n'
+          '    case 1 => std.io.print("x");\n'
           "  }\n"
           "}\n"
           "f();\n",
@@ -338,7 +338,7 @@ def run_cases():
           "func f() {\n"
           "  for x in [1, 2]\n"
           "  {\n"
-          "    print(x);\n"
+          "    std.io.print(x);\n"
           "  }\n"
           "}\n"
           "f();\n",
@@ -351,7 +351,7 @@ def run_cases():
           "  const A = 2;\n"
           "  const B = A * 3 + 1;\n"
           "  return B;\n"
-          "}\nprintln(f());\n",
+          "}\nstd.io.println(f());\n",
           stdout="7",
           env=dict(os.environ, SKEIN_VM="1", SKEIN_NO_CONST_PROP="1"))
     check("increment string", 'let s = "a";\ns++;\n',
@@ -372,15 +372,15 @@ def run_cases():
           "const x = 1;\nx += 1;\n",
           stderr="cannot assign to constant x")
     check("slice step zero",
-          "println([1, 2, 3][::0]);\n",
+          "std.io.println([1, 2, 3][::0]);\n",
           stderr="slice step cannot be zero")
     check("slice bound must be integer",
-          "println([1, 2, 3][1.0:]);\n",
+          "std.io.println([1, 2, 3][1.0:]);\n",
           stderr="slice start must be an integer")
     check("slice unsupported type",
-          "println(1[0:1]);\n",
+          "std.io.println(1[0:1]);\n",
           stderr="slice expects list, string, or bytes")
-    check("bool print", "println(true)\nprintln(false)\n",
+    check("bool print", "std.io.println(true)\nstd.io.println(false)\n",
           stdout_all=["true", "false"])
 
 
@@ -388,25 +388,25 @@ def run_cases():
           "switch (1) { case 1 => let y = 2; }\ny\n",
           stderr="symbol not found y")
     check("switch float selector",
-          'switch (1.0) { case 1 => println("bad"); }\n',
+          'switch (1.0) { case 1 => std.io.println("bad"); }\n',
           stderr="switch does not support float")
     check("switch float case",
-          'switch (1) { case 1.0 => println("bad"); }\n',
+          'switch (1) { case 1.0 => std.io.println("bad"); }\n',
           stderr="switch does not support float case value")
     check("switch list case",
-          'switch (1) { case [1] => println("bad"); }\n',
+          'switch (1) { case [1] => std.io.println("bad"); }\n',
           stderr="switch does not support list case value")
     check("switch builtin case",
-          'switch (1) { case std.math.sqrt => println("bad"); }\n',
+          'switch (1) { case std.math.sqrt => std.io.println("bad"); }\n',
           stderr="switch does not support builtin case value")
     check("switch type name is not pattern",
-          'switch (1) { case int => println("bad"); }\n',
+          'switch (1) { case int => std.io.println("bad"); }\n',
           stderr="switch does not support builtin case value")
     check("switch case condition rejected",
-          'switch (true) { case 1 < 2 => println("bad"); }\n',
+          'switch (true) { case 1 < 2 => std.io.println("bad"); }\n',
           stderr="logical or comparison expressions are not allowed in case values")
     check("switch list selector",
-          'switch ([1]) { default => println("bad"); }\n',
+          'switch ([1]) { default => std.io.println("bad"); }\n',
           stderr="switch does not support list")
 
     check("match binding scope",
@@ -437,13 +437,13 @@ def run_cases():
           'impl S { func m(self) { return 3; } }\n'
           'proto A { func m(self) { return 1; } }\n'
           'proto B { func m(self) { return 2; } }\n'
-          'println(S {}.m());\n',
+          'std.io.println(S {}.m());\n',
           stdout="3")
     check("protocol default conflict resolved by inline method",
           'struct S { func m(self) { return 3; } }\n'
           'proto A { func m(self) { return 1; } }\n'
           'proto B { func m(self) { return 2; } }\n'
-          'println(S {}.m());\n',
+          'std.io.println(S {}.m());\n',
           stdout="3")
     check("protocol missing method still rejected",
           'proto T { func m(self); }\n'
@@ -501,24 +501,24 @@ def run_cases():
     check("std.meta.traits removed",
           'import std;\n'
           'import std.meta;\n'
-          'println(str(std.dict.has(std.meta, "traits")));\n',
+          'std.io.println(str(std.dict.has(std.meta, "traits")));\n',
           stdout="0")
     check("with remains ordinary identifier",
           'let with = 7;\n'
           'struct S { with: int; }\n'
           'let s = S { with: 9 };\n'
-          'println(with + s.with);\n',
+          'std.io.println(with + s.with);\n',
           stdout="16")
 
     check("export expression function",
           'package p { export func twice(x) -> x * 2; }\n'
-          'println(p.twice(21));\n',
+          'std.io.println(p.twice(21));\n',
           stdout="42")
 
 
     check("pipe apply operator removed",
           'func h(x) { return y -> x + y; }\n'
-          'println(4 |>> h(3));\n',
+          'std.io.println(4 |>> h(3));\n',
           stderr="syntax error")
     check("parenthesized lambda parameter must be a name",
           "let f = (1) -> 2;\n",
@@ -555,7 +555,7 @@ def run_cases():
           "  func new(x, y) { return Point { x: x, y: y }; }\n"
           "}\n"
           "let p = Point.new(3.0, 4.0);\n"
-          "println(str(p.x) + \" \" + str(p.y));\n",
+          "std.io.println(str(p.x) + \" \" + str(p.y));\n",
           stdout="3.0 4.0")
 
     check("inline struct constructor",
@@ -563,7 +563,7 @@ def run_cases():
           "  x: float;\n"
           "  func new(x) { return Point { x: x }; }\n"
           "}\n"
-          "println(str(Point.new(1.5).x));\n",
+          "std.io.println(str(Point.new(1.5).x));\n",
           stdout="1.5")
 
     check("constructor validation",
@@ -606,7 +606,7 @@ def run_cases():
           "let a: ref Point = Point.new(1.0);\n"
           "let b = a;\n"
           "b.x = 9.0;\n"
-          "println(str(a.x));\n",
+          "std.io.println(str(a.x));\n",
           stdout="9.0")
 
     check("struct literal implicitly wraps to ref",
@@ -614,7 +614,7 @@ def run_cases():
           "let a: ref Point = Point { x: 1.0 };\n"
           "let b = a;\n"
           "b.x = 4.0;\n"
-          "println(str(a.x));\n",
+          "std.io.println(str(a.x));\n",
           stdout="4.0")
 
     check("struct value requires explicit ref",
@@ -631,7 +631,7 @@ def run_cases():
           "a = Point.new(2.0);\n"
           "let b = a;\n"
           "b.x = 9.0;\n"
-          "println(str(a.x));\n",
+          "std.io.println(str(a.x));\n",
           stdout="9.0")
 
     check("ref field store wraps a fresh constructor",
@@ -640,7 +640,7 @@ def run_cases():
           "struct Holder { p: ref Point; }\n"
           "let h = Holder { p: Point.new(1.0) };\n"
           "h.p = Point.new(2.0);\n"
-          "println(str(h.p.x));\n",
+          "std.io.println(str(h.p.x));\n",
           stdout="2.0")
 
     check("ref parameter wraps a fresh constructor",
@@ -648,7 +648,7 @@ def run_cases():
           "impl Point { func new(x) { return Point { x: x }; } }\n"
           "func bump(p: ref Point) { p.x = 9.0; }\n"
           "bump(Point.new(1.0));\n"
-          "println(\"ok\");\n",
+          "std.io.println(\"ok\");\n",
           stdout="ok")
 
     check("explicit ref conversion copies a struct value",
@@ -656,7 +656,7 @@ def run_cases():
           "let s = Point { x: 4.0 };\n"
           "let a = ref(s);\n"
           "a.x = 5.0;\n"
-          "println(str(s.x) + \" \" + str(a.x));\n",
+          "std.io.println(str(s.x) + \" \" + str(a.x));\n",
           stdout="4.0 5.0")
 
     check("as ref wraps a struct value",
@@ -664,7 +664,7 @@ def run_cases():
           "let s = Point { x: 1.0 };\n"
           "let a = s as ref Point;\n"
           "a.x = 7.0;\n"
-          "println(str(a.x));\n",
+          "std.io.println(str(a.x));\n",
           stdout="7.0")
 
     check("P5.2 as is an identifier outside cast, alias and pattern slots",
@@ -672,14 +672,14 @@ def run_cases():
           "struct Box { as: int; }\n"
           "let as = 7;\n"
           "let b = Box { as: as };\n"
-          "println(str(b.as));\n"
-          "println(str(1 as float));\n"
-          "println(str(as));\n",
+          "std.io.println(str(b.as));\n"
+          "std.io.println(str(1 as float));\n"
+          "std.io.println(str(as));\n",
           stdout="7\n1\n7")
 
     check("P5.2 as can be a user macro name",
           "macro as(x: expr) { #x + 100; }\n"
-          "println(str(as!(1)));\n",
+          "std.io.println(str(as!(1)));\n",
           stdout="101")
 
     check("P5.2 as remains the import alias separator",
@@ -690,8 +690,8 @@ def run_cases():
 
     check("P5.2 as remains the pattern binding separator",
           'match ({"a": 1}) { case {a} as whole => '
-          'println(str(whole["a"] + a)); }\n'
-          "match (5) { case is int as n => println(str(n + 1)); }\n",
+          'std.io.println(str(whole["a"] + a)); }\n'
+          "match (5) { case is int as n => std.io.println(str(n + 1)); }\n",
           stdout="2\n6")
 
     check("P5.3 ref is an identifier outside ref slots",
@@ -699,8 +699,8 @@ def run_cases():
           "let ref = 7;\n"
           "struct Box { ref: int; }\n"
           "let b = Box { ref: ref };\n"
-          "println(str(ref));\n"
-          "println(str(b.ref));\n",
+          "std.io.println(str(ref));\n"
+          "std.io.println(str(b.ref));\n",
           stdout="7\n7")
 
     check("P5.3 ref conversion, literal and type prefix still work",
@@ -710,12 +710,12 @@ def run_cases():
           "a.x = 7.0;\n"
           "let b = ref Point { x: 2.0 };\n"
           "let c: ref Point = a;\n"
-          "println(str(a.x + b.x + c.x));\n",
+          "std.io.println(str(a.x + b.x + c.x));\n",
           stdout="16.0")
 
     check("P5.3 ref can be a user macro name",
           "macro ref(x: expr) { #x + 100; }\n"
-          "println(str(ref!(1)));\n",
+          "std.io.println(str(ref!(1)));\n",
           stdout="101")
 
     check("ref rejects a ref handle",
@@ -733,9 +733,9 @@ def run_cases():
           "let weak = 7;\n"
           "struct Box { weak: int; }\n"
           "let b = Box { weak: weak };\n"
-          "println(str(weak));\n"
-          "println(str(b.weak));\n"
-          "println(str(weak as float));\n",
+          "std.io.println(str(weak));\n"
+          "std.io.println(str(b.weak));\n"
+          "std.io.println(str(weak as float));\n",
           stdout="7\n7\n7")
 
     check("P5.4 weak type prefix still works",
@@ -743,12 +743,12 @@ def run_cases():
           "struct Node { value: int; }\n"
           "let n = ref Node { value: 1 };\n"
           "let w: weak Node = n;\n"
-          "println(str(std.ref.upgrade(w) != null));\n",
+          "std.io.println(str(std.ref.upgrade(w) != null));\n",
           stdout="true")
 
     check("P5.4 weak can be a user macro name",
           "macro weak(x: expr) { #x + 100; }\n"
-          "println(str(weak!(1)));\n",
+          "std.io.println(str(weak!(1)));\n",
           stdout="101")
 
     check("P5.5 is is an identifier outside type-test slots",
@@ -756,23 +756,23 @@ def run_cases():
           "let is = 7;\n"
           "struct Box { is: int; }\n"
           "let b = Box { is: is };\n"
-          "println(str(is));\n"
-          "println(str(b.is));\n"
-          "println(str(is is int));\n"
+          "std.io.println(str(is));\n"
+          "std.io.println(str(b.is));\n"
+          "std.io.println(str(is is int));\n"
           "func f(is: int) { return is + 1; }\n"
-          "println(str(f(2)));\n"
-          "println(str(is as float));\n",
+          "std.io.println(str(f(2)));\n"
+          "std.io.println(str(is as float));\n",
           stdout="7\n7\ntrue\n3\n7")
 
     check("P5.5 is operator and type pattern still work",
           "import std;\n"
-          "match (5) { case is int as n => println(str(n + 1)); }\n"
-          "println(str(5 is int));\n",
+          "match (5) { case is int as n => std.io.println(str(n + 1)); }\n"
+          "std.io.println(str(5 is int));\n",
           stdout="6\ntrue")
 
     check("P5.5 is can be a user macro name",
           "macro is(x: expr) { #x + 100; }\n"
-          "println(str(is!(1)));\n",
+          "std.io.println(str(is!(1)));\n",
           stdout="101")
 
     check("weak accepts a ref handle",
@@ -780,7 +780,7 @@ def run_cases():
           "struct Node { value: int; }\n"
           "let n = ref Node { value: 1 };\n"
           "let w: weak Node = n;\n"
-          "println(str(std.ref.upgrade(w) != null));\n",
+          "std.io.println(str(std.ref.upgrade(w) != null));\n",
           stdout="true")
 
     check("container elements do not implicitly wrap",

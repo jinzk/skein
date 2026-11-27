@@ -49,11 +49,11 @@ def main():
             "}\n"
             "std.thread.collect();\n"
             "let after = std.thread.debug_counts();\n"
-            'print("m=" + str(after["messages"] - base["messages"]) + "|");\n'
-            'print("c=" + str(after["channels"] - base["channels"]) + "|");\n'
-            'print("d=" + str(after["pairs"] - base["pairs"]) + "|");\n'
-            'print("e=" + str(after["endpoints"] - base["endpoints"]) + "|");\n'
-            'print("g=" + str(after["collected"] > base["collected"]) + "|");\n'
+            'std.io.print("m=" + str(after["messages"] - base["messages"]) + "|");\n'
+            'std.io.print("c=" + str(after["channels"] - base["channels"]) + "|");\n'
+            'std.io.print("d=" + str(after["pairs"] - base["pairs"]) + "|");\n'
+            'std.io.print("e=" + str(after["endpoints"] - base["endpoints"]) + "|");\n'
+            'std.io.print("g=" + str(after["collected"] > base["collected"]) + "|");\n'
         )
         env = os.environ.copy()
         env.setdefault("ASAN_OPTIONS", "detect_leaks=0")

@@ -15,10 +15,10 @@ def main():
         with open(script, "w", encoding="utf-8") as handle:
             handle.write(
                 "import std;\n"
-                "println(str(std.sys.args()));\n"
-                'println("count=" + str(len(std.sys.args())));\n'
-                'println("script=" + std.sys.script());\n'
-                'println("exe=" + std.sys.executable());\n'
+                "std.io.println(str(std.sys.args()));\n"
+                'std.io.println("count=" + str(std.utils.len(std.sys.args())));\n'
+                'std.io.println("script=" + std.sys.script());\n'
+                'std.io.println("exe=" + std.sys.executable());\n'
             )
         # `--vm` works in every build; `--no-vm` is rejected by VM-only
         # builds, where the first flag only needs to prove that interpreter
@@ -63,8 +63,8 @@ def main():
         # Stdin scripts have no script path and no arguments.
         proc = subprocess.run(
             [BIN],
-            input="import std;\nprintln(str(std.sys.args()));\n"
-                  'println("script=[" + std.sys.script() + "]");\n',
+            input="import std;\nstd.io.println(str(std.sys.args()));\n"
+                  'std.io.println("script=[" + std.sys.script() + "]");\n',
             text=True,
             encoding="utf-8",
             capture_output=True,
@@ -79,9 +79,9 @@ def main():
         proc = subprocess.run(
             [BIN],
             input="import std;\n"
-                  'println("before-exit");\n'
+                  'std.io.println("before-exit");\n'
                   "std.sys.exit(3);\n"
-                  'println("after-exit");\n',
+                  'std.io.println("after-exit");\n',
             text=True,
             encoding="utf-8",
             capture_output=True,
@@ -133,9 +133,9 @@ def main():
                 "import std;\n"
                 "import helper;\n"
                 "func callback() { return std.sys.is_main(); }\n"
-                "println(str(std.sys.is_main()));\n"
-                "println(str(helper.in_package()));\n"
-                "println(str(helper.call_main(callback)));\n"
+                "std.io.println(str(std.sys.is_main()));\n"
+                "std.io.println(str(helper.in_package()));\n"
+                "std.io.println(str(helper.call_main(callback)));\n"
             )
         proc = subprocess.run(
             [BIN, main_script],
@@ -151,7 +151,7 @@ def main():
 
         proc = subprocess.run(
             [BIN],
-            input="import std;\nprintln(str(std.sys.is_main()));\n",
+            input="import std;\nstd.io.println(str(std.sys.is_main()));\n",
             text=True,
             encoding="utf-8",
             capture_output=True,

@@ -70,7 +70,7 @@ def run_cases():
             f'let s = std.net.tcp_connect("127.0.0.1", {port}, 1000, "ipv4");\n'
             'std.net.send(s, "hello", 1000);\n'
             "let data = std.net.recv(s, 100, 1000);\n"
-            "println(std.bytes.to_string(data));\n"
+            "std.io.println(std.bytes.to_string(data));\n"
             "std.net.close(s);\n"
         )
         thread.join(timeout=5)
@@ -103,7 +103,7 @@ def run_cases():
             f'let s = std.net.tcp_connect("127.0.0.1", {stream_port}, '
             '1000, "ipv4");\n'
             'std.io.write_all(s, "hello", 1000);\n'
-            "println(std.bytes.to_string(std.io.read(s, 100, 1000)));\n"
+            "std.io.println(std.bytes.to_string(std.io.read(s, 100, 1000)));\n"
             "std.io.close(s);\n"
         )
         stream_thread.join(timeout=5)
@@ -138,7 +138,7 @@ def run_cases():
             f'{async_stream_port}, 1000, "ipv4");\n'
             'std.io.write_task(s, "hello", 1000).wait()\n'
             "let data = std.io.read_task(s, 100, 1000).wait();\n"
-            "println(std.bytes.to_string(data));\n"
+            "std.io.println(std.bytes.to_string(data));\n"
             "std.io.close(s);\n"
         )
         async_stream_thread.join(timeout=5)
@@ -153,8 +153,8 @@ def run_cases():
             'import std;\n'
             f'let f = std.fs.open("{test_file}", "rb");\n'
             'let b = std.io.buffered(f, 4);\n'
-            'len(std.io.read_task(b, 2).wait()) == 2\n'
-            'len(std.io.read_task(b, 100).wait()) > 0\n'
+            'std.utils.len(std.io.read_task(b, 2).wait()) == 2\n'
+            'std.utils.len(std.io.read_task(b, 100).wait()) > 0\n'
             'std.io.close(b)\n',
             stdout_all=["= true", "= true", "= true"],
         )
@@ -191,9 +191,9 @@ def run_cases():
         http_client_proc = run(
             "import std;\n"
             f'let r = std.http.get("http://127.0.0.1:{http_test_port}/");\n'
-            'println(r["status"]);\n'
-            'println(r["headers"]["x-test"]);\n'
-            'println(std.bytes.to_string(r["body"]));\n'
+            'std.io.println(r["status"]);\n'
+            'std.io.println(r["headers"]["x-test"]);\n'
+            'std.io.println(std.bytes.to_string(r["body"]));\n'
         )
         http_test_thread.join(timeout=5)
         assert http_client_proc.returncode == 0, http_client_proc.stderr
@@ -236,8 +236,8 @@ def run_cases():
             "import std;\n"
             f'let a = std.http.get("http://127.0.0.1:{keepalive_port}/a");\n'
             f'let b = std.http.get("http://127.0.0.1:{keepalive_port}/b");\n'
-            'println(std.bytes.to_string(a["body"]));\n'
-            'println(std.bytes.to_string(b["body"]));\n'
+            'std.io.println(std.bytes.to_string(a["body"]));\n'
+            'std.io.println(std.bytes.to_string(b["body"]));\n'
         )
         keepalive_thread.join(timeout=5)
         assert keepalive_proc.returncode == 0, keepalive_proc.stderr
@@ -282,8 +282,8 @@ def run_cases():
             f'"http://127.0.0.1:{async_keepalive_port}/a").wait();\n'
             f'let b = std.http.get_task('
             f'"http://127.0.0.1:{async_keepalive_port}/b").wait();\n'
-            'println(std.bytes.to_string(a["body"]));\n'
-            'println(std.bytes.to_string(b["body"]));\n'
+            'std.io.println(std.bytes.to_string(a["body"]));\n'
+            'std.io.println(std.bytes.to_string(b["body"]));\n'
         )
         async_keepalive_thread.join(timeout=5)
         assert async_keepalive_proc.returncode == 0, (
@@ -327,8 +327,8 @@ def run_cases():
             "import std;\n"
             f'let a = std.http.get("http://127.0.0.1:{stale_sync_port}/a");\n'
             f'let b = std.http.get("http://127.0.0.1:{stale_sync_port}/b");\n'
-            'println(std.bytes.to_string(a["body"]));\n'
-            'println(std.bytes.to_string(b["body"]));\n'
+            'std.io.println(std.bytes.to_string(a["body"]));\n'
+            'std.io.println(std.bytes.to_string(b["body"]));\n'
         )
         stale_sync_thread.join(timeout=5)
         assert stale_sync_proc.returncode == 0, stale_sync_proc.stderr
@@ -352,8 +352,8 @@ def run_cases():
             f'"http://127.0.0.1:{stale_async_port}/a").wait();\n'
             f'let b = std.http.get_task('
             f'"http://127.0.0.1:{stale_async_port}/b").wait();\n'
-            'println(std.bytes.to_string(a["body"]));\n'
-            'println(std.bytes.to_string(b["body"]));\n'
+            'std.io.println(std.bytes.to_string(a["body"]));\n'
+            'std.io.println(std.bytes.to_string(b["body"]));\n'
         )
         stale_async_thread.join(timeout=5)
         assert stale_async_proc.returncode == 0, stale_async_proc.stderr
@@ -398,15 +398,15 @@ def run_cases():
             f'let a = std.http.get('
             f'"http://127.0.0.1:{stream_port}/a", '
             '{"on_body": func(chunk) {\n'
-            '  println("s=" + std.bytes.to_string(chunk));\n'
+            '  std.io.println("s=" + std.bytes.to_string(chunk));\n'
             "}});\n"
-            'println("sb=" + std.bytes.to_string(a["body"]));\n'
+            'std.io.println("sb=" + std.bytes.to_string(a["body"]));\n'
             f'let b = std.http.get_task('
             f'"http://127.0.0.1:{stream_port}/b", '
             '{"on_body": func(chunk) {\n'
-            '  println("a=" + std.bytes.to_string(chunk));\n'
+            '  std.io.println("a=" + std.bytes.to_string(chunk));\n'
             "}}).wait();\n"
-            'println("ab=" + std.bytes.to_string(b["body"]));\n',
+            'std.io.println("ab=" + std.bytes.to_string(b["body"]));\n',
             timeout=15,
         )
         stream_thread.join(timeout=5)
@@ -482,11 +482,11 @@ def run_cases():
             f'let a = std.http.post('
             f'"http://127.0.0.1:{request_stream_port}/a", '
             '{"body_stream": parts()});\n'
-            'println(std.bytes.to_string(a["body"]));\n'
+            'std.io.println(std.bytes.to_string(a["body"]));\n'
             f'let b = std.http.post_task('
             f'"http://127.0.0.1:{request_stream_port}/b", '
             '{"body_stream": async_parts()}).wait();\n'
-            'println(std.bytes.to_string(b["body"]));\n',
+            'std.io.println(std.bytes.to_string(b["body"]));\n',
             timeout=15,
         )
         request_stream_thread.join(timeout=5)
@@ -504,14 +504,14 @@ def run_cases():
             '  yield "stream";\n'
             "}\n"
             'let s = std.http.listen("127.0.0.1", 0);\n'
-            'println(str(s["port"]));\n'
+            'std.io.println(str(s["port"]));\n'
             "std.io.flush(std.io.stdout);\n"
             "let n = std.http.serve(s, func(req) {\n"
             '  return {"status": 200, "headers": '
             '{"Content-Type": "text/plain"}, '
             '"body_stream": parts()};\n'
             "}, 2);\n"
-            'println("served " + str(n));\n'
+            'std.io.println("served " + str(n));\n'
             "std.http.close(s);\n",
             "http serve stream",
         )
@@ -520,11 +520,11 @@ def run_cases():
                 "import std;\n"
                 f'let a = std.http.get('
                 f'"http://127.0.0.1:{serve_stream_port}/a");\n'
-                'println(a["headers"]["transfer-encoding"]);\n'
-                'println(std.bytes.to_string(a["body"]));\n'
+                'std.io.println(a["headers"]["transfer-encoding"]);\n'
+                'std.io.println(std.bytes.to_string(a["body"]));\n'
                 f'let b = std.http.get_task('
                 f'"http://127.0.0.1:{serve_stream_port}/b").wait();\n'
-                'println(std.bytes.to_string(b["body"]));\n',
+                'std.io.println(std.bytes.to_string(b["body"]));\n',
                 timeout=30,
             )
             assert serve_stream_client.returncode == 0, (
@@ -546,7 +546,7 @@ def run_cases():
             '  yield "stream";\n'
             "}\n"
             'let s = std.http.listen("127.0.0.1", 0);\n'
-            'println(str(s["port"]));\n'
+            'std.io.println(str(s["port"]));\n'
             "std.io.flush(std.io.stdout);\n"
             "let req = std.http.accept(s, 5000);\n"
             "std.http.respond(req, 200, {}, parts());\n"
@@ -558,8 +558,8 @@ def run_cases():
                 "import std;\n"
                 f'let a = std.http.get('
                 f'"http://127.0.0.1:{respond_stream_port}/a");\n'
-                'println(a["headers"]["transfer-encoding"]);\n'
-                'println(std.bytes.to_string(a["body"]));\n',
+                'std.io.println(a["headers"]["transfer-encoding"]);\n'
+                'std.io.println(std.bytes.to_string(a["body"]));\n',
                 timeout=30,
             )
             assert respond_stream_client.returncode == 0, (
@@ -607,8 +607,8 @@ def run_cases():
             f'let t = std.http.get_task('
             f'"http://127.0.0.1:{http_async_port}/");\n'
             'let r = t.wait();\n'
-            'println(r["status"]);\n'
-            'println(std.bytes.to_string(r["body"]));\n'
+            'std.io.println(r["status"]);\n'
+            'std.io.println(std.bytes.to_string(r["body"]));\n'
         )
         http_async_thread.join(timeout=5)
         assert http_async_proc.returncode == 0, http_async_proc.stderr
@@ -632,7 +632,7 @@ def run_cases():
             http_server_proc.stdin.write(
                 "import std;\n"
                 f'let s = std.http.listen("127.0.0.1", {http_port});\n'
-                'println("ready");\n'
+                'std.io.println("ready");\n'
                 "std.io.flush(std.io.stdout);\n"
                 "let req = std.http.accept(s, 10000);\n"
                 'std.http.respond(req, 200, {"X-Test": "yes"}, '
@@ -688,7 +688,7 @@ def run_cases():
             http_async_server_proc.stdin.write(
                 "import std;\n"
                 f'let s = std.http.listen("127.0.0.1", {http_async_port});\n'
-                'println("ready");\n'
+                'std.io.println("ready");\n'
                 "std.io.flush(std.io.stdout);\n"
                 "let req = std.http.accept_task(s, 10000).wait();\n"
                 'std.http.respond_task(req, 200, '
@@ -759,7 +759,7 @@ def run_cases():
                     'str(req["connection_id"])\n'
                     "  };\n"
                     "}, 3);\n"
-                    'println("served " + str(n));\n'
+                    'std.io.println("served " + str(n));\n'
                     "std.http2.close(s);\n"
                 )
                 http2_server_proc.stdin.close()
@@ -779,16 +779,16 @@ def run_cases():
                     "import std;\n"
                     f'let a = std.http2.get('
                     f'"http://127.0.0.1:{http2_port}/hello");\n'
-                    'println(str(a["status"]) + " " + a["status_text"] '
+                    'std.io.println(str(a["status"]) + " " + a["status_text"] '
                     '+ " " + a["protocol"]);\n'
-                    'println(std.bytes.to_string(a["body"]));\n'
-                    'println(a["headers"]["x-path"]);\n'
+                    'std.io.println(std.bytes.to_string(a["body"]));\n'
+                    'std.io.println(a["headers"]["x-path"]);\n'
                     f'let b = std.http2.post('
                     f'"http://127.0.0.1:{http2_port}/post", "payload");\n'
-                    'println(std.bytes.to_string(b["body"]));\n'
+                    'std.io.println(std.bytes.to_string(b["body"]));\n'
                     'let c = std.http2.get_task('
                     f'"http://127.0.0.1:{http2_port}/async").wait();\n'
-                    'println(std.bytes.to_string(c["body"]));\n',
+                    'std.io.println(std.bytes.to_string(c["body"]));\n',
                     timeout=15,
                 )
                 assert http2_client_proc.returncode == 0, (
@@ -869,9 +869,9 @@ def run_cases():
                 '    return {"status": 200, "body": body};\n'
                 "  }\n"
                 '  return {"status": 200, "body": "len=" + '
-                'str(len(req["body"]))};\n'
+                'str(std.utils.len(req["body"]))};\n'
                 "}, 2);\n"
-                'println("served " + str(n));\n'
+                'std.io.println("served " + str(n));\n'
             )
             flow_proc = h2_start_server(flow_server, flow_port)
             try:
@@ -881,13 +881,13 @@ def run_cases():
                     f'let up = std.http2.post('
                     f'"http://127.0.0.1:{flow_port}/upload", body,\n'
                     '  {"settings": {"initial_window_size": 16384}});\n'
-                    'println("sent=" + str(len(body)));\n'
-                    'println(str(up["status"]) + ":" + '
+                    'std.io.println("sent=" + str(std.utils.len(body)));\n'
+                    'std.io.println(str(up["status"]) + ":" + '
                     'std.bytes.to_string(up["body"]));\n'
                     f'let down = std.http2.get('
                     f'"http://127.0.0.1:{flow_port}/download",\n'
                     '  {"settings": {"initial_window_size": 16384}});\n'
-                    'println("down=" + str(len(down["body"])));\n',
+                    'std.io.println("down=" + str(std.utils.len(down["body"])));\n',
                     timeout=30,
                 )
                 assert flow_client.returncode == 0, flow_client.stderr
@@ -915,14 +915,14 @@ def run_cases():
                 "  let total = 0;\n"
                 "  let chunk = std.http.read_body(req);\n"
                 "  while (chunk != null) {\n"
-                "    total = total + len(chunk);\n"
+                "    total = total + std.utils.len(chunk);\n"
                 "    std.time.sleep(1);\n"
                 "    chunk = std.http.read_body(req);\n"
                 "  }\n"
                 '  return {"status": 200, "body": "total=" + '
                 'str(total)};\n'
                 "}, 1);\n"
-                'println("served " + str(n));\n'
+                'std.io.println("served " + str(n));\n'
             )
             stream_proc = h2_start_server(stream_server, stream_port)
             try:
@@ -932,7 +932,7 @@ def run_cases():
                     f'let r = std.http2.post('
                     f'"http://127.0.0.1:{stream_port}/upload", body,\n'
                     '  {"settings": {"initial_window_size": 16384}});\n'
-                    'println(str(r["status"]) + ":" + '
+                    'std.io.println(str(r["status"]) + ":" + '
                     'std.bytes.to_string(r["body"]));\n',
                     timeout=30,
                 )
@@ -956,7 +956,7 @@ def run_cases():
                 + h2_build_body +
                 '  return {"status": 200, "body": body};\n'
                 "}, 1);\n"
-                'println("served " + str(n));\n'
+                'std.io.println("served " + str(n));\n'
             )
             back_proc = h2_start_server(back_server, back_port)
             try:
@@ -968,13 +968,13 @@ def run_cases():
                     f'"http://127.0.0.1:{back_port}/big",\n'
                     '  {"settings": {"initial_window_size": 16384},\n'
                     '   "on_body": func(chunk) {\n'
-                    "       total = total + len(chunk);\n"
+                    "       total = total + std.utils.len(chunk);\n"
                     "       chunks = chunks + 1;\n"
                     "       std.time.sleep(1);\n"
                     "   }});\n"
-                    'println("status=" + str(r["status"]));\n'
-                    'println("total=" + str(total));\n'
-                    'println("chunks=" + str(chunks));\n',
+                    'std.io.println("status=" + str(r["status"]));\n'
+                    'std.io.println("total=" + str(total));\n'
+                    'std.io.println("chunks=" + str(chunks));\n',
                     timeout=30,
                 )
                 assert back_client.returncode == 0, back_client.stderr
@@ -999,7 +999,7 @@ def run_cases():
                 "  std.time.sleep(5);\n"
                 '  return {"status": 200, "body": req["path"]};\n'
                 "}, 16);\n"
-                'println("served " + str(n));\n'
+                'std.io.println("served " + str(n));\n'
             )
             many_proc = h2_start_server(many_server, many_port)
             try:
@@ -1012,14 +1012,14 @@ def run_cases():
                     f"{many_items}],\n"
                     '  {"settings": {"max_concurrent_streams": 2, '
                     '"initial_window_size": 16384}});\n'
-                    'println("count=" + str(len(responses)));\n'
+                    'std.io.println("count=" + str(std.utils.len(responses)));\n'
                     "let ok = true;\n"
-                    "for (let i = 0; i < len(responses); i = i + 1) {\n"
+                    "for (let i = 0; i < std.utils.len(responses); i = i + 1) {\n"
                     '  if (responses[i]["status"] != 200) { ok = false; }\n'
                     '  if (std.bytes.to_string(responses[i]["body"]) != '
                     '"/r" + str(i)) { ok = false; }\n'
                     "}\n"
-                    'println("ok=" + str(ok));\n',
+                    'std.io.println("ok=" + str(ok));\n',
                     timeout=30,
                 )
                 assert many_client.returncode == 0, many_client.stderr
@@ -1053,7 +1053,7 @@ def run_cases():
                     '  return {"status": 200, "body": "cid=" + '
                     'str(req["connection_id"])};\n'
                     "}, 2, 1, 0);\n"
-                    'println("served " + str(n));\n'
+                    'std.io.println("served " + str(n));\n'
                     "std.http2.close(s);\n"
                 )
                 http2_goaway_proc.stdin.close()
@@ -1075,8 +1075,8 @@ def run_cases():
                     f'"http://127.0.0.1:{http2_goaway_port}/a");\n'
                     f'let b = std.http2.get('
                     f'"http://127.0.0.1:{http2_goaway_port}/b");\n'
-                    'println(std.bytes.to_string(a["body"]));\n'
-                    'println(std.bytes.to_string(b["body"]));\n',
+                    'std.io.println(std.bytes.to_string(a["body"]));\n'
+                    'std.io.println(std.bytes.to_string(b["body"]));\n',
                     timeout=15,
                 )
                 assert http2_goaway_client.returncode == 0, (
@@ -1118,7 +1118,7 @@ def run_cases():
                     '  return {"status": 200, "body": "echo:" + '
                     'std.bytes.to_string(req["body"])};\n'
                     "}, 2);\n"
-                    'println("served " + str(n));\n'
+                    'std.io.println("served " + str(n));\n'
                     "std.http2.close(s);\n"
                 )
                 http2_stream_proc.stdin.close()
@@ -1146,16 +1146,16 @@ def run_cases():
                     f'let a = std.http2.post('
                     f'"http://127.0.0.1:{http2_stream_port}/a", '
                     '{"body_stream": parts(), "on_body": func(chunk) {\n'
-                    '  println("s=" + std.bytes.to_string(chunk));\n'
+                    '  std.io.println("s=" + std.bytes.to_string(chunk));\n'
                     "}});\n"
-                    'println("sb=" + std.bytes.to_string(a["body"]));\n'
+                    'std.io.println("sb=" + std.bytes.to_string(a["body"]));\n'
                     f'let b = std.http2.post_task('
                     f'"http://127.0.0.1:{http2_stream_port}/b", '
                     '{"body_stream": async_parts(), '
                     '"on_body": func(chunk) {\n'
-                    '  println("a=" + std.bytes.to_string(chunk));\n'
+                    '  std.io.println("a=" + std.bytes.to_string(chunk));\n'
                     "}}).wait();\n"
-                    'println("ab=" + std.bytes.to_string(b["body"]));\n',
+                    'std.io.println("ab=" + std.bytes.to_string(b["body"]));\n',
                     timeout=15,
                 )
                 assert http2_stream_client.returncode == 0, (
@@ -1204,7 +1204,7 @@ def run_cases():
                     "let n = std.http2.serve(s, func(req) {\n"
                     '  return {"status": 200, "body_stream": parts()};\n'
                     "}, 2);\n"
-                    'println("served " + str(n));\n'
+                    'std.io.println("served " + str(n));\n'
                     "std.http2.close(s);\n"
                 )
                 http2_send_proc.stdin.close()
@@ -1224,10 +1224,10 @@ def run_cases():
                     "import std;\n"
                     f'let a = std.http2.get('
                     f'"http://127.0.0.1:{http2_send_port}/a");\n'
-                    'println(std.bytes.to_string(a["body"]));\n'
+                    'std.io.println(std.bytes.to_string(a["body"]));\n'
                     f'let b = std.http2.get_task('
                     f'"http://127.0.0.1:{http2_send_port}/b").wait();\n'
-                    'println(std.bytes.to_string(b["body"]));\n',
+                    'std.io.println(std.bytes.to_string(b["body"]));\n',
                     timeout=15,
                 )
                 assert http2_send_client.returncode == 0, (
@@ -1265,7 +1265,7 @@ def run_cases():
                     '" " + req["path"] + " " + '
                     'std.bytes.to_string(req["body"])};\n'
                     f"}}, {h2_cookie_requests});\n"
-                    'println("served " + str(n));\n'
+                    'std.io.println("served " + str(n));\n'
                     "std.http2.close(s);\n"
                 )
                 http2_many_proc.stdin.close()
@@ -1293,9 +1293,9 @@ def run_cases():
                     f'"http://127.0.0.1:{http2_many_port}/c", '
                     '"method": "PUT", "body": "x"}\n'
                     "]);\n"
-                    'println(std.bytes.to_string(rs[0]["body"]));\n'
-                    'println(std.bytes.to_string(rs[1]["body"]));\n'
-                    'println(std.bytes.to_string(rs[2]["body"]));\n'
+                    'std.io.println(std.bytes.to_string(rs[0]["body"]));\n'
+                    'std.io.println(std.bytes.to_string(rs[1]["body"]));\n'
+                    'std.io.println(std.bytes.to_string(rs[2]["body"]));\n'
                     "let rs2 = std.http2.request_many_task([\n"
                     f'  {{"url": '
                     f'"http://127.0.0.1:{http2_many_port}/d"}},\n'
@@ -1306,9 +1306,9 @@ def run_cases():
                     f'"http://127.0.0.1:{http2_many_port}/f", '
                     '"method": "POST", "body": "async"}\n'
                     "]).wait();\n"
-                    'println(std.bytes.to_string(rs2[0]["body"]));\n'
-                    'println(std.bytes.to_string(rs2[1]["body"]));\n'
-                    'println(std.bytes.to_string(rs2[2]["body"]));\n',
+                    'std.io.println(std.bytes.to_string(rs2[0]["body"]));\n'
+                    'std.io.println(std.bytes.to_string(rs2[1]["body"]));\n'
+                    'std.io.println(std.bytes.to_string(rs2[2]["body"]));\n',
                     timeout=15,
                 )
                 assert http2_many_client.returncode == 0, (
@@ -1356,7 +1356,7 @@ def run_cases():
                     'str(req["connection_id"]) + " echo:" + '
                     'std.bytes.to_string(req["body"])};\n'
                     "}, 2);\n"
-                    'println("served " + str(n));\n'
+                    'std.io.println("served " + str(n));\n'
                     "std.http2.close(s);\n"
                 )
                 http2_ms_proc.stdin.close()
@@ -1381,17 +1381,17 @@ def run_cases():
                     f'"http://127.0.0.1:{http2_ms_port}/a", '
                     '"method": "POST", "body_stream": p1(), '
                     '"on_body": func(c) {\n'
-                    '    println("s1=" + std.bytes.to_string(c));\n'
+                    '    std.io.println("s1=" + std.bytes.to_string(c));\n'
                     "  }},\n"
                     f'  {{"url": '
                     f'"http://127.0.0.1:{http2_ms_port}/b", '
                     '"method": "POST", "body_stream": p2(), '
                     '"on_body": func(c) {\n'
-                    '    println("s2=" + std.bytes.to_string(c));\n'
+                    '    std.io.println("s2=" + std.bytes.to_string(c));\n'
                     "  }}\n"
                     "]);\n"
-                    'println("r1=" + std.bytes.to_string(rs[0]["body"]));\n'
-                    'println("r2=" + std.bytes.to_string(rs[1]["body"]));\n',
+                    'std.io.println("r1=" + std.bytes.to_string(rs[0]["body"]));\n'
+                    'std.io.println("r2=" + std.bytes.to_string(rs[1]["body"]));\n',
                     timeout=15,
                 )
                 assert http2_ms_client.returncode == 0, (
@@ -1436,7 +1436,7 @@ def run_cases():
                     '  return {"status": 200, "body": "len=" + '
                     'str(std.bytes.len(req["body"]))};\n'
                     "}, 2);\n"
-                    'println("served " + str(n));\n'
+                    'std.io.println("served " + str(n));\n'
                     "std.http2.close(s);\n"
                 )
                 http2_set_proc.stdin.close()
@@ -1468,8 +1468,8 @@ def run_cases():
                     f'"http://127.0.0.1:{http2_set_port}/b", '
                     '"method": "POST", "body_stream": big()}\n'
                     '], {"settings": {"initial_window_size": 16384}});\n'
-                    'println(std.bytes.to_string(rs[0]["body"]));\n'
-                    'println(std.bytes.to_string(rs[1]["body"]));\n',
+                    'std.io.println(std.bytes.to_string(rs[0]["body"]));\n'
+                    'std.io.println(std.bytes.to_string(rs[1]["body"]));\n',
                     timeout=30,
                 )
                 assert http2_set_client.returncode == 0, (
@@ -1542,7 +1542,7 @@ def run_cases():
                     'std.bytes.from_hex("1f8b08000000000002ffcb48cdc9c957c830'
                     '0200d243ada208000000")};\n'
                     "}, 6);\n"
-                    'println("served " + str(n));\n'
+                    'std.io.println("served " + str(n));\n'
                     "std.http2.close(s);\n"
                 )
                 http2_cookie_proc.stdin.close()
@@ -1567,7 +1567,7 @@ def run_cases():
                     f'let b = std.http2.get('
                     f'"http://127.0.0.1:{http2_cookie_port}/check", '
                     '{"cookie_jar": jar});\n'
-                    'println(std.bytes.to_string(b["body"]));\n'
+                    'std.io.println(std.bytes.to_string(b["body"]));\n'
                     "let jar2 = {};\n"
                     f'let c = std.http2.get_task('
                     f'"http://127.0.0.1:{http2_cookie_port}/set", '
@@ -1575,18 +1575,18 @@ def run_cases():
                     f'let d = std.http2.get_task('
                     f'"http://127.0.0.1:{http2_cookie_port}/check", '
                     '{"cookie_jar": jar2}).wait();\n'
-                    'println(std.bytes.to_string(d["body"]));\n'
+                    'std.io.println(std.bytes.to_string(d["body"]));\n'
                 )
                 if h2_compression_enabled:
                     h2_cookie_source += (
                         f'let g = std.http2.get('
                         f'"http://127.0.0.1:{http2_cookie_port}/gzip", '
                         '{"decompress": true});\n'
-                        'println(std.bytes.to_string(g["body"]));\n'
+                        'std.io.println(std.bytes.to_string(g["body"]));\n'
                         f'let h = std.http2.get_task('
                         f'"http://127.0.0.1:{http2_cookie_port}/gzip", '
                         '{"decompress": true}).wait();\n'
-                        'println(std.bytes.to_string(h["body"]));\n'
+                        'std.io.println(std.bytes.to_string(h["body"]));\n'
                     )
                 http2_cookie_client = run(h2_cookie_source, timeout=15)
                 assert http2_cookie_client.returncode == 0, (
@@ -1644,7 +1644,7 @@ def run_cases():
                     'std.bytes.from_hex("1f8b08000000000002ffcb48cdc9c957c830'
                     '0200d243ada208000000")};\n'
                     f"}}, {h2_many_requests});\n"
-                    'println("served " + str(n));\n'
+                    'std.io.println("served " + str(n));\n'
                     "std.http2.close(s);\n"
                 )
                 http2_many2_proc.stdin.close()
@@ -1672,8 +1672,8 @@ def run_cases():
                     f'  {{"url": '
                     f'"http://127.0.0.1:{http2_many2_port}/check"}}\n'
                     '], {"cookie_jar": jar});\n'
-                    'println(std.bytes.to_string(rs[0]["body"]));\n'
-                    'println(std.bytes.to_string(rs[1]["body"]));\n'
+                    'std.io.println(std.bytes.to_string(rs[0]["body"]));\n'
+                    'std.io.println(std.bytes.to_string(rs[1]["body"]));\n'
                 )
                 if h2_compression_enabled:
                     h2_many_source += (
@@ -1683,8 +1683,8 @@ def run_cases():
                         f'  {{"url": '
                         f'"http://127.0.0.1:{http2_many2_port}/gzip"}}\n'
                         '], {"decompress": true});\n'
-                        'println(std.bytes.to_string(gs[0]["body"]));\n'
-                        'println(std.bytes.to_string(gs[1]["body"]));\n'
+                        'std.io.println(std.bytes.to_string(gs[0]["body"]));\n'
+                        'std.io.println(std.bytes.to_string(gs[1]["body"]));\n'
                     )
                 http2_many2_client = run(h2_many_source, timeout=15)
                 assert http2_many2_client.returncode == 0, (
@@ -1728,7 +1728,7 @@ def run_cases():
                     f"{h2_maxconn_port});\n"
                     's["max_connections"] = 1;\n'
                     "let n = std.http2.serve(s, handler, 2);\n"
-                    'println("served " + str(n));\n'
+                    'std.io.println("served " + str(n));\n'
                     "std.http2.close(s);\n"
                 )
                 h2_maxconn_proc.stdin.close()
@@ -1748,7 +1748,7 @@ def run_cases():
                     "import std;\n"
                     f'let a = std.http2.get('
                     f'"http://127.0.0.1:{h2_maxconn_port}/a");\n'
-                    'println(std.bytes.to_string(a["body"]));\n'
+                    'std.io.println(std.bytes.to_string(a["body"]));\n'
                 )
                 started = time.time()
                 h2mc1 = subprocess.Popen(
@@ -1797,13 +1797,13 @@ def run_cases():
                     "import std;\n"
                     f'let s = std.http2.listen("127.0.0.1", {rb2_port});\n'
                     's["on_request_body"] = func(chunk) {\n'
-                    '  println("rb=" + std.bytes.to_string(chunk));\n'
+                    '  std.io.println("rb=" + std.bytes.to_string(chunk));\n'
                     "};\n"
                     "let n = std.http2.serve(s, func(req) {\n"
                     '  return {"status": 200, "body": "handler_body=" + '
                     'std.bytes.to_string(req["body"])};\n'
                     "}, 1);\n"
-                    'println("served " + str(n));\n'
+                    'std.io.println("served " + str(n));\n'
                     "std.http2.close(s);\n"
                 )
                 rb2_proc.stdin.close()
@@ -1829,7 +1829,7 @@ def run_cases():
                     f'let a = std.http2.post('
                     f'"http://127.0.0.1:{rb2_port}/a", '
                     '{"body_stream": parts()});\n'
-                    'println(std.bytes.to_string(a["body"]));\n',
+                    'std.io.println(std.bytes.to_string(a["body"]));\n',
                     timeout=15,
                 )
                 assert rb2_client.returncode == 0, rb2_client.stderr
@@ -1869,7 +1869,7 @@ def run_cases():
                     f'let s = std.http2.listen("127.0.0.1", '
                     f"{http2_conc_port});\n"
                     "let n = std.http2.serve(s, handler, 3);\n"
-                    'println("served " + str(n));\n'
+                    'std.io.println("served " + str(n));\n'
                     "std.http2.close(s);\n"
                 )
                 http2_conc_proc.stdin.close()
@@ -1896,9 +1896,9 @@ def run_cases():
                     f'  {{"url": '
                     f'"http://127.0.0.1:{http2_conc_port}/c"}}\n'
                     "]);\n"
-                    'println(std.bytes.to_string(rs[0]["body"]));\n'
-                    'println(std.bytes.to_string(rs[1]["body"]));\n'
-                    'println(std.bytes.to_string(rs[2]["body"]));\n',
+                    'std.io.println(std.bytes.to_string(rs[0]["body"]));\n'
+                    'std.io.println(std.bytes.to_string(rs[1]["body"]));\n'
+                    'std.io.println(std.bytes.to_string(rs[2]["body"]));\n',
                     timeout=15,
                 )
                 elapsed = time.time() - started
@@ -1943,7 +1943,7 @@ def run_cases():
                     f'let s = std.http2.listen("127.0.0.1", '
                     f"{http2_mc_port});\n"
                     "let n = std.http2.serve(s, handler, 2);\n"
-                    'println("served " + str(n));\n'
+                    'std.io.println("served " + str(n));\n'
                     "std.http2.close(s);\n"
                 )
                 http2_mc_proc.stdin.close()
@@ -1963,7 +1963,7 @@ def run_cases():
                     "import std;\n"
                     f'let a = std.http2.get('
                     f'"http://127.0.0.1:{http2_mc_port}/a");\n'
-                    'println(std.bytes.to_string(a["body"]));\n'
+                    'std.io.println(std.bytes.to_string(a["body"]));\n'
                 )
                 started = time.time()
                 mc1 = subprocess.Popen(
@@ -2020,7 +2020,7 @@ def run_cases():
                     f'let s = std.http2.listen("127.0.0.1", '
                     f"{http2_shared_port});\n"
                     "let n = std.http2.serve(s, handler, 6);\n"
-                    'println("served " + str(n));\n'
+                    'std.io.println("served " + str(n));\n'
                     "std.http2.close(s);\n"
                 )
                 http2_shared_proc.stdin.close()
@@ -2048,9 +2048,9 @@ def run_cases():
                     "let a = t1.wait();\n"
                     "let b = t2.wait();\n"
                     "let c = t3.wait();\n"
-                    'println(std.bytes.to_string(a["body"]));\n'
-                    'println(std.bytes.to_string(b["body"]));\n'
-                    'println(std.bytes.to_string(c["body"]));\n'
+                    'std.io.println(std.bytes.to_string(a["body"]));\n'
+                    'std.io.println(std.bytes.to_string(b["body"]));\n'
+                    'std.io.println(std.bytes.to_string(c["body"]));\n'
                     f'let p1 = std.http2.post_task('
                     f'"http://127.0.0.1:{http2_shared_port}/d", "one");\n'
                     f'let p2 = std.http2.post_task('
@@ -2060,9 +2060,9 @@ def run_cases():
                     "let d = p1.wait();\n"
                     "let e = p2.wait();\n"
                     "let f = p3.wait();\n"
-                    'println(std.bytes.to_string(d["body"]));\n'
-                    'println(std.bytes.to_string(e["body"]));\n'
-                    'println(std.bytes.to_string(f["body"]));\n',
+                    'std.io.println(std.bytes.to_string(d["body"]));\n'
+                    'std.io.println(std.bytes.to_string(e["body"]));\n'
+                    'std.io.println(std.bytes.to_string(f["body"]));\n',
                     timeout=15,
                 )
                 elapsed = time.time() - started
@@ -2114,7 +2114,7 @@ def run_cases():
                     '  return {"status": 200, "body": "cid=" + '
                     'str(req["connection_id"]) + " " + req["path"]};\n'
                     "}, 4, 2);\n"
-                    'println("served " + str(n));\n'
+                    'std.io.println("served " + str(n));\n'
                     "std.http2.close(s);\n"
                 )
                 http2_shared_go_proc.stdin.close()
@@ -2136,16 +2136,16 @@ def run_cases():
                     f'"http://127.0.0.1:{http2_shared_go_port}/a").wait();\n'
                     f'let b = std.http2.get_task('
                     f'"http://127.0.0.1:{http2_shared_go_port}/b").wait();\n'
-                    'println(std.bytes.to_string(a["body"]));\n'
-                    'println(std.bytes.to_string(b["body"]));\n'
+                    'std.io.println(std.bytes.to_string(a["body"]));\n'
+                    'std.io.println(std.bytes.to_string(b["body"]));\n'
                     f'let t1 = std.http2.get_task('
                     f'"http://127.0.0.1:{http2_shared_go_port}/c");\n'
                     f'let t2 = std.http2.get_task('
                     f'"http://127.0.0.1:{http2_shared_go_port}/d");\n'
                     "let c = t1.wait();\n"
                     "let d = t2.wait();\n"
-                    'println(std.bytes.to_string(c["body"]));\n'
-                    'println(std.bytes.to_string(d["body"]));\n',
+                    'std.io.println(std.bytes.to_string(c["body"]));\n'
+                    'std.io.println(std.bytes.to_string(d["body"]));\n',
                     timeout=15,
                 )
                 assert http2_shared_go_client.returncode == 0, (
@@ -2187,7 +2187,7 @@ def run_cases():
                     '  return {"status": 200, "body": "cid=" + '
                     'str(req["connection_id"]) + " " + req["path"]};\n'
                     "}, 2, 1);\n"
-                    'println("served " + str(n));\n'
+                    'std.io.println("served " + str(n));\n'
                     "std.http2.close(s);\n"
                 )
                 http2_retry_proc.stdin.close()
@@ -2211,8 +2211,8 @@ def run_cases():
                     f'"http://127.0.0.1:{http2_retry_port}/b");\n'
                     "let a = t1.wait();\n"
                     "let b = t2.wait();\n"
-                    'println(std.bytes.to_string(a["body"]));\n'
-                    'println(std.bytes.to_string(b["body"]));\n',
+                    'std.io.println(std.bytes.to_string(a["body"]));\n'
+                    'std.io.println(std.bytes.to_string(b["body"]));\n',
                     timeout=15,
                 )
                 assert http2_retry_client.returncode == 0, (
@@ -2256,7 +2256,7 @@ def run_cases():
                     f'let s = std.http2.listen("127.0.0.1", '
                     f"{http2_drain_port});\n"
                     "let n = std.http2.serve(s, handler, 2);\n"
-                    'println("served " + str(n));\n'
+                    'std.io.println("served " + str(n));\n'
                     "std.http2.close(s);\n"
                 )
                 http2_drain_proc.stdin.close()
@@ -2280,8 +2280,8 @@ def run_cases():
                     f'"http://127.0.0.1:{http2_drain_port}/b");\n'
                     "let a = t1.wait();\n"
                     "let b = t2.wait();\n"
-                    'println(std.bytes.to_string(a["body"]));\n'
-                    'println(std.bytes.to_string(b["body"]));\n',
+                    'std.io.println(std.bytes.to_string(a["body"]));\n'
+                    'std.io.println(std.bytes.to_string(b["body"]));\n',
                     timeout=15,
                 )
                 assert http2_drain_client.returncode == 0, (
@@ -2324,7 +2324,7 @@ def run_cases():
                     'str(req["connection_id"]) + " echo:" + '
                     'std.bytes.to_string(req["body"])};\n'
                     "}, 2);\n"
-                    'println("served " + str(n));\n'
+                    'std.io.println("served " + str(n));\n'
                     "std.http2.close(s);\n"
                 )
                 http2_ss_proc.stdin.close()
@@ -2347,17 +2347,17 @@ def run_cases():
                     f'let t1 = std.http2.post_task('
                     f'"http://127.0.0.1:{http2_ss_port}/a", '
                     '{"body_stream": p1(), "on_body": func(c) {\n'
-                    '  println("s1=" + std.bytes.to_string(c));\n'
+                    '  std.io.println("s1=" + std.bytes.to_string(c));\n'
                     "}});\n"
                     f'let t2 = std.http2.post_task('
                     f'"http://127.0.0.1:{http2_ss_port}/b", '
                     '{"body_stream": p2(), "on_body": func(c) {\n'
-                    '  println("s2=" + std.bytes.to_string(c));\n'
+                    '  std.io.println("s2=" + std.bytes.to_string(c));\n'
                     "}});\n"
                     "let r1 = t1.wait();\n"
                     "let r2 = t2.wait();\n"
-                    'println("r1=" + std.bytes.to_string(r1["body"]));\n'
-                    'println("r2=" + std.bytes.to_string(r2["body"]));\n',
+                    'std.io.println("r1=" + std.bytes.to_string(r1["body"]));\n'
+                    'std.io.println("r2=" + std.bytes.to_string(r2["body"]));\n',
                     timeout=15,
                 )
                 assert http2_ss_client.returncode == 0, (
@@ -2426,9 +2426,9 @@ def run_cases():
                     'let t = std.tls.client(s, "localhost", '
                     f'{{"ca_file": "{tls_cert}", '
                     '"alpn": ["h2", "http/1.1"]});\n'
-                    "println(std.tls.alpn(t));\n"
+                    "std.io.println(std.tls.alpn(t));\n"
                     'std.io.write_all(t, "hello");\n'
-                    "println(std.bytes.to_string(std.io.read(t, 100)));\n"
+                    "std.io.println(std.bytes.to_string(std.io.read(t, 100)));\n"
                     "std.io.close(t);\n"
                 )
                 tls_thread.join(timeout=5)
@@ -2464,7 +2464,7 @@ def run_cases():
                     "import std;\n"
                     'let listener = std.net.tcp_listen("127.0.0.1", 0, 100);\n'
                     'let port = std.net.local_addr(listener)["port"];\n'
-                    'println("ready " + str(port));\n'
+                    'std.io.println("ready " + str(port));\n'
                     "std.io.flush(std.io.stdout);\n"
                     "let certs = [\n"
                     '  {"server_name": "api.example.com", '
@@ -2476,7 +2476,7 @@ def run_cases():
                     "  let s = std.net.accept_task(listener, 5000).wait();\n"
                     f'  let t = std.tls.server(s, "{default_cert}", '
                     f'"{default_key}", {{"certs": certs}});\n'
-                    '  println("sni=" + std.tls.server_name(t));\n'
+                    '  std.io.println("sni=" + std.tls.server_name(t));\n'
                     "  std.io.flush(std.io.stdout);\n"
                     "  std.io.close(t);\n"
                     "}\n"
@@ -2522,13 +2522,13 @@ def run_cases():
                     "import std;\n"
                     'let listener = std.net.tcp_listen("127.0.0.1", 0, 100);\n'
                     'let port = std.net.local_addr(listener)["port"];\n'
-                    'println("ready " + str(port));\n'
+                    'std.io.println("ready " + str(port));\n'
                     "std.io.flush(std.io.stdout);\n"
                     "for (let i = 0; i < 2; i = i + 1) {\n"
                     "  let s = std.net.accept_task(listener, 5000).wait();\n"
                     f'  let t = std.tls.server(s, "{default_cert}", '
                     f'"{default_key}");\n'
-                    '  println("reused=" + str(std.tls.reused(t)));\n'
+                    '  std.io.println("reused=" + str(std.tls.reused(t)));\n'
                     "  std.io.flush(std.io.stdout);\n"
                     '  std.io.write(t, "x");\n'
                     "  std.io.flush(t);\n"
@@ -2601,15 +2601,15 @@ def run_cases():
                     f"{client_port}, 2000);\n"
                     'let t1 = std.tls.client(c1, "default.example.com", '
                     '{"verify": false});\n'
-                    'println("first=" + str(std.tls.reused(t1)));\n'
-                    "println(len(std.io.read(t1, 1)));\n"
+                    'std.io.println("first=" + str(std.tls.reused(t1)));\n'
+                    "std.io.println(std.utils.len(std.io.read(t1, 1)));\n"
                     "std.io.close(t1);\n"
                     f'let c2 = std.net.tcp_connect("127.0.0.1", '
                     f"{client_port}, 2000);\n"
                     'let t2 = std.tls.client(c2, "default.example.com", '
                     '{"verify": false});\n'
-                    'println("second=" + str(std.tls.reused(t2)));\n'
-                    "println(len(std.io.read(t2, 1)));\n"
+                    'std.io.println("second=" + str(std.tls.reused(t2)));\n'
+                    "std.io.println(std.utils.len(std.io.read(t2, 1)));\n"
                     "std.io.close(t2);\n"
                 )
                 client_thread.join(timeout=15)
@@ -2640,7 +2640,7 @@ def run_cases():
                         '  return {"status": 200, "body": "tls-h2:" + '
                         'req["path"]};\n'
                         "}, 1);\n"
-                        'println("served " + str(n));\n'
+                        'std.io.println("served " + str(n));\n'
                         "std.http2.close(s);\n"
                     )
                     h2_tls_server_proc.stdin.close()
@@ -2650,8 +2650,8 @@ def run_cases():
                         f'let a = std.http2.get('
                         f'"https://127.0.0.1:{h2_tls_port}/secure", '
                         '{"tls": {"verify": false}});\n'
-                        'println(str(a["status"]) + " " + a["protocol"]);\n'
-                        'println(std.bytes.to_string(a["body"]));\n',
+                        'std.io.println(str(a["status"]) + " " + a["protocol"]);\n'
+                        'std.io.println(std.bytes.to_string(a["body"]));\n',
                         timeout=15,
                     )
                     assert h2_tls_client_proc.returncode == 0, (
@@ -2690,7 +2690,7 @@ def run_cases():
                         f'let t = std.tls.server(c, "{tls_cert}", '
                         f'"{tls_key}", '
                         '{"alpn": ["h2", "http/1.1"]});\n'
-                        "println(std.tls.alpn(t));\n"
+                        "std.io.println(std.tls.alpn(t));\n"
                         "let data = std.io.read(t, 100);\n"
                         'std.io.write_all(t, "server:" + '
                         "std.bytes.to_string(data));\n"
@@ -2759,7 +2759,7 @@ def run_cases():
                     'let t = std.tls.client(s, "localhost", '
                     f'{{"ca_file": "{tls_cert}"}});\n'
                     'std.io.write_task(t, "hello").wait();\n'
-                    "println(std.bytes.to_string(std.io.read_task(t, 100).wait()));\n"
+                    "std.io.println(std.bytes.to_string(std.io.read_task(t, 100).wait()));\n"
                     "std.io.close(t);\n"
                 )
                 tls_async_thread.join(timeout=5)
@@ -2804,8 +2804,8 @@ def run_cases():
                     "import std;\n"
                     f'let r = std.http.get("https://localhost:{https_port}/", '
                     f'{{"tls": {{"ca_file": "{tls_cert}"}}}});\n'
-                    'println(r["status"]);\n'
-                    'println(std.bytes.to_string(r["body"]));\n'
+                    'std.io.println(r["status"]);\n'
+                    'std.io.println(std.bytes.to_string(r["body"]));\n'
                 )
                 https_thread.join(timeout=5)
                 assert https_proc.returncode == 0, https_proc.stderr
@@ -2913,8 +2913,8 @@ def run_cases():
                     f'let r = std.http.get_task('
                     f'"https://localhost:{async_https_port}/", '
                     f'{{"tls": {{"ca_file": "{tls_cert}"}}}}).wait();\n'
-                    'println(r["status"]);\n'
-                    'println(std.bytes.to_string(r["body"]));\n'
+                    'std.io.println(r["status"]);\n'
+                    'std.io.println(std.bytes.to_string(r["body"]));\n'
                 )
                 async_https_thread.join(timeout=5)
                 assert async_https_proc.returncode == 0, (
@@ -3044,7 +3044,7 @@ def run_cases():
                         "  std.io.close(t);\n"
                         "}\n"
                         "std.net.close(l);\n"
-                        'println("rotation served");\n'
+                        'std.io.println("rotation served");\n'
                     )
                     rotation_server.stdin.close()
 
@@ -3160,7 +3160,7 @@ def run_cases():
                         "std.bytes.to_string(data));\n"
                         "std.io.close(t);\n"
                         "std.net.close(l);\n"
-                        'println("mtls served");\n'
+                        'std.io.println("mtls served");\n'
                     )
                     proc.stdin.close()
                     return proc, port
@@ -3271,7 +3271,7 @@ def run_cases():
                     f'  "key_file": "{mtls_client_key}"\n'
                     "});\n"
                     'std.io.write_all(t, "hello");\n'
-                    'println(std.bytes.to_string(std.io.read(t, 100)));\n'
+                    'std.io.println(std.bytes.to_string(std.io.read(t, 100)));\n'
                     "std.io.close(t);\n"
                 )
                 py_thread.join(timeout=5)
@@ -3335,8 +3335,8 @@ def run_cases():
                     f'"cert_file": "{mtls_client_cert}", '
                     f'"key_file": "{mtls_client_key}"'
                     "}});\n"
-                    'println(r["status"]);\n'
-                    'println(std.bytes.to_string(r["body"]));\n'
+                    'std.io.println(r["status"]);\n'
+                    'std.io.println(std.bytes.to_string(r["body"]));\n'
                 )
                 py_https_thread.join(timeout=5)
                 assert https_mtls_client.returncode == 0, (
@@ -3373,7 +3373,7 @@ def run_cases():
                         '  return {"status": 200, "body": "http-mtls:" + '
                         'req["path"]};\n'
                         "}, 1);\n"
-                        'println("served " + str(n));\n'
+                        'std.io.println("served " + str(n));\n'
                         "std.http.close(s);\n"
                     )
                     serve_mtls_proc.stdin.close()
@@ -3442,7 +3442,7 @@ def run_cases():
                         '  return {"status": 200, "body": "h2-mtls:" + '
                         'req["path"]};\n'
                         "}, 1);\n"
-                        'println("served " + str(n));\n'
+                        'std.io.println("served " + str(n));\n'
                         "std.http2.close(s);\n"
                     )
                     h2_mtls_server.stdin.close()
@@ -3456,8 +3456,8 @@ def run_cases():
                         f'"cert_file": "{mtls_client_cert}", '
                         f'"key_file": "{mtls_client_key}"'
                         "}});\n"
-                        'println(str(a["status"]) + " " + a["protocol"]);\n'
-                        'println(std.bytes.to_string(a["body"]));\n',
+                        'std.io.println(str(a["status"]) + " " + a["protocol"]);\n'
+                        'std.io.println(std.bytes.to_string(a["body"]));\n',
                         timeout=15,
                     )
                     assert h2_mtls_client.returncode == 0, (
@@ -3531,17 +3531,17 @@ def run_cases():
                         serve = (
                             "let ts = std.http.serve_threads(s, 2, "
                             f"\"{cluster_worker_path}\", {options});\n"
-                            'println(s["port"]);\n'
+                            'std.io.println(s["port"]);\n'
                             "std.io.flush(std.io.stdout);\n"
-                            'println("served=" + str(ts.join(20000)));\n'
+                            'std.io.println("served=" + str(ts.join(20000)));\n'
                         )
                     else:
                         serve = (
                             "let ps = std.http.serve_processes(s, 2, "
                             f"\"{cluster_worker_path}\", {options});\n"
-                            'println(s["port"]);\n'
+                            'std.io.println(s["port"]);\n'
                             "std.io.flush(std.io.stdout);\n"
-                            'println("served=" + str(ps.join(20000)));\n'
+                            'std.io.println("served=" + str(ps.join(20000)));\n'
                         )
                     with open(server_script, "w", encoding="utf-8") as handle:
                         handle.write(
@@ -3634,18 +3634,18 @@ def run_cases():
                             "let ts = std.http.serve_threads(s, 2, "
                             f"\"{sni_worker_path}\", {{\"strategy\": "
                             f"\"{strategy}\", \"max_requests\": 2}});\n"
-                            'println(s["port"]);\n'
+                            'std.io.println(s["port"]);\n'
                             "std.io.flush(std.io.stdout);\n"
-                            'println("served=" + str(ts.join(20000)));\n'
+                            'std.io.println("served=" + str(ts.join(20000)));\n'
                         )
                     else:
                         serve = (
                             "let ps = std.http.serve_processes(s, 2, "
                             f"\"{sni_worker_path}\", {{\"strategy\": "
                             f"\"{strategy}\", \"max_requests\": 2}});\n"
-                            'println(s["port"]);\n'
+                            'std.io.println(s["port"]);\n'
                             "std.io.flush(std.io.stdout);\n"
-                            'println("served=" + str(ps.join(20000)));\n'
+                            'std.io.println("served=" + str(ps.join(20000)));\n'
                         )
                     with open(server_script, "w", encoding="utf-8") as handle:
                         handle.write(
@@ -3721,17 +3721,17 @@ def run_cases():
                             "import std;\n"
                             f'let s = std.http.listen_tls("127.0.0.1", 0, '
                             f'"{tls_cert}", "{tls_key}");\n'
-                            'println(s["port"]);\n'
+                            'std.io.println(s["port"]);\n'
                             "std.io.flush(std.io.stdout);\n"
                             f'let ps = std.http.serve_processes(s, 2, '
                             f'"{rp_worker_path}", {{"strategy": '
                             f'"reuse_port", "max_requests": {rp_requests}}});\n'
-                            'println("info=" + ps.strategy + ":" + '
+                            'std.io.println("info=" + ps.strategy + ":" + '
                             'str(ps.capabilities["reuse_port"]) + ":" + '
                             'str(ps.capabilities["http2"]));\n'
                             "std.io.flush(std.io.stdout);\n"
                             "let served = ps.join(30000);\n"
-                            'println("served=" + str(served));\n'
+                            'std.io.println("served=" + str(served));\n'
                         )
                     rp_proc = subprocess.Popen(
                         [BIN, rp_server],
@@ -3753,8 +3753,8 @@ def run_cases():
                             f'let r = std.http.get('
                             f'"https://127.0.0.1:{rp_port}/h1", '
                             '{"tls": {"verify": false}});\n'
-                            'println(r["status"]);\n'
-                            'println(std.bytes.to_string(r["body"]));\n'
+                            'std.io.println(r["status"]);\n'
+                            'std.io.println(std.bytes.to_string(r["body"]));\n'
                         )
                         assert h1.returncode == 0, h1.stderr
                         assert "200" in h1.stdout, h1.stdout
@@ -3765,9 +3765,9 @@ def run_cases():
                                 f'let a = std.http2.get('
                                 f'"https://127.0.0.1:{rp_port}/h2", '
                                 '{"tls": {"verify": false}});\n'
-                                'println(str(a["status"]) + " " + '
+                                'std.io.println(str(a["status"]) + " " + '
                                 'a["protocol"]);\n'
-                                'println(std.bytes.to_string(a["body"]));\n',
+                                'std.io.println(std.bytes.to_string(a["body"]));\n',
                                 timeout=15,
                             )
                             assert h2.returncode == 0, h2.stderr
@@ -3803,7 +3803,7 @@ def run_cases():
                 '  return {"status": 200, "headers": {"Content-Type": '
                 '"text/plain"}, "body": "serve:" + req["path"]};\n'
                 "}, 2);\n"
-                'println("served " + str(n));\n'
+                'std.io.println("served " + str(n));\n'
                 "std.http.close(s);\n"
             )
             serve_proc.stdin.close()
@@ -3995,7 +3995,7 @@ def run_cases():
                 "}\n"
                 f'let s = std.http.listen("127.0.0.1", {http1_mc_port});\n'
                 "let n = std.http.serve(s, handler, 2);\n"
-                'println("served " + str(n));\n'
+                'std.io.println("served " + str(n));\n'
                 "std.http.close(s);\n"
             )
             http1_mc_proc.stdin.close()
@@ -4015,7 +4015,7 @@ def run_cases():
                 "import std;\n"
                 f'let a = std.http.get('
                 f'"http://127.0.0.1:{http1_mc_port}/a");\n'
-                'println(std.bytes.to_string(a["body"]));\n'
+                'std.io.println(std.bytes.to_string(a["body"]));\n'
             )
             started = time.time()
             mc1 = subprocess.Popen(
@@ -4140,16 +4140,16 @@ def run_cases():
             f'let a = std.http.get('
             f'"http://127.0.0.1:{upgrade_server_port}/", '
             '{"upgrade": true, "headers": {"Upgrade": "test"}});\n'
-            'println(str(a["status"]) + " " + str(a["upgraded"]));\n'
+            'std.io.println(str(a["status"]) + " " + str(a["upgraded"]));\n'
             'std.io.write_all(a["socket"], "one");\n'
-            'println(std.bytes.to_string(std.io.read(a["socket"], 100)));\n'
+            'std.io.println(std.bytes.to_string(std.io.read(a["socket"], 100)));\n'
             'std.io.close(a["socket"]);\n'
             f'let b = std.http.get_task('
             f'"http://127.0.0.1:{upgrade_server_port}/", '
             '{"upgrade": true, "headers": {"Upgrade": "test"}}).wait();\n'
-            'println(str(b["status"]) + " " + str(b["upgraded"]));\n'
+            'std.io.println(str(b["status"]) + " " + str(b["upgraded"]));\n'
             'std.io.write_all(b["socket"], "two");\n'
-            'println(std.bytes.to_string(std.io.read(b["socket"], 100)));\n'
+            'std.io.println(std.bytes.to_string(std.io.read(b["socket"], 100)));\n'
             'std.io.close(b["socket"]);\n',
             timeout=15,
         )
@@ -4216,7 +4216,7 @@ def run_cases():
             f'"ws://127.0.0.1:{ws_client_port}/");\n'
             'std.websocket.send(ws, "hello");\n'
             "let m = std.websocket.receive(ws);\n"
-            'println(m["data"]);\n'
+            'std.io.println(m["data"]);\n'
             "std.websocket.close(ws);\n",
             timeout=15,
         )
@@ -4247,7 +4247,7 @@ def run_cases():
                 "let req = std.http.accept(s, 5000);\n"
                 "let ws = std.websocket.accept(req);\n"
                 "let m = std.websocket.receive(ws);\n"
-                'println("got:" + m["data"]);\n'
+                'std.io.println("got:" + m["data"]);\n'
                 'std.websocket.send(ws, "echo:" + m["data"]);\n'
                 "std.websocket.close(ws);\n"
                 "std.http.close(s);\n"
@@ -4350,23 +4350,23 @@ def run_cases():
                 f'let a = std.http.get('
                 f'"http://127.0.0.1:{redirect_port}/a", '
                 '{"follow_redirects": true});\n'
-                'println(std.bytes.to_string(a["body"]));\n'
+                'std.io.println(std.bytes.to_string(a["body"]));\n'
                 f'let b = std.http.post('
                 f'"http://127.0.0.1:{redirect_port}/post303", "data", '
                 '{"follow_redirects": true});\n'
-                'println(std.bytes.to_string(b["body"]));\n'
+                'std.io.println(std.bytes.to_string(b["body"]));\n'
                 f'let c = std.http.post('
                 f'"http://127.0.0.1:{redirect_port}/post307", "payload", '
                 '{"follow_redirects": true});\n'
-                'println(std.bytes.to_string(c["body"]));\n'
+                'std.io.println(std.bytes.to_string(c["body"]));\n'
                 f'let d = std.http.get_task('
                 f'"http://127.0.0.1:{redirect_port}/a", '
                 '{"follow_redirects": true}).wait();\n'
-                'println(std.bytes.to_string(d["body"]));\n'
+                'std.io.println(std.bytes.to_string(d["body"]));\n'
                 f'let e = std.http.get('
                 f'"http://127.0.0.1:{redirect_port}/dir/page", '
                 '{"follow_redirects": true});\n'
-                'println(std.bytes.to_string(e["body"]));\n',
+                'std.io.println(std.bytes.to_string(e["body"]));\n',
                 timeout=15,
             )
             assert redirect_client.returncode == 0, redirect_client.stderr
@@ -4434,28 +4434,28 @@ def run_cases():
                 f'"http://127.0.0.1:{cookie_port}/set", '
                 '{"cookie_jar": jar});\n'
                 "let cs = std.http.cookies(r);\n"
-                'println("count=" + str(len(cs)));\n'
-                'println("check1=" + std.bytes.to_string(std.http.get('
+                'std.io.println("count=" + str(std.utils.len(cs)));\n'
+                'std.io.println("check1=" + std.bytes.to_string(std.http.get('
                 f'"http://127.0.0.1:{cookie_port}/check", '
                 '{"cookie_jar": jar})["body"]));\n'
-                'println("admin=" + std.bytes.to_string(std.http.get('
+                'std.io.println("admin=" + std.bytes.to_string(std.http.get('
                 f'"http://127.0.0.1:{cookie_port}/admin/check", '
                 '{"cookie_jar": jar})["body"]));\n'
                 f'let deleted = std.http.get('
                 f'"http://127.0.0.1:{cookie_port}/delete", '
                 '{"cookie_jar": jar});\n'
-                'println("check2=" + std.bytes.to_string(std.http.get('
+                'std.io.println("check2=" + std.bytes.to_string(std.http.get('
                 f'"http://127.0.0.1:{cookie_port}/check", '
                 '{"cookie_jar": jar})["body"]));\n'
                 "let jar2 = {};\n"
                 f'let ar = std.http.get_task('
                 f'"http://127.0.0.1:{cookie_port}/set", '
                 '{"cookie_jar": jar2}).wait();\n'
-                'println("acount=" + str(len(std.http.cookies(ar))));\n'
+                'std.io.println("acount=" + str(std.utils.len(std.http.cookies(ar))));\n'
                 f'let ac = std.http.get_task('
                 f'"http://127.0.0.1:{cookie_port}/check", '
                 '{"cookie_jar": jar2}).wait();\n'
-                'println("acheck=" + std.bytes.to_string(ac["body"]));\n',
+                'std.io.println("acheck=" + std.bytes.to_string(ac["body"]));\n',
                 timeout=15,
             )
             assert cookie_client.returncode == 0, cookie_client.stderr
@@ -4529,28 +4529,28 @@ def run_cases():
                     f'let a = std.http.get('
                     f'"http://127.0.0.1:{compression_port}/gzip", '
                     '{"decompress": true});\n'
-                    'println(std.bytes.to_string(a["body"]) + " " + '
+                    'std.io.println(std.bytes.to_string(a["body"]) + " " + '
                     'str(a["decompressed"]));\n'
                     f'let b = std.http.get('
                     f'"http://127.0.0.1:{compression_port}/deflate", '
                     '{"decompress": true});\n'
-                    'println(std.bytes.to_string(b["body"]));\n'
+                    'std.io.println(std.bytes.to_string(b["body"]));\n'
                     f'let c = std.http.get('
                     f'"http://127.0.0.1:{compression_port}/rawdeflate", '
                     '{"decompress": true});\n'
-                    'println(std.bytes.to_string(c["body"]));\n'
+                    'std.io.println(std.bytes.to_string(c["body"]));\n'
                     f'let d = std.http.get('
                     f'"http://127.0.0.1:{compression_port}/br", '
                     '{"decompress": true});\n'
-                    'println(std.bytes.to_string(d["body"]));\n'
+                    'std.io.println(std.bytes.to_string(d["body"]));\n'
                     f'let e = std.http.get_task('
                     f'"http://127.0.0.1:{compression_port}/gzip", '
                     '{"decompress": true}).wait();\n'
-                    'println(std.bytes.to_string(e["body"]));\n'
+                    'std.io.println(std.bytes.to_string(e["body"]));\n'
                     f'let f = std.http.get('
                     f'"http://127.0.0.1:{compression_port}/ae", '
                     '{"decompress": true});\n'
-                    'println("ae=" + std.bytes.to_string(f["body"]));\n',
+                    'std.io.println("ae=" + std.bytes.to_string(f["body"]));\n',
                     timeout=15,
                 )
                 assert compression_client.returncode == 0, (
@@ -4680,7 +4680,7 @@ def run_cases():
                 f'let s = std.http.listen("127.0.0.1", {maxconn_port});\n'
                 's["max_connections"] = 1;\n'
                 "let n = std.http.serve(s, handler, 2);\n"
-                'println("served " + str(n));\n'
+                'std.io.println("served " + str(n));\n'
                 "std.http.close(s);\n"
             )
             maxconn_proc.stdin.close()
@@ -4700,7 +4700,7 @@ def run_cases():
                 "import std;\n"
                 f'let a = std.http.get('
                 f'"http://127.0.0.1:{maxconn_port}/a");\n'
-                'println(std.bytes.to_string(a["body"]));\n'
+                'std.io.println(std.bytes.to_string(a["body"]));\n'
             )
             started = time.time()
             mc1 = subprocess.Popen(
@@ -4748,13 +4748,13 @@ def run_cases():
                 "import std;\n"
                 f'let s = std.http.listen("127.0.0.1", {rb1_port});\n'
                 's["on_request_body"] = func(chunk) {\n'
-                '  println("rb=" + std.bytes.to_string(chunk));\n'
+                '  std.io.println("rb=" + std.bytes.to_string(chunk));\n'
                 "};\n"
                 "let n = std.http.serve(s, func(req) {\n"
                 '  return {"status": 200, "body": "handler_body=" + '
                 'std.bytes.to_string(req["body"])};\n'
                 "}, 1);\n"
-                'println("served " + str(n));\n'
+                'std.io.println("served " + str(n));\n'
                 "std.http.close(s);\n"
             )
             rb1_proc.stdin.close()
@@ -4780,7 +4780,7 @@ def run_cases():
                 f'let a = std.http.post('
                 f'"http://127.0.0.1:{rb1_port}/a", '
                 '{"body_stream": parts()});\n'
-                'println(std.bytes.to_string(a["body"]));\n',
+                'std.io.println(std.bytes.to_string(a["body"]));\n',
                 timeout=15,
             )
             assert rb1_client.returncode == 0, rb1_client.stderr
@@ -4824,7 +4824,7 @@ def run_cases():
                 '  return {"status": 200, "body": "pull=" + out + '
                 '    "|body=" + std.bytes.to_string(req["body"])};\n'
                 "}, 2);\n"
-                'println("served " + str(n));\n'
+                'std.io.println("served " + str(n));\n'
                 "std.http.close(s);\n"
             )
             pull1_proc.stdin.close()
@@ -4850,10 +4850,10 @@ def run_cases():
                 f'let a = std.http.post('
                 f'"http://127.0.0.1:{pull1_port}/a", '
                 '{"body_stream": parts()});\n'
-                'println(std.bytes.to_string(a["body"]));\n'
+                'std.io.println(std.bytes.to_string(a["body"]));\n'
                 f'let b = std.http.get('
                 f'"http://127.0.0.1:{pull1_port}/b");\n'
-                'println(std.bytes.to_string(b["body"]));\n',
+                'std.io.println(std.bytes.to_string(b["body"]));\n',
                 timeout=15,
             )
             assert pull1_client.returncode == 0, pull1_client.stderr
@@ -4896,7 +4896,7 @@ def run_cases():
                 '  return {"status": 200, "body": "pull=" + out + '
                 '    "|body=" + std.bytes.to_string(req["body"])};\n'
                 "}, 2);\n"
-                'println("served " + str(n));\n'
+                'std.io.println("served " + str(n));\n'
                 "std.http2.close(s);\n"
             )
             pull2_proc.stdin.close()
@@ -4922,10 +4922,10 @@ def run_cases():
                 f'let a = std.http2.post('
                 f'"http://127.0.0.1:{pull2_port}/a", '
                 '{"body_stream": parts()});\n'
-                'println(std.bytes.to_string(a["body"]));\n'
+                'std.io.println(std.bytes.to_string(a["body"]));\n'
                 f'let b = std.http2.get('
                 f'"http://127.0.0.1:{pull2_port}/b");\n'
-                'println(std.bytes.to_string(b["body"]));\n',
+                'std.io.println(std.bytes.to_string(b["body"]));\n',
                 timeout=15,
             )
             assert pull2_client.returncode == 0, pull2_client.stderr
@@ -4970,7 +4970,7 @@ def run_cases():
             "std.task.wait(st)\n"
             "let rt = std.net.recv_task(s, 100, 1000);\n"
             "let data = std.task.wait(rt);\n"
-            "println(std.bytes.to_string(data));\n"
+            "std.io.println(std.bytes.to_string(data));\n"
             "std.net.close(s);\n"
         )
         async_thread.join(timeout=5)
@@ -5098,7 +5098,7 @@ def run_cases():
                 'let b = std.task.wait(std.net.tcp_listen_task('
                 '"127.0.0.1", port, 1000, "any", '
                 '{"reuse_port": true}));\n'
-                'print("same=" + str(std.net.local_addr(a)["port"] == '
+                'std.io.print("same=" + str(std.net.local_addr(a)["port"] == '
                 'std.net.local_addr(b)["port"]));\n'
                 "std.net.close(a);\n"
                 "std.net.close(b);\n",

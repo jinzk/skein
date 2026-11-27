@@ -303,7 +303,7 @@ def run_cases():
 
             messy = (
                 "import std;\n"
-                'println("SKEIN_LSP_SIDE_EFFECT");\n'
+                'std.io.println("SKEIN_LSP_SIDE_EFFECT");\n'
                 'let xs:list[int]=[1,"a"];\n'
             )
             session.notify(
@@ -327,7 +327,7 @@ def run_cases():
             assert len(edits) == 1, edits
             expected = (
                 "import std;\n"
-                'println("SKEIN_LSP_SIDE_EFFECT");\n'
+                'std.io.println("SKEIN_LSP_SIDE_EFFECT");\n'
                 'let xs: list[int] = [1, "a"];\n'
             )
             assert edits[0]["newText"] == expected, repr(edits[0]["newText"])
@@ -392,7 +392,12 @@ def run_cases():
             )
             assert "std.io" in hover["contents"]["value"], hover
 
-            did_change(session, uri, 6, "let x:int=1;\nprint(x);\n")
+            did_change(
+                session,
+                uri,
+                6,
+                "import std;\nlet x:int=1;\nstd.io.print(x);\n",
+            )
             session.wait_for_diagnostics(uri)
             symbols = session.request(
                 "textDocument/documentSymbol", {"textDocument": {"uri": uri}}
@@ -402,30 +407,35 @@ def run_cases():
                 "textDocument/definition",
                 {
                     "textDocument": {"uri": uri},
-                    "position": {"line": 1, "character": 7},
+                    "position": {"line": 2, "character": 13},
                 },
             )
             assert definitions, definitions
-            assert definitions[0]["range"]["start"]["line"] == 0
+            assert definitions[0]["range"]["start"]["line"] == 1
             local_hover = session.request(
                 "textDocument/hover",
                 {
                     "textDocument": {"uri": uri},
-                    "position": {"line": 1, "character": 7},
+                    "position": {"line": 2, "character": 13},
                 },
             )
             assert "let x: int" in local_hover["contents"]["value"], local_hover
 
             # Incremental edits replace UTF-16 ranges and are debounced.
-            did_change(session, uri, 7, "let x:int=1;\nprint(x);\n")
+            did_change(
+                session,
+                uri,
+                7,
+                "import std;\nlet x:int=1;\nstd.io.print(x);\n",
+            )
             session.wait_for_diagnostics(uri)
             did_change_edits(
                 session,
                 uri,
                 6,
                 [
-                    ((0, 4), (0, 5), "value"),
-                    ((1, 6), (1, 7), "value"),
+                    ((1, 4), (1, 5), "value"),
+                    ((2, 13), (2, 14), "value"),
                 ],
             )
             session.wait_for_diagnostics(uri)

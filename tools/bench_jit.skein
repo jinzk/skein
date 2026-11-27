@@ -42,17 +42,17 @@ func parse_args(argv) {
   let max_ratio = 1.10;
   let fib_speedup = 2.0;
   let i = 0;
-  while (i < len(argv)) {
+  while (i < std.utils.len(argv)) {
     let arg = argv[i];
     if (arg == "--bin") {
       i = i + 1;
-      if (i >= len(argv)) {
+      if (i >= std.utils.len(argv)) {
         die("--bin requires a value\n" + usage_text());
       }
       bin_path = argv[i];
     } else if (arg == "--repeats") {
       i = i + 1;
-      if (i >= len(argv)) {
+      if (i >= std.utils.len(argv)) {
         die("--repeats requires a value\n" + usage_text());
       }
       repeats = int(argv[i]);
@@ -62,18 +62,18 @@ func parse_args(argv) {
       json = true;
     } else if (arg == "--max-ratio") {
       i = i + 1;
-      if (i >= len(argv)) {
+      if (i >= std.utils.len(argv)) {
         die("--max-ratio requires a value\n" + usage_text());
       }
       max_ratio = float(argv[i]);
     } else if (arg == "--fib-speedup") {
       i = i + 1;
-      if (i >= len(argv)) {
+      if (i >= std.utils.len(argv)) {
         die("--fib-speedup requires a value\n" + usage_text());
       }
       fib_speedup = float(argv[i]);
     } else if (arg == "--help" || arg == "-h") {
-      println(usage_text());
+      std.io.println(usage_text());
       std.sys.exit(0);
     } else {
       die("unknown argument: " + arg + "\n" + usage_text());
@@ -140,18 +140,18 @@ func run({bin, repeats, check, json, max_ratio, fib_speedup}) {
   }
 
   if (json) {
-    println(std.json.stringify(results));
+    std.io.println(std.json.stringify(results));
   } else {
-    println(std.string.format("{:<18} {:>8} {:>8} {:>8} {:>9}",
+    std.io.println(std.string.format("{:<18} {:>8} {:>8} {:>8} {:>9}",
                    "benchmark", "VM", "JIT", "ratio", "speedup"));
     for item in results {
-      println(std.string.format("{:<18} {:>8.3f} {:>8.3f} {:>8.2f} {:>8.2f}x",
+      std.io.println(std.string.format("{:<18} {:>8.3f} {:>8.3f} {:>8.2f} {:>8.2f}x",
                      item["benchmark"], item["vm"], item["jit"],
                      item["ratio"], item["speedup"]));
     }
   }
 
-  if (len(failures) > 0) {
+  if (std.utils.len(failures) > 0) {
     std.io.flush(std.io.stdout);
     for message in failures {
       std.io.write_all(std.io.stderr, "FAIL: " + message + "\n");
@@ -159,7 +159,7 @@ func run({bin, repeats, check, json, max_ratio, fib_speedup}) {
     std.sys.exit(1);
   }
   if (check) {
-    println("JIT benchmark gate passed");
+    std.io.println("JIT benchmark gate passed");
   }
 }
 

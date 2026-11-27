@@ -14,8 +14,8 @@ def run_cases():
         "path golden output",
         "import std.path;\n"
         'let p = path.parse("/a/b/../c.txt", "posix");\n'
-        'print(p["style"]);\n'
-        'print(p["parts"]);\n'
-        'print(p["normalized"]);\n',
+        'std.io.print(p["style"]);\n'
+        'std.io.print(p["parts"]);\n'
+        'std.io.print(p["normalized"]);\n',
         stdout_all=["posix", "[a, b, .., c.txt]", "/a/c.txt"],
     )

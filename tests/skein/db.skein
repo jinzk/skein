@@ -9,7 +9,7 @@ ts_test("sqlite exec and query", func() {
   ts_eq(r["changes"], 1);
   ts_eq(r["last_insert_rowid"], 1);
   let rows = std.db.query(db, "SELECT id, name, score FROM users");
-  ts_eq(len(rows), 1);
+  ts_eq(std.utils.len(rows), 1);
   ts_eq(rows[0]["id"], 1);
   ts_eq(rows[0]["name"], "alice");
   ts_eq(rows[0]["score"], 1.5);
@@ -34,12 +34,12 @@ ts_test("sqlite transaction", func() {
   std.db.begin(db);
   std.db.exec(db, "INSERT INTO t VALUES (1)");
   std.db.rollback(db);
-  ts_eq(len(std.db.query(db, "SELECT * FROM t")), 0);
+  ts_eq(std.utils.len(std.db.query(db, "SELECT * FROM t")), 0);
 
   std.db.begin(db);
   std.db.exec(db, "INSERT INTO t VALUES (2)");
   std.db.commit(db);
-  ts_eq(len(std.db.query(db, "SELECT * FROM t")), 1);
+  ts_eq(std.utils.len(std.db.query(db, "SELECT * FROM t")), 1);
   std.db.close(db);
 });
 
@@ -66,7 +66,7 @@ ts_test("sqlite migrations", func() {
   ts_eq(first["applied"], [1, 2, 3]);
   ts_eq(first["current"], 3);
   let rows = std.db.query(db, "SELECT id, name, note FROM migrate_t");
-  ts_eq(len(rows), 1);
+  ts_eq(std.utils.len(rows), 1);
   ts_eq(rows[0]["name"], "alice");
   ts_eq(rows[0]["note"], null);
 
@@ -90,7 +90,7 @@ ts_test("sqlite migration rollback", func() {
   ts_error(func() {
     std.db.migrate(db, broken, {"table": "skein_migrate_rollback"});
   }, "std.db exec");
-  ts_eq(len(std.db.query(db, "SELECT * FROM migrate_rollback")), 0);
+  ts_eq(std.utils.len(std.db.query(db, "SELECT * FROM migrate_rollback")), 0);
   std.db.close(db);
 });
 

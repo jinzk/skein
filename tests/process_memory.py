@@ -24,7 +24,7 @@ def main():
                 "import std;\n"
                 f'let leaf = std.process.spawn_command("{skein_path(BIN)}", '
                 '{"args": ["' + skein_path(leaf) + '"]});\n'
-                "println(str(std.process.pid(leaf)));\n"
+                "std.io.println(str(std.process.pid(leaf)));\n"
                 "std.io.flush(std.io.stdout);\n"
                 "std.task.sleep(1000).wait();\n"
                 "std.process.wait(leaf);\n"
@@ -37,11 +37,11 @@ def main():
             'let leaf_pid = int(std.bytes.to_string('
             'std.io.read_line(parent["stdout"])));\n'
             "std.task.sleep(300).wait();\n"
-            'println("parent_rss=" + str(std.process.rss(parent) > 0));\n'
-            'println("leaf_rss=" + str(std.process.rss(leaf_pid) > 0));\n'
+            'std.io.println("parent_rss=" + str(std.process.rss(parent) > 0));\n'
+            'std.io.println("leaf_rss=" + str(std.process.rss(leaf_pid) > 0));\n'
             'let kids = std.process.children(parent);\n'
-            'println("kids=" + str(len(kids) >= 1));\n'
-            'println("tree=" + str(std.process.tree_rss(parent) >= '
+            'std.io.println("kids=" + str(std.utils.len(kids) >= 1));\n'
+            'std.io.println("tree=" + str(std.process.tree_rss(parent) >= '
             'std.process.rss(parent)));\n'
             "std.process.wait(parent);\n"
             "std.process.close(parent);\n"

@@ -18,8 +18,8 @@ def run_cases():
         "meta golden output",
         "import std;\n"
         "struct MetaGolden { x: int; }\n"
-        "println(std.meta.type_info(MetaGolden { x: 1 })[\"name\"]);\n"
-        "println(std.meta.fields(MetaGolden { x: 1 })[0][\"type\"]);\n",
+        "std.io.println(std.meta.type_info(MetaGolden { x: 1 })[\"name\"]);\n"
+        "std.io.println(std.meta.fields(MetaGolden { x: 1 })[0][\"type\"]);\n",
         stdout_all=["MetaGolden", "int"],
     )
 
@@ -44,10 +44,10 @@ def run_cases():
         main = write("main_vis.skein",
                      "import std;\n"
                      "import aa;\n"
-                     'println(std.meta.type_info("Pub")["name"]);\n'
-                     'println(std.meta.type_info("aa.Pub")["name"]);\n'
-                     'println(std.meta.has_type("aa.Hidden"));\n'
-                     'println(aa.local_meta()["name"]);\n'
+                     'std.io.println(std.meta.type_info("Pub")["name"]);\n'
+                     'std.io.println(std.meta.type_info("aa.Pub")["name"]);\n'
+                     'std.io.println(std.meta.has_type("aa.Hidden"));\n'
+                     'std.io.println(aa.local_meta()["name"]);\n'
                      'std.meta.type_info("aa.Hidden");\n')
         proc = run_file(main)
         assert proc.returncode != 0, proc.stdout
@@ -68,8 +68,8 @@ def run_cases():
         main = write("main_alias.skein",
                      "import std;\n"
                      "import aa as lib;\n"
-                     'println(std.meta.type_info("lib.Pub")["name"]);\n'
-                     'println(std.meta.has_type("lib.Hidden"));\n')
+                     'std.io.println(std.meta.type_info("lib.Pub")["name"]);\n'
+                     'std.io.println(std.meta.has_type("lib.Hidden"));\n')
         proc = run_file(main)
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout.splitlines() == ["Pub", "false"], proc.stdout

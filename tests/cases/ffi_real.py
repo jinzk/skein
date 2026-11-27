@@ -10,7 +10,7 @@ from harness import *  # noqa: F401,F403
 
 
 def _ffi_available():
-    return "= dict" in run("import std;\nkind_of(std.ffi)\n").stdout
+    return "= dict" in run("import std;\nstd.type.kind_of(std.ffi)\n").stdout
 
 
 def _write_manifest(directory, name, manifest):

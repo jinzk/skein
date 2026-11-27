@@ -20,7 +20,7 @@ def run_cases():
         "import std;\n"
         "struct G { x: int; }\n"
         "impl G { func get(self) { return self.x; } }\n"
-        "println(G { x: 5 }.get());\n",
+        "std.io.println(G { x: 5 }.get());\n",
         stdout="5",
     )
 
@@ -44,9 +44,10 @@ def run_cases():
         )
         main = write(
             "main.skein",
+            "import std;\n"
             "import aa;\n"
             "let c = aa.make(12);\n"
-            "println(c.get());\n",
+            "std.io.println(c.get());\n",
         )
         proc = run_file(main)
         assert proc.returncode == 0, proc.stderr
@@ -61,7 +62,7 @@ def run_cases():
         "for (let i = 0; i < 40; i = i + 1) {\n"
         "  total = total + wait launch work(i);\n"
         "}\n"
-        "println(total);\n",
+        "std.io.println(total);\n",
         env=env,
     )
     assert proc.returncode == 0, proc.stderr
@@ -91,10 +92,10 @@ def run_cases():
         "}\n"
         "let g = make_gen()();\n"
         "let first = std.generator.next(g);\n"
-        "println(first[\"value\"]);\n"
+        "std.io.println(first[\"value\"]);\n"
         + "if (false) { }\n" * 80
         + "let second = std.generator.next(g);\n"
-        "println(second[\"value\"]);\n",
+        "std.io.println(second[\"value\"]);\n",
         stdout="[1, 2, 3]\n[1, 2, 3, 4]\n",
     )
 
@@ -110,7 +111,7 @@ def run_cases():
         "}\n"
         "let t = launch hold([1, 2, 3]);\n"
         + "if (false) { }\n" * 80
-        + "println(t.wait());\n",
+        + "std.io.println(t.wait());\n",
         stdout="[1, 2, 3, 0, 1, 2]\n",
     )
 
@@ -136,7 +137,7 @@ def run_cases():
         "import std;\n"
         "func child() {\n"
         "  std.task.sleep(10).wait();\n"
-        '  println("child");\n'
+        '  std.io.println("child");\n'
         "  return 1;\n"
         "}\n"
         "let v = std.task.scope(func() {\n"
@@ -144,7 +145,7 @@ def run_cases():
         "  t.detach();\n"
         "  return 0;\n"
         "});\n"
-        'println("scope=" + str(v));\n'
+        'std.io.println("scope=" + str(v));\n'
         "std.task.sleep(30).wait();\n",
         stdout="scope=0\nchild\n",
     )
@@ -154,7 +155,7 @@ def run_cases():
         "import std;\n"
         "func ok() {\n"
         "  std.task.sleep(30).wait();\n"
-        '  println("ok");\n'
+        '  std.io.println("ok");\n'
         "  return 1;\n"
         "}\n"
         "func bad() {\n"
@@ -188,7 +189,7 @@ def run_cases():
         "import std;\n"
         "func ok(tag) {\n"
         "  std.task.sleep(20).wait();\n"
-        '  println("ok-" + tag);\n'
+        '  std.io.println("ok-" + tag);\n'
         "  return tag;\n"
         "}\n"
         "func bad() {\n"
@@ -201,7 +202,7 @@ def run_cases():
         '  let c = launch ok("c");\n'
         "  return 0;\n"
         "}\n"
-        "println(wait launch parent());\n",
+        "std.io.println(wait launch parent());\n",
         stderr="sibling-fail",
         not_stderr="ok-a",
     )
@@ -233,8 +234,8 @@ def run_cases():
         "await launches and waits for a call",
         "import std;\n"
         "func work(n) { return n + 1; }\n"
-        "println(await work(41));\n"
-        "println(wait launch work(41));\n",
+        "std.io.println(await work(41));\n"
+        "std.io.println(wait launch work(41));\n",
         stdout="42\n42\n",
     )
 
@@ -251,7 +252,7 @@ def run_cases():
         'import std;\n'
         'func boom() { fail "await-boom"; }\n'
         'let v = await boom() on error(e) { recover 7; };\n'
-        'println(v);\n',
+        'std.io.println(v);\n',
         stdout="7",
         not_stderr="on error does not catch failures from the launched function",
     )
@@ -261,8 +262,8 @@ def run_cases():
         "import std;\n"
         "struct Box { x: int; }\n"
         "func make(): Box { return Box { x: 7 }; }\n"
-        "println(await make().x);\n"
-        "println((await make()).x);\n",
+        "std.io.println(await make().x);\n"
+        "std.io.println((await make()).x);\n",
         stdout="7\n7\n",
     )
 
@@ -273,10 +274,10 @@ def run_cases():
         "let launch = work;\n"
         "let wait = work;\n"
         "let await = work;\n"
-        "println((launch)());\n"
-        "println((wait)());\n"
-        "println((await)());\n"
-        "println(await(work()));\n",
+        "std.io.println((launch)());\n"
+        "std.io.println((wait)());\n"
+        "std.io.println((await)());\n"
+        "std.io.println(await(work()));\n",
         stdout="8\n8\n8\n8\n",
     )
 
@@ -285,7 +286,7 @@ def run_cases():
         "import std;\n"
         "struct Holder { await: int; }\n"
         "let h = Holder { await: 9 };\n"
-        "println(h.await);\n",
+        "std.io.println(h.await);\n",
         stdout="9",
     )
 
@@ -316,7 +317,7 @@ def run_cases():
         "let r = wait launch boom() on error(e) {\n"
         "  recover str(e);\n"
         "};\n"
-        "println(r);\n",
+        "std.io.println(r);\n",
         stdout="boom",
         not_stderr="detached task failed",
     )
@@ -329,7 +330,7 @@ def run_cases():
         "let r = wait launch boom() on error() {\n"
         '  recover "caught";\n'
         "};\n"
-        "println(r);\n",
+        "std.io.println(r);\n",
         stdout="caught",
         not_stderr="detached task failed",
     )
@@ -345,7 +346,7 @@ def run_cases():
         "let r = wait t on error(e) {\n"
         "  recover str(e);\n"
         "};\n"
-        "println(r);\n",
+        "std.io.println(r);\n",
         stdout="boom",
         not_stderr="detached task failed",
     )
@@ -358,7 +359,7 @@ def run_cases():
         "let r = wait (launch boom()) on error(e) {\n"
         "  recover str(e);\n"
         "};\n"
-        "println(r);\n",
+        "std.io.println(r);\n",
         stdout="boom",
         not_stderr="detached task failed",
     )
@@ -366,6 +367,6 @@ def run_cases():
     check(
         "on error without a binding",
         "let r = (1 / 0) on error() { recover 7; };\n"
-        "println(r);\n",
+        "std.io.println(r);\n",
         stdout="7",
     )

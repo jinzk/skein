@@ -43,7 +43,7 @@ ts_test("set value semantics and order", func() {
 
 ts_test("set len json iterate type", func() {
   let s: set = set.from_list([2, 1, 3]);
-  ts_eq(len(s), 3);
+  ts_eq(std.utils.len(s), 3);
   ts_eq(std.json.stringify(s), "[2,1,3]");
   let out = [];
   for (let x in s) {
@@ -68,7 +68,7 @@ ts_test("set differential", func() {
       s = set.add(s, v);
       reference[v] = true;
     }
-    if (set.size(s) != len(reference)) {
+    if (set.size(s) != std.utils.len(reference)) {
       fail("size mismatch");
     }
     if (set.has(s, v) != (std.dict.has(reference, v) != 0)) {
@@ -174,7 +174,7 @@ ts_test("deque empty peek", func() {
 ts_test("deque via std namespace", func() {
   let d = std.deque.from_list([1, 2, 3]);
   ts_eq(std.deque.to_list(d), [1, 2, 3]);
-  ts_eq(kind_of(d), "deque");
+  ts_eq(std.type.kind_of(d), "deque");
   ts_true(d == std.deque.from_list([1, 2, 3]));
   ts_false(d == std.deque.from_list([1, 2]));
 });
@@ -193,7 +193,7 @@ ts_test("deque large", func() {
 
 ts_test("deque and heap len json iterate", func() {
   let d = deque.from_list([1, 2, 3]);
-  ts_eq(len(d), 3);
+  ts_eq(std.utils.len(d), 3);
   ts_eq(std.json.stringify(d), "[1,2,3]");
   let out = [];
   for (let x in d) {
@@ -201,7 +201,7 @@ ts_test("deque and heap len json iterate", func() {
   }
   ts_eq(out, [1, 2, 3]);
   let h = heap.from_list([3, 1, 2], func(a, b) { return a < b; });
-  ts_eq(len(h), 3);
+  ts_eq(std.utils.len(h), 3);
   ts_eq(std.json.stringify(h), "[1,3,2]");
   out = [];
   for (let x in h) {
@@ -212,11 +212,11 @@ ts_test("deque and heap len json iterate", func() {
 
 ts_test("deque and heap type annotations", func() {
   let d: deque = deque.new();
-  ts_eq(len(d), 0);
+  ts_eq(std.utils.len(d), 0);
   let h: heap = heap.from_list([1], func(a, b) { return a < b; });
-  ts_eq(len(h), 1);
+  ts_eq(std.utils.len(h), 1);
   let b = CollectionsBox { items: d };
-  ts_eq(len(b.items), 0);
+  ts_eq(std.utils.len(b.items), 0);
 });
 
 ts_test("heap min", func() {
@@ -276,8 +276,8 @@ ts_test("heap value semantics", func() {
 ts_test("heap via std namespace", func() {
   let h = std.heap.from_list([2, 1, 3], func(a, b) { return a < b; });
   ts_eq(std.heap.peek(h), 1);
-  ts_eq(kind_of(h), "heap");
-  ts_eq(len(std.heap.to_list(h)), 3);
+  ts_eq(std.type.kind_of(h), "heap");
+  ts_eq(std.utils.len(std.heap.to_list(h)), 3);
   ts_true(h == std.heap.from_list([2, 1, 3],
                                   func(a, b) { return a < b; }));
 });

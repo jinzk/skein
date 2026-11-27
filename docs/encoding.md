@@ -76,6 +76,7 @@ GBK 和 GB18030 都不依赖平台后端，因此 `std.encoding.supports("gbk")`
 - `std.bytes.to_string(bytes)` 保持严格 UTF-8，等价于：
 
   ```text
+import std;
   std.encoding.decode(bytes, "utf-8", "strict")
   ```
 
@@ -83,6 +84,7 @@ GBK 和 GB18030 都不依赖平台后端，因此 `std.encoding.supports("gbk")`
 - 首版已补充严格 UTF-8 的别名：
 
   ```text
+import std;
   std.bytes.to_string(bytes)   → string
   std.bytes.from_string(string) → bytes
   ```
@@ -97,6 +99,7 @@ GBK 和 GB18030 都不依赖平台后端，因此 `std.encoding.supports("gbk")`
 ### 4.1 函数
 
 ```text
+import std;
 std.encoding.decode(bytes, encoding[, errors])  → string
 std.encoding.encode(string, encoding[, errors]) → bytes
 std.encoding.supports(encoding)                 → bool
@@ -153,16 +156,16 @@ GBK 是 GB2312 的超集，编码时可能生成 GB2312 范围外的字符。如
 import std;
 
 let s = std.encoding.decode(std.bytes.from_hex("d6d0b9fa"), "gbk");
-print(s);                                      // 中国
+std.io.print(s);                                      // 中国
 
 let b = std.encoding.encode("中国", "gbk");
-print(std.bytes.hex(b));                           // d6d0b9fa
+std.io.print(std.bytes.hex(b));                           // d6d0b9fa
 
-print(std.encoding.supports("gbk"));           // 1 / true
-print(std.encoding.supports("gb18030"));       // 1 / true
+std.io.print(std.encoding.supports("gbk"));           // 1 / true
+std.io.print(std.encoding.supports("gb18030"));       // 1 / true
 
 let e = std.encoding.decode(std.bytes.from_hex("ff"), "utf-8", "replace");
-print(e);                                      // U+FFFD
+std.io.print(e);                                      // U+FFFD
 ```
 
 ### 4.4 Base64 和 URL 工具
@@ -170,6 +173,7 @@ print(e);                                      // U+FFFD
 `std.encoding` 还提供：
 
 ```text
+import std;
 std.encoding.base64_encode(bytes) → string
 std.encoding.base64_decode(string) → bytes
 std.encoding.url_encode(string) → string
@@ -658,8 +662,8 @@ check(
     "gbk roundtrip",
     'import std;\n'
     'let s = std.encoding.decode(std.bytes.from_hex("d6d0b9fa"), "gbk");\n'
-    'print(s);\n'
-    'print(std.bytes.hex(std.encoding.encode(s, "gbk")));\n',
+    'std.io.print(s);\n'
+    'std.io.print(std.bytes.hex(std.encoding.encode(s, "gbk")));\n',
     stdout_all=["= 中国", "= d6d0b9fa"],
 )
 ```

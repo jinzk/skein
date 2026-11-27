@@ -131,7 +131,7 @@ ts_test("for in dict key value", func() {
 
 ts_test("for in range", func() {
   let out = [];
-  for (let x in range(1, 3)) {
+  for (let x in std.utils.range(1, 3)) {
     out = std.list.append(out, x);
   }
   ts_eq(out, [1, 2, 3]);

@@ -6,9 +6,10 @@ import sys
 BIN = sys.argv[1]
 
 CASES = [
-    (b'print("abc");\n:quit\n', b'> abc\n> '),
-    (b'println("abc");\n:quit\n', b'> abc\n> '),
-    (b'print("a"); print("b");\n:quit\n', b'> ab\n> '),
+    (b'import std; std.io.print("abc");\n:quit\n', b'> abc\n> '),
+    (b'import std; std.io.println("abc");\n:quit\n', b'> abc\n> '),
+    (b'import std; std.io.print("a"); std.io.print("b");\n:quit\n',
+     b'> ab\n> '),
 ]
 
 

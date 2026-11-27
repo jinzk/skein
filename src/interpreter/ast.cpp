@@ -1218,6 +1218,22 @@ void free_function_code(struct function_code *code) {
 static thread_local std::unordered_map<struct funcdef *, std::shared_ptr<function_code>>
     function_codes;
 
+// During shutdown, treefree() must not erase entries from function_codes:
+// ast_thread_shutdown() may already be destroying that map, and the ASTs being
+// freed can contain nested funcdef nodes.  Function bodies and parameter lists
+// are released by the shutdown loop and by function_code destructors instead.
+static thread_local bool ast_shutdown_in_progress = false;
+
+static bool function_body_is_owned(struct ast *body) {
+    if (!body)
+        return false;
+    for (const auto &entry : function_bodies) {
+        if (entry.second == body)
+            return true;
+    }
+    return false;
+}
+
 std::shared_ptr<function_code> get_function_code(struct funcdef *node) {
     std::unordered_map<struct funcdef *, std::shared_ptr<function_code>>::iterator
         it = function_codes.find(node);
@@ -1269,16 +1285,31 @@ void release_function_code(struct funcdef *node) {
 }
 
 void ast_thread_shutdown() {
-    function_codes.clear();
+    ast_shutdown_in_progress = true;
+
+    // Move the shared_ptrs out first.  The map keeps its keys with null values
+    // so treefree() can still recognize bodies owned by function_code, but
+    // clearing the map cannot re-enter treefree() through a destructor.
+    std::vector<std::shared_ptr<function_code>> owned_codes;
+    owned_codes.reserve(function_codes.size());
+    for (auto &entry : function_codes)
+        owned_codes.push_back(std::move(entry.second));
+
     for (auto &entry : function_bodies)
         treefree(entry.second);
     function_bodies.clear();
-    for (auto &entry : symlist_metadata_map) {
-        treefree(entry.second.default_value);
-        treefree(entry.second.pattern);
-    }
+    function_codes.clear();
+
+    // function_bodies is empty, so code destructors cannot free a body twice.
+    // They still release parameter lists and their metadata ASTs.
+    owned_codes.clear();
+
+    // Remaining metadata is inert at shutdown; its ASTs are owned by the
+    // function bodies or parameter lists already released above.
     symlist_metadata_map.clear();
     func_locations.clear();
+
+    ast_shutdown_in_progress = false;
 }
 
 struct ast *newlist(struct ast *v, struct ast *l) {
@@ -1966,7 +1997,23 @@ void treefree(struct ast *a) {
              * example, a duplicate definition error) release them here.
              */
             struct funcdef *f = (struct funcdef *)a;
-            if (f->moved) {
+            if (ast_shutdown_in_progress) {
+                /*
+                 * Do not mutate function_codes while ast_thread_shutdown()
+                 * is tearing it down.  Bodies are released from
+                 * function_bodies; parameter lists are released by the
+                 * function_code destructor.
+                 */
+                auto code = function_codes.find(f);
+                if (code != function_codes.end() ||
+                    function_body_is_owned(f->ast)) {
+                    f->ast = NULL;
+                    f->sl = NULL;
+                } else {
+                    treefree(f->ast);
+                    if (f->sl) symlistfree_full(f->sl);
+                }
+            } else if (f->moved) {
                 release_function_code(f);
             } else {
                 /*

@@ -204,6 +204,45 @@ def run_cases():
         stdout="6",
     )
     check(
+        "user macro literal multi-argument call",
+        'func add2(a: int, b: int): int { return a + b; }\n'
+        'macro call2(a: expr, b: expr) { return add2(#a, #b); }\n'
+        'func test(): int { return call2!(20, 22); }\n'
+        'println(str(test()));\n',
+        stdout="42",
+    )
+    check(
+        "user macro three literal arguments",
+        'func add3(a: int, b: int, c: int): int { return a + b + c; }\n'
+        'macro call3(a: expr, b: expr, c: expr) {\n'
+        '  return add3(#a, #b, #c);\n'
+        '}\n'
+        'func test(): int { return call3!(10, 20, 30); }\n'
+        'println(str(test()));\n',
+        stdout="60",
+    )
+    check(
+        "user macro nested multi-argument call",
+        'macro pair(a: expr, b: expr) {\n'
+        '  println(str(#a));\n'
+        '  println(str(#b));\n'
+        '}\n'
+        'macro outer(a: expr, b: expr) { pair!(#a, #b); }\n'
+        'func test(): int { outer!("left", "right"); return 0; }\n'
+        'test();\n',
+        stdout="left\nright",
+    )
+    check(
+        "user macro generates route registration",
+        'import std;\n'
+        'import std.route;\n'
+        'macro get(app: expr, path: expr, h: expr) { #app.get(#path, #h); }\n'
+        'let app = route.new();\n'
+        'get!(app, "/x", func(req) { return {"status": 200, "body": "ok"}; });\n'
+        'println(app.dispatch({"method": "GET", "path": "/x"})["body"]);\n',
+        stdout="ok",
+    )
+    check(
         "user macro nested call",
         'macro inc(x: expr) { #x + 1; }\n'
         'macro twice(x: expr) { inc!(#x) * 2; }\n'

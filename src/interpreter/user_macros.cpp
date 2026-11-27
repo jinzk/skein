@@ -478,8 +478,10 @@ struct ast *clone_call_arg_list(const struct list_node *list,
     } else {
         value = clone_node(list->value, state, clone_context::arg);
     }
-    struct ast *next = clone_call_arg_list(
-        (const struct list_node *)list->next, state);
+    /* `explist` is right-recursive: its final link can be the last argument
+     * itself rather than another 'L' node.  Clone through the generic path so
+     * both nested lists and terminal arguments are handled. */
+    struct ast *next = clone_node(list->next, state, clone_context::arg);
     if (!value)
         value = newnullast();
     struct ast *result = newast('L', value, next);

@@ -2679,11 +2679,38 @@ rpc.serve(func(method, params, body) {
 ```
 
 - 自动发送 ready 帧；hybrid 额外带 `"protocol":"hybrid"`；
-- 从 stdin 读取请求，从 stdout 写响应；
+- 默认从 stdin 读取请求，从 stdout 写响应；
 - jsonl handler 参数为 `(method, params)`；
 - hybrid handler 参数为 `(method, params, body)`，可返回普通值或 `{value, body}`；
 - handler 抛错时返回 `ok:false`，循环继续；
-- stdin 关闭时返回已处理请求数。
+- 输入关闭时返回已处理请求数。
+
+`options` 支持自定义传输流：
+
+```text
+rpc.serve(handler[, options])
+rpc.server(handler[, options]) -> rpc.Server
+
+options:
+  protocol: "jsonl" | "hybrid"   // 默认 "jsonl"
+  input: readable stream          // 默认 std.io.stdin
+  output: writable stream         // 默认 std.io.stdout
+  ready: bool                     // 默认 true，是否发送 ready 帧
+```
+
+可以配合文件句柄、socket 或进程 pipe 使用：
+
+```text
+let input = std.fs.open("requests.jsonl", "rb");
+let output = std.fs.open("responses.jsonl", "w+b");
+
+let server = rpc.server(handler, {
+  "input": input,
+  "output": output,
+  "ready": false
+});
+server.serve();
+```
 
 也可以先构造 `RpcServer` 对象，再启动循环：
 
@@ -2694,9 +2721,20 @@ let server = rpc.server(func(method, params) {
 
 server is RpcServer;   // true
 server.serve();        // 阻塞运行服务端循环
+server.stats();        // {"served": ..., "errors": ..., "protocol": "jsonl"}
 ```
 
 `rpc.server(handler[, options])` 返回 `rpc.Server`，它通过结构式 `RpcServer` proto；`rpc.serve(handler[, options])` 等价于直接调用该循环。
+
+`server.stats()` 返回计数器快照：
+
+```text
+{
+  "served": int,      // 已处理请求数
+  "errors": int,      // handler 错误 + 解析错误数
+  "protocol": string  // "jsonl" 或 "hybrid"
+}
+```
 
 `Iterable[T]` 是结构化迭代器 proto：
 

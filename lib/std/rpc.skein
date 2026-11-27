@@ -4,27 +4,59 @@ package rpc {
   // Object wrapper around the server loop.  Server satisfies the
   // std.traits.RpcServer proto via its serve(self): int method.
   export struct Server {
-    handler: any;
+    _serve: Callable;
+    _stats: Callable;
     options: dict;
   }
 
   impl Server {
     func serve(self): int {
-      return _serve(self.handler, self.options);
+      return self._serve();
+    }
+
+    // Snapshot of the loop counters for this server.
+    func stats(self) {
+      return self._stats();
     }
   }
 
   // Wrap a handler in an RpcServer object without running the loop yet.
   export func server(handler, options = {}) {
-    return Server { handler: handler, options: options };
+    let stats = {
+      "served": 0,
+      "errors": 0,
+      "protocol": std.dict.get(options, "protocol", "jsonl")
+    };
+    return Server {
+      _serve: func() {
+        let latest = _serve(handler, options);
+        stats["served"] = stats["served"] + latest["served"];
+        stats["errors"] = stats["errors"] + latest["errors"];
+        return latest["served"];
+      },
+      _stats: func() {
+        return {
+          "served": stats["served"],
+          "errors": stats["errors"],
+          "protocol": stats["protocol"]
+        };
+      },
+      options: options
+    };
   }
 
   // Run a handler as an RPC server loop.
   export func serve(handler, options = {}) {
-    return _serve(handler, options);
+    return _serve(handler, options)["served"];
   }
 
-  // Minimal JSON Lines / hybrid RPC server loop for std.worker.pool workers.
+  // Minimal JSON Lines / hybrid RPC server loop.
+  //
+  // options:
+  //   protocol: "jsonl" (default) or "hybrid"
+  //   input:    readable stream, defaults to std.io.stdin
+  //   output:   writable stream, defaults to std.io.stdout
+  //   ready:    emit the ready frame, defaults to true
   //
   // jsonl:
   //   handler(method, params) -> result
@@ -43,24 +75,31 @@ package rpc {
       fail("rpc server supports protocol \"jsonl\" or \"hybrid\"");
     }
     let hybrid = protocol == "hybrid";
+    let input = std.dict.get(options, "input", std.io.stdin);
+    let output = std.dict.get(options, "output", std.io.stdout);
+    let send_ready = std.dict.get(options, "ready", true);
 
-    let ready = {"ready": true, "version": 1};
-    if (hybrid) {
-      ready["protocol"] = "hybrid";
+    if (send_ready) {
+      let ready = {"ready": true, "version": 1};
+      if (hybrid) {
+        ready["protocol"] = "hybrid";
+      }
+      std.io.write_all(
+        output,
+        std.bytes.from_string(std.json.stringify(ready) + "\n"));
+      std.io.flush(output);
     }
-    std.io.write_all(
-      std.io.stdout,
-      std.bytes.from_string(std.json.stringify(ready) + "\n"));
-    std.io.flush(std.io.stdout);
 
     let served = 0;
+    let errors = 0;
     while (true) {
-      let line = std.io.read_line(std.io.stdin);
+      let line = std.io.read_line(input);
       if (line == null) {
         break;
       }
       let parsed = std.json.try_parse(std.bytes.to_string(line));
       if (std.result.is_err(parsed)) {
+        errors = errors + 1;
         break;
       }
       let request = std.result.unwrap(parsed);
@@ -72,7 +111,7 @@ package rpc {
       if (hybrid) {
         let body_len = std.dict.get(request, "body_len", 0);
         if (body_len > 0) {
-          body = std.io.read_exact(std.io.stdin, body_len);
+          body = std.io.read_exact(input, body_len);
         }
       }
 
@@ -103,6 +142,7 @@ package rpc {
         }
       } else {
         let error = std.result.error(call);
+        errors = errors + 1;
         response = {
           "id": id,
           "ok": false,
@@ -117,14 +157,14 @@ package rpc {
       }
 
       std.io.write_all(
-        std.io.stdout,
+        output,
         std.bytes.from_string(std.json.stringify(response) + "\n"));
       if (len(response_body) > 0) {
-        std.io.write_all(std.io.stdout, response_body);
+        std.io.write_all(output, response_body);
       }
-      std.io.flush(std.io.stdout);
+      std.io.flush(output);
       served = served + 1;
     }
-    return served;
+    return {"served": served, "errors": errors};
   }
 }

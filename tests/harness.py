@@ -959,6 +959,39 @@ def check_extended_stdlib():
             'pool.shutdown();\n',
             stdout_all=["true", "42"],
         )
+        rpc_in_file = os.path.join(worker_tmp, "rpc_in.jsonl")
+        rpc_out_file = os.path.join(worker_tmp, "rpc_out.jsonl")
+        rpc_in_path = rpc_in_file.replace("\\", "\\\\")
+        rpc_out_path = rpc_out_file.replace("\\", "\\\\")
+        check(
+            "std.rpc file transport and stats",
+            "import std;\n"
+            "import std.rpc;\n"
+            f'std.fs.write_text("{rpc_in_path}", '
+            '"{\\"id\\":1,\\"method\\":\\"add\\",\\"params\\":[2,3]}\\n'
+            '{\\"id\\":2,\\"method\\":\\"nope\\",\\"params\\":[]}\\n", "utf-8");\n'
+            f'let input = std.fs.open("{rpc_in_path}", "rb");\n'
+            f'let output = std.fs.open("{rpc_out_path}", "w+b");\n'
+            "let server = rpc.server(func(method, params) {\n"
+            '  if (method == "add") { return params[0] + params[1]; }\n'
+            '  fail("unknown method " + method);\n'
+            '}, {"input": input, "output": output, "ready": false});\n'
+            "let n = server.serve();\n"
+            "std.io.flush(output);\n"
+            "std.io.close(input);\n"
+            "std.io.close(output);\n"
+            f'let text = std.fs.read_text("{rpc_out_path}", "utf-8");\n'
+            'print("n=" + str(n));\n'
+            'print("result=" + str(std.string.contains(text, '
+            '"\\"result\\":5")));\n'
+            'print("error=" + str(std.string.contains(text, '
+            '"\\"ok\\":false")));\n'
+            'print("served=" + str(server.stats()["served"]));\n'
+            'print("errors=" + str(server.stats()["errors"]));\n'
+            'print("protocol=" + server.stats()["protocol"]);\n',
+            stdout_all=["n=2", "result=1", "error=1", "served=2",
+                        "errors=1", "protocol=jsonl"],
+        )
         restart_script = os.path.join(worker_tmp, "restart.skein")
         with open(restart_script, "w", encoding="utf-8") as handle:
             handle.write(

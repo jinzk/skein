@@ -887,6 +887,28 @@ def check_extended_stdlib():
             stdout_all=["5", "true", "true", "9",
                         "std.traits.RpcClient", "std.traits.RpcJob"],
         )
+        rpc_worker_script = os.path.join(worker_tmp, "rpc_worker.skein")
+        with open(rpc_worker_script, "w", encoding="utf-8") as handle:
+            handle.write(
+                "import std;\n"
+                "import std.rpc;\n"
+                "rpc.serve(func(method, params) {\n"
+                "  if (method == \"add\") {\n"
+                "    return params[0] + params[1];\n"
+                "  }\n"
+                "  fail(\"unknown method \" + method);\n"
+                "});\n"
+            )
+        rpc_worker_path = rpc_worker_script.replace("\\", "\\\\")
+        check(
+            "std.rpc serve worker loop",
+            "import std;\n"
+            f'let pool = std.worker.pool(1, "{rpc_worker_path}");\n'
+            'print(std.result.unwrap(pool.call("add", [2, 3])));\n'
+            'print(str(std.result.is_err(pool.call("nope", []))));\n'
+            'pool.shutdown();\n',
+            stdout_all=["5", "true"],
+        )
         restart_script = os.path.join(worker_tmp, "restart.skein")
         with open(restart_script, "w", encoding="utf-8") as handle:
             handle.write(

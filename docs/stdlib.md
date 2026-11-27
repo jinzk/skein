@@ -2320,6 +2320,7 @@ std.lru（内嵌 Skein 源码包）
 std.dict_key（内嵌 Skein 源码包）
 std.ops（内嵌 Skein 源码包）
 std.traits（内嵌 Skein 源码包）
+std.rpc（内嵌 Skein 源码包）
 ```
 
 `std.fsm` 是内嵌 Skein 源码标准库，源码位于 `lib/std/fsm.skein`，构建时嵌入解释器，不需要安装额外文件：
@@ -2621,6 +2622,25 @@ job.wait([timeout_ms])
 job.id
 job.done
 ```
+
+`std.rpc` 提供 JSON Lines worker 服务端循环：
+
+```text
+import std.rpc;
+
+rpc.serve(func(method, params) {
+  if (method == "add") {
+    return params[0] + params[1];
+  }
+  fail("unknown method " + method);
+}) -> served
+```
+
+- 自动发送 `{"ready":true,"version":1}`；
+- 从 stdin 读取请求，从 stdout 写响应；
+- handler 参数为 `(method, params)`；
+- handler 抛错时返回 `ok:false`，循环继续；
+- stdin 关闭时返回已处理请求数。
 
 `Iterable[T]` 是结构化迭代器 proto：
 

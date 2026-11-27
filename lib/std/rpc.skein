@@ -1,0 +1,69 @@
+package rpc {
+  import std;
+
+  // Minimal JSON Lines RPC server loop for std.worker.pool workers.
+  //
+  // The handler receives (method, params) and returns the result value.
+  // A throwing handler is reported as an ok:false response and the loop
+  // continues with the next request.
+  export func serve(handler, options = {}) {
+    if (kind_of(handler) != "function" && kind_of(handler) != "builtin") {
+      fail("std.rpc.serve handler must be callable");
+    }
+    let protocol = std.dict.get(options, "protocol", "jsonl");
+    if (protocol != "jsonl") {
+      fail("std.rpc.serve only supports protocol \"jsonl\"");
+    }
+
+    std.io.write_all(
+      std.io.stdout,
+      std.bytes.from_string("{\"ready\":true,\"version\":1}\n"));
+    std.io.flush(std.io.stdout);
+
+    let served = 0;
+    while (true) {
+      let line = std.io.read_line(std.io.stdin);
+      if (line == null) {
+        break;
+      }
+      let parsed = std.json.try_parse(std.bytes.to_string(line));
+      if (std.result.is_err(parsed)) {
+        break;
+      }
+      let request = std.result.unwrap(parsed);
+      let id = std.dict.get(request, "id", null);
+      let method = std.dict.get(request, "method", "");
+      let params = std.dict.get(request, "params", []);
+
+      let call = std.result.capture(func() {
+        return handler(method, params);
+      });
+
+      let response = null;
+      if (std.result.is_ok(call)) {
+        response = {
+          "id": id,
+          "ok": true,
+          "result": std.result.unwrap(call)
+        };
+      } else {
+        let error = std.result.error(call);
+        response = {
+          "id": id,
+          "ok": false,
+          "error": {
+            "kind": "worker",
+            "message": std.error.message(error)
+          }
+        };
+      }
+
+      std.io.write_all(
+        std.io.stdout,
+        std.bytes.from_string(std.json.stringify(response) + "\n"));
+      std.io.flush(std.io.stdout);
+      served = served + 1;
+    }
+    return served;
+  }
+}

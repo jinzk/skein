@@ -3080,6 +3080,7 @@ std.lru（内嵌 Skein 源码包）
 std.dict_key（内嵌 Skein 源码包）
 std.ops（内嵌 Skein 源码包）
 std.traits（内嵌 Skein 源码包）
+std.rpc（内嵌 Skein 源码包）
 ```
 
 常用示例：

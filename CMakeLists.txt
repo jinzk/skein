@@ -610,6 +610,7 @@ set(SKEIN_EMBEDDED_SOURCES
   dict_key.skein:kStdDictKeySource:std_dict_key_source.inc
   ops.skein:kStdOpsSource:std_ops_source.inc
   traits.skein:kStdTraitsSource:std_traits_source.inc
+  rpc.skein:kStdRpcSource:std_rpc_source.inc
 )
 set(SKEIN_EMBEDDED_OUTPUTS)
 foreach(entry IN LISTS SKEIN_EMBEDDED_SOURCES)

@@ -77,8 +77,9 @@ struct expansion_state {
     int expansion_id = 0;
     bool failed = false;
     bool validate_only = false;
-    /* True only while cloning the template body.  Call-site arguments may
-     * contain generic values such as `identity[int]`; templates may not. */
+    /* True only while cloning the template body.  Literal generic
+     * applications are allowed here, but type fragments cannot enter generic
+     * argument lists; call-site fragments may contain either. */
     bool template_body = false;
 };
 
@@ -296,6 +297,20 @@ bool type_constraint_contains_placeholder(const struct type_constraint *type) {
      * names. */
     return type->display &&
            std::strstr(type->display, USER_MACRO_PARAM_PREFIX) != NULL;
+}
+
+bool generic_type_args_contain_placeholder(
+    const struct generic_type_arg *args) {
+    for (const struct generic_type_arg *arg = args; arg; arg = arg->next) {
+        if (type_constraint_contains_placeholder(arg->type))
+            return true;
+    }
+    return false;
+}
+
+bool invalid_template_generic_args(const struct generic_type_arg *args,
+                                   const char *error) {
+    return error != NULL || generic_type_args_contain_placeholder(args);
 }
 
 /* Replace `#T` type placeholders with the call-site constraint.  Literal
@@ -534,12 +549,21 @@ struct ast *clone_node(const struct ast *node, expansion_state &state,
         return NULL;
     }
 
-    /* Explicit generic applications are syntax generation too, whether the
-     * argument is a fragment or a literal type written in the template. */
+    /* Literal generic applications are ordinary template syntax: their type
+     * arguments were captured by the parser at the definition point.  A type
+     * fragment inside a generic argument list still crosses the boundary and
+     * stays rejected. */
     if (state.template_body && node->nodetype == 'y') {
         const struct struct_lit_node *lit =
             (const struct struct_lit_node *)node;
-        if (lit->has_type_args || lit->type_args || lit->type_args_error) {
+        if (is_internal_name(lit->name)) {
+            report_at(node->line, node->column,
+                      "type fragment cannot be used as a value or name");
+            state.failed = true;
+            return NULL;
+        }
+        if (invalid_template_generic_args(lit->type_args,
+                                          lit->type_args_error)) {
             report_at(node->line, node->column,
                       "macro template cannot generate generic syntax");
             state.failed = true;
@@ -549,7 +573,14 @@ struct ast *clone_node(const struct ast *node, expansion_state &state,
     if (state.template_body && node->nodetype == NODE_ENUM_LITERAL) {
         const struct enum_lit_node *lit =
             (const struct enum_lit_node *)node;
-        if (lit->has_type_args || lit->type_args || lit->type_args_error) {
+        if (is_internal_name(lit->name) || is_internal_name(lit->variant)) {
+            report_at(node->line, node->column,
+                      "type fragment cannot be used as a value or name");
+            state.failed = true;
+            return NULL;
+        }
+        if (invalid_template_generic_args(lit->type_args,
+                                          lit->type_args_error)) {
             report_at(node->line, node->column,
                       "macro template cannot generate generic syntax");
             state.failed = true;
@@ -667,9 +698,8 @@ struct ast *clone_node(const struct ast *node, expansion_state &state,
             const struct index_node *source =
                 (const struct index_node *)node;
             if (state.template_body &&
-                (source->generic_candidate ||
-                 source->generic_function_value || source->type_args ||
-                 source->type_args_error)) {
+                invalid_template_generic_args(source->type_args,
+                                              source->type_args_error)) {
                 report_at(node->line, node->column,
                           "macro template cannot generate generic syntax");
                 state.failed = true;
@@ -923,6 +953,47 @@ struct ast *clone_node(const struct ast *node, expansion_state &state,
                               : NULL;
             return (struct ast *)copy;
         }
+        case 'y': {
+            const struct struct_lit_node *source =
+                (const struct struct_lit_node *)node;
+            struct struct_lit_node *copy = copy_node(source);
+            copy->name = source->name ? copy_string(source->name) : NULL;
+            copy->source = source->source ? copy_string(source->source) : NULL;
+            copy->type_args = dup_generic_type_args(source->type_args);
+            copy->type_args_error = source->type_args_error
+                                        ? copy_string(source->type_args_error)
+                                        : NULL;
+            copy->fields = (struct struct_init *)clone_node(
+                (const struct ast *)source->fields, state,
+                clone_context::expr);
+            return (struct ast *)copy;
+        }
+        case NODE_ENUM_LITERAL: {
+            const struct enum_lit_node *source =
+                (const struct enum_lit_node *)node;
+            struct enum_lit_node *copy = copy_node(source);
+            copy->name = source->name ? copy_string(source->name) : NULL;
+            copy->source = source->source ? copy_string(source->source) : NULL;
+            copy->variant = source->variant ? copy_string(source->variant)
+                                            : NULL;
+            copy->type_args = dup_generic_type_args(source->type_args);
+            copy->type_args_error = source->type_args_error
+                                        ? copy_string(source->type_args_error)
+                                        : NULL;
+            copy->fields = (struct struct_init *)clone_node(
+                (const struct ast *)source->fields, state,
+                clone_context::expr);
+            return (struct ast *)copy;
+        }
+        case 'i': {
+            const struct struct_init *source = (const struct struct_init *)node;
+            struct struct_init *copy = copy_node(source);
+            copy->name = source->name ? copy_string(source->name) : NULL;
+            copy->value = clone_node(source->value, state, clone_context::expr);
+            copy->next = (struct struct_init *)clone_node(
+                (const struct ast *)source->next, state, clone_context::expr);
+            return (struct ast *)copy;
+        }
         case NODE_MACRO_TYPE_ARG: {
             const struct macro_type_arg_node *source =
                 (const struct macro_type_arg_node *)node;
@@ -1034,6 +1105,24 @@ void collect_declared(const struct ast *node,
             collect_declared(call->args, names);
             break;
         }
+        case 'y': {
+            const struct struct_lit_node *lit =
+                (const struct struct_lit_node *)node;
+            collect_declared((const struct ast *)lit->fields, names);
+            break;
+        }
+        case NODE_ENUM_LITERAL: {
+            const struct enum_lit_node *lit =
+                (const struct enum_lit_node *)node;
+            collect_declared((const struct ast *)lit->fields, names);
+            break;
+        }
+        case 'i': {
+            const struct struct_init *field = (const struct struct_init *)node;
+            collect_declared(field->value, names);
+            collect_declared((const struct ast *)field->next, names);
+            break;
+        }
         case 'L':
         case NODE_TUPLE:
             collect_declared(node->l, names);
@@ -1105,6 +1194,24 @@ void collect_macro_calls(const struct ast *node,
             const struct ufncall *call = (const struct ufncall *)node;
             collect_macro_calls(call->callee, out);
             collect_macro_calls(call->args, out);
+            break;
+        }
+        case 'y': {
+            const struct struct_lit_node *lit =
+                (const struct struct_lit_node *)node;
+            collect_macro_calls((const struct ast *)lit->fields, out);
+            break;
+        }
+        case NODE_ENUM_LITERAL: {
+            const struct enum_lit_node *lit =
+                (const struct enum_lit_node *)node;
+            collect_macro_calls((const struct ast *)lit->fields, out);
+            break;
+        }
+        case 'i': {
+            const struct struct_init *field = (const struct struct_init *)node;
+            collect_macro_calls(field->value, out);
+            collect_macro_calls((const struct ast *)field->next, out);
             break;
         }
         case 'L':

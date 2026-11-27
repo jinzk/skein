@@ -1906,8 +1906,20 @@ struct value_t *eval(struct ast *a) {
                 field_call && call->callee->l &&
                 call->callee->l->nodetype == 'N' &&
                 !lookupsym(((struct symref *)call->callee->l)->name);
-            if (call->callee && (call->callee->nodetype == 'G' ||
-                                 (field_call && !unresolved_field_base))) {
+            /* Generic brackets are erased during typechecking.  Macro
+             * expansion can place a generic call inside a nested `return`
+             * that the checker skips, so erase it here as well instead of
+             * treating `id[int]` as a runtime index/member access. */
+            const struct index_node *generic_callee =
+                call->callee && call->callee->nodetype == 'G'
+                    ? (const struct index_node *)call->callee
+                    : NULL;
+            const bool erased_generic_callee =
+                generic_callee && (generic_callee->generic_candidate ||
+                                   generic_callee->generic_function_value);
+            if (!erased_generic_callee &&
+                ((generic_callee != NULL) ||
+                 (field_call && !unresolved_field_base))) {
                 bool field_access = field_call;
                 struct value_t *receiver = eval(call->callee->l);
                 if (!receiver)
@@ -2002,7 +2014,9 @@ struct value_t *eval(struct ast *a) {
                 break;
             }
 
-            struct value_t *callee = eval(call->callee);
+            struct value_t *callee =
+                erased_generic_callee ? eval(generic_callee->l)
+                                      : eval(call->callee);
             if (callee) {
                 value_release_guard callee_guard(callee);
                 ret = callvalue(callee, call->args);

@@ -363,6 +363,11 @@ def run_cases():
             "func f(): list[int] { return wrap!(type(list[int]), [1, 2]); }\n",
             "explicit composite type argument",
         ),
+        (
+            "macro make(v:expr){let b=Box[int]{value:#v};return b.value;}\n",
+            "macro make(v: expr) { let b = Box[int] { value: #v}; return b.value; }\n",
+            "literal generic application in macro template",
+        ),
     ]
     for source, expected, label in type_fragment_positions:
         path = write_temp(source)

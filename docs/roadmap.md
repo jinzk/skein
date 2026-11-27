@@ -553,9 +553,10 @@ keyword（`in` / `export` / `import` / `package` / `include`）已完成。其�
 
 #### 后续计划：宏与泛型结合（G1–G5 已完成）
 
-M11 继续保持“宏不生成泛型语法”的边界。当前可用组合是：泛型实例化写在宏外，
-宏只接收已绑定泛型值；宏体生成对泛型函数的普通调用并交给类型推断。不要依靠宏
-生成 `Box[int] { ... }` 或 `f[int](...)`。若未来要让二者更紧密协作，按以下顺序推进：
+M11 继续保持“类型片段不进入泛型实参”的边界。当前可用组合是：模板里可以写
+字面显式泛型应用（`Box[int] { ... }` / `f[int](...)`），parser 在宏定义点捕获实参；
+宏也可以接收已绑定泛型值或生成普通调用交给类型推断。仍不允许用 `type` 片段生成
+`Box[#T]` / `f[#T](...)`。G1–G5 按以下顺序推进：
 
 1. **G1 AST 化泛型实参（已完成）**：parser 一次解析显式类型实参并存入 AST；
    typechecker 不再从原始源码文本恢复 `Box[int]` / `f[int](...)` / `let g = f[int]`
@@ -569,12 +570,14 @@ M11 继续保持“宏不生成泛型语法”的边界。当前可用组合是�
     `Hashable` / `Iterable` 等 proto 约束仍需专用约束片段，不混入 `type` 片段。
      复合类型实参用显式 `type(...)` 包装（`type(list[int])`、`type((int) -> int)`）；
      它只切换 parser 到类型语法，不扩展为表达式包装或编译期执行。
-3. **G3 宏类型参数边界（已完成）**：在定义期固化“宏不替代泛型”的边界，不新增
+3. **G3 宏类型参数边界（已完成）**：在定义期固化“宏不替代泛型声明”的边界，不新增
    语法。模板体不得生成 `struct` / `enum` / `proto` / `impl` 或具名 `func` 声明
-   （`macro template cannot generate declarations`），也不得生成显式泛型应用，
-   包括模板里写死的 `f[int](...)` / `Box[int] { ... }` 与 `f[#T](...)`
-   （`macro template cannot generate generic syntax`）；`impl Box[int]` 本身在
-   parser 阶段就是语法错误。类型片段不能进入反射 builtin（`kind_of(#T)` 等报
+   （`macro template cannot generate declarations`）。字面显式泛型应用
+   （`f[int](...)` / `let g = f[int]` / `Box[int] { ... }`）允许，实参由 parser 在
+   定义点捕获并通过 AST clone 复制；把 `type` 片段放进泛型实参
+   （`f[#T](...)` / `Box[list[#T]]`）仍报 `macro template cannot generate generic syntax`。
+   `impl Box[int]` 本身在 parser 阶段就是语法错误。类型片段不能进入反射 builtin
+   （`kind_of(#T)` 等报
    `type fragment cannot be used as a value or name`），不做类型计算或类型内省。
    限制只针对模板体：调用点已有的泛型值仍可经 `expr` 片段传入，匿名函数表达式
    仍可作为普通表达式出现在模板里。

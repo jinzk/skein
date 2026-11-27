@@ -451,12 +451,20 @@ def run_cases():
         stderr="macro template cannot generate generic syntax",
     )
     check(
-        "user macro cannot generate literal generic calls",
+        "user macro can generate literal generic calls",
         'func id[T any](x: T) { return x; }\n'
-        'macro bad(v: expr) { return id[int](#v); }\n'
-        'func test(): int { return bad!(7); }\n'
+        'macro call(v: expr) { return id[int](#v); }\n'
+        'func test(): int { return call!(7); }\n'
         'println(str(test()));\n',
-        stderr="macro template cannot generate generic syntax",
+        stdout="7",
+    )
+    check(
+        "user macro can generate generic function values",
+        'func id[T any](x: T) { return x; }\n'
+        'macro get() { let g = id[int]; return g(7); }\n'
+        'func test(): int { return get!(); }\n'
+        'println(str(test()));\n',
+        stdout="7",
     )
     check(
         "user macro cannot generate generic calls with type fragments",
@@ -467,9 +475,74 @@ def run_cases():
         stderr="macro template cannot generate generic syntax",
     )
     check(
-        "user macro cannot generate generic struct literals",
+        "user macro can generate literal generic struct literals",
         'struct Box[T any] { value: T; }\n'
-        'macro bad(T: type) { let b = Box[int] { value: 1 }; return 1; }\n'
+        'macro make(v: expr) { let b = Box[int] { value: #v }; return b.value; }\n'
+        'func test(): int { return make!(7); }\n'
+        'println(str(test()));\n',
+        stdout="7",
+    )
+    check(
+        "user macro can generate nested literal generic struct literals",
+        'struct Box[T any] { value: T; }\n'
+        'macro make(v: expr) {\n'
+        '  let b = Box[list[int]] { value: [#v] };\n'
+        '  return b.value[0];\n'
+        '}\n'
+        'func test(): int { return make!(7); }\n'
+        'println(str(test()));\n',
+        stdout="7",
+    )
+    check(
+        "user macro can generate plain struct literals",
+        'struct Point { x: int; }\n'
+        'macro make(v: expr) { let p = Point { x: #v }; return p.x; }\n'
+        'func test(): int { return make!(7); }\n'
+        'println(str(test()));\n',
+        stdout="7",
+    )
+    check(
+        "user macro can generate literal generic enum literals",
+        'enum Option[T any] { None; Some { value: T; } }\n'
+        'macro make(v: expr) {\n'
+        '  let o = Option[int].Some { value: #v };\n'
+        '  return o.value;\n'
+        '}\n'
+        'func test(): int { return make!(7); }\n'
+        'println(str(test()));\n',
+        stdout="7",
+    )
+    check(
+        "user macro can generate fieldless literal generic enum literals",
+        'enum Option[T any] { None; Some { value: T; } }\n'
+        'macro none() { let o = Option[int].None; return 1; }\n'
+        'func test(): int { return none!(); }\n'
+        'println(str(test()));\n',
+        stdout="1",
+    )
+    check(
+        "user macro cannot generate generic struct literals with type fragments",
+        'struct Box[T any] { value: T; }\n'
+        'macro bad(T: type) { let b = Box[#T] { value: 1 }; return 1; }\n'
+        'func test(): int { return bad!(int); }\n'
+        'println(str(test()));\n',
+        stderr="macro template cannot generate generic syntax",
+    )
+    check(
+        "user macro cannot generate generic enum literals with type fragments",
+        'enum Option[T any] { None; Some { value: T; } }\n'
+        'macro bad(T: type) { let o = Option[#T].None; return 1; }\n'
+        'func test(): int { return bad!(int); }\n'
+        'println(str(test()));\n',
+        stderr="macro template cannot generate generic syntax",
+    )
+    check(
+        "user macro cannot nest type fragments in literal generic arguments",
+        'struct Box[T any] { value: T; }\n'
+        'macro bad(T: type) {\n'
+        '  let b = Box[list[#T]] { value: [1] };\n'
+        '  return 1;\n'
+        '}\n'
         'func test(): int { return bad!(int); }\n'
         'println(str(test()));\n',
         stderr="macro template cannot generate generic syntax",
@@ -509,6 +582,14 @@ def run_cases():
         'macro a(x: expr) { return b!(#x); }\n'
         'macro b(x: expr) { return a!(#x); }\n'
         'println(str(a!(1)));\n',
+        stderr="recursive user macro calls are not allowed",
+    )
+    check(
+        "recursive user macro inside struct literal field",
+        'struct Box[T any] { value: T; }\n'
+        'macro bad() { let b = Box[int] { value: bad!() }; return 1; }\n'
+        'func test(): int { return bad!(); }\n'
+        'println(str(test()));\n',
         stderr="recursive user macro calls are not allowed",
     )
     check(

@@ -113,12 +113,15 @@ make!(type((int) -> int), f)
 `[V proto Drawable]` 这类约束仍由普通源码书写。
 
 G3 边界在定义期执行：模板体不得生成 `struct` / `enum` / `proto` / `impl` 或具名
-`func` 声明（`macro template cannot generate declarations`），也不得生成显式泛型
-应用，包括模板里写死的字面实参 `f[int](...)` / `Box[int] { ... }` 和 `f[#T](...)`
-（`macro template cannot generate generic syntax`）。匿名函数表达式 `func(x) {...}`
-是普通表达式，仍然允许。这些限制只作用于模板体：调用点传入的表达式片段可以是
-`identity[int]` 这类已绑定泛型值，宏会原样克隆。类型片段不能进入反射 builtin，
-`kind_of(#T)` / `type_name(#T)` 等报 `type fragment cannot be used as a value or name`。
+`func` 声明（`macro template cannot generate declarations`）。模板里的**字面**显式
+泛型应用允许使用，例如 `f[int](...)`、`let g = f[int]`、`Box[int] { ... }` 和
+`Option[int].Some { ... }`；类型实参由 parser 在宏定义点捕获进 AST，展开时复制，
+不回读源码文本。仍不允许把 `type` 片段放进泛型实参，例如 `f[#T](...)`、
+`Box[#T] { ... }`、`Box[list[#T]]`，会报 `macro template cannot generate generic syntax`。
+匿名函数表达式 `func(x) {...}` 是普通表达式，仍然允许。这些限制只作用于模板体：
+调用点传入的表达式片段可以是 `identity[int]` 这类已绑定泛型值，宏会原样克隆。
+类型片段不能进入反射 builtin，`kind_of(#T)` / `type_name(#T)` 等报
+`type fragment cannot be used as a value or name`。
 
 ### 3.3 调用
 
@@ -309,7 +312,7 @@ wrap!(2) {
 - 编译期任意执行、编译期 I/O、反射或类型内省；
 - `pattern` / `module` / `operator` 片段，以及类型计算、类型内省和专用约束片段；
 - 宏递归、互递归或展开次数参数；
-- 生成泛型声明或泛型调用，如 `f[int](...)` / `Box[int]{}`（含模板里的字面类型实参）；
+- 生成泛型声明；模板里的字面泛型应用允许，但不能把 `type` 片段塞进泛型实参；
 - 声明生成宏：`struct` / `enum` / `proto` / `impl` 和具名 `func` 都在定义期拒绝；
 - 对 `if` / `for` / `match` / `defer` / `on error` 等核心语义的重写；用户宏不得
   重写 `fail` / `recover` / `pass`，这三者由后续阶段的内置宏 `fail!` /
@@ -323,9 +326,10 @@ wrap!(2) {
 
 显式泛型实参已由 parser 一次解析并保存在 AST 节点上（roadmap G1），typechecker
 不再回读原始源码文本。用户宏片段支持 `expr` / `ident` / `expr...` / `block` 与
-受限 `type`（G2）。G3 把这些边界固化为定义期诊断：模板不得生成声明或显式泛型
-语法（包括字面的 `f[int](...)` / `Box[int] { ... }`），类型片段不能被当作值传给
-反射 builtin；调用点已有的泛型值仍可通过 `expr` 片段传入。
+受限 `type`（G2）。G3 把这些边界固化为定义期诊断：模板不得生成声明，字面显式
+泛型应用（`f[int](...)` / `Box[int] { ... }`）可以克隆定义点捕获的实参，但 `type`
+片段不能进入泛型实参；类型片段也不能被当作值传给反射 builtin。调用点已有的
+泛型值仍可通过 `expr` 片段传入。
 
 ## 7. 诊断
 
@@ -345,7 +349,8 @@ wrap!(2) {
 - 同文件宏重名；遮蔽内置裸名不是错误，但需说明实际命中的来源；
 - 自递归 / 未注册宏调用；
 - 模板中出现声明定义：`macro template cannot generate declarations`；
-- 模板中出现泛型语法，含字面类型实参：`macro template cannot generate generic syntax`；
+- 模板中把 `type` 片段放进泛型实参，如 `f[#T]` / `Box[list[#T]]`：
+  `macro template cannot generate generic syntax`；
 - 无参数宏收到表达式参数，或需要参数的宏缺少参数；
 - 内置宏裸名与规范路径解析到不同定义时，诊断说明实际命中的来源；
 - 块片段中的控制流位置错误；
@@ -464,10 +469,10 @@ wrap!(2) {
     位置作为运算符，其他位置是普通标识符。
 
 宏与泛型结合阶段 G1–G5（已完成）紧随 P5.5：parser 先把显式泛型实参存入 AST，
-用户宏随后获得只用于类型位置的受限 `type` 片段，定义期拒绝生成声明和泛型语法；
-G4 补齐 formatter / lint / LSP 的片段覆盖、双位置诊断与 VM/JIT differential；
-G5 用负例验收非文本展开、无编译期执行/类型检查、非一等宏值等核心边界，
-语义边界保持不变。
+用户宏随后获得只用于类型位置的受限 `type` 片段，定义期拒绝生成声明；字面显式
+泛型应用可在模板中使用，但仍拒绝 `type` 片段进入泛型实参。G4 补齐 formatter /
+lint / LSP 的片段覆盖、双位置诊断与 VM/JIT differential；G5 用负例验收非文本展开、
+无编译期执行/类型检查、非一等宏值等核心边界，语义边界保持不变。
 
 每个阶段都要保持第一批宏与全量测试全绿；用户宏不得改变第一批宏的行为；每阶段
 运行 `tools/check_docs_sync.py` 与 `git diff --check`。

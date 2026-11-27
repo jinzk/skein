@@ -38,8 +38,8 @@ null true false
 
 `on` / `error` 不是全局保留字：它们只在 `expr on error(e) { ... }` handler
 位置作为 contextual keyword（保留 `%prec ON` 的绑定规则）；其他位置仍是普通
-标识符，可声明为变量、字段名或类型名。`error!` 走普通 `NAME MACRO_BANG`
-路径，按默认宏绑定解析为 `std.log.error!`。
+标识符，可声明为变量、字段名或类型名。日志宏使用规范路径
+`std.log.error!`；`error!` 只有用户自定义宏时才会解析。
 
 `as` 也不是全局保留字：它只在表达式之后（cast）、import 别名与模式绑定
 （`case P as p`）位置作为 contextual keyword；其他位置可作为变量、字段或宏名。
@@ -81,7 +81,7 @@ contextual keyword，不是全局保留字：`launch f()` 启动 task，`await f
 抛出、恢复与传播错误使用内置宏 `std.error.fail!` / `std.error.recover!` /
 `std.error.pass!`；裸 `fail` / `recover` / `pass` 只是普通标识符。
 `on` / `error` 已按 handler-scoped contextual 处理：
-`error!` 是普通宏调用，`: error` 走类型命名空间，`.error` 是普通字段。
+`std.log.error!` 是日志宏的规范路径，`: error` 走类型命名空间，`.error` 是普通字段。
 设计见 [`docs/macros_user_defined.md`](docs/macros_user_defined.md)。
 
 
@@ -885,13 +885,13 @@ import std;
 std.assert.that!(condition[, message])
 std.assert.schema!(value, spec)
 
-trace!(message[, fields])
-debug!(message[, fields])
-info!(message[, fields])
-warn!(message[, fields])
-error!(message[, fields])
+std.log.trace!(message[, fields])
+std.log.debug!(message[, fields])
+std.log.info!(message[, fields])
+std.log.warn!(message[, fields])
+std.log.error!(message[, fields])
 
-log_to!(logger, level, message[, fields])
+std.log.log_to!(logger, level, message[, fields])
 
 capture! { statements }
 ```
@@ -910,9 +910,10 @@ opcode。用户宏另有受限 `type` 片段，把调用点的类型放进类型
 `wait!`（规范路径 `std.task.wait!`，展开为 `#expr.wait()`）已实现，见
 [`docs/macros_user_defined.md`](docs/macros_user_defined.md)。
 
-内置宏裸名（`info!` / `capture!` / `fail!` / `wait!` 等）也按默认 import 处理：
-它们是解析期别名，规范路径为 `std.log.*!`、`std.result.capture!`、`std.error.*!`、
-`std.task.wait!`、`std.assert.*!`；规范路径始终可以显式调用，用户宏只遮蔽裸名。
+保留的默认宏绑定只有 `capture!` / `fail!` / `recover!` / `pass!` / `wait!` /
+`iter!`；它们是解析期便利别名，规范路径为 `std.result.capture!`、
+`std.error.*!`、`std.task.wait!`、`std.utils.iter!`。日志宏没有裸名别名，
+必须写 `std.log.*!`。规范路径始终可以显式调用，用户宏只遮蔽裸名。
 用户宏可用 `export macro name(params) { ... }` 导出，再用
 `import {name! [as alias]} from pkg;` 跨包导入；宏导入在解析期绑定，只读取导出
 模板、不执行包代码，且与值/类型选择项互不冲突。

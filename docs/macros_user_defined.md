@@ -49,12 +49,11 @@ macro name(param: expr, label: ident, body: block) {
 }
 ```
 
-`macro` 建议作为新的保留声明关键字。宏名使用普通标识符。内置宏名不是全局
-保留字，而是默认 import 的解析期绑定（第 3.5 节）：当前规范路径包括
-`std.log.trace!`、`std.log.debug!`、`std.log.info!`、`std.log.warn!`、
-`std.log.error!`、`std.log.log_to!`、`std.result.capture!`、
-`std.assert.that!`、`std.assert.schema!`、`std.error.fail!` /
-`std.error.recover!` / `std.error.pass!` / `std.task.wait!`。
+`macro` 建议作为新的保留声明关键字。宏名使用普通标识符。保留的便利内置宏
+名不是全局保留字，而是默认宏绑定（第 3.5 节）：规范路径包括
+`std.result.capture!`、`std.utils.iter!`、`std.error.fail!` /
+`std.error.recover!` / `std.error.pass!` / `std.task.wait!`。日志与断言宏
+没有裸名别名，使用 `std.log.*!` / `std.assert.*!` 规范路径。
 
 ### 3.2 参数片段
 
@@ -202,36 +201,33 @@ import {retry! as r} from util;   // 调用时写 r!(...)
 字段。parser 只在 `import { ... }` 之后、`importref` 之前把拼写为 `from` 的
 `NAME` token 当作分隔符；其他位置保持普通标识符。
 
-### 3.5 内置宏的默认 import
+### 3.5 保留的默认宏绑定
 
-内置宏不再是硬编码的裸名，而是 parser 侧的默认宏绑定：裸名是隐式导入的别名，
-每个宏都有规范路径。当前映射为：
+只有下列便利宏保留 parser 侧的默认绑定；裸名是解析期别名，每个宏都有规范
+路径。日志宏不在这个白名单里。当前映射为：
 
 | 裸名 | 规范路径 |
 | --- | --- |
-| `trace!` | `std.log.trace!` |
-| `debug!` | `std.log.debug!` |
-| `info!` | `std.log.info!` |
-| `warn!` | `std.log.warn!` |
-| `error!` | `std.log.error!` |
-| `log_to!` | `std.log.log_to!` |
 | `capture!` | `std.result.capture!` |
 | `fail!` | `std.error.fail!` |
 | `recover!` | `std.error.recover!` |
 | `pass!` | `std.error.pass!` |
 | `wait!` | `std.task.wait!` |
+| `iter!` | `std.utils.iter!` |
 
-`std.assert.that!` / `std.assert.schema!` 本身就是规范路径，没有裸名别名。
+`std.assert.that!` / `std.assert.schema!` / `std.log.*!` 本身就是规范路径，
+没有裸名别名。
 
 宏解析发生在语法分析阶段，顺序为：
 
 ```text
-同文件用户宏 > 显式 import 的宏 > 默认 import 的内置宏 > 未知宏诊断
+同文件用户宏 > 显式 import 的宏 > 保留的默认宏绑定 > 未知宏诊断
 ```
 
-规范路径始终可以显式写，不受裸名遮蔽影响。例如同文件用户定义了同名 `info`
-宏后，`info!` 指向用户宏，`std.log.info!` 仍指向内置宏。`error!` 也走这条普通
-`NAME MACRO_BANG` 路径；`error` 本身可以是变量、字段或类型名。
+规范路径始终可以显式写，不受裸名遮蔽影响。例如同文件用户定义了同名 `fail`
+宏后，`fail!` 指向用户宏，`std.error.fail!` 仍指向内置宏。`error!` 也走普通
+`NAME MACRO_BANG` 路径，但不再默认指向日志宏；日志请写 `std.log.error!`。
+`error` 本身可以是变量、字段或类型名。
 
 ## 4. 展开模型
 
@@ -243,7 +239,7 @@ Parser 维护一个 `MacroTable`，键为宏名，值为已验证的 `MacroTempl
 
 1. 解析到 `macro` 声明时，把宏体解析成内部模板 AST，校验片段位置和占位符；
 2. 校验通过后注册到 `MacroTable`；该声明本身不产生运行时 AST；
-3. 解析到 `name!(...)` 时，先查 `MacroTable`，再按默认 import 映射解析内置
+3. 解析到 `name!(...)` 时，先查 `MacroTable`，再按保留的默认绑定解析内置
    宏；显式 import 的宏在跨包阶段位于两者之间；
 4. 找到用户宏后，在 grammar action 中实例化模板；
 5. 实例化后的普通 AST 才进入逐 `top_statement` 的 typecheck。
@@ -460,8 +456,8 @@ builtin，调用点已有的泛型值仍可通过 `expr` 片段传入。
 8. **P4.3（已完成）**：`export macro` 与 `import {name!} from pkg;`（含 alias）、
    宏与值/类型命名空间的隔离、定义点宏表快照、跨包 hygiene、循环检测、
    parse-only 包读取和完整测试矩阵；引号形式的外部 module 宏导入暂不支持。
-9. **P5.1（已完成）**：`on` / `error` 评估 handler-scoped contextual；`error!` 改为普通
-    `NAME MACRO_BANG` 路径，`type error` 走类型命名空间，`.error` 仍是普通字段；
+9. **P5.1（已完成）**：`on` / `error` 评估 handler-scoped contextual；`std.log.error!` /
+    用户宏走普通 `NAME MACRO_BANG` 路径，`type error` 走类型命名空间，`.error` 仍是普通字段；
    保留 `%prec ON`，补齐 handler body / defer / 默认参数诊断。
 10. **P5.2（已完成）**：`as` 改为 contextual；cast、import 别名与模式绑定仍是
     分隔符，其他位置是普通标识符。
@@ -509,8 +505,8 @@ formatter / lint / LSP 的片段覆盖、双位置诊断与 VM/JIT differential�
    或 handler-scoped contextual 方案；诊断仍由现有 handler 栈检查产生；
 14. 宏简写只支持 `name!` 与 `name! x`；列表、字典、表达式、嵌套宏和成员链
    一律写括号；`foo! { ... }` 始终是 block；
-15. `on` / `error` 已按 handler-scoped contextual 落地：`error!` 走普通宏路径，类型与字段位置不受影响；
-16. 内置宏默认 import 映射采用第 3.5 节的表；`std.error.fail!` /
+15. `on` / `error` 已按 handler-scoped contextual 落地：`std.log.error!` 与用户宏走普通宏路径，类型与字段位置不受影响；
+16. 保留的默认宏绑定采用第 3.5 节的表；`std.error.fail!` /
     `std.error.recover!` / `std.error.pass!` 是规范路径，裸关键字形式已移除；
 17. 协议声明关键字 `protocol` 重命名为 `proto`，作为全局保留字；泛型约束列表中
     的 `proto` / `type` 是地位相同的 contextual 标记，只在类型参数约束位置

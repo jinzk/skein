@@ -143,17 +143,14 @@ bool known_level(const std::string &level) {
            level == "warn" || level == "error";
 }
 
-std::string canonical_macro_name(const std::string &name) {
+/* Deliberately retained convenience bindings.  These are the only bare macro
+ * names resolved by default; logging macros have no bare alias and must use
+ * their std.log.*! canonical paths. */
+std::string default_macro_path(const std::string &name) {
     static const struct {
         const char *alias;
         const char *canonical;
-    } aliases[] = {
-        {"trace", "std.log.trace"},
-        {"debug", "std.log.debug"},
-        {"info", "std.log.info"},
-        {"warn", "std.log.warn"},
-        {"error", "std.log.error"},
-        {"log_to", "std.log.log_to"},
+    } bindings[] = {
         {"capture", "std.result.capture"},
         {"fail", "std.error.fail"},
         {"recover", "std.error.recover"},
@@ -161,7 +158,7 @@ std::string canonical_macro_name(const std::string &name) {
         {"wait", "std.task.wait"},
         {"iter", "std.utils.iter"},
     };
-    for (const auto &entry : aliases) {
+    for (const auto &entry : bindings) {
         if (name == entry.alias)
             return entry.canonical;
     }
@@ -271,7 +268,7 @@ struct ast *expand_builtin_macro(struct ast *callee, struct ast *args,
         treefree(block);
         return NULL;
     }
-    name = canonical_macro_name(name);
+    name = default_macro_path(name);
 
     std::vector<struct ast *> checked_args;
     collect_args(args, checked_args);

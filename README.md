@@ -270,7 +270,7 @@ let n = parse_positive("0") on error(e) {
 - task 内的错误在观察点抛出：`std.task.wait!(t) on error(e) { ... }`、`std.task.wait!(launch f()) on error(e) { ... }`；
 - `launch f() on error(...)` 不能捕获任务体错误，会产生 warning；
 - `on` / `error` 是 handler-scoped contextual keyword，其他位置仍是普通标识符
-  （变量、字段、类型名均可）；`error!` 走普通宏解析路径；
+  （变量、字段、类型名均可）；日志宏使用 `std.log.error!` 等规范路径；
 - 详见 [SYNTAX.md](SYNTAX.md) 和 [docs/stdlib.md](docs/stdlib.md)。
 
 ## 能力一览

@@ -17,7 +17,7 @@ def run_cases():
         "import std;\n"
         'func boom() { std.error.fail!("must not run"); }\n'
         'std.log.set_level("error");\n'
-        'info!("hidden", {"x": boom()});\n'
+        'std.log.info!("hidden", {"x": boom()});\n'
         'std.io.println("guard-ok");\n'
     )
     assert proc.returncode == 0, proc.stderr
@@ -26,7 +26,7 @@ def run_cases():
     proc = run(
         "import std;\n"
         'std.log.set_level("trace");\n'
-        'info!("visible", {"x": 3});\n'
+        'std.log.info!("visible", {"x": 3});\n'
     )
     assert proc.returncode == 0, proc.stderr
     assert " INFO  visible x=3" in proc.stderr, proc.stderr
@@ -34,8 +34,8 @@ def run_cases():
     proc = run(
         "import std;\n"
         'std.log.set_level("error");\n'
-        'error!("bad", {"x": 1});\n'
-        'let v = info!("guarded");\n'
+        'std.log.error!("bad", {"x": 1});\n'
+        'let v = std.log.info!("guarded");\n'
         'std.io.println(str(v));\n'
     )
     assert proc.returncode == 0, proc.stderr
@@ -46,7 +46,7 @@ def run_cases():
         "import std;\n"
         'let lg = std.log.new({"output": "stdout", "level": "trace", '
         '"name": "macro"});\n'
-        'log_to!(lg, "debug", "to logger", {"k": 1});\n'
+        'std.log.log_to!(lg, "debug", "to logger", {"k": 1});\n'
     )
     assert proc.returncode == 0, proc.stderr
     assert "DEBUG macro: to logger k=1" in proc.stdout, proc.stdout
@@ -58,7 +58,7 @@ def run_cases():
         '  std.io.println("get");\n'
         '  return lg;\n'
         '}\n'
-        'log_to!(get_logger(), "debug", "once");\n'
+        'std.log.log_to!(get_logger(), "debug", "once");\n'
     )
     assert proc.returncode == 0, proc.stderr
     assert sum(line == "get" for line in proc.stdout.splitlines()) == 1, \
@@ -74,14 +74,20 @@ def run_cases():
         "import std;\nfoo!(1);\n",
         stderr="is not a known built-in or user-defined macro",
     )
+    for alias in ("trace", "debug", "info", "warn", "error", "log_to"):
+        check(
+            f"logging macro alias {alias}! is not a default binding",
+            f'import std;\n{alias}!("x");\n',
+            stderr="is not a known built-in or user-defined macro",
+        )
     check(
         "macro wrong arity",
-        'import std;\ninfo!();\n',
+        'import std;\nstd.log.info!();\n',
         stderr="expects 1 or 2 expression arguments",
     )
     check(
         "macro mixed invocation rejects block",
-        'import std;\ninfo!("x") { std.io.println(1); };\n',
+        'import std;\nstd.log.info!("x") { std.io.println(1); };\n',
         stderr="does not accept a block",
     )
 
@@ -265,7 +271,7 @@ def run_cases():
         stdout="100\n2",
     )
     check(
-        "user macro shadows builtin bare name but not canonical path",
+        "user macro uses ordinary bare path distinct from canonical builtin path",
         'import std;\n'
         'macro info(x: expr) { return #x + 100; }\n'
         'func bare(): int { return info!(1); }\n'
@@ -280,7 +286,7 @@ def run_cases():
         stderr=" INFO  canonical",
     )
     check(
-        "P5.1 error! uses the ordinary macro path and can be shadowed",
+        "user error macro uses ordinary bare path distinct from canonical builtin path",
         'import std;\n'
         'macro error(x: expr) { #x + 100; }\n'
         'func bare(): int { return error!(1); }\n'
@@ -441,7 +447,7 @@ def run_cases():
     )
     check(
         "builtin macro rejects type argument",
-        'info!(type(int));\n'
+        'std.log.info!(type(int));\n'
         'std.io.println("ok");\n',
         stderr="does not accept type arguments",
     )

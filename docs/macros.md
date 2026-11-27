@@ -38,7 +38,7 @@ name!(expr, ...) { statements }
 示例：
 
 ```text
-info!("ready", {"service": "api"});
+std.log.info!("ready", {"service": "api"});
 capture! { return int("42"); }
 ```
 
@@ -56,18 +56,13 @@ name! x     // 单个 NAME 参数
 
 ## 3. 第一批内置宏
 
-下面的裸名都是默认 import 的解析期别名；右侧规范路径始终可以显式调用。用户
-自定义宏可以遮蔽裸名，规范路径不受影响，见
-[`docs/macros_user_defined.md`](macros_user_defined.md)。
+只保留下列便利宏的默认解析期绑定；右侧规范路径始终可以显式调用。用户自定义
+宏可以遮蔽裸名，规范路径不受影响，见
+[`docs/macros_user_defined.md`](macros_user_defined.md)。日志宏没有裸名别名，
+必须写 `std.log.*!`。
 
 | 裸名 | 规范路径 |
 | --- | --- |
-| `trace!` | `std.log.trace!` |
-| `debug!` | `std.log.debug!` |
-| `info!` | `std.log.info!` |
-| `warn!` | `std.log.warn!` |
-| `error!` | `std.log.error!` |
-| `log_to!` | `std.log.log_to!` |
 | `capture!` | `std.result.capture!` |
 | `fail!` | `std.error.fail!` |
 | `recover!` | `std.error.recover!` |
@@ -101,14 +96,14 @@ schema 是纯数据描述，不是类型标注，也不是 `shape` 类型。
 ### 3.2 默认 logger
 
 ```text
-trace!("message"[, fields])
-debug!("message"[, fields])
-info!("message"[, fields])
-warn!("message"[, fields])
-error!("message"[, fields])
+std.log.trace!("message"[, fields])
+std.log.debug!("message"[, fields])
+std.log.info!("message"[, fields])
+std.log.warn!("message"[, fields])
+std.log.error!("message"[, fields])
 ```
 
-`info!("done", {"ms": elapsed()})` 展开为：
+`std.log.info!("done", {"ms": elapsed()})` 展开为：
 
 ```text
 import std;
@@ -118,20 +113,20 @@ if (std.log.enabled("info")) {
 ```
 
 级别关闭时，`message` 和 `fields` 表达式完全不求值，宏表达式的结果是 `null`。
-`error!` 现在与普通 `NAME MACRO_BANG` 走同一条解析路径：裸名是默认宏绑定，
-规范路径 `std.log.error!` 始终可用；`error` 本身已不是保留字，`: error` 走类型
-命名空间，`.error` 是普通字段。
+`std.log.error!` 与普通 `NAME MACRO_BANG` 走同一条解析路径；`error!` 不再默认
+指向日志宏，只有用户自定义同名宏时才会解析。`error` 本身已不是保留字，
+`: error` 走类型命名空间，`.error` 是普通字段。
 
 ### 3.3 指定 logger
 
 ```text
-log_to!(logger, level, message[, fields])
+std.log.log_to!(logger, level, message[, fields])
 ```
 
 示例：
 
 ```text
-log_to!(lg, "debug", "cache miss", {"key": key});
+std.log.log_to!(lg, "debug", "cache miss", {"key": key});
 ```
 
 展开为：

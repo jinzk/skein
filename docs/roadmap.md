@@ -54,7 +54,7 @@
 - P1 / P2 / P3.1：`proto`、selective import、prelude 默认 import、`list` / `dict` 构造器、`fail!` / `recover!` / `pass!` / `wait!` 宏，以及 `launch` / `wait` / `await` contextual keyword
 - P4：用户自定义宏 v1（四种片段、hygiene、嵌套调用、递归禁止）与跨包
   `export macro` / `import {name!}`（parse-only 包读取、宏命名空间隔离、循环检测）
-- P5.1：`on` / `error` handler-scoped contextual；`error!` 走普通宏路径，`type error` / `.error` 不受影响
+- P5.1：`on` / `error` handler-scoped contextual；`std.log.error!` / 用户宏走普通宏路径，`type error` / `.error` 不受影响
 - P5.2：`as` contextual；cast、import 别名与模式绑定仍是分隔符，其他位置是普通标识符
 - P5.3：`ref` contextual；`ref(x)`、`ref Point { ... }` 与 `ref T` 前缀保持，其他位置是普通标识符
 - P5.4：`weak` contextual；只在 `weak T` 类型前缀位置作为关键字，其他位置是普通标识符
@@ -544,7 +544,7 @@ keyword（`in` / `export` / `import` / `package` / `include`）已完成。其�
    宏与值/类型命名空间隔离、定义点宏表快照、跨包 hygiene、循环检测、parse-only
    包读取与测试矩阵均已完成；引号形式的外部 module 宏导入暂不支持。
 9. **P5.1（已完成）** `on` / `error` 改为 handler-scoped contextual，保留 `%prec ON`；
-   `error!` 改为普通 `NAME MACRO_BANG` 路径，`type error` 走类型命名空间。
+   `std.log.error!` / 用户宏走普通 `NAME MACRO_BANG` 路径，`type error` 走类型命名空间。
 10. **P5.2（已完成）** `as` contextual：cast、import 别名与模式绑定位置为分隔符，其他位置仍是普通标识符。
 11. **P5.3（已完成）** `ref` contextual：`ref(x)`、`ref Point { ... }` 与 `ref T` 前缀保持，其他位置仍是普通标识符。
 12. **P5.4（已完成）** `weak` contextual：只在 `weak T` 类型前缀位置作为关键字，其他位置仍是普通标识符。

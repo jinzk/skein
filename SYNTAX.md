@@ -380,7 +380,32 @@ a >= b
 - 大小比较只支持数值之间或字符串之间；
 - 所有比较运算返回 `bool`；
 - `<>` 是 `!=` 的别名；
+- 静态已知的用户 struct/enum 可以通过 `op_eq` 重载 `==` / `!=`，通过
+  `op_cmp` 的符号重载 `<` / `<=` / `>` / `>=`；表达式在类型检查期改写为
+  普通方法调用或与其返回值的比较，内置类型不受影响；
 - 比较运算符不能连续使用，例如 `a < b < c` 是语法错误。
+
+```text
+struct Counter {
+  value: int;
+
+  func op_eq(self, rhs: Counter): bool {
+    return self.value == rhs.value;
+  }
+  func op_cmp(self, rhs: Counter): int {
+    return self.value - rhs.value;
+  }
+}
+
+let a = Counter { value: 1 };
+let b = Counter { value: 2 };
+a == b    // false
+a < b     // true
+```
+
+`op_eq` 必须返回 `bool`，`op_cmp` 必须返回 `int`（负数 / 0 / 正数）。自定义
+相等不改变 dict/set key 判定、`list.contains` 或模式匹配；这些路径仍使用各自的
+既有相等逻辑。
 
 ### 4.3 逻辑运算
 
@@ -2383,11 +2408,12 @@ let d = Point { ...p, x: 9 };
 - 普通值不允许创建环：`a.next = b; b.next = a;` 会报 `recursive value would create a cycle`；共享子结构（DAG）允许；使用 `ref` 字段的强引用环由 GC 回收，见 5.12.3；
 - 字段可以保存 `Callable` / `function` 值，作为普通回调使用，不会自动绑定 `self`；
 - 不支持继承、静态方法或动态添加方法；`std.ops` 定义的 `Add` / `Sub` / `Mul` /
-  `Div` / `Mod` proto 对应的 `op_*` 方法可用于用户类型重载算术运算符：当左操作数
-  是静态已知的 struct/enum 且定义了匹配方法时，`a + b` 会在类型检查阶段改写为
-  `a.op_add(b)`，内置类型仍走原有 fast path；`Equatable` / `Comparable` 的运算符
-  尚未接线。唯一例外是构造函数，见 5.12.4；泛型 `struct` / `enum` / `proto` / 函数
-  见“用户自定义泛型”；
+  `Div` / `Mod` / `Equatable` / `Comparable` proto 对应的 `op_*` 方法可用于用户
+  类型重载运算符：当左操作数是静态已知的 struct/enum 且定义了匹配方法时，`a + b`
+  在类型检查阶段改写为 `a.op_add(b)`，`a == b` / `a != b` 改用 `op_eq`，
+  `< <= > >=` 改用 `op_cmp` 的符号；内置类型仍走原有 fast path，泛型类型变量仍
+  使用显式方法调用。唯一例外是构造函数，见 5.12.4；泛型 `struct` / `enum` /
+  `proto` / 函数见“用户自定义泛型”；
 - 内建容器的类型参数见变量类型标注章节。
 
 #### 5.12.4 构造函数

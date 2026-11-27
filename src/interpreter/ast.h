@@ -635,8 +635,8 @@ struct incdec_node {
 };
 
 struct ast *newast(int nodetype, struct ast *l, struct ast *r);
-/* Arithmetic operator nodes need room to be rewritten into a method call by
- * the type checker without replacing the node in its parent. */
+/* Arithmetic and comparison operator nodes need room to be rewritten into
+ * method calls by the type checker without replacing the node in its parent. */
 struct ast *newarith(int nodetype, struct ast *l, struct ast *r);
 struct ast *newcmp(int cmptype, struct ast *l, struct ast *r);
 struct ast *newcall(struct ast *callee, struct ast *l);

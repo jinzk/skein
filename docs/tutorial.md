@@ -419,9 +419,10 @@ x is Keyed[int]   // 错误
 ```
 
 `std.ops` 提供 `Add` / `Sub` / `Mul` / `Div` / `Mod` / `Equatable` / `Comparable`
-等结构式 proto，可用于泛型约束。算术协议对应的 `op_*` 方法也已接入 `+` / `-` /
-`*` / `/` / `%`：静态已知的用户 struct/enum 定义方法后即可重载，内置类型不变。
-相等与比较运算符尚未接线。
+等结构式 proto，可用于泛型约束。对应的 `op_*` 方法也已接入运算符：静态已知的
+用户 struct/enum 定义方法后，`+` / `-` / `*` / `/` / `%` 使用算术方法，`==` /
+`!=` 使用 `op_eq`，`<` / `<=` / `>` / `>=` 使用 `op_cmp` 的符号；内置类型不变，
+泛型类型变量仍使用显式方法调用。
 
 ```text
 struct Counter {
@@ -429,10 +430,22 @@ struct Counter {
   func op_add(self, rhs: Counter): Counter {
     return Counter { value: self.value + rhs.value };
   }
+  func op_eq(self, rhs: Counter): bool {
+    return self.value == rhs.value;
+  }
+  func op_cmp(self, rhs: Counter): int {
+    return self.value - rhs.value;
+  }
 }
 
-let c = Counter { value: 1 } + Counter { value: 2 };  // Counter { value: 3 }
+let a = Counter { value: 1 };
+let b = Counter { value: 2 };
+let c = a + b;    // Counter { value: 3 }
+a == b            // false
+a < b             // true
 ```
+
+自定义 `op_eq` 不改变 dict/set key、`list.contains` 或模式匹配的既有相等逻辑。
 
 元数据和序列化：
 

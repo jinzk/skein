@@ -1,7 +1,8 @@
 package ops {
   // Binary arithmetic protocols.  R is the right-hand-side type and O is
   // the result type.  A type conforms structurally by defining a matching
-  // op_* method.  Operator expressions do not use these protocols yet.
+  // op_* method.  Operator expressions use these methods for statically
+  // known struct/enum receivers.
   proto Add[R any, O any] {
     func op_add(self, rhs: R): O;
   }

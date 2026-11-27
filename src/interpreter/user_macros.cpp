@@ -493,7 +493,10 @@ struct ast *clone_pair(const struct ast *node, expansion_state &state,
     const int op = node->nodetype;
     const bool arithmetic = op == '+' || op == '-' || op == '*' ||
                             op == '/' || op == '%';
-    struct ast *copy = arithmetic ? newarith(op, l, r) : newast(op, l, r);
+    const bool comparison = op >= '1' && op <= '6';
+    struct ast *copy = arithmetic    ? newarith(op, l, r)
+                       : comparison ? newcmp(op - '0', l, r)
+                                    : newast(op, l, r);
     copy->line = node->line;
     copy->column = node->column;
     return copy;

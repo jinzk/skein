@@ -329,16 +329,24 @@ struct ast *newarith(int nodetype, struct ast *l, struct ast *r) {
 }
 
 struct ast *newcmp(int cmptype, struct ast *l, struct ast *r) {
-    struct ast *a = (struct ast *)ast_node_alloc(sizeof(struct ast));
+    /* Comparison nodes can be rewritten into method calls or into a call
+     * compared against zero, so reserve call-node storage up front. */
+    struct ufncall *a =
+        (struct ufncall *)ast_node_alloc(sizeof(struct ufncall));
     if (!a) {
         yyerror("out of space");
         std::exit(0);
     }
     a->nodetype = '0' + cmptype;
     set_loc_from(a, l);
-    a->l = l;
-    a->r = r;
-    return a;
+    a->callee = NULL;
+    a->args = NULL;
+    a->launch = 0;
+    a->awaited = 0;
+    a->wait_sugar = 0;
+    ((struct ast *)a)->l = l;
+    ((struct ast *)a)->r = r;
+    return (struct ast *)a;
 }
 
 struct ast *newcall(struct ast *callee, struct ast *l) {

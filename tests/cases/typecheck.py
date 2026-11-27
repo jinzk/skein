@@ -344,6 +344,26 @@ def run_cases():
           "let x = NoOp {} + NoOp {};\n",
           stderr="runtime error: cannot add NoOp and NoOp")
 
+    check("equality overload rejects wrong rhs type",
+          "struct Eq { func op_eq(self, rhs: Eq): bool { return true; } }\n"
+          "let x = Eq {} == 1;\n",
+          stderr="type error: expected Eq, got int")
+
+    check("equality overload requires bool result",
+          "struct Eq { func op_eq(self, rhs: Eq): int { return 1; } }\n"
+          "let x = Eq {} == Eq {};\n",
+          stderr="type error: op_eq must return bool, got int")
+
+    check("ordering overload rejects wrong rhs type",
+          "struct Cmp { func op_cmp(self, rhs: Cmp): int { return 0; } }\n"
+          "let x = Cmp {} < 1;\n",
+          stderr="type error: expected Cmp, got int")
+
+    check("ordering overload requires int result",
+          "struct Cmp { func op_cmp(self, rhs: Cmp): bool { return true; } }\n"
+          "let x = Cmp {} >= Cmp {};\n",
+          stderr="type error: op_cmp must return int, got bool")
+
     check("generic default type must be trailing",
           "struct Bad[T = int, U any] { }\n",
           stderr="type error: default type parameters must be trailing")

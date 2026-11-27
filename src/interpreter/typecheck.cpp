@@ -3800,8 +3800,20 @@ struct Checker : public BuiltinContext {
         }
     }
 
-    bool has_user_arithmetic_method(const TypeNode *type,
-                                    const char *method_name) {
+    static const char *comparison_method_name(int nodetype) {
+        switch (nodetype) {
+            case '1':
+            case '2':
+            case '5':
+            case '6': return "op_cmp";
+            case '3':
+            case '4': return "op_eq";
+            default: return NULL;
+        }
+    }
+
+    bool has_user_operator_method(const TypeNode *type,
+                                  const char *method_name) {
         type = unwrap_ref_type(type);
         structtype_lookup_result lookup;
         if (!lookup_type_node(type, lookup))
@@ -3819,12 +3831,35 @@ struct Checker : public BuiltinContext {
         return method && method->code != NULL;
     }
 
-    /* Rewrite a binary arithmetic expression into a method call in place.
-     * Arithmetic nodes are allocated with call-node storage, so the original
+    static bool operator_result_matches(const TypeNode *result,
+                                        enum type_constraint_kind expected) {
+        return result &&
+               (result->kind == expected || result->kind == TYPE_ANY);
+    }
+
+    struct ast *make_operator_method_call(struct ast *lhs, struct ast *rhs,
+                                          const char *method_name,
+                                          int line, int column) {
+        struct ast *member = newast('j', lhs, newstr(method_name));
+        member->line = line;
+        member->column = column;
+        struct ast *args = newast('L', rhs, NULL);
+        args->line = line;
+        args->column = column;
+        struct ast *call = newcall(member, args);
+        call->line = line;
+        call->column = column;
+        return call;
+    }
+
+    /* Rewrite a binary operator expression into a method call in place.
+     * Operator nodes are allocated with call-node storage, so the original
      * node identity (and every parent pointer) stays valid. */
-    const TypeNode *rewrite_arithmetic_call(struct ast *expr, Env &env,
-                                             const char *method_name) {
-        struct ast *member = newast('j', expr->l, newstr(method_name));
+    const TypeNode *rewrite_operator_call_in_place(struct ast *expr,
+                                                   Env &env,
+                                                   const char *method_name) {
+        struct ast *member =
+            newast('j', expr->l, newstr(method_name));
         member->line = expr->line;
         member->column = expr->column;
         struct ast *args = newast('L', expr->r, NULL);
@@ -3841,6 +3876,54 @@ struct Checker : public BuiltinContext {
         if (!check_call(expr, type_any(), env, result))
             return type_any();
         return result;
+    }
+
+    const TypeNode *rewrite_comparison_call(struct ast *expr, Env &env,
+                                             const char *method_name) {
+        const int op = expr->nodetype;
+        if (op == '4') {
+            const TypeNode *result =
+                rewrite_operator_call_in_place(expr, env, method_name);
+            if (!operator_result_matches(result, TYPE_BOOL)) {
+                char message[256];
+                std::snprintf(message, sizeof(message),
+                              "%s must return bool, got %s", method_name,
+                              type_display(result));
+                report_error(expr->line, expr->column, message);
+                return type_any();
+            }
+            return type_builtin(TYPE_BOOL);
+        }
+
+        const bool equality = op == '3';
+        const enum type_constraint_kind expected =
+            equality ? TYPE_BOOL : TYPE_INT;
+        struct ast *call = make_operator_method_call(
+            expr->l, expr->r, method_name, expr->line, expr->column);
+        if (equality) {
+            /* a != b becomes !(a.op_eq(b)). */
+            expr->l = call;
+            expr->r = NULL;
+            expr->nodetype = '!';
+        } else {
+            /* a < b becomes a.op_cmp(b) < 0 (and likewise for <=, >, >=). */
+            struct ast *zero = newint(0);
+            zero->line = expr->line;
+            zero->column = expr->column;
+            expr->l = call;
+            expr->r = zero;
+        }
+        const TypeNode *result = infer(call, env);
+        if (!operator_result_matches(result, expected)) {
+            char message[256];
+            std::snprintf(message, sizeof(message),
+                          "%s must return %s, got %s", method_name,
+                          type_display(type_builtin(expected)),
+                          type_display(result));
+            report_error(expr->line, expr->column, message);
+            return type_any();
+        }
+        return type_builtin(TYPE_BOOL);
     }
 
     void rewrite_iterable_call(struct forinloop *f) {
@@ -4725,22 +4808,30 @@ struct Checker : public BuiltinContext {
             case 'A':
             case 'Q':
             case '!':
+                infer(expr->l, env);
+                infer(expr->r, env);
+                return type_builtin(TYPE_BOOL);
             case '1':
             case '2':
             case '3':
             case '4':
             case '5':
-            case '6':
-                infer(expr->l, env);
+            case '6': {
+                const TypeNode *left = infer(expr->l, env);
                 infer(expr->r, env);
+                const char *method =
+                    comparison_method_name(expr->nodetype);
+                if (method && has_user_operator_method(left, method))
+                    return rewrite_comparison_call(expr, env, method);
                 return type_builtin(TYPE_BOOL);
+            }
             case '+': {
                 const TypeNode *left = infer(expr->l, env);
                 const TypeNode *right = infer(expr->r, env);
                 const char *method = arithmetic_method_name(expr->nodetype);
                 if (method && expr->r &&
-                    has_user_arithmetic_method(left, method))
-                    return rewrite_arithmetic_call(expr, env, method);
+                    has_user_operator_method(left, method))
+                    return rewrite_operator_call_in_place(expr, env, method);
                 if (left->kind == TYPE_LIST && right->kind == TYPE_LIST) {
                     const TypeNode *a = left->args.empty()
                                             ? type_any()
@@ -4777,8 +4868,8 @@ struct Checker : public BuiltinContext {
                     expr->r ? infer(expr->r, env) : NULL;
                 const char *method = arithmetic_method_name(expr->nodetype);
                 if (method && expr->r &&
-                    has_user_arithmetic_method(left, method))
-                    return rewrite_arithmetic_call(expr, env, method);
+                    has_user_operator_method(left, method))
+                    return rewrite_operator_call_in_place(expr, env, method);
                 if ((left->kind == TYPE_INT || left->kind == TYPE_FLOAT ||
                      left->kind == TYPE_NUMBER) &&
                     (!right || right->kind == TYPE_INT ||

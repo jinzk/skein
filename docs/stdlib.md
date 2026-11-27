@@ -2523,9 +2523,9 @@ struct User {
 `std.ops` 是内嵌 Skein 源码包（`lib/std/ops.skein`），提供操作符相关 proto：
 `Add[R, O]` / `Sub[R, O]` / `Mul[R, O]` / `Div[R, O]` / `Mod[R, O]`、
 `Equatable[R]` 和 `Comparable[R]`。它们是普通结构式 proto，可用在泛型约束中。
-算术协议对应的 `op_*` 方法也已接入运算符表达式：当左操作数是静态已知的
-struct/enum 且定义了匹配方法时，`a + b` 等表达式会在类型检查期改写为
-`a.op_add(b)` 等调用，返回方法声明的类型；内置类型仍走原有 fast path。
+对应的 `op_*` 方法也已接入运算符表达式：当左操作数是静态已知的 struct/enum 且
+定义了匹配方法时，表达式会在类型检查期改写为普通方法调用；内置类型仍走原有
+fast path，泛型类型变量仍使用显式方法调用。
 
 ```text
 struct Counter {
@@ -2533,9 +2533,19 @@ struct Counter {
   func op_add(self, rhs: Counter): Counter {
     return Counter { value: self.value + rhs.value };
   }
+  func op_eq(self, rhs: Counter): bool {
+    return self.value == rhs.value;
+  }
+  func op_cmp(self, rhs: Counter): int {
+    return self.value - rhs.value;
+  }
 }
 
-let c = Counter { value: 1 } + Counter { value: 2 };
+let a = Counter { value: 1 };
+let b = Counter { value: 2 };
+let c = a + b;    // Counter { value: 3 }
+a == b            // false
+a < b             // true
 
 import {Add} from std.ops;
 
@@ -2548,8 +2558,11 @@ func add[T Add[T, T]](a: T, b: T): T {
 不支持。
 
 `std.ops.Equatable.op_eq` 与 `std.dict_key.KeyEquatable.key_eq` 是两个不同协议；
-后者只服务 dict/set key。相等与比较运算符当前仍不使用 `op_eq` / `op_cmp`；
-`Comparable` 使用单一 `op_cmp` 返回负数 / 0 / 正数，标准库算法当前也不使用它。
+后者只服务 dict/set key。`==` / `!=` 在用户类型上走 `op_eq`（`!=` 取反），
+`< <= > >=` 走 `op_cmp` 返回值的符号；`op_eq` 不改变 dict/set key、
+`list.contains` 或模式匹配的既有相等逻辑。数值、字符串和 NaN 的内置比较语义
+保持不变。`Comparable` 使用单一 `op_cmp` 返回负数 / 0 / 正数，标准库算法当前
+也不使用它。
 
 `std.traits` 是内嵌 Skein 源码包（`lib/std/traits.skein`），提供内置 trait proto。`Hashable`、`Iterable`、`Callable` 都是默认导入的 prelude proto，无需显式 import。
 

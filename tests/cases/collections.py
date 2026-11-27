@@ -157,7 +157,7 @@ def run_cases():
           'while (i < 40) { big[User { id: i, cache: [] }] = i; i = i + 1; }\n'
           'println(big[User { id: 20, cache: [1] }]);\n',
           stdout_all=["a", "1", "1", "20"])
-    check("custom hash keeps structural equality without KeyEq",
+    check("custom hash keeps structural equality without KeyEquatable",
           'import std;\nimport std.dict_key;\n'
           'struct User { id: int; cache: list[int]; }\n'
           'impl User {\n'

@@ -2484,7 +2484,7 @@ r = lru.put(l, "c", 3);    // 淘汰 b
 r["evicted"]               // {key: b, value: 2}
 ```
 
-API：`new` / `get` / `peek` / `put` / `delete` / `has` / `keys` / `values` / `size` / `capacity` / `clear`。key 必须是合法 dict key（包括由合法 key 元素组成的 tuple/pair，以及字段递归可哈希或实现 `std.dict_key.DictKey` 的 struct/enum）；`keys` / `values` 从最久未使用到最近使用排列。
+API：`new` / `get` / `peek` / `put` / `delete` / `has` / `keys` / `values` / `size` / `capacity` / `clear`。key 必须是合法 dict key（包括由合法 key 元素组成的 tuple/pair，以及字段递归可哈希或实现 `std.dict_key.DictHashable` 的 struct/enum）；`keys` / `values` 从最久未使用到最近使用排列。
 
 `Lru` 是普通 struct（字段 `cap` / `map` / `order`），保持值语义：每次更新返回新值，旧值不变。因为不再是原生不透明类型，`kind_of` 返回 `"struct"`，JSON 会编码内部字段；跨线程传输按普通 struct 处理，函数 / heap 等特殊值不能嵌套在 LRU 字段中传输。单次更新 O(n)。
 
@@ -2511,10 +2511,10 @@ struct User {
 
 `dict_hash` 必须是纯函数、确定性、无副作用，并且与 key 相等语义一致：相等的值必须返回相同的 hash。实现后该 struct/enum 可以跳过字段递归可哈希检查，直接作为 `dict` key 或 `set` 元素；hash 相同但 key 不相等的值只会在同一个桶里冲突。hash 期间禁止重入 dict/set key hash。
 
-`KeyEq` 是可选的 key 相等接口：
+`KeyEquatable` 是可选的 key 相等接口：
 
-- 只有同时实现 `DictKey` 的 struct/enum 才会使用 `key_eq`。
-- 未实现 `KeyEq` 时继续使用结构相等。
+- 只有同时实现 `DictHashable` 的 struct/enum 才会使用 `key_eq`。
+- 未实现 `KeyEquatable` 时继续使用结构相等。
 - `key_eq` 只影响 dict/set（以及 unique、group_by、LRU 等内部使用 dict/set 的操作），**不改变普通 `==`**。
 - `key_eq` 必须是纯函数、确定性、无副作用，并且与 `dict_hash` 一致：`a.key_eq(b)` 为 true 时，`dict_hash(a)` 和 `dict_hash(b)` 必须相同。
 - key_eq 期间禁止重入 dict/set key equality。
@@ -2635,7 +2635,7 @@ let h = heap.from_list([3, 1, 2], func(a, b) { return a < b; });
 heap.peek(h)         // 1
 ```
 
-`set` 元素必须是合法 dict key（`int/float/bool/string/char/byte/bytes/null`，或由这些类型递归组成的 tuple/pair，或所有字段递归可哈希的 struct/enum，或实现 `std.dict_key.DictKey` 的 struct/enum）。`set` / `deque` / `heap` 都是原生值类型：`set` 的 add/remove/has 为 O(log n)、`from_list` 为 O(n log n)，`values` 保持插入顺序；`deque` 的 push/pop/size/peek 为均摊 O(1)、`to_list` 为 O(n)；`heap` 的 push/pop 为 O(log n)、`from_list` 为 O(n log n)。`deque.pop_*` 和 `heap.pop` 返回 `{ok, ..., value}`。当 `K` / `T` 静态已知时，`dict[K, V]` / `set[T]` 会在类型检查阶段拒绝不可哈希的类型；`dict[any, V]` / `set[any]` 仍由运行时检查。
+`set` 元素必须是合法 dict key（`int/float/bool/string/char/byte/bytes/null`，或由这些类型递归组成的 tuple/pair，或所有字段递归可哈希的 struct/enum，或实现 `std.dict_key.DictHashable` 的 struct/enum）。`set` / `deque` / `heap` 都是原生值类型：`set` 的 add/remove/has 为 O(log n)、`from_list` 为 O(n log n)，`values` 保持插入顺序；`deque` 的 push/pop/size/peek 为均摊 O(1)、`to_list` 为 O(n)；`heap` 的 push/pop 为 O(log n)、`from_list` 为 O(n log n)。`deque.pop_*` 和 `heap.pop` 返回 `{ok, ..., value}`。当 `K` / `T` 静态已知时，`dict[K, V]` / `set[T]` 会在类型检查阶段拒绝不可哈希的类型；`dict[any, V]` / `set[any]` 仍由运行时检查。
 
 `std.route` 是显式注册的 Web 路由：
 
@@ -3185,7 +3185,7 @@ std.list.top_k([5, 1, 4, 2, 3], 3)      // [1, 2, 3]
 std.list.binary_search([1, 3, 5], 4)    // {found: false, index: 1}
 ```
 
-`zip` 以最短输入为准；`binary_search` 要求升序，未找到时 `index` 是插入点；`group_by` 的 key 必须是合法 dict key（包括由合法 key 元素组成的 tuple/pair，以及字段递归可哈希或实现 `std.dict_key.DictKey` 的 struct/enum）。`unique` / `unique_by` 的 key 可哈希时用哈希去重，O(n)；否则回退到 O(n²) 比较。`top_k` 使用 partial sort，O(n log k)。
+`zip` 以最短输入为准；`binary_search` 要求升序，未找到时 `index` 是插入点；`group_by` 的 key 必须是合法 dict key（包括由合法 key 元素组成的 tuple/pair，以及字段递归可哈希或实现 `std.dict_key.DictHashable` 的 struct/enum）。`unique` / `unique_by` 的 key 可哈希时用哈希去重，O(n)；否则回退到 O(n²) 比较。`top_k` 使用 partial sort，O(n log k)。
 
 `std.list` / `std.dict` / `std.bytes` 由内部适配层提供，原生入口保留在 `std.raw.list` / `std.raw.dict` / `std.raw.bytes`；当前使用语言级默认参数的有 `list.slice`、`list.sort`、`list.sort_by`、`list.is_sorted`、`list.top_k`、`list.binary_search`、`list.reduce`、`dict.get` 和 `bytes.slice`，其余函数仍直接使用原生 builtin。`import std.list` 和 `import std; std.list` 现在指向同一个命名空间。
 

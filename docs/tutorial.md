@@ -513,7 +513,7 @@ struct Handler {
 - `pair` / `tuple` / `union` 是静态类型：pair/tuple 在运行时仍是 list，但 tuple/pair 字面量以及 `zip`、`dict.items`、`iter.enumerate` 产生的 pair 是不可变 list，不能索引赋值；`union` 的成员兼容性主要由静态检查器保证；`union[T, null]` 归一化为 `T?` 后同时保留运行时检查；
 - 带 `pair` / `tuple` 注解的变量、参数、字段和返回值在运行时会校验值是不可变 tuple，且元素数量与注解一致；
 - tuple/pair 可以作为 `dict` key 或 `set` 元素，前提是所有元素递归地属于合法 key 类型（`int/float/bool/string/char/byte/bytes/null`、嵌套 tuple/pair、可哈希 struct/enum）；含可变 list/dict、NaN 等元素的 tuple 不能作为 key；
-- struct 也可以作为 `dict` key 或 `set` 元素：所有字段递归地属于合法 key 类型时可以自动哈希；否则可以实现 `std.dict_key.DictKey` 并提供纯函数 `dict_hash(self) -> int` 来自定义哈希；如果还需要自定义 key 相等，再实现 `std.dict_key.KeyEq` 的 `key_eq(self, other) -> bool`，它只影响 dict/set 的 key 语义，不改变普通 `==`；含可变 list/dict、NaN 等字段且没有自定义 hash 的 struct 不能作为 key；
+- struct 也可以作为 `dict` key 或 `set` 元素：所有字段递归地属于合法 key 类型时可以自动哈希；否则可以实现 `std.dict_key.DictHashable` 并提供纯函数 `dict_hash(self) -> int` 来自定义哈希；如果还需要自定义 key 相等，再实现 `std.dict_key.KeyEquatable` 的 `key_eq(self, other) -> bool`，它只影响 dict/set 的 key 语义，不改变普通 `==`；含可变 list/dict、NaN 等字段且没有自定义 hash 的 struct 不能作为 key；
 - 当 key/元素类型静态已知时，类型检查器会在 `dict[K, V]` / `set[T]` 注解、参数、返回值、字段和 `std.dict.*` / `std.set.*` builtin 调用处提前拒绝不可哈希类型；`dict[any, V]` / `set[any]` 仍由运行时检查；
 - key 的完整规则、错误和 `std.dict.index_by` 用法见 [key-semantics.md](key-semantics.md)；
 - `match (a, b)` 的 subject 是 tuple/pair；tuple 模式 `(x, y)` 只匹配 pair/tuple，序列模式 `[x, y]` 匹配任意二元素序列；传单个 tuple 参数使用 `f((a, b))`；
@@ -1275,7 +1275,7 @@ p.sum()
 - 默认值在定义包的作用域中求值，每次构造重新求值；不能引用 `self` 或其他字段；
 - `std.struct.decode` 不自动填充默认值，缺失字段仍然报错；
 - 字段可以读写：`p.x`、`p.x = 5`；
-- 所有字段递归可哈希时，结构体可以自动作 `dict` key 或 `set` 元素；也可以实现 `std.dict_key.DictKey` 的 `dict_hash(self) -> int` 跳过字段检查并使用自定义 hash；key 保存插入时的字段快照，之后修改原变量不会改变已插入的 key；
+- 所有字段递归可哈希时，结构体可以自动作 `dict` key 或 `set` 元素；也可以实现 `std.dict_key.DictHashable` 的 `dict_hash(self) -> int` 跳过字段检查并使用自定义 hash；key 保存插入时的字段快照，之后修改原变量不会改变已插入的 key；
 - `struct` 可以直接写方法，也可以只写字段；inline 方法使用与 `impl Type` 方法相同的 `func` 语法；
 - `impl Type` 保留为补充手段，用来给同一类型追加方法；inline 方法与 `impl` 方法共享方法命名空间，同名重复（inline / inline、inline / impl、impl / impl）报 `method repeated <name>`，`impl` 不能覆盖 inline 方法；
 - 方法第一个参数必须是显式 `self`；例外是构造函数 `func new(...)`（无 `self`，只能通过 `Type.new(...)` 调用，返回类型隐式固定为 `Type`，且不能声明返回类型或带装饰器）；
@@ -1562,7 +1562,7 @@ match (a) {
 - `kind_of(e)` 是 `"enum"`，`type_name(e)` 是枚举名；
 - `match` 支持变体模式、字段模式和守卫；
 - JSON 编码为 `{"$enum":"Event.UserMsg","payload":{...}}`；
-- enum 可以作为 `dict` key 或 `set` 元素：所有载荷字段递归可哈希时自动哈希；也可以实现 `std.dict_key.DictKey` 自定义 `dict_hash`；含可变 list/dict、NaN 等字段且没有自定义 hash 的 enum 不能作为 key；
+- enum 可以作为 `dict` key 或 `set` 元素：所有载荷字段递归可哈希时自动哈希；也可以实现 `std.dict_key.DictHashable` 自定义 `dict_hash`；含可变 list/dict、NaN 等字段且没有自定义 hash 的 enum 不能作为 key；
 - 暂不支持互递归 enum（自引用 enum 已支持）、enum 的 JSON 自动解码。
 
 ```text

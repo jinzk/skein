@@ -3398,7 +3398,7 @@ struct Checker : public BuiltinContext {
                 std::string message =
                     std::string("dict key type ") + type_display(key) +
                     " is not hashable; remove mutable fields or implement "
-                    "std.dict_key.DictKey";
+                    "std.dict_key.DictHashable";
                 report_error(line, column, message.c_str());
                 ok = false;
             }
@@ -3408,7 +3408,7 @@ struct Checker : public BuiltinContext {
                 std::string message =
                     std::string("set element type ") + type_display(element) +
                     " is not hashable; remove mutable fields or implement "
-                    "std.dict_key.DictKey";
+                    "std.dict_key.DictHashable";
                 report_error(line, column, message.c_str());
                 ok = false;
             }

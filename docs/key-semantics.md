@@ -73,9 +73,9 @@ d[(1, "a")]
 
 含可变 list/dict 等不可哈希值的 tuple/struct/enum 不能自动作为 key；`float` 标量（NaN 除外）可以作为 key。
 
-## 3. 自定义 hash：`DictKey`
+## 3. 自定义 hash：`DictHashable`
 
-`std.dict_key.DictKey` 允许 struct/enum 跳过字段递归检查，使用自定义 hash：
+`std.dict_key.DictHashable` 允许 struct/enum 跳过字段递归检查，使用自定义 hash：
 
 ```skein
 import std.dict_key;
@@ -99,12 +99,12 @@ impl User {
 - 与 key 相等语义一致
 - hash 期间不能重入 dict/set key hash
 
-如果只实现 `DictKey`，key 相等仍然使用结构相等。此时 `dict_hash` 必须与结构
+如果只实现 `DictHashable`，key 相等仍然使用结构相等。此时 `dict_hash` 必须与结构
 相等保持一致。
 
-## 4. 自定义相等：`KeyEq`
+## 4. 自定义相等：`KeyEquatable`
 
-`KeyEq` 是可选的 key 相等接口：
+`KeyEquatable` 是可选的 key 相等接口：
 
 ```skein
 impl User {
@@ -116,8 +116,8 @@ impl User {
 
 规则：
 
-- 只有同时实现 `DictKey` 的类型才会使用 `key_eq`
-- 未实现 `KeyEq` 时继续使用结构相等
+- 只有同时实现 `DictHashable` 的类型才会使用 `key_eq`
+- 未实现 `KeyEquatable` 时继续使用结构相等
 - `key_eq` 只影响 dict/set 以及内部使用 dict/set 的操作，例如 `unique`、
   `group_by`、LRU
 - **普通 `==` / `!=` 不改变**，仍使用结构相等
@@ -134,7 +134,7 @@ a.key_eq(b) == true  =>  dict_hash(a) == dict_hash(b)
 
 ## 5. Key 相等与 `==` 的区别
 
-实现 `KeyEq` 后可能出现：
+实现 `KeyEquatable` 后可能出现：
 
 ```skein
 a != b
@@ -185,7 +185,7 @@ by_id[user.id]
 - key 必须是合法 dict key
 - 时间复杂度 O(n)
 
-`index_by` 不需要 `DictKey` 或 `KeyEq`，因为 key 是显式投影出来的普通值。
+`index_by` 不需要 `DictHashable` 或 `KeyEquatable`，因为 key 是显式投影出来的普通值。
 
 ## 8. 线程和进程传输
 
@@ -217,13 +217,13 @@ by_id[user.id]
 | `dict_hash` 返回非 int | 运行时错误 |
 | `key_eq` 返回非 bool | 运行时错误 |
 | hash/eq 重入 key 计算 | 运行时错误 |
-| `KeyEq` 未配合 `DictKey` | 不使用自定义相等 |
+| `KeyEquatable` 未配合 `DictHashable` | 不使用自定义相等 |
 
 ## 10. 推荐用法
 
 - 普通标量 key：直接使用。
 - 组合字段：使用 frozen tuple，例如 `(region, id)`。
-- 大量字段且只按少数字段识别：使用 `DictKey` + `KeyEq`。
+- 大量字段且只按少数字段识别：使用 `DictHashable` + `KeyEquatable`。
 - 只需要建立索引：使用 `std.dict.index_by`。
-- 不要依赖 `KeyEq` 改变普通 `==`。
+- 不要依赖 `KeyEquatable` 改变普通 `==`。
 - 不要在 hash/eq 中做 I/O、修改容器或依赖全局状态。

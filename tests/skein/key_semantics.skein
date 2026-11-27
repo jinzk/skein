@@ -265,7 +265,7 @@ ts_test("key hash must return int", func() {
   }, "dict_hash must return an int");
 });
 
-ts_test("key KeyEq custom equality", func() {
+ts_test("key KeyEquatable custom equality", func() {
   let a = KeyCaseEqUser { id: 1, cache: [] };
   let b = KeyCaseEqUser { id: 1, cache: [1] };
   let d = {a: "x"};
@@ -276,19 +276,19 @@ ts_test("key KeyEq custom equality", func() {
   ts_eq(std.set.size(s), 1);
 });
 
-ts_test("key hash without KeyEq stays structural", func() {
+ts_test("key hash without KeyEquatable stays structural", func() {
   let a = KeyCaseHashUser { id: 1, cache: [] };
   let b = KeyCaseHashUser { id: 1, cache: [1] };
   let d = {a: "x"};
   ts_eq(std.dict.has(d, b), 0);
 });
 
-ts_test("key KeyEq nested in tuple", func() {
+ts_test("key KeyEquatable nested in tuple", func() {
   let d = {(KeyCaseEqUser { id: 1, cache: [] }, "x"): true};
   ts_true(d[(KeyCaseEqUser { id: 1, cache: [1] }, "x")]);
 });
 
-ts_test("key KeyEq nested in auto struct", func() {
+ts_test("key KeyEquatable nested in auto struct", func() {
   let d = {KeyCaseEqWrapper {
     user: KeyCaseEqUser { id: 1, cache: [] }
   }: true};
@@ -297,14 +297,14 @@ ts_test("key KeyEq nested in auto struct", func() {
   }]);
 });
 
-ts_test("key KeyEq must return bool", func() {
+ts_test("key KeyEquatable must return bool", func() {
   ts_error(func() {
     let d = {KeyCaseBadEq { id: 1 }: 1};
     return d[KeyCaseBadEq { id: 1 }];
   }, "key_eq must return a bool");
 });
 
-ts_test("key KeyEq reentrancy rejected", func() {
+ts_test("key KeyEquatable reentrancy rejected", func() {
   ts_error(func() {
     let d = {KeyCaseReenterA { id: 1 }: 1};
     return d[KeyCaseReenterA { id: 1 }];
@@ -354,7 +354,7 @@ func key_case_task_worker() {
   return d[KeyCaseEqUser { id: 1, cache: [1] }];
 }
 
-ts_test("key custom hash and KeyEq inside task", func() {
+ts_test("key custom hash and KeyEquatable inside task", func() {
   ts_eq(wait launch key_case_task_worker(), "x");
 });
 

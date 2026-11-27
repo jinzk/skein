@@ -72,7 +72,7 @@ bool check_builtin(BuiltinContext &context, const std::string &path,
         std::string message = std::string(what) + " type " +
                               type_display(type) +
                               " is not hashable; remove mutable fields or "
-                              "implement std.dict_key.DictKey";
+                              "implement std.dict_key.DictHashable";
         struct ast *where = arg < args.size()
                                 ? args[arg]
                                 : (args.empty() ? nullptr : args.back());

@@ -45,7 +45,7 @@ def run_cases():
                 "}\n"
             )
         check(
-            "key custom hash and KeyEq across threads",
+            "key custom hash and KeyEquatable across threads",
             USER_KEYEQ +
             'let a = User { id: 1, cache: [] };\n'
             'let b = User { id: 1, cache: [1] };\n'
@@ -162,7 +162,7 @@ def run_cases():
     )
 
     check(
-        "key custom hash and KeyEq across entry threads",
+        "key custom hash and KeyEquatable across entry threads",
         USER_KEYEQ +
         'func worker(ctx) {\n'
         '  let d = ctx.payload["d"];\n'

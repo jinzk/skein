@@ -87,7 +87,7 @@ impl Box {
 [T any]
 [T Hashable]
 [T Drawable]
-[T Drawable & std.dict_key.DictKey]
+[T Drawable & std.dict_key.DictHashable]
 [T int | string | Box[int]]
 ```
 
@@ -148,7 +148,7 @@ TypeUnion     := ConcreteType ('|' ConcreteType)*
 
 ```skein
 [T Drawable]
-[T Drawable & std.dict_key.DictKey]
+[T Drawable & std.dict_key.DictHashable]
 ```
 
 - `&` 两侧必须是 proto；

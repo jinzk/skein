@@ -1051,6 +1051,47 @@ def check_extended_stdlib():
             "conn.close();\n",
             stdout_all=["value=ok", "body=payload"],
         )
+        rpc_codec_script = os.path.join(worker_tmp, "rpc_codec_worker.skein")
+        with open(rpc_codec_script, "w", encoding="utf-8") as handle:
+            handle.write(
+                "import std;\n"
+                "import std.rpc;\n"
+                "func enc(frame: dict): string {\n"
+                "  return \"RPC1 \" + std.json.stringify(frame);\n"
+                "}\n"
+                "func dec(line: string): dict {\n"
+                "  return std.json.parse(std.string.substr(line, 5));\n"
+                "}\n"
+                "rpc.serve(func(method, params) {\n"
+                "  if (method == \"add\") {\n"
+                "    return params[0] + params[1];\n"
+                "  }\n"
+                "  fail(\"unknown method \" + method);\n"
+                "}, {\"encode\": enc, \"decode\": dec});\n"
+            )
+        rpc_codec_path = rpc_codec_script.replace("\\", "\\\\")
+        check(
+            "std.rpc custom framing",
+            "import std;\n"
+            "import std.rpc;\n"
+            "func enc(frame: dict): string {\n"
+            '  return "RPC1 " + std.json.stringify(frame);\n'
+            "}\n"
+            "func dec(line: string): dict {\n"
+            "  return std.json.parse(std.string.substr(line, 5));\n"
+            "}\n"
+            f'let conn = rpc.spawn("{binary_path}", '
+            f'{{"args": ["{rpc_codec_path}"], "encode": enc, '
+            f'"decode": dec}});\n'
+            'print("call=" + str(std.result.unwrap('
+            'conn.call("add", [2, 3]))));\n'
+            'let bad = conn.call("nope", []);\n'
+            'print("err=" + str(std.result.is_err(bad)));\n'
+            'print("kind=" + std.error.kind(std.result.error(bad)));\n'
+            'print("errors=" + str(conn.stats()["errors"]));\n'
+            "conn.close();\n",
+            stdout_all=["call=5", "err=true", "kind=worker", "errors=1"],
+        )
         restart_script = os.path.join(worker_tmp, "restart.skein")
         with open(restart_script, "w", encoding="utf-8") as handle:
             handle.write(

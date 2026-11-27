@@ -79,7 +79,7 @@ package rpc {
     }
     if (std.dict.get(options, "ready", true)) {
       _handshake(
-        io, protocol,
+        io, options, protocol,
         std.dict.get(options, "timeout_ms", 5000));
     }
     return _connection(io, options, false);
@@ -97,7 +97,7 @@ package rpc {
     let opened = std.result.capture(func() {
       if (std.dict.get(options, "ready", true)) {
         _handshake(
-          io, protocol,
+          io, options, protocol,
           std.dict.get(options, "timeout_ms", 5000));
       }
     });
@@ -109,12 +109,44 @@ package rpc {
     return _connection(io, options, true);
   }
 
-  func _handshake(io, protocol, timeout_ms) {
+  // Custom framing hook: encode a frame dict as one line (without newline).
+  // Defaults to std.json.stringify.  The hook must return a string.
+  func _encode_line(options, frame) {
+    let encode = std.dict.get(options, "encode", null);
+    if (encode == null) {
+      return std.json.stringify(frame);
+    }
+    let encoded = encode(frame);
+    if (kind_of(encoded) != "string") {
+      fail("rpc encode must return a string");
+    }
+    return encoded;
+  }
+
+  // Custom framing hook: decode one line into a frame dict.  Defaults to
+  // std.json.parse.  The hook must return a dict.
+  func _decode_line(options, line) {
+    let decode = std.dict.get(options, "decode", null);
+    let text = line;
+    if (kind_of(text) == "bytes") {
+      text = std.bytes.to_string(text);
+    }
+    if (decode == null) {
+      return std.json.parse(text);
+    }
+    let frame = decode(text);
+    if (kind_of(frame) != "dict") {
+      fail("rpc decode must return a dict");
+    }
+    return frame;
+  }
+
+  func _handshake(io, options, protocol, timeout_ms) {
     let line = io.read_line(timeout_ms);
     if (line == null) {
       fail("rpc connection closed before ready");
     }
-    let frame = std.json.parse(line);
+    let frame = _decode_line(options, line);
     if (std.dict.get(frame, "ready", false) != true) {
       fail("rpc ready frame is invalid");
     }
@@ -142,7 +174,7 @@ package rpc {
       let id = state["next_id"];
       state["next_id"] = id + 1;
       let result = _call_impl(
-        io, protocol, id, method, params, body, binary, timeout_ms);
+        io, options, protocol, id, method, params, body, binary, timeout_ms);
       state["calls"] = state["calls"] + 1;
       if (std.result.is_err(result)) {
         state["errors"] = state["errors"] + 1;
@@ -196,7 +228,8 @@ package rpc {
     };
   }
 
-  func _call_impl(io, protocol, id, method, params, body, binary, timeout_ms) {
+  func _call_impl(io, options, protocol, id, method, params, body, binary,
+                  timeout_ms) {
     let hybrid = protocol == "hybrid";
 
     let request = {"id": id, "method": method, "params": params};
@@ -205,7 +238,7 @@ package rpc {
     }
 
     let exchange = std.result.capture(func() {
-      io.write(std.json.stringify(request) + "\n");
+      io.write(_encode_line(options, request) + "\n");
       if (hybrid && len(body) > 0) {
         io.write(body);
       }
@@ -215,7 +248,7 @@ package rpc {
       if (line == null) {
         fail("rpc connection closed");
       }
-      let response = std.json.parse(line);
+      let response = _decode_line(options, line);
       if (std.dict.get(response, "id", 0) != id) {
         fail("rpc response id mismatch");
       }
@@ -334,9 +367,7 @@ package rpc {
       if (hybrid) {
         ready["protocol"] = "hybrid";
       }
-      std.io.write_all(
-        output,
-        std.bytes.from_string(std.json.stringify(ready) + "\n"));
+      std.io.write_all(output, _encode_line(options, ready) + "\n");
       std.io.flush(output);
     }
 
@@ -347,7 +378,9 @@ package rpc {
       if (line == null) {
         break;
       }
-      let parsed = std.json.try_parse(std.bytes.to_string(line));
+      let parsed = std.result.capture(func() {
+        return _decode_line(options, line);
+      });
       if (std.result.is_err(parsed)) {
         errors = errors + 1;
         break;
@@ -406,9 +439,7 @@ package rpc {
         }
       }
 
-      std.io.write_all(
-        output,
-        std.bytes.from_string(std.json.stringify(response) + "\n"));
+      std.io.write_all(output, _encode_line(options, response) + "\n");
       if (len(response_body) > 0) {
         std.io.write_all(output, response_body);
       }

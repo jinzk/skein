@@ -2696,6 +2696,8 @@ options:
   input: readable stream          // 默认 std.io.stdin
   output: writable stream         // 默认 std.io.stdout
   ready: bool                     // 默认 true，是否发送 ready 帧
+  encode: func(dict) -> string    // 默认 std.json.stringify
+  decode: func(string) -> dict    // 默认 std.json.parse
 ```
 
 可以配合文件句柄、socket 或进程 pipe 使用：
@@ -2711,6 +2713,30 @@ let server = rpc.server(handler, {
 });
 server.serve();
 ```
+
+自定义 framing：
+
+```text
+func enc(frame: dict): string {
+  return "RPC1 " + std.json.stringify(frame);
+}
+
+func dec(line: string): dict {
+  return std.json.parse(std.string.substr(line, 5));
+}
+
+let server = rpc.server(handler, {"encode": enc, "decode": dec});
+let conn = rpc.spawn("skein", {
+  "args": ["worker.skein"],
+  "encode": enc,
+  "decode": dec
+});
+```
+
+- `encode` 把 frame dict 编码成一行字符串；
+- `decode` 把一行字符串解码成 frame dict；
+- 两者同时作用于 ready 帧、请求和响应；
+- `hybrid` 的二进制 body 不经过 encode/decode，仍按 `body_len` 原样读写。
 
 也可以先构造 `RpcServer` 对象，再启动循环：
 
@@ -2764,7 +2790,7 @@ conn.close();
 
 - `rpc.spawn(command[, options])` 用 `std.process.spawn_pipe` 启动子进程并持有其生命周期；
 - `rpc.connect(io[, options])` 复用已有 `process_io`，只借用，不接管进程；
-- 两者支持 `protocol`、`ready`、`timeout_ms` 选项；
+- 两者支持 `protocol`、`ready`、`timeout_ms`、`encode`、`decode` 选项；
 - `call` / `call_timeout` / `call_bytes` 返回 `ok(result)` 或 `err(error(kind, message))`；
 - `submit` 返回惰性 `rpc.Job`，`wait()` 时才发送请求，单连接按 `wait` 顺序串行执行；
 - `Connection.stats()` 返回 `{calls, errors, protocol, closed, owns}`。

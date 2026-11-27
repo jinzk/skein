@@ -853,7 +853,8 @@ ProtocolMatch match_protocol(
             }
         case PROTOCOL_BUILTIN_RPC_CLIENT:
         case PROTOCOL_BUILTIN_RPC_JOB:
-            return ProtocolMatch::No;
+        case PROTOCOL_BUILTIN_RPC_SERVER:
+            break;
         case PROTOCOL_BUILTIN_NONE:
             break;
     }

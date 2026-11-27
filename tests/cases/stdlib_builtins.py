@@ -3051,6 +3051,54 @@ def run_cases():
           "println(render(Point { x: 1 }));\n"
           "println(Point { x: 1 }.other());\n",
           stdout_all=["1", "2"])
+    check("rpc protocols structural conformance",
+          "struct Client {\n"
+          "  base: int;\n"
+          "  func call(self, method: string, args: list) {\n"
+          "    return self.base + len(args);\n"
+          "  }\n"
+          "  func submit(self, method: string, args: list) {\n"
+          "    return self.base;\n"
+          "  }\n"
+          "}\n"
+          "struct Job {\n"
+          "  value: int;\n"
+          "  func wait(self, timeout_ms: int): int { return self.value; }\n"
+          "}\n"
+          "struct Server {\n"
+          "  n: int;\n"
+          "  func serve(self): int { return self.n; }\n"
+          "}\n"
+          "struct Other { x: int; }\n"
+          "let c = Client { base: 4 };\n"
+          "let j = Job { value: 7 };\n"
+          "let s = Server { n: 3 };\n"
+          "println(str(c is RpcClient));\n"
+          "println(str(j is RpcJob));\n"
+          "println(str(s is RpcServer));\n"
+          "println(str(c is RpcJob));\n"
+          "println(str(Other { x: 1 } is RpcClient));\n"
+          "println(str(c.call(\"m\", [1, 2])));\n"
+          "println(str(j.wait(0)));\n"
+          "println(str(s.serve()));\n",
+          stdout_all=["true", "true", "true", "false", "false",
+                      "6", "7", "3"])
+    check("rpc protocol typed parameter",
+          "struct Client {\n"
+          "  base: int;\n"
+          "  func call(self, method: string, args: list) {\n"
+          "    return self.base + len(args);\n"
+          "  }\n"
+          "  func submit(self, method: string, args: list) {\n"
+          "    return self.base;\n"
+          "  }\n"
+          "}\n"
+          "func use(c: RpcClient) { return c.call(\"m\", [1, 2]); }\n"
+          "println(str(use(Client { base: 10 })));\n"
+          "struct Other { x: int; }\n"
+          "use(Other { x: 1 });\n",
+          stdout="12",
+          stderr="expected RpcClient, got Other")
     check("inline method satisfies protocol default",
           "proto Doubler {\n"
           "  func value(self) -> int;\n"

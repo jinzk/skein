@@ -18,10 +18,17 @@ package traits {
   proto Callable {
   }
 
-  // Marker protocols for RPC clients and pending RPC jobs.
-  proto RpcClient {
+  // RPC client, pending job, and server protocols.
+  proto RpcJob {
+    func wait(self, timeout_ms: int);
   }
 
-  proto RpcJob {
+  proto RpcClient {
+    func call(self, method: string, args: list);
+    func submit(self, method: string, args: list);
+  }
+
+  proto RpcServer {
+    func serve(self): int;
   }
 }

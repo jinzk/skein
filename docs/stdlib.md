@@ -2600,11 +2600,42 @@ std.meta.implements("builtin", "Callable"); // true
 
 `Callable` 不是内置类型名，`callable` 不再作为类型使用。
 
-`RpcClient` / `RpcJob` 是默认导入的 prelude marker proto：
+`RpcClient` / `RpcJob` / `RpcServer` 是默认导入的结构式 prelude proto：
+
+```text
+proto RpcJob {
+  func wait(self, timeout_ms: int);
+}
+
+proto RpcClient {
+  func call(self, method: string, args: list);
+  func submit(self, method: string, args: list);
+}
+
+proto RpcServer {
+  func serve(self): int;
+}
+```
+
+内置实现自动满足：
 
 ```text
 worker_pool -> RpcClient
 worker_job  -> RpcJob
+rpc.Server  -> RpcServer
+```
+
+用户 struct 只要方法签名匹配也自动满足：
+
+```text
+struct Client {
+  base: int;
+  func call(self, method: string, args: list) { return self.base; }
+  func submit(self, method: string, args: list) { return self.base; }
+}
+
+Client { base: 4 } is RpcClient;   // true
+Other { x: 1 } is RpcClient;       // false
 ```
 
 `worker_pool` / `worker_job` 同时提供方法式接口：
@@ -2653,6 +2684,19 @@ rpc.serve(func(method, params, body) {
 - hybrid handler 参数为 `(method, params, body)`，可返回普通值或 `{value, body}`；
 - handler 抛错时返回 `ok:false`，循环继续；
 - stdin 关闭时返回已处理请求数。
+
+也可以先构造 `RpcServer` 对象，再启动循环：
+
+```text
+let server = rpc.server(func(method, params) {
+  return params[0] + params[1];
+});
+
+server is RpcServer;   // true
+server.serve();        // 阻塞运行服务端循环
+```
+
+`rpc.server(handler[, options])` 返回 `rpc.Server`，它通过结构式 `RpcServer` proto；`rpc.serve(handler[, options])` 等价于直接调用该循环。
 
 `Iterable[T]` 是结构化迭代器 proto：
 

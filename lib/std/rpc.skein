@@ -1,6 +1,29 @@
 package rpc {
   import std;
 
+  // Object wrapper around the server loop.  Server satisfies the
+  // std.traits.RpcServer proto via its serve(self): int method.
+  export struct Server {
+    handler: any;
+    options: dict;
+  }
+
+  impl Server {
+    func serve(self): int {
+      return _serve(self.handler, self.options);
+    }
+  }
+
+  // Wrap a handler in an RpcServer object without running the loop yet.
+  export func server(handler, options = {}) {
+    return Server { handler: handler, options: options };
+  }
+
+  // Run a handler as an RPC server loop.
+  export func serve(handler, options = {}) {
+    return _serve(handler, options);
+  }
+
   // Minimal JSON Lines / hybrid RPC server loop for std.worker.pool workers.
   //
   // jsonl:
@@ -11,13 +34,13 @@ package rpc {
   //
   // A throwing handler is reported as an ok:false response and the loop
   // continues with the next request.
-  export func serve(handler, options = {}) {
+  func _serve(handler, options) {
     if (kind_of(handler) != "function" && kind_of(handler) != "builtin") {
-      fail("rpc.serve handler must be callable");
+      fail("rpc handler must be callable");
     }
     let protocol = std.dict.get(options, "protocol", "jsonl");
     if (protocol != "jsonl" && protocol != "hybrid") {
-      fail("rpc.serve supports protocol \"jsonl\" or \"hybrid\"");
+      fail("rpc server supports protocol \"jsonl\" or \"hybrid\"");
     }
     let hybrid = protocol == "hybrid";
 

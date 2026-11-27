@@ -934,6 +934,31 @@ def check_extended_stdlib():
             'pool.shutdown();\n',
             stdout_all=["ok", "payload"],
         )
+        rpc_object_script = os.path.join(worker_tmp, "rpc_server_object.skein")
+        with open(rpc_object_script, "w", encoding="utf-8") as handle:
+            handle.write(
+                "import std;\n"
+                "import std.rpc;\n"
+                "let server = rpc.server(func(method, params) {\n"
+                "  if (method == \"mul\") {\n"
+                "    return params[0] * params[1];\n"
+                "  }\n"
+                "  fail(\"unknown method \" + method);\n"
+                "});\n"
+                "server.serve();\n"
+            )
+        rpc_object_path = rpc_object_script.replace("\\", "\\\\")
+        check(
+            "std.rpc server object",
+            "import std;\n"
+            "import std.rpc;\n"
+            "let local = rpc.server(func(method, params) { return 0; });\n"
+            "print(str(local is RpcServer));\n"
+            f'let pool = std.worker.pool(1, "{rpc_object_path}");\n'
+            'print(std.result.unwrap(pool.call("mul", [6, 7])));\n'
+            'pool.shutdown();\n',
+            stdout_all=["true", "42"],
+        )
         restart_script = os.path.join(worker_tmp, "restart.skein")
         with open(restart_script, "w", encoding="utf-8") as handle:
             handle.write(

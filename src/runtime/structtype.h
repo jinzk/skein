@@ -34,6 +34,7 @@ enum protocol_builtin_kind {
     PROTOCOL_BUILTIN_CALLABLE,
     PROTOCOL_BUILTIN_RPC_CLIENT,
     PROTOCOL_BUILTIN_RPC_JOB,
+    PROTOCOL_BUILTIN_RPC_SERVER,
 };
 
 struct protocol_def {

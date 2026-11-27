@@ -137,7 +137,8 @@ resolved_type resolve_named(const char *source, const char *name,
         std::strcmp(name, "Hashable") == 0 ||
         std::strcmp(name, "Iterable") == 0 ||
         std::strcmp(name, "RpcClient") == 0 ||
-        std::strcmp(name, "RpcJob") == 0) {
+        std::strcmp(name, "RpcJob") == 0 ||
+        std::strcmp(name, "RpcServer") == 0) {
         auto prelude = logical_protocols.find(type_key("std.traits", name));
         if (prelude != logical_protocols.end() && prelude->second &&
             prelude->second->builtin_kind != PROTOCOL_BUILTIN_NONE) {
@@ -543,7 +544,18 @@ bool value_satisfies_builtin_protocol(const struct value_t *value,
     if (protocol->builtin_kind == PROTOCOL_BUILTIN_CALLABLE)
         return value_is_callable(value);
     if (protocol->builtin_kind == PROTOCOL_BUILTIN_RPC_CLIENT ||
-        protocol->builtin_kind == PROTOCOL_BUILTIN_RPC_JOB) {
+        protocol->builtin_kind == PROTOCOL_BUILTIN_RPC_JOB ||
+        protocol->builtin_kind == PROTOCOL_BUILTIN_RPC_SERVER) {
+        if (value->type == T_struct) {
+            const struct_value_t *sv = (const struct_value_t *)value;
+            return sv->def &&
+                   structtype_satisfies_protocol(sv->def, protocol);
+        }
+        if (value->type == T_enum) {
+            const enum_value_t *ev = (const enum_value_t *)value;
+            return ev->def &&
+                   structtype_satisfies_protocol(ev->def, protocol);
+        }
         if (value->type != T_userdata)
             return false;
         const userdata_value_t *userdata =
@@ -554,7 +566,9 @@ bool value_satisfies_builtin_protocol(const struct value_t *value,
             return false;
         if (protocol->builtin_kind == PROTOCOL_BUILTIN_RPC_CLIENT)
             return std::strcmp(type_name, "worker_pool") == 0;
-        return std::strcmp(type_name, "worker_job") == 0;
+        if (protocol->builtin_kind == PROTOCOL_BUILTIN_RPC_JOB)
+            return std::strcmp(type_name, "worker_job") == 0;
+        return false;
     }
     return false;
 }
@@ -1098,7 +1112,10 @@ bool structtype_create_protocol(const char *source, const char *package,
     if (std_traits_source &&
         (std::strcmp(name, "Callable") == 0 ||
          std::strcmp(name, "Hashable") == 0 ||
-         std::strcmp(name, "Iterable") == 0)) {
+         std::strcmp(name, "Iterable") == 0 ||
+         std::strcmp(name, "RpcClient") == 0 ||
+         std::strcmp(name, "RpcJob") == 0 ||
+         std::strcmp(name, "RpcServer") == 0)) {
         if (protocol_def *existing =
                 structtype_find_protocol_by_name("std.traits", name)) {
             out = existing;
@@ -1185,6 +1202,8 @@ bool structtype_create_protocol(const char *source, const char *package,
             def->builtin_kind = PROTOCOL_BUILTIN_RPC_CLIENT;
         else if (def->name == "RpcJob")
             def->builtin_kind = PROTOCOL_BUILTIN_RPC_JOB;
+        else if (def->name == "RpcServer")
+            def->builtin_kind = PROTOCOL_BUILTIN_RPC_SERVER;
     }
     out = def.get();
     logical_protocols.emplace(logical_key, out);
@@ -1208,8 +1227,46 @@ void structtype_install_builtin_protocols() {
 
     install("Hashable", {}, {});
     install("Callable", {}, {});
-    install("RpcClient", {}, {});
-    install("RpcJob", {}, {});
+
+    auto constraint = [](type_constraint_kind kind) {
+        type_constraint c{};
+        c.kind = kind;
+        c.name = NULL;
+        c.source = NULL;
+        c.nullable = false;
+        return c;
+    };
+    auto method = [&](const char *name,
+                      std::vector<type_constraint> params,
+                      type_constraint_kind result_kind,
+                      bool has_result) {
+        method_sig sig;
+        sig.name = name;
+        sig.params = std::move(params);
+        sig.required_params = (int)sig.params.size();
+        if (has_result)
+            sig.return_type = std::make_shared<const type_constraint>(
+                constraint(result_kind));
+        return sig;
+    };
+    install("RpcJob",
+            {method("wait",
+                    {constraint(TYPE_ANY), constraint(TYPE_INT)},
+                    TYPE_ANY, false)},
+            {});
+    install("RpcClient",
+            {method("call",
+                    {constraint(TYPE_ANY), constraint(TYPE_STRING),
+                     constraint(TYPE_LIST)},
+                    TYPE_ANY, false),
+             method("submit",
+                    {constraint(TYPE_ANY), constraint(TYPE_STRING),
+                     constraint(TYPE_LIST)},
+                    TYPE_ANY, false)},
+            {});
+    install("RpcServer",
+            {method("serve", {constraint(TYPE_ANY)}, TYPE_INT, true)},
+            {});
 
     method_sig iter;
     iter.name = "iter";
@@ -1645,9 +1702,7 @@ bool structtype_satisfies_protocol(
             bindings_out->clear();
         return type_def_is_hashable(def);
     }
-    if (protocol->builtin_kind == PROTOCOL_BUILTIN_CALLABLE ||
-        protocol->builtin_kind == PROTOCOL_BUILTIN_RPC_CLIENT ||
-        protocol->builtin_kind == PROTOCOL_BUILTIN_RPC_JOB) {
+    if (protocol->builtin_kind == PROTOCOL_BUILTIN_CALLABLE) {
         if (bindings_out)
             bindings_out->clear();
         return false;
@@ -1906,7 +1961,8 @@ bool named_type_matches(const char *source, const char *name,
             return dict_key_allowed(value);
         if (resolved.protocol->builtin_kind == PROTOCOL_BUILTIN_CALLABLE ||
             resolved.protocol->builtin_kind == PROTOCOL_BUILTIN_RPC_CLIENT ||
-            resolved.protocol->builtin_kind == PROTOCOL_BUILTIN_RPC_JOB)
+            resolved.protocol->builtin_kind == PROTOCOL_BUILTIN_RPC_JOB ||
+            resolved.protocol->builtin_kind == PROTOCOL_BUILTIN_RPC_SERVER)
             return value_satisfies_builtin_protocol(value, resolved.protocol);
         if (resolved.protocol->builtin_kind == PROTOCOL_BUILTIN_ITERABLE &&
             value->type != T_struct && value->type != T_enum)

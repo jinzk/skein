@@ -293,6 +293,33 @@ def run_cases():
           "let a = need(StringKey {});\n",
           stderr="type error: type argument StringKey does not satisfy generic constraint for need")
 
+    check("generic protocol self-referential rhs mismatch",
+          "proto Add[R any, O any] { func op_add(self, rhs: R): O; }\n"
+          "struct BadRhs { func op_add(self, rhs: int): BadRhs { return self; } }\n"
+          "func add[T Add[T, T]](x: T, y: T): T { return x.op_add(y); }\n"
+          "add(BadRhs {}, BadRhs {});\n",
+          stderr="type error: type argument BadRhs does not satisfy generic constraint for add")
+
+    check("generic protocol self-referential result mismatch",
+          "proto Add[R any, O any] { func op_add(self, rhs: R): O; }\n"
+          "struct BadOut { func op_add(self, rhs: BadOut): int { return 1; } }\n"
+          "func add[T Add[T, T]](x: T, y: T): T { return x.op_add(y); }\n"
+          "add(BadOut {}, BadOut {});\n",
+          stderr="type error: type argument BadOut does not satisfy generic constraint for add")
+
+    check("generic struct self-referential constraint mismatch",
+          "proto Add[R any, O any] { func op_add(self, rhs: R): O; }\n"
+          "struct BadRhs { func op_add(self, rhs: int): BadRhs { return self; } }\n"
+          "struct AddBox[T Add[T, T]] { value: T; }\n"
+          "let b = AddBox[BadRhs] { value: BadRhs {} };\n",
+          stderr="type error: type argument BadRhs does not satisfy generic constraint for AddBox")
+
+    check("generic default self-referential constraint mismatch",
+          "proto Add[R any, O any] { func op_add(self, rhs: R): O; }\n"
+          "struct BadRhs { func op_add(self, rhs: int): BadRhs { return self; } }\n"
+          "func add[T Add[T, T] = BadRhs](x: T): T { return x.op_add(x); }\n",
+          stderr="type error: default type BadRhs does not satisfy the constraint for T")
+
     check("generic default type must be trailing",
           "struct Bad[T = int, U any] { }\n",
           stderr="type error: default type parameters must be trailing")

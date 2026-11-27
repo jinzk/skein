@@ -25,6 +25,11 @@ struct StringKey {
   func key(self): string { return "a"; }
 }
 
+struct SelfKey {
+  value: int;
+  func key(self): SelfKey { return self; }
+}
+
 struct GoodPair {
   func first(self): int { return 2; }
   func second(self): int { return 3; }
@@ -44,6 +49,33 @@ func need_badged[T Badged](x: T): T {
 
 func need_int_key[T Keyed[int]](x: T): T {
   return x;
+}
+
+func need_self_key[T Keyed[T]](x: T): T {
+  return x;
+}
+
+proto SelfAdd[R any, O any] {
+  func op_add(self, rhs: R): O;
+}
+
+struct AddNum {
+  value: int;
+  func op_add(self, rhs: AddNum): AddNum {
+    return AddNum { value: self.value + rhs.value };
+  }
+}
+
+struct AddBox[T SelfAdd[T, T]] {
+  value: T;
+}
+
+func add_self[T SelfAdd[T, T]](x: T, y: T): T {
+  return x.op_add(y);
+}
+
+func add_self_default[T SelfAdd[T, T] = AddNum](x: T): T {
+  return x.op_add(x);
 }
 
 ts_test("generic protocol constraint", func() {
@@ -68,6 +100,13 @@ ts_test("generic protocol default method", func() {
 
 ts_test("generic protocol explicit type argument", func() {
   ts_eq(need_int_key(IntKey {}).key(), 1);
+});
+
+ts_test("generic protocol self-referential constraint", func() {
+  ts_eq(need_self_key(SelfKey { value: 1 }).key().value, 1);
+  ts_eq(add_self(AddNum { value: 2 }, AddNum { value: 3 }).value, 5);
+  ts_eq(AddBox[AddNum] { value: AddNum { value: 4 } }.value.value, 4);
+  ts_eq(add_self_default(AddNum { value: 5 }).value, 10);
 });
 
 ts_finish();

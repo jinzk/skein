@@ -411,6 +411,9 @@ g(1);
 func need[T Keyed](x: T): T { return x; }
 func need_int[T Keyed[int]](x: T): T { return x; }
 
+// 约束也可以引用当前类型参数：key() 必须返回 T 本身
+func need_self[T Keyed[T]](x: T): T { return x; }
+
 x is Keyed        // 允许
 x is Keyed[int]   // 错误
 ```

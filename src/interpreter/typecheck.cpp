@@ -1107,15 +1107,26 @@ struct Checker : public BuiltinContext {
     }
 
     bool type_satisfies_generic_constraint(
-        const TypeNode *arg, const GenericConstraintMeta &constraint) {
+        const TypeNode *arg, const GenericConstraintMeta &constraint,
+        const TypeBindings *type_bindings = nullptr) {
         if (!arg || arg->kind == TYPE_ANY || type_contains_vars(arg))
             return true;
-        if (constraint.items.empty())
+
+        GenericConstraintMeta resolved = constraint;
+        if (type_bindings && !type_bindings->empty()) {
+            resolved.items.clear();
+            resolved.items.reserve(constraint.items.size());
+            for (const TypeNode *item : constraint.items)
+                resolved.items.push_back(
+                    item ? instantiate_type(item, *type_bindings) : nullptr);
+        }
+        if (resolved.items.empty())
             return true;
 
         if (arg->kind == TYPE_UNION) {
             for (const TypeNode *member : arg->args) {
-                if (!type_satisfies_generic_constraint(member, constraint))
+                if (!type_satisfies_generic_constraint(member, resolved,
+                                                       type_bindings))
                     return false;
             }
             return true;
@@ -1149,10 +1160,10 @@ struct Checker : public BuiltinContext {
             return true;
         };
 
-        if (constraint.kind == GENERIC_CONSTRAINT_OR) {
-            if (constraint.category == GENERIC_CONSTRAINT_PROTOCOL)
+        if (resolved.kind == GENERIC_CONSTRAINT_OR) {
+            if (resolved.category == GENERIC_CONSTRAINT_PROTOCOL)
                 return false;
-            for (const TypeNode *item : constraint.items) {
+            for (const TypeNode *item : resolved.items) {
                 if (!item)
                     continue;
                 if (item->kind == TYPE_ANY)
@@ -1166,7 +1177,7 @@ struct Checker : public BuiltinContext {
             return false;
         }
 
-        for (const TypeNode *item : constraint.items) {
+        for (const TypeNode *item : resolved.items) {
             if (!item)
                 continue;
             if (item->kind == TYPE_ANY)
@@ -1177,7 +1188,7 @@ struct Checker : public BuiltinContext {
                     return false;
                 continue;
             }
-            if (constraint.category == GENERIC_CONSTRAINT_PROTOCOL)
+            if (resolved.category == GENERIC_CONSTRAINT_PROTOCOL)
                 return false;
             if (!type_equal(arg, item))
                 return false;
@@ -1262,19 +1273,28 @@ struct Checker : public BuiltinContext {
             if (!validate_generic_constraint(meta, param->name, line,
                                              column))
                 return false;
-            if (default_type &&
-                !type_satisfies_generic_constraint(default_type, meta)) {
-                std::string message =
-                    std::string("default type ") +
-                    type_display(default_type) +
-                    " does not satisfy the constraint for " +
-                    param->name;
-                report_error(line, column, message.c_str());
-                return false;
-            }
             names.push_back(param->name);
             constraints.push_back(std::move(meta));
             defaults.push_back(default_type);
+        }
+
+        TypeBindings default_bindings;
+        for (std::size_t i = 0; i < defaults.size(); ++i) {
+            if (defaults[i] && i < names.size())
+                default_bindings[names[i]] = defaults[i];
+        }
+        for (std::size_t i = 0; i < defaults.size(); ++i) {
+            if (!defaults[i] || i >= constraints.size())
+                continue;
+            if (type_satisfies_generic_constraint(defaults[i], constraints[i],
+                                                  &default_bindings))
+                continue;
+            std::string message =
+                std::string("default type ") + type_display(defaults[i]) +
+                " does not satisfy the constraint for " +
+                (i < names.size() ? names[i] : "type parameter");
+            report_error(line, column, message.c_str());
+            return false;
         }
         return true;
     }
@@ -1320,13 +1340,33 @@ struct Checker : public BuiltinContext {
             if (!check_type_argument_is_type(arg, line, column))
                 return false;
         }
-        const std::vector<GenericConstraintMeta> *constraints =
-            generic_constraints_for(type->source.c_str(), type->name.c_str());
+        const std::string key =
+            static_type_key(type->source.c_str(), type->name.c_str());
+        const std::vector<GenericConstraintMeta> *constraints = NULL;
+        std::vector<std::string> params;
+        auto meta = g_generic_type_meta.find(key);
+        if (meta != g_generic_type_meta.end()) {
+            constraints = &meta->second.constraints;
+            params = meta->second.params;
+        } else {
+            constraints =
+                generic_constraints_for(type->source.c_str(), type->name.c_str());
+            auto info = static_types.find(key);
+            if (info != static_types.end())
+                params = info->second.generic_params;
+        }
         if (!constraints)
             return true;
+
+        TypeBindings bindings;
+        if (params.size() == args.size()) {
+            for (std::size_t i = 0; i < params.size(); ++i)
+                bindings[params[i]] = args[i];
+        }
         for (std::size_t i = 0;
              i < args.size() && i < constraints->size(); ++i) {
-            if (type_satisfies_generic_constraint(args[i], (*constraints)[i]))
+            if (type_satisfies_generic_constraint(args[i], (*constraints)[i],
+                                                  &bindings))
                 continue;
             std::string message =
                 std::string("type argument ") + type_display(args[i]) +
@@ -1806,7 +1846,8 @@ struct Checker : public BuiltinContext {
                     i >= generic_meta->constraints.size())
                     continue;
                 if (type_satisfies_generic_constraint(
-                        binding->second, generic_meta->constraints[i]))
+                        binding->second, generic_meta->constraints[i],
+                        &bindings))
                     continue;
                 int line = args.empty() ? 0 : args[0]->line;
                 int column = args.empty() ? 0 : args[0]->column;

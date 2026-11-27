@@ -1257,13 +1257,14 @@ static std::unordered_set<std::string> g_generic_decl_names;
 static std::unordered_set<std::string> g_generic_function_names;
 static std::vector<std::unordered_set<std::string>> g_generic_type_scopes;
 
-static void push_generic_scope(struct generic_param *params) {
-    std::unordered_set<std::string> names;
-    for (struct generic_param *param = params; param; param = param->next) {
-        if (param->name && *param->name)
-            names.insert(param->name);
-    }
-    g_generic_type_scopes.push_back(std::move(names));
+static void push_generic_scope() {
+    g_generic_type_scopes.emplace_back();
+}
+
+static void note_generic_param_name(const char *name) {
+    if (!name || !*name || g_generic_type_scopes.empty())
+        return;
+    g_generic_type_scopes.back().insert(name);
 }
 
 static void pop_generic_scope() {
@@ -1592,6 +1593,7 @@ static struct ast *new_member_or_enum_literal(struct ast *base, char *field) {
 %type <a> struct_decl impl_decl protocol_decl struct_members struct_member
 %type <a> enum_decl enum_variants enum_variant variant_fields variant_field
 %type <a> generic_params generic_param_list generic_param
+%type <str> generic_param_name
 %type <a> generic_constraint generic_constraint_and generic_constraint_or
 %type <a> func_decl macro_decl
 %type <a> impl_methods protocol_methods protocol_method method_decl method_member
@@ -2126,11 +2128,10 @@ let_pattern: NAME '{' pattern_fields '}'  {
 
 generic_params: %empty                   {
         $$ = NULL;
-        push_generic_scope(NULL);
+        push_generic_scope();
       }
-    | '[' generic_param_list ']'         {
-        $$ = $2;
-        push_generic_scope((struct generic_param *)$2);
+    | '[' { push_generic_scope(); } generic_param_list ']' {
+        $$ = $3;
       }
     ;
 
@@ -2164,34 +2165,40 @@ generic_constraint_and: type                   {
       }
     ;
 
-generic_param: NAME generic_constraint        {
+generic_param_name: NAME                 {
+        note_generic_param_name($1);
+        $$ = $1;
+      }
+    ;
+
+generic_param: generic_param_name generic_constraint {
         $$ = (struct ast *)newgenericparam(
             $1, (struct generic_constraint *)$2);
       }
-    | NAME TYPE_MARK generic_constraint  {
+    | generic_param_name TYPE_MARK generic_constraint  {
         struct generic_constraint *constraint =
             (struct generic_constraint *)$3;
         if (constraint)
             constraint->category = GENERIC_CONSTRAINT_TYPE;
         $$ = (struct ast *)newgenericparam($1, constraint);
       }
-    | NAME PROTO_MARK generic_constraint {
+    | generic_param_name PROTO_MARK generic_constraint {
         struct generic_constraint *constraint =
             (struct generic_constraint *)$3;
         if (constraint)
             constraint->category = GENERIC_CONSTRAINT_PROTOCOL;
         $$ = (struct ast *)newgenericparam($1, constraint);
       }
-    | NAME '=' type                      {
+    | generic_param_name '=' type                      {
         $$ = (struct ast *)newgenericparam($1, NULL);
         ((struct generic_param *)$$)->default_type = $3;
       }
-    | NAME generic_constraint '=' type   {
+    | generic_param_name generic_constraint '=' type   {
         $$ = (struct ast *)newgenericparam(
             $1, (struct generic_constraint *)$2);
         ((struct generic_param *)$$)->default_type = $4;
       }
-    | NAME TYPE_MARK generic_constraint '=' type {
+    | generic_param_name TYPE_MARK generic_constraint '=' type {
         struct generic_constraint *constraint =
             (struct generic_constraint *)$3;
         if (constraint)
@@ -2199,7 +2206,7 @@ generic_param: NAME generic_constraint        {
         $$ = (struct ast *)newgenericparam($1, constraint);
         ((struct generic_param *)$$)->default_type = $5;
       }
-    | NAME PROTO_MARK generic_constraint '=' type {
+    | generic_param_name PROTO_MARK generic_constraint '=' type {
         struct generic_constraint *constraint =
             (struct generic_constraint *)$3;
         if (constraint)

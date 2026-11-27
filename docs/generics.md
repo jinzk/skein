@@ -14,7 +14,8 @@
 - 泛型函数调用推断、`f[int](...)` 和 `let g = f[int]`；
 - `|` 类型集合、`&` proto 组和约束检查；
 - `type` / `proto` 约束标记；
-- 泛型 proto 的结构式匹配、类型参数推断、默认方法和 `[T Keyed[int]]` 约束；
+- 泛型 proto 的结构式匹配、类型参数推断、默认方法、`[T Keyed[int]]` 和
+  `[T Keyed[T]]` 自引用约束；
 - 默认类型参数的声明、尾部/约束校验和推断缺失时的补全；
 - 裸 `Box` 类型注解按默认类型实参补全；
 - `std.meta.generic_info` / `type_args` / `type_params`；
@@ -153,7 +154,25 @@ TypeUnion     := ConcreteType ('|' ConcreteType)*
 
 - `&` 两侧必须是 proto；
 - `Hashable` 是 `std.traits` 提供的 proto，可参与 `&`；
-- 不允许具体类型出现在 `&` 中。
+- 不允许具体类型出现在 `&` 中；
+- proto 类型实参可以引用当前声明的类型参数，并在实例化或调用时替换为实际
+  类型实参：
+
+  ```skein
+  proto Keyed[K any] {
+    func key(self): K;
+  }
+
+  struct SelfKey {
+    func key(self): SelfKey { return self; }
+  }
+
+  func need[T Keyed[T]](x: T): T { return x; }
+  struct KeyBox[T Keyed[T]] { value: T; }
+
+  need(SelfKey {});
+  KeyBox[SelfKey] { value: SelfKey {} };
+  ```
 
 `TypeUnion`：
 

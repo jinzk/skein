@@ -1073,8 +1073,9 @@ impl Box {
 }
 ```
 
-泛型 proto 按结构式方法签名匹配，`[T Keyed]` 和 `[T Keyed[int]]` 都可用于约束；
-`x is Keyed` 只检查结构，`x is Keyed[int]` 非法。
+泛型 proto 按结构式方法签名匹配，`[T Keyed]`、`[T Keyed[int]]` 和引用当前类型
+参数的 `[T Keyed[T]]` 都可用于约束；约束里的类型参数在调用或实例化时按实际类型
+实参替换。`x is Keyed` 只检查结构，`x is Keyed[int]` 非法。
 
 元数据和序列化：
 

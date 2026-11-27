@@ -85,7 +85,7 @@ def run_cases():
         "func middle() { inner(); }\n"
         "func outer() { middle(); }\n"
         "let value = outer() on error(e) {\n"
-        "  std.io.println(str(std.utils.len(std.error.trace(e))));\n"
+        "  std.io.println(str((std.error.trace(e)).length()));\n"
         '  std.io.println(std.error.trace(e)[0]["function"]);\n'
         '  std.io.println(str(std.error.location(e)["line"]));\n'
         "  std.io.println(std.error.format_trace(e));\n"
@@ -105,7 +105,7 @@ def run_cases():
         "func middle() { inner(); }\n"
         "middle() on error(e) {\n"
         "  std.io.println(std.error.kind(e));\n"
-        "  std.io.println(str(std.utils.len(std.error.trace(e))));\n"
+        "  std.io.println(str((std.error.trace(e)).length()));\n"
         '  std.io.println(str(std.error.location(e)["line"]));\n'
         "  std.io.println(std.error.format_trace(e));\n"
         "  std.error.recover!(null);\n"
@@ -121,7 +121,7 @@ def run_cases():
         "import std;\n"
         'let e = std.error.new("custom", "boom");\n'
         "std.io.println(str(std.error.location(e)));\n"
-        "std.io.println(str(std.utils.len(std.error.trace(e))));\n"
+        "std.io.println(str((std.error.trace(e)).length()));\n"
         "std.io.println(std.error.format_trace(e));\n",
         stdout_all=["null", "0", "custom: boom"],
     )

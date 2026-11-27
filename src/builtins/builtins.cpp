@@ -1249,7 +1249,8 @@ struct value_t *call_builtin(int functype,
                 ret = newintval(
                     (long long)((struct set_value_t *)arg)->payload->size);
             } else {
-                yyerror("len expects string, bytes, list, dict, deque, heap, or set, got %s",
+                yyerror("length expects char, byte, string, bytes, list, "
+                        "dict, deque, heap, or set, got %s",
                         typename_of(arg));
             }
             break;

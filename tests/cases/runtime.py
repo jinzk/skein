@@ -41,7 +41,7 @@ def run_cases():
     )
     check(
         "values golden output",
-        "std.utils.len([1, 2, 3])\n"
+        "([1, 2, 3]).length()\n"
         "std.math.gcd(12, 18)\n",
         stdout_all=["= 3", "= 6"],
     )
@@ -388,7 +388,7 @@ def run_cases():
         "func vadd(...xs) {\n"
         "  let total = 0;\n"
         "  let i = 0;\n"
-        "  while (i < std.utils.len(xs)) { total = total + xs[i]; i = i + 1; }\n"
+        "  while (i < (xs).length()) { total = total + xs[i]; i = i + 1; }\n"
         "  return total;\n"
         "}\n"
         "std.io.println(zero());\n"
@@ -542,7 +542,7 @@ def run_cases():
     check("dict float keys canonically match ints",
           'let d = {1: "a", 1.0: "b", 2.5: "c", -0.0: "z"};\n'
           'std.io.println(d[1]);\nstd.io.println(d[2.5]);\nstd.io.println(d[0.0]);\n'
-          'std.io.println(std.utils.len(d));\n',
+          'std.io.println((d).length());\n',
           stdout_all=["b", "c", "z", "3"])
     check("dict NaN key rejected",
           'import std;\nlet n = std.math.log2(-1);\n{n: 1}\n',
@@ -587,8 +587,9 @@ def run_cases():
         env=dict(os.environ, SKEIN_VM="1", SKEIN_KEEP_AST="1"),
     )
 
-    check("len invalid type", "std.utils.len(1)\n",
-          stderr="len expects string, bytes, list, dict, deque, heap, or set")
+    check("length invalid type", "(1).length()\n",
+          stderr="length expects char, byte, string, bytes, list, dict, "
+                 "deque, heap, or set")
     check("for in invalid type", "for (let x in 1) { std.io.println(x); }\n",
           stderr="cannot iterate int")
     check("for in variable scope", "for (let x in [1]) { }\nx\n",
@@ -645,13 +646,13 @@ def run_cases():
           stderr="range expects 1 to 3 arguments")
     check("range overflow", "std.utils.range(9223372036854775807, 2)\n",
           stderr="range value overflow")
-    check("std import alias", "import std as s;\ns.list.len([1, 2, 3])\n",
+    check("std import alias", "import std as s;\ns.list.length([1, 2, 3])\n",
           stdout="= 3")
     check(
         "std import multiple aliases",
         "import std as s1;\n"
         "import std as s2;\n"
-        "s1.list.len([1]) + s2.list.len([1, 2])\n",
+        "s1.list.length([1]) + s2.list.length([1, 2])\n",
         stdout="= 3",
     )
     check("import alias conflict", "let s = 1;\nimport std as s;\n",
@@ -780,7 +781,7 @@ def run_cases():
         "func resolve_one() {\n"
         '  return std.net.resolve_task("localhost", 1000, "ipv4").wait();\n'
         "}\n"
-        "std.utils.len(resolve_one()) > 0\n",
+        "(resolve_one()).length() > 0\n",
         stdout="= true",
     )
     check(

@@ -1898,7 +1898,7 @@ struct Checker : public BuiltinContext {
     static const BuiltinMethod *find_builtin_method(
         enum type_constraint_kind receiver, const std::string &name) {
         static const BuiltinMethod methods[] = {
-            {TYPE_LIST, "len", "std.list.len", B_len},
+            {TYPE_LIST, "length", "std.list.length", B_len},
             {TYPE_LIST, "iter", "std.list.iter", B_iter_elements},
             {TYPE_LIST, "slice", "std.list.slice", B_list_slice},
             {TYPE_LIST, "contains", "std.list.contains", B_list_contains},
@@ -1924,7 +1924,7 @@ struct Checker : public BuiltinContext {
             {TYPE_LIST, "binary_search", "std.list.binary_search",
              B_list_binary_search},
 
-            {TYPE_DICT, "len", "std.dict.len", B_len},
+            {TYPE_DICT, "length", "std.dict.length", B_len},
             {TYPE_DICT, "get", "std.dict.get", B_dict_get},
             {TYPE_DICT, "has", "std.dict.has", B_dict_has},
             {TYPE_DICT, "keys", "std.dict.keys", B_dict_keys},
@@ -1941,6 +1941,7 @@ struct Checker : public BuiltinContext {
             {TYPE_DICT, "iter_items", "std.dict.iter_items", B_iter_items},
 
             {TYPE_SET, "size", "std.set.size", B_set_size},
+            {TYPE_SET, "length", "std.set.length", B_len},
             {TYPE_SET, "iter", "std.set.iter", B_iter_elements},
             {TYPE_SET, "add", "std.set.add", B_set_add},
             {TYPE_SET, "remove", "std.set.remove", B_set_remove},
@@ -1953,6 +1954,7 @@ struct Checker : public BuiltinContext {
             {TYPE_SET, "is_subset", "std.set.is_subset", B_set_is_subset},
 
             {TYPE_DEQUE, "size", "std.deque.size", B_deque_size},
+            {TYPE_DEQUE, "length", "std.deque.length", B_len},
             {TYPE_DEQUE, "iter", "std.deque.iter", B_iter_elements},
             {TYPE_DEQUE, "push_front", "std.deque.push_front",
              B_deque_push_front},
@@ -1969,12 +1971,15 @@ struct Checker : public BuiltinContext {
             {TYPE_DEQUE, "to_list", "std.deque.to_list", B_deque_to_list},
 
             {TYPE_HEAP, "size", "std.heap.size", B_heap_size},
+            {TYPE_HEAP, "length", "std.heap.length", B_len},
             {TYPE_HEAP, "iter", "std.heap.iter", B_iter_elements},
             {TYPE_HEAP, "push", "std.heap.push", B_heap_push},
             {TYPE_HEAP, "peek", "std.heap.peek", B_heap_peek},
             {TYPE_HEAP, "pop", "std.heap.pop", B_heap_pop},
             {TYPE_HEAP, "to_list", "std.heap.to_list", B_heap_to_list},
 
+            {TYPE_STRING, "length", "std.string.length", B_len},
+            {TYPE_BYTES, "length", "std.bytes.length", B_len},
             {TYPE_STRING, "iter", "std.iter.elements", B_iter_elements},
             {TYPE_BYTES, "iter", "std.iter.elements", B_iter_elements},
             {TYPE_GENERATOR, "iter", "std.iter.elements", B_iter_elements},
@@ -2126,8 +2131,8 @@ struct Checker : public BuiltinContext {
 
         /*
          * Built-in container values expose their module functions as methods:
-         * `xs.len()`, `d.iter_keys()`, `q.push_back(x)`, ...  Resolve from the
-         * receiver's static container type and rewrite the call to the
+         * `xs.length()`, `d.iter_keys()`, `q.push_back(x)`, ...  Resolve from
+         * the receiver's static container type and rewrite the call to the
          * corresponding builtin with the receiver as the first argument.
          */
         if (!spread && call->callee && call->callee->nodetype == 'j' &&

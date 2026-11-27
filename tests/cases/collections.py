@@ -76,7 +76,7 @@ def run_cases():
           'User { id: 1, name: "b" }];\n'
           'let by_id = std.dict.index_by(users, func(u) { return u.id; });\n'
           'std.io.println(by_id[1].name);\n'
-          'std.io.println(std.utils.len(by_id));\n',
+          'std.io.println((by_id).length());\n',
           stdout_all=["b", "1"])
     check("dict index_by composite keys",
           'import std;\n'
@@ -89,7 +89,7 @@ def run_cases():
           stdout_all=["eu", "us"])
     check("dict index_by empty list",
           'import std;\n'
-          'std.io.println(std.utils.len(std.dict.index_by([], func(x) { return x; })));\n',
+          'std.io.println((std.dict.index_by([], func(x) { return x; })).length());\n',
           stdout_all=["0"])
     check("dict index_by invalid key",
           'import std;\n'
@@ -135,7 +135,7 @@ def run_cases():
           'let i = 0;\n'
           'while (i < 40) { d[User { id: i, cache: [] }] = i; i = i + 1; }\n'
           'std.io.println(d[User { id: 20, cache: [] }]);\n'
-          'std.io.println(std.utils.len(d));\n'
+          'std.io.println((d).length());\n'
           'std.io.println(std.dict.has(d, User { id: 39, cache: [1] }));\n',
           stdout_all=["20", "40", "0"])
     check("custom struct key equality",
@@ -319,7 +319,7 @@ def run_cases():
           "std.io.println(n == n);\n"
           "std.io.println(n.value);\n"
           "let s = str(n);\n"
-          "std.io.println(std.utils.len(s) > 0);\n",
+          "std.io.println((s).length() > 0);\n",
           stdout_all=["built", "true", "1999", "true"])
 
     check("unary minus", "-3+5\n", stdout="= 2")
@@ -553,7 +553,7 @@ def run_cases():
     )
     check(
         "unicode variadic parameter",
-        "func 求和(...数字) { return std.utils.len(数字); }\n求和(1, 2, 3)\n",
+        "func 求和(...数字) { return (数字).length(); }\n求和(1, 2, 3)\n",
         stdout="= 3",
     )
     check(

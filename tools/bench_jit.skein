@@ -42,17 +42,17 @@ func parse_args(argv) {
   let max_ratio = 1.10;
   let fib_speedup = 2.0;
   let i = 0;
-  while (i < std.utils.len(argv)) {
+  while (i < (argv).length()) {
     let arg = argv[i];
     if (arg == "--bin") {
       i = i + 1;
-      if (i >= std.utils.len(argv)) {
+      if (i >= (argv).length()) {
         die("--bin requires a value\n" + usage_text());
       }
       bin_path = argv[i];
     } else if (arg == "--repeats") {
       i = i + 1;
-      if (i >= std.utils.len(argv)) {
+      if (i >= (argv).length()) {
         die("--repeats requires a value\n" + usage_text());
       }
       repeats = int(argv[i]);
@@ -62,13 +62,13 @@ func parse_args(argv) {
       json = true;
     } else if (arg == "--max-ratio") {
       i = i + 1;
-      if (i >= std.utils.len(argv)) {
+      if (i >= (argv).length()) {
         die("--max-ratio requires a value\n" + usage_text());
       }
       max_ratio = float(argv[i]);
     } else if (arg == "--fib-speedup") {
       i = i + 1;
-      if (i >= std.utils.len(argv)) {
+      if (i >= (argv).length()) {
         die("--fib-speedup requires a value\n" + usage_text());
       }
       fib_speedup = float(argv[i]);
@@ -151,7 +151,7 @@ func run({bin, repeats, check, json, max_ratio, fib_speedup}) {
     }
   }
 
-  if (std.utils.len(failures) > 0) {
+  if ((failures).length() > 0) {
     std.io.flush(std.io.stdout);
     for message in failures {
       std.io.write_all(std.io.stderr, "FAIL: " + message + "\n");

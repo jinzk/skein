@@ -2458,6 +2458,29 @@ extern "C" SKEIN_JIT_SYSV value_t *skein_jit_invoke_method(
             return result;
         }
     }
+    if (receiver && name && argc == 0 && std::strcmp(name, "length") == 0) {
+        int builtin_id = builtin_length_method_id(receiver);
+        /* Primitive scalars have no members; route them through B_len so
+         * callers get the canonical diagnostic while user-defined `length`
+         * methods keep the field path. */
+        if (builtin_id < 0 &&
+            (receiver->type == T_int || receiver->type == T_float ||
+             receiver->type == T_bool || receiver->type == T_null))
+            builtin_id = B_len;
+        if (builtin_id >= 0) {
+            value_t *builtin = newbuiltinval(builtin_id);
+            std::vector<value_t *> call_args;
+            call_args.push_back(receiver);
+            value_t *result =
+                skein_vm_call_value_args(builtin, std::move(call_args));
+            freeval(builtin);
+            if (g_interrupted) {
+                freeval(result);
+                return nullptr;
+            }
+            return result;
+        }
+    }
     value_t *callee = nullptr;
     bool receiver_owned = false;
     if (receiver && name) {

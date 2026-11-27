@@ -277,7 +277,7 @@ let n = parse_positive("0") on error(e) {
 
 ### 标准库
 
-`import std;` 即可使用内置标准库，不需要文件系统目录：
+`std` 是语言级默认绑定，无需 `import std;` 即可使用内置标准库；显式导入仍然合法且幂等：
 
 - 数据：`std.json`、`std.regex`（PCRE2）、`std.crypto`、`std.compress`、`std.encoding`、`std.unicode`、`std.log`；
 - 系统：`std.fs`、`std.process`、`std.env`、`std.sys`、`std.time`、`std.random`；

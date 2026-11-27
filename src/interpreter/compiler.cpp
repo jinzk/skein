@@ -3618,18 +3618,29 @@ struct Compiler {
         }
 
         /* `obj.method(args)` avoids materializing a bound method value.
-         * Spread, launch and tail calls keep the generic path. */
+         * Spread and launch calls keep the generic path.  Tail calls normally
+         * do too, except for `length`/`iter`: a generic field lookup cannot
+         * turn those names into built-in methods on container values. */
         const char *method_name = nullptr;
         bool member_call = false;
-        if (!tail && !call->launch && !has_spread && call->callee &&
+        bool method_was_tail = false;
+        if (!call->launch && !has_spread && call->callee &&
             call->callee->nodetype == 'j' && args.size() <= 0xFFFF) {
             method_name = literal_string(call->callee->r);
             if (method_name) {
+                const bool builtin_fallback =
+                    std::strcmp(method_name, "length") == 0 ||
+                    std::strcmp(method_name, "iter") == 0;
                 ast *base = call->callee->l;
                 const bool unresolved_base =
                     base && base->nodetype == 'N' &&
                     !name_is_resolved(((struct symref *)base)->name);
-                member_call = !unresolved_base;
+                if (builtin_fallback) {
+                    member_call = true;
+                    method_was_tail = tail;
+                } else if (!tail) {
+                    member_call = !unresolved_base;
+                }
             }
         }
         if (member_call) {
@@ -3646,6 +3657,8 @@ struct Compiler {
                  static_cast<uint16_t>(args.size()), method_index,
                  loc_of(node));
             call_cleanup.pop_back();
+            if (method_was_tail && return_value)
+                emit(Op::Return, 0, 0, 0, loc_of(node));
             return;
         }
 

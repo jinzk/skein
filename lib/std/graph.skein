@@ -80,11 +80,11 @@ package graph {
   }
 
   export func node_count(g) {
-    return std.dict.len(g.nodes);
+    return (g.nodes).length();
   }
 
   export func edge_count(g) {
-    return std.dict.len(g.edges);
+    return (g.edges).length();
   }
 
   export func node_ids(g) {
@@ -125,7 +125,7 @@ package graph {
       std.error.fail!("graph.add_edges edges must be a list");
     }
     for (let spec in edges) {
-      if (std.type.kind_of(spec) != "list" || std.utils.len(spec) < 2 || std.utils.len(spec) > 4) {
+      if (std.type.kind_of(spec) != "list" || (spec).length() < 2 || (spec).length() > 4) {
         std.error.fail!("graph.add_edges edge must be [from, to[, tag[, weight]]]");
       }
       let from = spec[0];
@@ -135,11 +135,11 @@ package graph {
       }
 
       let tag = "";
-      if (std.utils.len(spec) > 2 && spec[2] != null) {
+      if ((spec).length() > 2 && spec[2] != null) {
         tag = spec[2];
       }
       let weight = 1;
-      if (std.utils.len(spec) > 3 && spec[3] != null) {
+      if ((spec).length() > 3 && spec[3] != null) {
         weight = spec[3];
       }
       if (std.type.kind_of(weight) != "int" && std.type.kind_of(weight) != "float") {
@@ -330,7 +330,7 @@ package graph {
       if (nexts == null) {
         continue;
       }
-      let i = std.utils.len(nexts) - 1;
+      let i = (nexts).length() - 1;
       while (i >= 0) {
         if (!std.dict.has(seen, nexts[i])) {
           stack = std.deque.push_back(stack, nexts[i]);
@@ -377,7 +377,7 @@ package graph {
       }
     }
 
-    if (std.deque.size(order) != std.utils.len(g.nodes)) {
+    if (std.deque.size(order) != (g.nodes).length()) {
       return { "ok": false, "error": "cycle" };
     }
     return { "ok": true, "order": std.deque.to_list(order) };

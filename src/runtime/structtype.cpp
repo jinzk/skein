@@ -583,6 +583,25 @@ int builtin_iter_method_id(const struct value_t *value) {
     return -1;
 }
 
+int builtin_length_method_id(const struct value_t *value) {
+    if (!value)
+        return -1;
+    switch (value->type) {
+        case T_char:
+        case T_byte:
+        case T_string:
+        case T_bytes:
+        case T_list:
+        case T_dict:
+        case T_set:
+        case T_deque:
+        case T_heap:
+            return B_len;
+        default:
+            return -1;
+    }
+}
+
 type_def *structtype_find_type(const char *source, const char *name) {
     std::lock_guard<std::recursive_mutex> lock(type_registry_mutex);
     if (!name) return NULL;

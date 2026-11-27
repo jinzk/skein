@@ -32,7 +32,7 @@ let dynamic_req = {"method": "GET", "path": "/api/v1/resource99/42"};
 start = std.time.monotonic_ms();
 checksum = 0;
 for (let i in std.utils.range(5000)) {
-  checksum = checksum + std.utils.len(dynamic_app.dispatch(dynamic_req)["body"]);
+  checksum = checksum + (dynamic_app.dispatch(dynamic_req)["body"]).length();
 }
 std.io.print("dynamic 100 routes x5000: " +
       str(std.time.monotonic_ms() - start) + " ms (" + str(checksum) + ")");
@@ -49,7 +49,7 @@ let large_req = {"method": "GET", "path": "/api/v1/resource999/42"};
 start = std.time.monotonic_ms();
 checksum = 0;
 for (let i in std.utils.range(5000)) {
-  checksum = checksum + std.utils.len(large_app.dispatch(large_req)["body"]);
+  checksum = checksum + (large_app.dispatch(large_req)["body"]).length();
 }
 std.io.print("dynamic 1000 routes x5000: " +
       str(std.time.monotonic_ms() - start) + " ms (" + str(checksum) + ")");

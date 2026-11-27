@@ -77,6 +77,8 @@ void clear_scope(struct scope_t *s);
 void prune_scopes(scope_context &context);
 void save_global_symbol(const char *name, value_t *v);
 value_t *lookup_global_symbol(const char *name);
+void save_root_symbol(const char *name, value_t *v);
+value_t *lookup_root_symbol(const char *name);
 /* Stable global slot for `name`, or -1 if it is not a current global. */
 int global_symbol_slot(const char *name);
 struct symbol *lookupsym(const char *);

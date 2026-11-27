@@ -476,13 +476,13 @@ std.struct.encode(box, "Box[int]")   // envelope，包含 $type
 ```text
 import std;
 let xs: list[int] = [1, 2, 3];
-xs.len();
+xs.length();
 xs.contains(2);
 xs.map(func(x) { return x * 2; });
 for x in xs.iter() { ... }
 
 let d: dict[string, int] = {"a": 1};
-d.len();
+d.length();
 d.has("a");
 d.keys();
 for k in d.iter_keys() { ... }
@@ -502,7 +502,7 @@ for x in (1, 2).iter() { ... }
 
 ```text
 import std;
-xs.len()        == std.list.len(xs)
+xs.length()        == (xs).length()
 d.iter_keys()   == std.dict.iter_keys(d)
 q.push_back(3)  == std.deque.push_back(q, 3)
 ```
@@ -627,9 +627,9 @@ let copied_list = std.list.new([1, 2]);
 let copied_dict = std.dict.new({"a": 1});
 ```
 
-容器构造必须写 `std.list.new()` / `std.dict.new()`；单参数形式从可迭代对象构造，
-`dict` 接受 dict 或由长度 2 的 pair/list 组成的可迭代对象。裸名 `list` / `dict`
-不再是值绑定，但类型注解里的 `list[T]` / `dict[K, V]` 不受影响。
+容器构造可以写 `list()` / `dict()`，也可以写规范路径 `std.list.new()` /
+`std.dict.new()`；单参数形式从可迭代对象构造，`dict` 接受 dict 或由长度 2 的
+pair/list 组成的可迭代对象。类型注解里的 `list[T]` / `dict[K, V]` 不受影响。
 
 支持链式下标赋值：`a[0][1] = 9`、`d["a"]["b"] = 1`。
 
@@ -785,7 +785,7 @@ for a, b, c in triples() {
 - 遍历 dict 的 key 使用 `dict.keys()` 或 `dict.iter_keys(d)`；
 - `for (a, b, ...) in iterable` 或 `for a, b, ... in iterable` 对每个元素做 tuple 解构，支持 list、generator 等单值迭代；元素静态类型必须是 pair 或 tuple，元素个数必须一致；
 - 显式惰性迭代使用 `std.list.iter(xs)`、`std.dict.iter_keys(d)`、`std.dict.iter_values(d)`、`std.dict.iter_items(d)` 或 `std.dict.iter(d)`；这些返回 generator，可直接用于 `for` 或 `std.iter.*`；
-- list 需要下标时用 `std.utils.range(std.utils.len(list))` 或 C 风格 `for`；
+- list 需要下标时用 `std.utils.range((list).length())` 或 C 风格 `for`；
 - string 遍历 UTF-8 字符；bytes 遍历 `0..255` 的字节值；
 - 用户类型必须满足 `std.traits.Iterable`（`iter(self): generator[T]`）才能被 `for` 遍历；不满足时编译期报错；`any` 在运行时检查；
 - 迭代遍历对象在循环开始时求值一次，循环期间修改原对象不会改变本次遍历；
@@ -1683,7 +1683,7 @@ for (let value in values) {
 
 #### 内置函数
 
-原 prelude 值绑定已移除；先 `import std;` 再使用 `std.utils.*`、`std.io.*`、`std.list.new` / `std.dict.new`、`std.type.*` 等规范路径。`int`、`float`、`bool`、`str`、`char`、`byte` 仍是词法识别的转换函数与类型名。其中类型位置的 `str` 是 `string` 的短别名，规范类型名和诊断、反射输出都是 `string`；值位置只有 `str(x)`，`string` 不是值。数学、字符串、格式化、文件与 bytes 函数位于 `std.math`、`std.string`、`std.fs`、`std.bytes`，使用前需要 `import std;`。内置函数同样是一等值：
+`std` 是语言级默认根绑定，无需 `import std;`；显式导入仍然合法且幂等。默认裸值只有 `list` / `dict` / `input` / `print` / `println`；`len` / `iter!` 已完全移除，`range` 与类型内省使用 `std.utils.*` / `std.type.*` 规范路径。容器长度用 `x.length()`，迭代用 `x.iter()`。`int`、`float`、`bool`、`str`、`char`、`byte` 仍是词法识别的转换函数与类型名。其中类型位置的 `str` 是 `string` 的短别名，规范类型名和诊断、反射输出都是 `string`；值位置只有 `str(x)`，`string` 不是值。数学、字符串、格式化、文件与 bytes 函数位于 `std.math`、`std.string`、`std.fs`、`std.bytes`。内置函数同样是一等值：
 
 ```text
 import std;
@@ -1737,7 +1737,7 @@ apply(std.math.sqrt, 16)
 - `&&`、`||`、`!` 返回 `bool`，并短路求值。
 - `==` / `!=` 对所有类型有效，返回 `bool`；大小比较只支持数值之间或字符串之间，也返回 `bool`。
 - 列表和字符串下标必须是 `int`，`1.0` 不会被隐式截断；字符串下标按 UTF-8 码点计数，`"你好"[0]` 得到 `你`。
-- `std.utils.len(x)` 支持字符串、char、bytes、list、dict、deque、heap、set：字符串按 UTF-8 码点计数，char 为 1，bytes 按字节数，其余按元素数。
+- `x.length()` / `std.list.length(x)` 等支持字符串、char、bytes、list、dict、deque、heap、set：字符串按 UTF-8 码点计数，char 为 1，bytes 按字节数，其余按元素数。
 - `std.utils.range(length)` / `std.utils.range(start, length[, step])` 生成整数序列，第二参数是长度而不是结束值；`step` 不能为 0。
 - 字典键按值相等判断，`1` 和 `1.0` 是同一个键；字面量中的重复键以最后一个为准。
 - `list`、`dict` 和 `struct` 是值类型：赋值、传参和返回在语义上复制，但内部使用写时复制（COW），只读或复制时共享底层数据，真正修改时才分离。
@@ -2147,7 +2147,7 @@ f["close"]()
 '\u{1F600}'
 ```
 
-- `std.utils.len('a') == 1`；
+- `('a').length() == 1`；
 - 字符串下标和 `for ... in` 字符串返回 `char`；
 - `int('A') == 65`，`str('A') == "A"`，`char(65) == 'A'`；
 - `char` 可与字符串拼接：`'a' + "bc"`；
@@ -2179,7 +2179,7 @@ byte(255)
 import std;
 std.bytes.from_string(text)        → bytes
 std.bytes.to_string(bytes)         → string
-std.bytes.len(bytes)               → int
+std.bytes.length(bytes)            → int
 std.bytes.get(bytes, index)        → 0..255
 std.bytes.slice(bytes, start[, length]) → bytes
 std.bytes.concat(a, b)             → bytes
@@ -2196,7 +2196,7 @@ bytes[index]                       → 0..255
 bytes[index] = 0..255
 ```
 
-需要 `import std;`。
+`std` 默认可见；显式 `import std;` 也可以。
 
 示例：
 
@@ -2204,7 +2204,7 @@ bytes[index] = 0..255
 import std;
 
 let b = std.bytes.from_hex("00ff10");
-std.bytes.len(b)                     → 3
+std.bytes.length(b)                  → 3
 std.bytes.hex(b)                     → "00ff10"
 std.bytes.get(b, 1)                  → 255
 std.bytes.hex(std.bytes.slice(b, 1, 2)) → "ff10"
@@ -2229,7 +2229,7 @@ std.bytes.hex(std.bytes.from_int(-1, 2, "little"))
 
 - `bytes` 可以保存任意字节，包括 `0x00`，长度由字节数决定；
 - 直接打印 `bytes` 时显示为 `<bytes: N>`，不会把原始二进制写到终端；需要查看内容时使用 `std.bytes.hex`；
-- `std.bytes.len`、`std.bytes.get`、`std.bytes.slice`、索引和 `std.fs.seek` 都使用**字节下标**，不是 UTF-8 码点；
+- `std.bytes.length`、`std.bytes.get`、`std.bytes.slice`、索引和 `std.fs.seek` 都使用**字节下标**，不是 UTF-8 码点；
 - 索引读取返回 `0..255` 的整数，索引赋值只接受 `0..255`；
 - `std.bytes.slice` 的 `start` / `length` 不能为负数，越界会截断；
 - `std.bytes.from_hex` 只接受偶数个十六进制数字，大小写均可；
@@ -3328,7 +3328,7 @@ let response = {
   "id": request["id"],
   "ok": true,
   "result": request["params"][0],
-  "body_len": std.utils.len(body)
+  "body_len": (body).length()
 };
 std.io.write_all(std.io.stdout,
                  std.bytes.from_string(std.json.stringify(response) + "\n"));

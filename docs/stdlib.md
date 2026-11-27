@@ -3038,7 +3038,7 @@ for x in (Range { start: 1, end: 4 }) {
 注意事项：
 
 - `dict.iter()` 产出 entry pair；裸 `for x in dict` 也遍历 entry pair，二者语义一致。遍历 key 使用 `dict.keys()` 或 `dict.iter_keys(d)`。
-- 裸 `for x in userValue` 要求 `userValue` 满足 `Iterable`；满足时 `for` 会使用其 `iter()`。不满足的用户类型会报错，`iter!(userValue)` 仍可作为显式写法。
+- 裸 `for x in userValue` 要求 `userValue` 满足 `Iterable`；满足时 `for` 会使用其 `iter()`。不满足的用户类型会报错，`(userValue).iter()` 仍可作为显式写法。
 - `std.meta.implements("list", "Iterable")`、`std.meta.protocols("int")` 等反射入口会看到内置 conformance。
 - `std.meta.implements` 的字符串参数目前不接受 `generator[int]` 这类带类型参数的文本，使用 `type_info` 或值本身查询。
 
@@ -3622,8 +3622,9 @@ drive-relative 的 `C:foo` 和普通相对路径为 `false`。
 
 `std.list` / `std.dict` 的规范构造器为 `new`：无参数返回空容器，单参数从
 可迭代对象构造（list 复制元素，dict 接受 dict 或由长度 2 的 pair/list 组成的
-可迭代对象）。裸名 `list` / `dict` 不再是值绑定，构造必须写 `std.list.new(x)` /
-`std.dict.new(x)`；类型注解中的 `list[T]` / `dict[K, V]` 始终按类型命名空间解析。
+可迭代对象）。裸 `list(x)` / `dict(x)` 是默认根绑定，等价于规范路径
+`std.list.new(x)` / `std.dict.new(x)`；类型注解中的 `list[T]` / `dict[K, V]`
+始终按类型命名空间解析。
 
 `std.list` 新增常用算法：
 
@@ -3724,7 +3725,7 @@ for (k, v) in std.dict.iter(d) { ... }
 这些函数也可以作为内置容器值的方法调用：
 
 ```text
-xs.len()
+xs.length()
 xs.iter()
 d.keys()
 d.iter_keys()
@@ -3739,7 +3740,7 @@ q.push_back(3)
 ```text
 import std;
 std.list.new
-std.list.len
+std.list.length
 std.list.iter
 std.list.slice
 std.list.contains
@@ -3782,7 +3783,7 @@ std.iter.values
 std.iter.items
 
 std.dict.new
-std.dict.len
+std.dict.length
 std.dict.get
 std.dict.has
 std.dict.keys
@@ -3841,7 +3842,7 @@ std.json.parse
 std.json.try_parse
 std.json.stringify
 
-std.string.len
+std.string.length
 std.string.find
 std.string.substr
 std.string.split
@@ -3960,7 +3961,6 @@ std.type.package_name
 std.type.module_name
 std.type.source
 
-std.utils.len
 std.utils.range
 
 std.ref.set
@@ -4148,7 +4148,7 @@ std.ffi.function
 std.ffi.declare
 std.ffi.type
 
-std.bytes.len
+std.bytes.length
 std.bytes.get
 std.bytes.slice
 std.bytes.concat
@@ -4297,8 +4297,10 @@ std.thread.capabilities
 
 - `std` 是内置包，不参与文件系统查找，也不需要满足目录名规则；
 - `std` 名称保留，不能通过源码包覆盖；
-- `std.*` 是规范形式；使用 `import std;` 后通过 `std.list`、`std.string` 等方式访问；
-- 原 prelude 裸名（`len` / `range` / `print` / `println` / `input` / `kind_of` / `type_name` / `type_package` / `type_module_name` / `type_source` / `list` / `dict`）已移除；必须先 `import std;` 再使用对应的 `std.*` 规范路径；
+- `std` 是语言级默认根绑定，无需 `import std;` 即可使用；显式 `import std;` 仍然合法且幂等；
+- `std.*` 是规范形式；通过 `std.list`、`std.string` 等方式访问；
+- 默认裸值只有 `list` / `dict` / `input` / `print` / `println`；`len` / `iter!` 已完全移除，`range` 与类型内省裸名也不再提供，分别使用 `std.utils.range` / `std.type.*`；
+- 容器长度统一使用 `length()` 或 `std.*.length`；迭代器统一使用 `iter()` 或 `std.iter.*`，不再提供 `.len()` / `std.utils.len` / `std.utils.iter!`；
 - 数学、字符串、格式化、文件与 bytes 的旧全局函数（如 `find`、`split`、`bytes_*`、`file_*`）已移除，请改用对应的 `std.math` / `std.string` / `std.fs` / `std.bytes` 函数；
 - `std` 导入得到的是命名空间副本，修改自己的副本不会污染内置缓存；
 - 新函数只通过 `std.*` 提供，不再增加全局函数名；
@@ -4374,11 +4376,11 @@ std.thread.capabilities
 - `std.result.capture` 捕获同步 `fail` 和运行时错误；task 使用 `std.task.catch`；
 - 显式 `std.generator.close(g)` 会执行生成器的 `defer`；被直接丢弃的挂起生成器不会执行，但会打印 warning；
 - DNS 超时依赖 libuv 取消系统解析请求，极端情况下可能延迟返回；
-- 内置函数只通过 `std.*` 提供，原 prelude 裸名入口已移除。
+- 内置函数以 `std.*` 为规范路径；默认裸值只有 `list` / `dict` / `input` / `print` / `println`。
 
 ### 控制台输入
 
-`std.io.input([prompt])` 从 stdin 读取一行，返回字符串（不含末尾换行）；原全局 `input` 已移除。
+`std.io.input([prompt])` 从 stdin 读取一行，返回字符串（不含末尾换行）；裸 `input([prompt])` 是默认绑定，等价于该规范路径。
 
 ```text
 import std;

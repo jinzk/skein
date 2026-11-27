@@ -19,7 +19,7 @@ ts_test("char literal", func() {
   ts_eq(str(c), "a");
   ts_eq(std.type.kind_of(c), "char");
   ts_eq(std.type.name(c), "char");
-  ts_eq(std.utils.len(c), 1);
+  ts_eq((c).length(), 1);
 });
 
 ts_test("char conversions", func() {
@@ -145,7 +145,7 @@ ts_test("byte int conversions", func() {
   ts_eq(int(byte(65)), 65);
   ts_eq(int(byte(255)), 255);
   ts_eq(std.type.kind_of(byte(1)), "byte");
-  ts_eq(std.utils.len(byte(1)), 1);
+  ts_eq((byte(1)).length(), 1);
 });
 
 ts_test("byte type annotation", func() {

@@ -88,8 +88,8 @@ def run_cases():
         )
         check(
             "std.fs read_text ignore",
-            f'import std;\nstd.utils.len(std.fs.read_text("{quoted_invalid_text}", '
-            '"gbk", "ignore"))\n',
+            f'import std;\n(std.fs.read_text("{quoted_invalid_text}", '
+            '"gbk", "ignore")).length()\n',
             stdout="= 0",
         )
         check(
@@ -168,7 +168,7 @@ def run_cases():
             f'std.fs.seek(f, 6, 0)\n'
             f'std.bytes.to_string(std.io.read_line(f))\n'
             f'std.fs.seek(f, 0, 0)\n'
-            f'std.utils.len(std.io.read_all(f, 100))\n'
+            f'(std.io.read_all(f, 100)).length()\n'
             f'std.io.eof(f)\n'
             f'std.fs.seek(f, 0, 0)\n'
             f'std.bytes.to_string(std.io.read_exact(f, 5))\n'
@@ -184,7 +184,7 @@ def run_cases():
             "io file eof read",
             f'import std;\n'
             f'let f = std.fs.open("{quoted_stream}", "rb");\n'
-            f'std.utils.len(std.io.read(f, 100))\n'
+            f'(std.io.read(f, 100)).length()\n'
             f'std.io.eof(f)\n'
             f'std.io.read(f, 100) == null\n'
             f'std.io.close(f)\n',
@@ -269,7 +269,7 @@ def run_cases():
             f'std.io.close(w)\n'
             f'let r = std.fs.open("{quoted_stream_copy}", "rb");\n'
             f'std.bytes.to_string(std.io.read_task(r, 4).wait())\n'
-            f'std.utils.len(std.io.read_task(r, 100).wait())\n'
+            f'(std.io.read_task(r, 100).wait()).length()\n'
             f'std.io.read_task(r, 100).wait() == null\n'
             f'std.io.eof(r)\n'
             f'std.io.close(r)\n',
@@ -482,7 +482,7 @@ def run_cases():
     check("empty for body", "for (let i = 0; i < 1; i = i + 1) {}\n", code=0)
     check("empty func body", "func f() {}\nf()\n", code=0)
     check("empty package body", "package pkg {}\n", code=0)
-    check("empty dict in expression", "std.utils.len({})\n", stdout="= 0")
+    check("empty dict in expression", "({}).length()\n", stdout="= 0")
     check("empty dict as value", 'let d = {"a": {}};\nd["a"]\n',
           stdout="= {}")
     check("empty block inside block", "if (1) { {} }\n", code=0)

@@ -8,7 +8,7 @@ import std;
 package bench_common {
   export func median(values) {
     let ordered = std.list.sort(values);
-    let count = std.utils.len(ordered);
+    let count = (ordered).length();
     if (count == 0) {
       return 0.0;
     }

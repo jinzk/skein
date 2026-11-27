@@ -123,8 +123,8 @@ ts_test("lambda shorthand expression body", func() {
 ts_test("pipe operator", func() {
   ts_eq(std.utils.range(0, 6) |> std.iter.filter(x -> x % 2 == 0) |>
         std.iter.collect(), [0, 2, 4]);
-  ts_eq([1, 2, 3] |> std.list.len, 3);
-  ts_eq(std.list.map([1, 2, 3], x -> x + 1) |> std.list.len, 3);
+  ts_eq([1, 2, 3] |> std.list.length, 3);
+  ts_eq(std.list.map([1, 2, 3], x -> x + 1) |> std.list.length, 3);
 });
 
 ts_test("pipe struct method", func() {
@@ -174,8 +174,8 @@ ts_test("numbered placeholder binds nearest call", func() {
 });
 
 ts_test("string append reuses buffer", func() {
-  ts_eq(std.utils.len(function_build(3)), 3);
-  ts_eq(std.utils.len(function_build(5)), 5);
+  ts_eq((function_build(3)).length(), 3);
+  ts_eq((function_build(5)).length(), 5);
   ts_eq(function_build(3), "xxx");
 });
 

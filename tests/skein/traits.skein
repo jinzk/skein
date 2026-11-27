@@ -83,8 +83,8 @@ ts_test("traits generic hashable constraint", func() {
 });
 
 ts_test("traits generic iterable constraint", func() {
-  ts_eq(trait_need_iter([1, 2]).len(), 2);
-  ts_eq(std.utils.len(trait_need_iter("ab")), 2);
+  ts_eq((trait_need_iter([1, 2])).length(), 2);
+  ts_eq((trait_need_iter("ab")).length(), 2);
   ts_eq(trait_need_iter(TraitRange {
     start: 1, end: 3, extra: []
   }).start, 1);
@@ -93,7 +93,7 @@ ts_test("traits generic iterable constraint", func() {
 ts_test("traits iter macro accepts list-returning iter", func() {
   let box = TraitListIter { xs: [5, 6] };
   let out = [];
-  for x in iter!(box) {
+  for x in (box).iter() {
     out = std.list.append(out, x);
   }
   ts_eq(out, [5, 6]);
@@ -105,13 +105,13 @@ ts_test("traits proto iter dispatch", func() {
 
   let chars: Iterable = "xy";
   let got = std.iter.collect(chars.iter());
-  ts_eq(std.utils.len(got), 2);
+  ts_eq((got).length(), 2);
   ts_eq(str(got[0]), "x");
   ts_eq(str(got[1]), "y");
 
   let d: Iterable = {"a": 1, "b": 2};
   let entries = std.iter.collect(d.iter());
-  ts_eq(std.utils.len(entries), 2);
+  ts_eq((entries).length(), 2);
   ts_eq(entries[0][0], "a");
   ts_eq(entries[0][1], 1);
 
@@ -122,7 +122,7 @@ ts_test("traits proto iter dispatch", func() {
 ts_test("traits iter macro on proto value", func() {
   let xs: Iterable = [7, 8];
   let out = [];
-  for v in iter!(xs) {
+  for v in (xs).iter() {
     out = std.list.append(out, v);
   }
   ts_eq(out, [7, 8]);

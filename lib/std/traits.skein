@@ -6,7 +6,7 @@ package traits {
   proto Hashable {
   }
 
-  // Structural iterator protocol for explicit iter! / .iter() use.
+  // Structural iterator protocol for .iter() use.
   // Built-in containers satisfy it through built-in conformance; user
   // types satisfy it with a matching iter(self): generator[T] method.
   proto Iterable[T any] {

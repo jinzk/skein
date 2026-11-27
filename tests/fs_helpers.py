@@ -26,7 +26,7 @@ def main():
             'std.fs.write_text(std.fs.path_join(base, "a/b/c/one.txt"), "one", "utf-8");\n'
             'std.fs.write_text(std.fs.path_join(base, "root.txt"), "root", "utf-8");\n'
             'let files = std.fs.glob(std.fs.path_join(base, "*.txt"));\n'
-            'std.io.println("glob=" + str(std.utils.len(files)));\n'
+            'std.io.println("glob=" + str((files).length()));\n'
             'std.fs.copy(std.fs.path_join(base, "root.txt"), '
             'std.fs.path_join(base, "copy.txt"));\n'
             'std.io.println("copy=" + str(std.fs.exists('

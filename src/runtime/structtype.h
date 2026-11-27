@@ -281,6 +281,9 @@ bool value_is_callable(const struct value_t *value);
 /* Builtin iterator method id for Op::CallMethod fallback: B_iter_items for
  * dict and B_iter_elements for other iterables; -1 when not applicable. */
 int builtin_iter_method_id(const struct value_t *value);
+/* Builtin zero-argument length method id for scalar and container receivers;
+ * -1 when not applicable. */
+int builtin_length_method_id(const struct value_t *value);
 /* Look up the std.traits.Iterable-compatible iter method on a user type.
  * Returns false when the method is missing or does not return generator[T]. */
 bool structtype_find_iter_method(const type_def *def,

@@ -40,11 +40,11 @@ ts_test("kv scan and clear", func() {
   store.put("p:2", "b");
   store.put("q:1", "c");
   let page = store.scan("p:");
-  ts_eq(std.utils.len(page), 2);
+  ts_eq((page).length(), 2);
   ts_eq(std.bytes.to_string(page[0]["key"]), "p:1");
   ts_eq(std.bytes.to_string(page[1]["key"]), "p:2");
   let limited = store.scan("p:", 1);
-  ts_eq(std.utils.len(limited), 1);
+  ts_eq((limited).length(), 1);
   ts_eq(std.bytes.to_string(limited[0]["key"]), "p:1");
   ts_eq(store.count(), 3);
   ts_eq(store.clear(), 3);

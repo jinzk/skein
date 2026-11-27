@@ -153,8 +153,8 @@ def run_cases():
             'import std;\n'
             f'let f = std.fs.open("{test_file}", "rb");\n'
             'let b = std.io.buffered(f, 4);\n'
-            'std.utils.len(std.io.read_task(b, 2).wait()) == 2\n'
-            'std.utils.len(std.io.read_task(b, 100).wait()) > 0\n'
+            '(std.io.read_task(b, 2).wait()).length() == 2\n'
+            '(std.io.read_task(b, 100).wait()).length() > 0\n'
             'std.io.close(b)\n',
             stdout_all=["= true", "= true", "= true"],
         )
@@ -869,7 +869,7 @@ def run_cases():
                 '    return {"status": 200, "body": body};\n'
                 "  }\n"
                 '  return {"status": 200, "body": "len=" + '
-                'str(std.utils.len(req["body"]))};\n'
+                'str((req["body"]).length())};\n'
                 "}, 2);\n"
                 'std.io.println("served " + str(n));\n'
             )
@@ -881,13 +881,13 @@ def run_cases():
                     f'let up = std.http2.post('
                     f'"http://127.0.0.1:{flow_port}/upload", body,\n'
                     '  {"settings": {"initial_window_size": 16384}});\n'
-                    'std.io.println("sent=" + str(std.utils.len(body)));\n'
+                    'std.io.println("sent=" + str((body).length()));\n'
                     'std.io.println(str(up["status"]) + ":" + '
                     'std.bytes.to_string(up["body"]));\n'
                     f'let down = std.http2.get('
                     f'"http://127.0.0.1:{flow_port}/download",\n'
                     '  {"settings": {"initial_window_size": 16384}});\n'
-                    'std.io.println("down=" + str(std.utils.len(down["body"])));\n',
+                    'std.io.println("down=" + str((down["body"]).length()));\n',
                     timeout=30,
                 )
                 assert flow_client.returncode == 0, flow_client.stderr
@@ -915,7 +915,7 @@ def run_cases():
                 "  let total = 0;\n"
                 "  let chunk = std.http.read_body(req);\n"
                 "  while (chunk != null) {\n"
-                "    total = total + std.utils.len(chunk);\n"
+                "    total = total + (chunk).length();\n"
                 "    std.time.sleep(1);\n"
                 "    chunk = std.http.read_body(req);\n"
                 "  }\n"
@@ -968,7 +968,7 @@ def run_cases():
                     f'"http://127.0.0.1:{back_port}/big",\n'
                     '  {"settings": {"initial_window_size": 16384},\n'
                     '   "on_body": func(chunk) {\n'
-                    "       total = total + std.utils.len(chunk);\n"
+                    "       total = total + (chunk).length();\n"
                     "       chunks = chunks + 1;\n"
                     "       std.time.sleep(1);\n"
                     "   }});\n"
@@ -1012,9 +1012,9 @@ def run_cases():
                     f"{many_items}],\n"
                     '  {"settings": {"max_concurrent_streams": 2, '
                     '"initial_window_size": 16384}});\n'
-                    'std.io.println("count=" + str(std.utils.len(responses)));\n'
+                    'std.io.println("count=" + str((responses).length()));\n'
                     "let ok = true;\n"
-                    "for (let i = 0; i < std.utils.len(responses); i = i + 1) {\n"
+                    "for (let i = 0; i < (responses).length(); i = i + 1) {\n"
                     '  if (responses[i]["status"] != 200) { ok = false; }\n'
                     '  if (std.bytes.to_string(responses[i]["body"]) != '
                     '"/r" + str(i)) { ok = false; }\n'
@@ -1434,7 +1434,7 @@ def run_cases():
                     '"max_concurrent_streams": 1};\n'
                     "let n = std.http2.serve(s, func(req) {\n"
                     '  return {"status": 200, "body": "len=" + '
-                    'str(std.bytes.len(req["body"]))};\n'
+                    'str((req["body"]).length())};\n'
                     "}, 2);\n"
                     'std.io.println("served " + str(n));\n'
                     "std.http2.close(s);\n"
@@ -2602,14 +2602,14 @@ def run_cases():
                     'let t1 = std.tls.client(c1, "default.example.com", '
                     '{"verify": false});\n'
                     'std.io.println("first=" + str(std.tls.reused(t1)));\n'
-                    "std.io.println(std.utils.len(std.io.read(t1, 1)));\n"
+                    "std.io.println((std.io.read(t1, 1)).length());\n"
                     "std.io.close(t1);\n"
                     f'let c2 = std.net.tcp_connect("127.0.0.1", '
                     f"{client_port}, 2000);\n"
                     'let t2 = std.tls.client(c2, "default.example.com", '
                     '{"verify": false});\n'
                     'std.io.println("second=" + str(std.tls.reused(t2)));\n'
-                    "std.io.println(std.utils.len(std.io.read(t2, 1)));\n"
+                    "std.io.println((std.io.read(t2, 1)).length());\n"
                     "std.io.close(t2);\n"
                 )
                 client_thread.join(timeout=15)
@@ -4434,7 +4434,7 @@ def run_cases():
                 f'"http://127.0.0.1:{cookie_port}/set", '
                 '{"cookie_jar": jar});\n'
                 "let cs = std.http.cookies(r);\n"
-                'std.io.println("count=" + str(std.utils.len(cs)));\n'
+                'std.io.println("count=" + str((cs).length()));\n'
                 'std.io.println("check1=" + std.bytes.to_string(std.http.get('
                 f'"http://127.0.0.1:{cookie_port}/check", '
                 '{"cookie_jar": jar})["body"]));\n'
@@ -4451,7 +4451,7 @@ def run_cases():
                 f'let ar = std.http.get_task('
                 f'"http://127.0.0.1:{cookie_port}/set", '
                 '{"cookie_jar": jar2}).wait();\n'
-                'std.io.println("acount=" + str(std.utils.len(std.http.cookies(ar))));\n'
+                'std.io.println("acount=" + str((std.http.cookies(ar)).length()));\n'
                 f'let ac = std.http.get_task('
                 f'"http://127.0.0.1:{cookie_port}/check", '
                 '{"cookie_jar": jar2}).wait();\n'

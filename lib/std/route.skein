@@ -138,7 +138,7 @@ package route {
       }
     }
 
-    if (std.utils.len(segs) > _MAX_SEGMENTS) {
+    if ((segs).length() > _MAX_SEGMENTS) {
       std.error.fail!("route pattern is too deep");
     }
     return segs;
@@ -160,7 +160,7 @@ package route {
   }
 
   func _check_route(node, segs, i, method, pattern) {
-    if (i >= std.utils.len(segs)) {
+    if (i >= (segs).length()) {
       if (std.dict.has(node.handlers, method)) {
         std.error.fail!("duplicate route " + method + " " + pattern);
       }
@@ -204,7 +204,7 @@ package route {
   }
 
   func _insert_route(node, segs, i, method, handler) {
-    if (i >= std.utils.len(segs)) {
+    if (i >= (segs).length()) {
       _node_set_handler(node, method, handler);
       return;
     }
@@ -253,7 +253,7 @@ package route {
   }
 
   func _walk(node, parts, si, method, params) {
-    if (si >= std.utils.len(parts)) {
+    if (si >= (parts).length()) {
       if (std.dict.has(node.handlers, method) ||
           std.dict.has(node.handlers, "*")) {
         return {"ok": true, "node": node, "params": params};
@@ -311,12 +311,12 @@ package route {
   }
 
   func _walk_any(node, parts, si) {
-    if (si >= std.utils.len(parts)) {
-      if (std.utils.len(node.handlers) > 0) {
+    if (si >= (parts).length()) {
+      if ((node.handlers).length() > 0) {
         return true;
       }
       let wild = node.wild;
-      if (wild != null && std.utils.len(wild.handlers) > 0) {
+      if (wild != null && (wild.handlers).length() > 0) {
         return true;
       }
       return false;
@@ -335,7 +335,7 @@ package route {
     }
 
     let wild = node.wild;
-    if (wild != null && std.utils.len(wild.handlers) > 0) {
+    if (wild != null && (wild.handlers).length() > 0) {
       return true;
     }
 
@@ -434,7 +434,7 @@ package route {
 
     let apply_after = func(req, response) {
       let i = 0;
-      while (i < std.utils.len(afterware)) {
+      while (i < (afterware).length()) {
         let value = afterware[i](req, response);
         if (std.type.name(value) == "task") {
           value = value.wait();
@@ -459,7 +459,7 @@ package route {
       }
 
       let i = index;
-      while (i < std.utils.len(middlewares)) {
+      while (i < (middlewares).length()) {
         let value = middlewares[i](req);
         if (std.type.name(value) == "task") {
           value = value.wait();
@@ -481,7 +481,7 @@ package route {
       _validate_request(req);
 
       let i = 0;
-      while (i < std.utils.len(middlewares)) {
+      while (i < (middlewares).length()) {
         let value = middlewares[i](req);
         if (std.type.name(value) == "task") {
           return resume(req, i + 1, value);

@@ -4016,22 +4016,22 @@ while (true) {
         "remote_addr": null,
         "remote_port": 0
     };
-    if (std.utils.len(request["params"]) > 3) {
+    if ((request["params"]).length() > 3) {
         req["http_major"] = request["params"][3];
     }
-    if (std.utils.len(request["params"]) > 4) {
+    if ((request["params"]).length() > 4) {
         req["http_minor"] = request["params"][4];
     }
-    if (std.utils.len(request["params"]) > 5) {
+    if ((request["params"]).length() > 5) {
         req["keep_alive"] = request["params"][5];
     }
-    if (std.utils.len(request["params"]) > 6) {
+    if ((request["params"]).length() > 6) {
         req["remote_addr"] = request["params"][6];
     }
-    if (std.utils.len(request["params"]) > 7) {
+    if ((request["params"]).length() > 7) {
         req["remote_port"] = request["params"][7];
     }
-    if (std.utils.len(request["params"]) > 8 &&
+    if ((request["params"]).length() > 8 &&
         std.type.kind_of(request["params"][8]) == "dict") {
         let context = request["params"][8];
         for (let key in std.dict.keys(context)) {
@@ -4052,7 +4052,7 @@ while (true) {
         let reply = {"id": request["id"], "ok": true,
                      "result": {"status": response["status"],
                                 "headers": response["headers"]},
-                     "body_len": std.utils.len(response_body)};
+                     "body_len": (response_body).length()};
         std.io.write_all(std.io.stdout,
             std.bytes.from_string(std.json.stringify(reply) + "\n"));
         std.io.write_all(std.io.stdout, response_body);

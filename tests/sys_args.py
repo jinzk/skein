@@ -16,7 +16,7 @@ def main():
             handle.write(
                 "import std;\n"
                 "std.io.println(str(std.sys.args()));\n"
-                'std.io.println("count=" + str(std.utils.len(std.sys.args())));\n'
+                'std.io.println("count=" + str((std.sys.args()).length()));\n'
                 'std.io.println("script=" + std.sys.script());\n'
                 'std.io.println("exe=" + std.sys.executable());\n'
             )

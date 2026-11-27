@@ -240,7 +240,7 @@ std.io.println(\"served \" + str(n));
             f'let a = std.http2.get("http://127.0.0.1:{port}/ctx?a=1",\n'
             '  {"headers": {"Cookie": "sid=abc"}});\n'
             'std.io.println(str(a["status"]));\n'
-            'std.io.println(str(std.utils.len(a["set_cookie"])));\n'
+            'std.io.println(str((a["set_cookie"]).length()));\n'
             'std.io.println(std.bytes.to_string(a["body"]));\n'
             f'let b = std.http2.get("http://127.0.0.1:{port}/boom");\n'
             'std.io.println(str(b["status"]));\n'

@@ -142,7 +142,7 @@ ts_test("std.ops operators do not change key equality", func() {
   let d: dict[EqAlways, int] = {};
   d[value] = 10;
   d[other] = 20;
-  ts_eq(std.utils.len(d), 2);
+  ts_eq((d).length(), 2);
   ts_eq(d[value], 10);
   ts_eq(d[other], 20);
 });

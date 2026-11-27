@@ -3168,15 +3168,7 @@ void thread_proto_entry_main(
         return;
     }
 
-    {
-        struct value_t *std_namespace = skein::stdlib::build_namespace();
-        if (std_namespace) {
-            save_global_symbol("std", std_namespace);
-            package_seed_import("builtin:std", dupval(std_namespace));
-            package_seed_import_path("std", nullptr,
-                                     dupval(std_namespace));
-        }
-    }
+    package_install_default_std();
     std::shared_ptr<thread_transfer_context> transfer_context =
         skein_vm_thread_transfer_context_create();
     std::string setup_error;
@@ -3306,6 +3298,7 @@ void thread_entry_main(
     eval_begin_root_defers();
 
     package_configure(script, {});
+    package_install_default_std();
     std::string error;
     struct value_t *handler = nullptr;
     bool loaded = parse_worker_source(script, error);
@@ -4232,6 +4225,7 @@ bool thread_worker_begin(bool worker_vm, std::string &error) {
     worker_runtime_context = std::make_unique<eval_context>();
     set_active_eval_context(worker_runtime_context.get());
     initscope();
+    package_install_default_std();
     eval_begin_root_defers();
     return true;
 }

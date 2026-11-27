@@ -56,12 +56,12 @@ _LRU_IMPORT = re.compile(r"\bimport\s+std\.lru\b")
 
 
 def with_std_prelude(source):
-    """Add imports for std.* / lru.* used by short test snippets.
+    """Add redundant imports for std.* / lru.* used by short test snippets.
 
-    The language requires explicit imports.  Most test cases are short
-    snippets focused on one behavior, so the harness supplies them instead of
-    repeating them in every case.  Tests that exercise the missing-import path
-    with std_prelude=False.
+    `std` is now a language-level default root binding, so the `std` import is
+    harmless rather than required.  `std.lru` is still a separate package, so
+    the harness keeps injecting that import.  Pass std_prelude=False to test
+    snippets without harness-supplied imports.
     """
     prelude = ""
     if _STD_REFERENCE.search(source) and not _STD_IMPORT.search(source):
@@ -403,7 +403,7 @@ def check_extended_stdlib():
         'std.io.print(m["groups"][1]);\n'
         'std.io.print(std.regex.replace("(a+)", "xxaaabyy", "[$1]"));\n'
         'std.io.print(std.regex.split(",", "a,b,c"));\n'
-        'std.utils.len(std.regex.find_all("[0-9]+", "a1b22c333"))\n',
+        '(std.regex.find_all("[0-9]+", "a1b22c333")).length()\n',
         stdout_all=["= true", "= true", "aaab", "2", "b",
                     "xx[aaa]byy", "[a, b, c]", "= 3"],
     )
@@ -419,9 +419,9 @@ def check_extended_stdlib():
         'std.regex.match("\\\\d+", "１２３", "u")\n'
         'std.regex.match("é", "É", "iu")\n'
         'std.regex.match("a|ab", "ab")\n'
-        'std.utils.len(std.regex.find_all(".", "a你b", "u"))\n'
-        'std.utils.len(std.regex.find_all(".", "a你b"))\n'
-        'std.utils.len(std.regex.find_all("", "ab"))\n'
+        '(std.regex.find_all(".", "a你b", "u")).length()\n'
+        '(std.regex.find_all(".", "a你b")).length()\n'
+        '(std.regex.find_all("", "ab")).length()\n'
         'let u = std.regex.search("(\\\\p{L}+)", "123中文456", "u");\n'
         'std.io.print(u["text"]);\n'
         'std.io.print(u["start"]);\n'
@@ -476,10 +476,10 @@ def check_extended_stdlib():
         'std.random.int(5, 5)\n'
         'let f = std.random.float();\n'
         'std.io.print(f >= 0.0 && f < 1.0);\n'
-        'std.bytes.len(std.random.bytes(8))\n'
+        '(std.random.bytes(8)).length()\n'
         'std.random.choice([7])\n'
-        'std.utils.len(std.random.shuffle([1, 2, 3]))\n'
-        'std.utils.len(std.random.uuid())\n',
+        '(std.random.shuffle([1, 2, 3])).length()\n'
+        '(std.random.uuid()).length()\n',
         stdout_all=["= 5", "true", "= 8", "= 7", "= 3", "= 36"],
     )
     check(
@@ -1356,7 +1356,7 @@ def check_extended_stdlib():
                 "  }\n"
                 "  let response = {\"id\": request[\"id\"], "
                 "\"ok\": true, \"result\": request[\"params\"][0], "
-                "\"body_len\": std.utils.len(body)};\n"
+                "\"body_len\": (body).length()};\n"
                 "  std.io.write_all(std.io.stdout, std.bytes.from_string("
                 "std.json.stringify(response) + \"\\n\"));\n"
                 "  std.io.write_all(std.io.stdout, body);\n"
@@ -2264,7 +2264,7 @@ def check_extended_stdlib():
             'std.io.print("platform="); std.io.print(c["platform"]);\n'
             'std.io.print("http1="); std.io.print(c["http1"]);\n'
             'std.io.print("websocket="); std.io.print(c["websocket"]);\n'
-            'std.io.print("strategies="); std.io.print(std.utils.len(c["strategies"]));\n',
+            'std.io.print("strategies="); std.io.print((c["strategies"]).length());\n',
             stdout_all=["schema=1", "platform=", "http1=true",
                         "websocket=false", "strategies="],
         )

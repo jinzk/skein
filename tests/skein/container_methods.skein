@@ -3,7 +3,7 @@ include "_support.skein";
 
 ts_test("list methods", func() {
   let xs: list[int] = [1, 2, 3];
-  ts_eq(xs.len(), 3);
+  ts_eq(xs.length(), 3);
   ts_eq(xs.contains(2), 1);
   ts_eq(xs.map(func(x) { return x * 2; }), [2, 4, 6]);
   let out = [];
@@ -15,7 +15,7 @@ ts_test("list methods", func() {
 
 ts_test("dict methods", func() {
   let d: dict[string, int] = {"a": 1, "b": 2};
-  ts_eq(d.len(), 2);
+  ts_eq(d.length(), 2);
   ts_eq(d.has("a"), 1);
   ts_eq(d.keys(), ["a", "b"]);
   ts_eq(d.values(), [1, 2]);

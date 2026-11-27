@@ -19,8 +19,18 @@ def run_cases():
         stderr="symbol not found len",
     )
     check(
+        "removed len std paths are gone",
+        "std.utils.len([1])\n",
+        stderr="key not found",
+    )
+    check(
+        "len method is gone",
+        "([1]).len()\n",
+        stderr="list index must be an integer",
+    )
+    check(
         "canonical std paths replace prelude names",
-        "std.io.println(str(std.utils.len([1, 2, 3])));\n"
+        "std.io.println(str(([1, 2, 3]).length()));\n"
         "std.io.println(str(std.utils.range(3)));\n"
         "std.io.println(std.type.name(1));\n"
         "std.io.println(std.type.kind_of(1));\n",
@@ -28,9 +38,9 @@ def run_cases():
     )
     check(
         "selective import provides a local name",
-        "import {len} from std.utils;\n"
+        "import {length} from std.list;\n"
         "import {println as out} from std.io;\n"
-        "out(str(std.utils.len([1, 2])));\n",
+        "out(str(length([1, 2])));\n",
         stdout="2",
     )
 
@@ -909,7 +919,7 @@ def run_cases():
             'let text = std.string.repeat("retained-", 64);\n'
             'std.ffi.call(lib, "shim_save_text", [text]);\n'
             'std.ffi.call(lib, "shim_churn_text", '
-            "[std.string.len(text)]);\n"
+            "[(text).length()]);\n"
             'std.ffi.call(lib, "shim_saved_text_value", [])\n'
             "std.ffi.close(lib);\n",
             stdout="= " + "retained-" * 64,
@@ -1291,7 +1301,7 @@ def run_cases():
             "import test.dynamic;\n"
             "let s = dynamic.string_len();\n"
             "s\n"
-            "std.utils.len(s)\n",
+            "(s).length()\n",
             stdout_all=["= hello", "= 5"],
         )
         check(
@@ -1711,7 +1721,7 @@ def run_cases():
     check(
         "std list helpers",
         "import std;\n"
-        "std.list.len([1, 2, 3])\n"
+        "([1, 2, 3]).length()\n"
         "std.list.slice([1, 2, 3, 4], 1, 2)\n"
         "std.list.contains([1, 2, 3], 2)\n"
         "std.list.index([1, 2, 3], 3)\n",
@@ -1798,7 +1808,7 @@ def run_cases():
         "std bytes aliases",
         "import std;\n"
         'std.bytes.hex(std.bytes.from_hex("00ff"))\n'
-        'std.bytes.len(std.bytes.from_hex("00ff"))\n',
+        '(std.bytes.from_hex("00ff")).length()\n',
         stdout_all=["= 00ff", "= 2"],
     )
     check(
@@ -1866,7 +1876,7 @@ def run_cases():
         "import std;\n"
         'std.io.print(std.encoding.decode(std.bytes.from_hex("ff"), "utf-8", "replace"));\n'
         'std.io.print(std.bytes.hex(std.encoding.encode("é", "ascii", "replace")));\n'
-        'std.bytes.len(std.encoding.encode("é", "ascii", "ignore"))\n',
+        '(std.encoding.encode("é", "ascii", "ignore")).length()\n',
         stdout_all=["�", "3f", "= 0"],
     )
     check(
@@ -2082,14 +2092,14 @@ def run_cases():
           stderr="start must be a non-negative integer")
     check("std dict get type", 'import std;\nstd.dict.get([], "a")\n',
           stderr="std.dict.get expects a dict")
-    check("std import missing module", "std.list.len([1])\n",
-          stderr="symbol not found std", std_prelude=False)
+    check("std is available by default", "([1]).length()\n",
+          stdout="= 1", std_prelude=False)
     check(
         "std namespace copy is isolated",
         "import std;\n"
         "func mutate(ns) { ns.list = 1; }\n"
         "mutate(std);\n"
-        "std.list.len([1, 2])\n",
+        "([1, 2]).length()\n",
         stdout="= 2",
     )
     check(
@@ -2117,6 +2127,11 @@ def run_cases():
         '"send_async", "receive_async"]);\n'
         '  stale = stale + count_stale(std.ffi, ["call_async"]);\n'
         '  stale = stale + count_stale(std.type, ["module"]);\n'
+        '  stale = stale + count_stale(std.utils, ["len", "iter!"]);\n'
+        '  stale = stale + count_stale(std.list, ["len"]);\n'
+        '  stale = stale + count_stale(std.dict, ["len"]);\n'
+        '  stale = stale + count_stale(std.string, ["len"]);\n'
+        '  stale = stale + count_stale(std.bytes, ["len"]);\n'
         '  std.io.println("stale=" + str(stale));\n'
         '  std.io.println("primary=" + str(std.dict.has(std.process, "run_command")) + '
         '"," + str(std.dict.has(std.thread, "spawn_script")) + "," + '
@@ -2591,13 +2606,13 @@ def run_cases():
           stdout_all=["= 0", "= 6"])
     check("variadic with fixed parameters",
           "func f(a: int, ...rest: string) {\n"
-          "  return a + std.utils.len(rest);\n"
+          "  return a + (rest).length();\n"
           "}\n"
           "f(1)\nf(1, \"a\", \"b\")\n",
           stdout_all=["= 1", "= 3"])
     check("variadic rest is list",
           "func f(...xs) {\n"
-          "  if (std.utils.len(xs) == 0) { return null; }\n"
+          "  if ((xs).length() == 0) { return null; }\n"
           "  return xs[1];\n"
           "}\n"
           "f()\nf(10, 20)\n",
@@ -2606,7 +2621,7 @@ def run_cases():
           "func f(a: int, ...rest) { return a; }\nf()\n",
           stderr="function f expects at least 1 argument(s), got 0")
     check("variadic element type",
-          'func f(...rest: number) { return std.utils.len(rest); }\nf(1, "x")\n',
+          'func f(...rest: number) { return (rest).length(); }\nf(1, "x")\n',
           stderr="type error: expected number, got string")
     check("variadic must be last",
           "func f(...xs, y) { return y; }\n",
@@ -2624,7 +2639,7 @@ def run_cases():
           "P { x: 1 }.add(1, 2, 3)\n",
           stdout="= 6")
     check("variadic anonymous function",
-          "func make() { return func(...args: int) { return std.utils.len(args); }; }\n"
+          "func make() { return func(...args: int) { return (args).length(); }; }\n"
           "make()(1, 2, 3)\n",
           stdout="= 3")
     check("call spread",
@@ -2637,7 +2652,7 @@ def run_cases():
           "sum(...xs)\nsum(0, ...xs)\n",
           stdout_all=["= 6", "= 6"])
     check("call spread requires list",
-          "func f(...xs) { return std.utils.len(xs); }\nf(...1)\n",
+          "func f(...xs) { return (xs).length(); }\nf(...1)\n",
           stderr="spread expects a list, got int")
     check("protocol variadic rejected",
           "proto T { func f(self, ...args); }\n",
@@ -2712,15 +2727,15 @@ def run_cases():
           "func h(x: bool) { return x; }\nh(1 == 1)\n",
           stdout="= true")
     check("typed list",
-          "func f(x: list) { return std.utils.len(x); }\nf([1,2])\n",
+          "func f(x: list) { return (x).length(); }\nf([1,2])\n",
           stdout="= 2")
     check("typed dict",
-          "func f(x: dict) { return std.utils.len(x); }\nf({1:2})\n",
+          "func f(x: dict) { return (x).length(); }\nf({1:2})\n",
           stdout="= 1")
     check("typed string",
           'func f(x: string) { return x; }\nf("a")\n', stdout="= a")
     check("typed bytes",
-          'func f(x: bytes) { return std.bytes.len(x); }\n'
+          'func f(x: bytes) { return (x).length(); }\n'
           'f(std.bytes.from_hex("00ff"))\n',
           stdout="= 2")
     check("typed callable",
@@ -2817,8 +2832,8 @@ def run_cases():
           "let d: dict;\n"
           "let by: bytes;\n"
           "let a: any;\n"
-          's == "" && i == 0 && f == 0.0 && !b && std.utils.len(l) == 0 && '
-          "std.utils.len(d) == 0 && std.bytes.len(by) == 0 && a == null\n",
+          's == "" && i == 0 && f == 0.0 && !b && (l).length() == 0 && '
+          "(d).length() == 0 && (by).length() == 0 && a == null\n",
           stdout="= true")
     check("typed variable is shallow",
           'let a: list = [0];\na[0] = "x";\na\n', stdout='= [x]')
@@ -3084,7 +3099,7 @@ def run_cases():
           "struct Client {\n"
           "  base: int;\n"
           "  func call(self, method: string, args: list) {\n"
-          "    return self.base + std.utils.len(args);\n"
+          "    return self.base + (args).length();\n"
           "  }\n"
           "  func submit(self, method: string, args: list) {\n"
           "    return self.base;\n"
@@ -3116,7 +3131,7 @@ def run_cases():
           "struct Client {\n"
           "  base: int;\n"
           "  func call(self, method: string, args: list) {\n"
-          "    return self.base + std.utils.len(args);\n"
+          "    return self.base + (args).length();\n"
           "  }\n"
           "  func submit(self, method: string, args: list) {\n"
           "    return self.base;\n"
@@ -3444,7 +3459,7 @@ def run_cases():
           stderr="type error: expected string, got int")
     check("bytes_from_string display", 'std.bytes.from_string("abc")\n',
           stdout="= <bytes: 3>")
-    check("bytes_len", 'std.bytes.len(std.bytes.from_string("abc"))\n', stdout="= 3")
+    check("bytes_len", '(std.bytes.from_string("abc")).length()\n', stdout="= 3")
     check("bytes_get", 'std.bytes.get(std.bytes.from_string("abc"), 1)\n',
           stdout="= 98")
     check("bytes_get out of range",
@@ -3455,7 +3470,7 @@ def run_cases():
     check("bytes_slice", 'std.bytes.hex(std.bytes.slice('
           'std.bytes.from_string("abcdef"), 1, 3))\n', stdout="= 626364")
     check("bytes_slice past end",
-          'std.bytes.len(std.bytes.slice(std.bytes.from_string("abc"), 10))\n',
+          '(std.bytes.slice(std.bytes.from_string("abc"), 10)).length()\n',
           stdout="= 0")
     check("bytes_slice clamps length",
           'std.bytes.hex(std.bytes.slice(std.bytes.from_string("abc"), 1, 100))\n',
@@ -3580,8 +3595,8 @@ def run_cases():
     check("bytes equality",
           'std.bytes.from_string("ab") == std.bytes.from_hex("6162")\n',
           stdout="= true")
-    check("bytes arity", "std.bytes.len()\n",
-          stderr="built-in function expects 1 argument")
+    check("bytes arity", "std.bytes.get()\n",
+          stderr="bytes_get expects 2 arguments")
     check("bytes_slice arity", "std.bytes.slice(std.bytes.from_string(\"a\"))\n",
           stderr="expects at least 2 argument(s)")
     check("read_bytes type", "std.fs.read_bytes(1)\n",

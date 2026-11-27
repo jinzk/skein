@@ -2964,6 +2964,26 @@ public:
                     }
                 }
 
+                if (argc == 0 && std::strcmp(name, "length") == 0) {
+                    int builtin_id = builtin_length_method_id(receiver);
+                    /* Primitive scalars have no members; route them through
+                     * B_len so callers get the canonical diagnostic while
+                     * user-defined `length` methods keep the field path. */
+                    if (builtin_id < 0 && receiver &&
+                        (receiver->type == T_int || receiver->type == T_float ||
+                         receiver->type == T_bool || receiver->type == T_null))
+                        builtin_id = B_len;
+                    if (builtin_id >= 0) {
+                        value_t *builtin = newbuiltinval(builtin_id);
+                        std::vector<value_t *> call_args;
+                        call_args.push_back(receiver);
+                        value_t *result = skein_vm_call_value_args(
+                            builtin, std::move(call_args));
+                        freeval(builtin);
+                        return finish_call_result(result, control_out);
+                    }
+                }
+
                 value_t *callee =
                     read_field_cached(receiver, name, member_cache(ins.b));
                 freeval(receiver);

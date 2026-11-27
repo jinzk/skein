@@ -14,7 +14,7 @@ ts_test("string equality", func() {
 });
 
 ts_test("string escape", func() {
-  ts_eq(std.utils.len("a\nb"), 3);
+  ts_eq(("a\nb").length(), 3);
   ts_eq("a\nb"[1], char(10));
 });
 
@@ -37,13 +37,13 @@ ts_test("long non-ascii sparse index", func() {
     text = text + str(char(233));
     i = i + 1;
   }
-  ts_eq(std.utils.len(text), 100);
+  ts_eq((text).length(), 100);
   ts_eq(str(text[0]), str(char(233)));
   ts_eq(str(text[63]), str(char(233)));
   ts_eq(str(text[64]), str(char(233)));
   ts_eq(str(text[99]), str(char(233)));
   text = text + str(char(234));
-  ts_eq(std.utils.len(text), 101);
+  ts_eq((text).length(), 101);
   ts_eq(str(text[100]), str(char(234)));
   ts_eq(str(text[99]), str(char(233)));
 });
@@ -55,7 +55,7 @@ ts_test("long four-byte sparse index", func() {
     text = text + str(char(128512));
     i = i + 1;
   }
-  ts_eq(std.utils.len(text), 80);
+  ts_eq((text).length(), 80);
   ts_eq(str(text[0]), str(char(128512)));
   ts_eq(str(text[16]), str(char(128512)));
   ts_eq(str(text[64]), str(char(128512)));
@@ -72,9 +72,9 @@ ts_test("sparse index survives copy and append", func() {
   ts_eq(str(text[69]), str(char(233)));
   let copy = text;
   text = text + "x";
-  ts_eq(std.utils.len(copy), 70);
+  ts_eq((copy).length(), 70);
   ts_eq(str(copy[69]), str(char(233)));
-  ts_eq(std.utils.len(text), 71);
+  ts_eq((text).length(), 71);
   ts_eq(str(text[69]), str(char(233)));
   ts_eq(str(text[70]), "x");
 });

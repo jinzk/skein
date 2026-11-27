@@ -347,9 +347,9 @@ ts_test("list unique and group_by", func() {
 
 ts_test("list unique large and non-hashable", func() {
   let xs = std.utils.range(20000);
-  ts_eq(std.utils.len(std.list.unique(xs)), 20000);
+  ts_eq((std.list.unique(xs)).length(), 20000);
   let ys = std.list.map(xs, func(i) { return i % 1000; });
-  ts_eq(std.utils.len(std.list.unique(ys)), 1000);
+  ts_eq((std.list.unique(ys)).length(), 1000);
   ts_eq(std.list.unique([[1], [1], [2]]), [[1], [2]]);
 });
 

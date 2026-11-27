@@ -19,23 +19,23 @@ ts_test("nested list read", func() {
 });
 
 ts_test("len list", func() {
-  ts_eq(std.utils.len([1, 2, 3]), 3);
+  ts_eq(([1, 2, 3]).length(), 3);
 });
 
 ts_test("len empty list", func() {
-  ts_eq(std.utils.len([]), 0);
+  ts_eq(([]).length(), 0);
 });
 
 ts_test("len dict", func() {
-  ts_eq(std.utils.len({"a": 1, "b": 2}), 2);
+  ts_eq(({"a": 1, "b": 2}).length(), 2);
 });
 
 ts_test("len utf8 string", func() {
-  ts_eq(std.utils.len("你好a"), 3);
+  ts_eq(("你好a").length(), 3);
 });
 
 ts_test("len bytes", func() {
-  ts_eq(std.utils.len(std.bytes.from_hex("00ff")), 2);
+  ts_eq((std.bytes.from_hex("00ff")).length(), 2);
 });
 
 ts_test("std math constants and helpers", func() {

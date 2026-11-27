@@ -30,7 +30,7 @@ package arena {
   }
 
   func _entry(s, slot) {
-    if (slot < 0 || slot >= std.utils.len(s.slots)) {
+    if (slot < 0 || slot >= (s.slots).length()) {
       return null;
     }
     return s.slots[slot];
@@ -61,7 +61,7 @@ package arena {
       slots = std.deque.push_back(
         slots, _Slot { gen: 1, alive: true, value: value });
     }
-    let n = std.utils.len(values);
+    let n = (values).length();
     return Store {
       slots: std.deque.to_list(slots),
       free: [],
@@ -71,8 +71,8 @@ package arena {
   }
 
   export func add(s, value) {
-    if (std.utils.len(s.free) > 0) {
-      let n = std.utils.len(s.free);
+    if ((s.free).length() > 0) {
+      let n = (s.free).length();
       let slot = s.free[n - 1];
       s.free = std.list.slice(s.free, 0, n - 1);
       let prev = s.slots[slot];
@@ -134,13 +134,13 @@ package arena {
   }
 
   export func capacity(s) {
-    return std.utils.len(s.slots);
+    return (s.slots).length();
   }
 
   export func ids(s) {
     let out = std.deque.new();
     let slot = 0;
-    while (slot < std.utils.len(s.slots)) {
+    while (slot < (s.slots).length()) {
       let entry = s.slots[slot];
       if (entry.alive) {
         out = std.deque.push_back(out, _handle(slot, entry.gen));

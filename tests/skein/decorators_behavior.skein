@@ -38,7 +38,7 @@ func dec_show_args(fn) {
 
 func dec_count_args(fn) {
   return func(...args) {
-    dec_log = std.list.append(dec_log, str(std.utils.len(args)));
+    dec_log = std.list.append(dec_log, str((args).length()));
     return fn(...args);
   };
 }

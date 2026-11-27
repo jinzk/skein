@@ -22,7 +22,7 @@ ts_test("range empty", func() {
 });
 
 ts_test("range len", func() {
-  ts_eq(std.utils.len(std.utils.range(0, 7, 2)), 7);
+  ts_eq((std.utils.range(0, 7, 2)).length(), 7);
 });
 
 ts_finish();

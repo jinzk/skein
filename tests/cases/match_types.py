@@ -260,7 +260,7 @@ def run_cases():
           'let m = fsm.define(0, func(state, ev) { return state + 1; });\n'
           'let ctx = m.run(m.start(), std.utils.range(20000));\n'
           'std.io.println(ctx.state);\n'
-          'std.io.println(std.utils.len(fsm.history(ctx)));\n',
+          'std.io.println((fsm.history(ctx)).length());\n',
           stdout_all=["20000", "20001"])
     check("std.fsm branch clears redo",
           'import std.fsm;\n'
@@ -440,7 +440,7 @@ def run_cases():
     check("dict large lookup and order",
           "import std;\nlet d = {};\n"
           "for (let i in std.utils.range(200)) { d[i] = i * 2; }\n"
-          "std.io.println(std.utils.len(d));\nstd.io.println(d[100]);\nstd.io.println(std.dict.keys(d)[0]);\n"
+          "std.io.println((d).length());\nstd.io.println(d[100]);\nstd.io.println(std.dict.keys(d)[0]);\n"
           "std.io.println(std.dict.keys(d)[199]);\n",
           stdout_all=["200", "200", "0", "199"])
     check("dict scalar keys",
@@ -453,7 +453,7 @@ def run_cases():
     check("dict float key",
           "let d = {1.5: 1, 1: 2, 2.5: 3};\n"
           "std.io.println(d[1.5]);\nstd.io.println(d[1.0]);\nstd.io.println(d[2.5]);\n"
-          "std.io.println(std.utils.len(d));\n",
+          "std.io.println((d).length());\n",
           stdout_all=["1", "2", "3", "3"])
     check("dict list key rejected",
           "{[1]: 1}\n",
@@ -498,7 +498,7 @@ def run_cases():
           "std.io.println(d[(1, 'a')]);\n"
           "d[(3, 'c')] = 30;\n"
           "std.io.println(d[(3, 'c')]);\n"
-          "std.io.println(std.utils.len(d));\n",
+          "std.io.println((d).length());\n",
           stdout_all=["10", "30", "3"])
     check("dict nested tuple keys",
           "let d = {((1, 2), 'x'): true};\n"
@@ -509,7 +509,7 @@ def run_cases():
           "let i = 0;\n"
           "while (i < 40) { d[(i, i + 1)] = i; i = i + 1; }\n"
           "std.io.println(d[(20, 21)]);\n"
-          "std.io.println(std.utils.len(d));\n"
+          "std.io.println((d).length());\n"
           "std.io.println(d[(39, 40)]);\n",
           stdout_all=["20", "40", "39"])
     check("dict tuple mutable element rejected",
@@ -518,7 +518,7 @@ def run_cases():
     check("dict tuple float element",
           "let d = {(1, 2.0): 1, (3, 4.5): 2};\n"
           "std.io.println(d[(1, 2)]);\nstd.io.println(d[(3.0, 4.5)]);\n"
-          "std.io.println(std.utils.len(d));\n",
+          "std.io.println((d).length());\n",
           stdout_all=["1", "2", "2"])
     check("tuple index assignment rejected",
           "let t = (1, 2);\nt[0] = 9;\n",
@@ -593,7 +593,7 @@ def run_cases():
           'func pair({x, y}) { return x * y; }\n'
           'struct P { x: int; y: int; }\n'
           'func point(P {x, y}) { return x + y; }\n'
-          'func rest([h, ...t]) { return str(h) + ":" + str(std.utils.len(t)); }\n'
+          'func rest([h, ...t]) { return str(h) + ":" + str((t).length()); }\n'
           'std.io.println(sum([2, 3]));\n'
           'std.io.println(pair({"x": 3, "y": 4}));\n'
           'std.io.println(point(P { x: 5, y: 6 }));\n'
@@ -606,7 +606,7 @@ def run_cases():
     check("function parameter destructuring uses compiled pattern",
           'func sum([a, b]) { return a + b; }\n'
           'func pair({x, y}) { return x * y; }\n'
-          'func rest([h, ...t]) { return str(h) + ":" + str(std.utils.len(t)); }\n'
+          'func rest([h, ...t]) { return str(h) + ":" + str((t).length()); }\n'
           'std.io.println(sum([2, 3]));\n'
           'std.io.println(pair({"x": 3, "y": 4}));\n'
           'std.io.println(rest([9, 8, 7]));\n',
@@ -618,13 +618,13 @@ def run_cases():
           'import std;\n'
           'struct P { x: int; y: int; }\n'
           'func nested([[a, b], {x, y}]) { return a + b + x + y; }\n'
-          'func rest([h, ...t]) { return h * std.utils.len(t); }\n'
+          'func rest([h, ...t]) { return h * (t).length(); }\n'
           'func point(P {x, y}) { return x * y; }\n'
           'func rec([n, acc]) {\n'
           '  if (n <= 0) { return acc; }\n'
           '  return rec([n - 1, acc + n]);\n'
           '}\n'
-          'func aspat([a as whole]) { return std.utils.len(whole) + a[0]; }\n'
+          'func aspat([a as whole]) { return (whole).length() + a[0]; }\n'
           'std.io.println(str(nested([[1, 2], {"x": 3, "y": 4}])));\n'
           'std.io.println(str(rest([5, 1, 2])));\n'
           'std.io.println(str(point(P { x: 3, y: 4 })));\n'

@@ -132,9 +132,9 @@ def enum_program():
 
 def empty_program():
     return (
-        "std.io.print(std.utils.len([]));\n"
-        "std.io.print(std.utils.len({}));\n"
-        "std.io.print(std.utils.len(\"\"));\n"
+        "std.io.print(([]).length());\n"
+        "std.io.print(({}).length());\n"
+        "std.io.print((\"\").length());\n"
         "std.io.print(str([]));\n"
         "std.io.print(str({}));\n"
         "std.io.print([][0] on error(e) { std.error.recover!(\"caught\"); });\n"

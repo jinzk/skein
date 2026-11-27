@@ -44,7 +44,7 @@ ts_test("tuple match", func() {
 ts_test("tuple as pattern", func() {
   let v = (7, 8);
   ts_eq(match v {
-    case (x, y) as whole => std.utils.len(whole) + x + y;
+    case (x, y) as whole => (whole).length() + x + y;
   }, 17);
 });
 

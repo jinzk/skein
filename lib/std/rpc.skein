@@ -431,7 +431,7 @@ package rpc {
           "protocol": state["protocol"],
           "closed": state["closed"],
           "owns": state["owns"],
-          "pending": std.utils.len(state["pending"])
+          "pending": (state["pending"]).length()
         };
       },
       options: options
@@ -442,10 +442,10 @@ package rpc {
     let hybrid = protocol == "hybrid";
     let request = {"id": id, "method": method, "params": params};
     if (hybrid) {
-      request["body_len"] = std.utils.len(body);
+      request["body_len"] = (body).length();
     }
     io.write(_encode_line(options, request) + "\n");
-    if (hybrid && std.utils.len(body) > 0) {
+    if (hybrid && (body).length() > 0) {
       io.write(body);
     }
     io.flush();
@@ -533,7 +533,7 @@ package rpc {
   //   failure_limit: consecutive failures before opening a circuit (0 disables)
   //   cooldown_ms:   how long an open circuit blocks a client
   export func pool(clients, options = {}) {
-    if (std.utils.len(clients) == 0) {
+    if ((clients).length() == 0) {
       std.error.fail!("rpc.pool requires at least one client");
     }
     let failure_limit = std.dict.get(options, "failure_limit", 3);
@@ -566,7 +566,7 @@ package rpc {
       if (state["closed"]) {
         std.error.fail!("rpc pool is closed");
       }
-      let n = std.utils.len(clients);
+      let n = (clients).length();
       let now = std.time.monotonic_ms();
       let start = state["next"] % n;
       let i = 0;
@@ -685,7 +685,7 @@ package rpc {
     let health_snapshot = func() {
       let now = std.time.monotonic_ms();
       let out = [];
-      for i in std.utils.range(std.utils.len(state["health"])) {
+      for i in std.utils.range((state["health"]).length()) {
         let h = state["health"][i];
         out = std.list.append(out, {
           "index": i,
@@ -720,13 +720,13 @@ package rpc {
       _stats: func() {
         let now = std.time.monotonic_ms();
         let healthy = 0;
-        for i in std.utils.range(std.utils.len(state["health"])) {
+        for i in std.utils.range((state["health"]).length()) {
           if (is_open(i, now) == false) {
             healthy = healthy + 1;
           }
         }
         return {
-          "clients": std.utils.len(clients),
+          "clients": (clients).length(),
           "calls": state["calls"],
           "errors": state["errors"],
           "reconnects": state["reconnects"],
@@ -736,7 +736,7 @@ package rpc {
       },
       _health: health_snapshot,
       _reset: func() {
-        for i in std.utils.range(std.utils.len(state["health"])) {
+        for i in std.utils.range((state["health"]).length()) {
           state["health"][i]["failures"] = 0;
           state["health"][i]["open_until"] = 0;
         }
@@ -890,7 +890,7 @@ package rpc {
           } else {
             response["result"] = value;
           }
-          response["body_len"] = std.utils.len(response_body);
+          response["body_len"] = (response_body).length();
         } else {
           response["result"] = value;
         }
@@ -911,7 +911,7 @@ package rpc {
       }
 
       std.io.write_all(output, _encode_line(options, response) + "\n");
-      if (std.utils.len(response_body) > 0) {
+      if ((response_body).length() > 0) {
         std.io.write_all(output, response_body);
       }
       std.io.flush(output);

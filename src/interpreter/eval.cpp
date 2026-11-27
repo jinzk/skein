@@ -2003,6 +2003,26 @@ struct value_t *eval(struct ast *a) {
                     }
                 }
 
+                if (call->args == NULL && key->type == T_string &&
+                    std::strcmp(((struct string_value_t *)key)->value,
+                                "length") == 0) {
+                    int builtin_id = builtin_length_method_id(receiver);
+                    /* Primitive scalars have no members; route them through
+                     * B_len so callers get the canonical diagnostic while
+                     * user-defined `length` methods keep the field path. */
+                    if (builtin_id < 0 && receiver &&
+                        (receiver->type == T_int || receiver->type == T_float ||
+                         receiver->type == T_bool || receiver->type == T_null))
+                        builtin_id = B_len;
+                    if (builtin_id >= 0) {
+                        ret = call_builtin_method_value(receiver, builtin_id,
+                                                        call->args);
+                        freeval(receiver);
+                        freeval(key);
+                        break;
+                    }
+                }
+
                 struct value_t *member =
                     read_member_value(receiver, key, field_access);
                 freeval(receiver);

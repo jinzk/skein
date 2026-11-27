@@ -132,11 +132,11 @@ func ts_finish() {
     std.io.print("FAIL no case matched SKEIN_TEST_CASE=" + ts_only + "\n");
     std.sys.exit(1);
   }
-  if (std.utils.len(ts_failures) > 0) {
+  if ((ts_failures).length() > 0) {
     for (let failure in ts_failures) {
       std.io.print("FAIL " + failure + "\n");
     }
-    std.io.print("failed: " + str(std.utils.len(ts_failures)) + " failure(s), " +
+    std.io.print("failed: " + str((ts_failures).length()) + " failure(s), " +
           str(ts_total) + " case(s), " + str(ts_skipped) + " skipped\n");
     std.sys.exit(1);
   }

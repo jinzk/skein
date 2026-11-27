@@ -1,4 +1,5 @@
 #include "scopestack.h"
+#include "builtin_ids.h"
 #include "gc.h"
 #include "structtype.h"
 #include "symbol.h"
@@ -137,8 +138,8 @@ void pushscope() {
 
 void pushscope_isolated() {
     scope_context &context = active_scope_context();
-    /* Isolated scopes hide the caller's globals and see no implicit bindings;
-     * packages must import what they use. */
+    /* Isolated scopes hide the caller's globals but still see the small set of
+     * root-level default bindings. */
     std::shared_ptr<scope_t> root =
         context.global_scope ? context.global_scope->parent
                              : std::shared_ptr<scope_t>();
@@ -154,17 +155,69 @@ void initscope() {
     initscope(active_scope_context());
 }
 
+/* A small set of unavoidable convenience values lives in the root scope, so
+ * local declarations, explicit imports, and package scopes can shadow it. */
+static void install_default_value_bindings(const std::shared_ptr<scope_t> &root) {
+    static const struct {
+        const char *name;
+        int id;
+    } bindings[] = {
+        {"list", B_list},
+        {"dict", B_dict},
+        {"input", B_input},
+        {"print", B_print},
+        {"println", B_println},
+    };
+    for (const auto &entry : bindings) {
+        struct symbol *sym = newsym(entry.name);
+        sym->val = newbuiltinval(entry.id);
+        sym->is_const = true;
+        sym->scope_owned = true;
+        root->syms.insert(sym);
+    }
+}
+
+void save_root_symbol(const char *name, value_t *v) {
+    scope_context &context = active_scope_context();
+    if (!name || !context.global_scope)
+        return;
+    std::shared_ptr<scope_t> root = context.global_scope->parent;
+    if (!root)
+        return;
+    std::string_view key(name);
+    if (struct symbol *existing = root->syms.find(key)) {
+        freeval(existing->val);
+        existing->val = v;
+        return;
+    }
+    struct symbol *sym = newsym(name);
+    sym->val = v;
+    sym->is_const = true;
+    sym->scope_owned = true;
+    root->syms.insert(sym);
+}
+
+value_t *lookup_root_symbol(const char *name) {
+    scope_context &context = active_scope_context();
+    if (!name || !context.global_scope)
+        return NULL;
+    std::shared_ptr<scope_t> root = context.global_scope->parent;
+    if (!root)
+        return NULL;
+    struct symbol *sym = root->syms.find(std::string_view(name));
+    return sym ? sym->val : NULL;
+}
+
 void initscope(scope_context &context) {
     if (context.current) return;
     structtype_install_builtin_protocols();
-    /* Keep an empty root scope so isolated package scopes have a stable
-     * parent.  Builtins are only available through explicit std.* imports. */
     std::shared_ptr<scope_t> root = std::make_shared<scope_t>();
     root->parent.reset();
     root->is_function = false;
     root->is_global = false;
     root->ret = NULL;
     root->function_scope = NULL;
+    install_default_value_bindings(root);
 
     std::shared_ptr<scope_t> s = std::make_shared<scope_t>();
     s->parent = root;

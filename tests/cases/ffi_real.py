@@ -111,12 +111,12 @@ def _sqlite_cases(directory):
         'let bad = std.ffi.call(lib, "sqlite3_exec", '
         '[db, "NOT SQL;", null, null, null]);\n'
         "bad != 0\n"
-        'std.string.len(std.ffi.call(lib, "sqlite3_errmsg", [db])) > 0\n'
+        '(std.ffi.call(lib, "sqlite3_errmsg", [db])).length() > 0\n'
         'let raw = std.ffi.call_variadic(lib, "sqlite3_mprintf", '
         '["%d-%s"], ["i32", "cstring"], [7, "ok"]);\n'
         'std.ffi.string(raw)\n'
         "raw = null;\n"
-        'std.string.len(std.ffi.call(lib, "sqlite3_libversion", [])) > 0\n'
+        '(std.ffi.call(lib, "sqlite3_libversion", [])).length() > 0\n'
         'std.ffi.call(lib, "sqlite3_close", [db]);\n'
         "db = null;\n"
         "out = null;\n"
@@ -154,7 +154,7 @@ def _zlib_cases(directory):
         f"let lib = std.ffi.open({skein_string(library)}, "
         f"{skein_string(manifest)});\n"
         'let source = std.bytes.from_string("hello hello hello");\n'
-        "let source_len = std.bytes.len(source);\n"
+        "let source_len = (source).length();\n"
         'let bound = std.ffi.call(lib, "compressBound", [source_len]);\n'
         "let dest = std.ffi.buffer(bound);\n"
         'let dest_len = std.ffi.alloc("usize");\n'
@@ -170,7 +170,7 @@ def _zlib_cases(directory):
         "[out, out_len, compressed, compressed_len]);\n"
         "compressed_rc == 0 && unpack_rc == 0\n"
         "std.bytes.to_string(std.ffi.buffer_bytes(out, source_len))\n"
-        'std.string.len(std.ffi.call(lib, "zlibVersion", [])) > 0\n'
+        '(std.ffi.call(lib, "zlibVersion", [])).length() > 0\n'
         "std.ffi.close(lib);\n",
         stdout_all=["= true", "= hello hello hello", "= true"],
     )

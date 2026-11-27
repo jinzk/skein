@@ -65,13 +65,14 @@ contextual keyword，不是全局保留字：`launch f()` 启动 task，`await f
 `[V proto Drawable]` 这类位置生效。`std.meta.type_info` 等反射结果的 kind 字符串
 为 `"proto"`。
 
-`len` / `range` / `print` / `println` / `input` / `kind_of` / `type_name` /
-`type_package` / `type_module_name` / `type_source` 不再是保留字，也不再是默认
-导入的 prelude 值；必须 `import std;` 后使用规范路径：`std.utils.len` /
-`std.utils.range`、`std.io.print` / `std.io.println` / `std.io.input`，以及
+`std` 是语言级默认根绑定，无需 `import std;` 即可使用；显式 `import std;` 仍然
+合法且幂等。默认裸值只有 `list` / `dict` / `input` / `print` / `println`；
+`len` / `iter!` 已完全移除，`range` 与类型内省使用规范路径 `std.utils.range`、
 `std.type.kind_of` / `std.type.name` / `std.type.package_name` /
 `std.type.module_name` / `std.type.source`。
-`std.list.new(x)` / `std.dict.new(x)` 同样只能通过 `std.list.new(x)` / `std.dict.new(x)` 调用；
+容器长度用 `x.length()` 或 `std.list.length(x)` 等规范路径，迭代器用
+`x.iter()` 或 `std.iter.*`。
+裸 `list(x)` / `dict(x)` 等价于 `std.list.new(x)` / `std.dict.new(x)`；
 类型注解里的 `list[T]` / `dict[K, V]` 始终按独立的类型命名空间解析。
 `int` / `float` / `bool` / `str` / `char` / `byte`
 目前仍由类型命名空间处理。`str` 在类型位置是 `string` 的短别名，两者是同一个
@@ -180,7 +181,7 @@ contextual keyword，不是全局保留字：`launch f()` 启动 task，`await f
 - 支持 `\n`、`\t`、`\r`、`\\`、`\'`、`\"`、`\0`、`\uXXXX`、`\u{...}`；
 - 必须恰好包含一个字符；
 - 空字符、多个字符、代理区 `D800..DFFF`、超过 `0x10FFFF` 都会报错；
-- `std.utils.len(char)` 为 `1`；
+- `(char).length()` 为 `1`；
 - 字符串下标和 `for ... in` 字符串返回 `char`；
 - `char` 可以与 `string` 拼接，例如 `'a' + "bc"`；
 - `int(char)` 得到码点，`str(char)` 得到单字符字符串，`char(int)` / `char(string)` 构造字符；
@@ -223,7 +224,7 @@ null
 
 列表字面量允许尾随逗号。函数参数和调用参数也允许尾随逗号；字典字面量不允许。
 `std.list.new()` 返回空列表，`std.list.new(x)` 从任意可迭代对象复制元素；
-裸名 `list` 不再是值绑定，仅用于类型注解。
+裸 `list()` / `list(x)` 是默认绑定，等价于 `std.list.new()` / `std.list.new(x)`。
 
 ### 2.8 字典
 
@@ -232,14 +233,14 @@ null
 {1: "one", 2: "two"}
 ```
 
-空字典可以直接使用 `{}`，也可以使用 `std.dict.new()` / `std.dict.new()`；单参数形式
-`std.dict.new(x)` / `std.dict.new(x)` 从 dict 或 pair 序列构造：
+空字典可以直接使用 `{}`，也可以使用 `dict()` / `std.dict.new()`；单参数形式
+`dict(x)` / `std.dict.new(x)` 从 dict 或 pair 序列构造：
 
 ```text
-import std;
 {}
+dict()
 std.dict.new()
-std.dict.new({"a": 1})
+dict({"a": 1})
 std.dict.new([["a", 1]])
 ```
 
@@ -910,10 +911,10 @@ opcode。用户宏另有受限 `type` 片段，把调用点的类型放进类型
 `wait!`（规范路径 `std.task.wait!`，展开为 `#expr.wait()`）已实现，见
 [`docs/macros_user_defined.md`](docs/macros_user_defined.md)。
 
-保留的默认宏绑定只有 `capture!` / `fail!` / `recover!` / `pass!` / `wait!` /
-`iter!`；它们是解析期便利别名，规范路径为 `std.result.capture!`、
-`std.error.*!`、`std.task.wait!`、`std.utils.iter!`。日志宏没有裸名别名，
-必须写 `std.log.*!`。规范路径始终可以显式调用，用户宏只遮蔽裸名。
+保留的默认宏绑定只有 `capture!` / `fail!` / `recover!` / `pass!` / `wait!`；
+它们是解析期便利别名，规范路径为 `std.result.capture!`、`std.error.*!`、
+`std.task.wait!`。`iter!` 已移除，迭代使用 `x.iter()` 或 `std.iter.*`；日志宏没有
+裸名别名，必须写 `std.log.*!`。规范路径始终可以显式调用，用户宏只遮蔽裸名。
 用户宏可用 `export macro name(params) { ... }` 导出，再用
 `import {name! [as alias]} from pkg;` 跨包导入；宏导入在解析期绑定，只读取导出
 模板、不执行包代码，且与值/类型选择项互不冲突。
@@ -1204,13 +1205,13 @@ ys[0] = "a";                        // 错误
 ```text
 import std;
 let xs: list[int] = [1, 2, 3];
-xs.len();
+xs.length();
 xs.contains(2);
 xs.map(func(x) { return x * 2; });
 for x in xs.iter() { ... }
 
 let d: dict[string, int] = {"a": 1};
-d.len();
+d.length();
 d.has("a");
 d.keys();
 d.values();
@@ -1223,6 +1224,8 @@ q.size();
 q = q.push_back(3);
 q.to_list();
 
+("ab").length();
+std.bytes.from_hex("00ff").length();
 for c in "ab".iter() { ... }
 for b in std.bytes.from_hex("00ff").iter() { ... }
 for x in gen().iter() { ... }
@@ -1233,7 +1236,7 @@ for x in (1, 2).iter() { ... }
 
 ```text
 import std;
-xs.len()        == std.list.len(xs)
+xs.length()     == std.list.length(xs)
 d.iter_keys()   == std.dict.iter_keys(d)
 q.push_back(3)  == std.deque.push_back(q, 3)
 ```
@@ -1288,7 +1291,7 @@ import std;
   func apply(f: (int) -> int): int { return f(3); }
   apply(add);       // OK
 
-  func count(...xs: int): int { return std.utils.len(xs); }
+  func count(...xs: int): int { return xs.length(); }
   func pair(f: (int, int) -> int): int { return f(1, 2); }
   pair(count);      // OK，rest 类型是 int
   ```
@@ -1426,7 +1429,7 @@ import std;
     if (x is int) {
       x + 1;          // x: int
     } else {
-      std.utils.len(x);         // x: string
+      x.length();               // x: string
     }
   }
   ```
@@ -1684,7 +1687,7 @@ for a, b, c in triples() {
 - `in` 是 contextual keyword，只在循环变量列表后作分隔符；其他位置仍是普通
   标识符，例如 `let in = 1;`；
 - 省略形式在顶层要求 `{` 和头部同一行，规则与 `if` / `while` 相同；
-- list 单变量遍历元素；需要下标时用 `std.utils.range(std.utils.len(list))` 或 C 风格 `for`；
+- list 单变量遍历元素；需要下标时用 `std.utils.range(list.length())` 或 C 风格 `for`；
 - deque / heap / set 单变量遍历元素（heap 按层序，set 按插入顺序）；
 - dict 单变量遍历 entry pair，双变量得到 `key, value`；遍历 key 使用 `dict.keys()` 或 `dict.iter_keys(d)`；非 dict 的双变量按 tuple 解构；静态类型是 `any` 的双变量保留运行时 dict key/value 行为；
 - string 单变量遍历 UTF-8 字符，元素是 `char`；
@@ -3307,7 +3310,7 @@ std.unicode.version()                  → string
 ```
 
 `form` 支持 `nfc`、`nfd`、`nfkc`、`nfkd`。字符串归一化只在显式调用时发生，
-字符串比较、拼接、下标和 `len` 不会自动归一化。标识符按 NFC 归一化，不做 NFKC。
+字符串比较、拼接、下标和 `length()` 不会自动归一化。标识符按 NFC 归一化，不做 NFKC。
 
 ```text
 import std;
@@ -5273,7 +5276,7 @@ set.is_subset(a, b)
 
 元素必须是合法 dict key：`int / float / bool / string / char / byte / bytes / null`、由这些类型递归组成的 tuple/pair、字段递归可哈希的 struct/enum，或实现 `std.dict_key.DictHashable` 的 struct/enum。
 
-`std.set` 是 C++ 原生持久化集合（哈希 treap + 插入日志），具有值语义：`add` / `remove` 返回新 set，不修改原 set。`add` / `remove` / `has` 为 O(log n)，`from_list` 为 O(n log n)，`values` 为 O(n log n) 并保持插入顺序（删除后重新添加会排到末尾）。也可以只 `import std;` 然后使用 `std.set.*`。`std.utils.len(s)`、`for ... in s`、JSON 编码（数组）和类型标注 `set` 均支持；`set` 默认值为空集合。
+`std.set` 是 C++ 原生持久化集合（哈希 treap + 插入日志），具有值语义：`add` / `remove` 返回新 set，不修改原 set。`add` / `remove` / `has` 为 O(log n)，`from_list` 为 O(n log n)，`values` 为 O(n log n) 并保持插入顺序（删除后重新添加会排到末尾）。也可以只 `import std;` 然后使用 `std.set.*`。`(s).length()`、`for ... in s`、JSON 编码（数组）和类型标注 `set` 均支持；`set` 默认值为空集合。
 
 #### std.deque
 
@@ -5297,7 +5300,7 @@ d = r["deque"];
 
 `pop_front` / `pop_back` 返回 `{ok, deque, value}`；空队列返回 `{ok: false, error: "empty deque", deque}`。
 
-`std.deque` 是 C++ 原生值类型，提供均摊 O(1) 的双端 push/pop 和 O(1) 的 `size` / `peek`，`from_list` / `to_list` 为 O(n)。与 `list` / `dict` / `lru` 一样具有值语义：`let e = deque.push_back(d, 1)` 不会修改 `d`。也可以只 `import std;` 然后使用 `std.deque.*`。`std.utils.len(d)`、`for ... in d`、JSON 编码（数组）和类型标注 `deque` 均支持。
+`std.deque` 是 C++ 原生值类型，提供均摊 O(1) 的双端 push/pop 和 O(1) 的 `size` / `peek`，`from_list` / `to_list` 为 O(n)。与 `list` / `dict` / `lru` 一样具有值语义：`let e = deque.push_back(d, 1)` 不会修改 `d`。也可以只 `import std;` 然后使用 `std.deque.*`。`(d).length()`、`for ... in d`、JSON 编码（数组）和类型标注 `deque` 均支持。
 
 #### std.heap
 
@@ -5318,7 +5321,7 @@ let h2 = heap.from_list([3, 1, 2], func(a, b) { return a > b; });  // 大顶堆
 
 `less(a, b)` 返回 `true` 表示 `a` 优先出堆。`pop` 返回 `{ok, heap, value}`；空堆返回 `{ok: false, error: "empty heap", heap}`。
 
-`std.heap` 是 C++ 原生持久化左偏堆（leftist heap），具有值语义：push/pop 返回新堆，不修改原堆；push/pop 为 O(log n)，`from_list` 为 O(n log n)，`to_list` 为 O(n)（层序）。也可以只 `import std;` 然后使用 `std.heap.*`。`std.utils.len(h)`、`for ... in h`（层序）、JSON 编码（数组）和类型标注 `heap` 均支持；`heap` 没有默认值，声明时必须提供初始值。
+`std.heap` 是 C++ 原生持久化左偏堆（leftist heap），具有值语义：push/pop 返回新堆，不修改原堆；push/pop 为 O(log n)，`from_list` 为 O(n log n)，`to_list` 为 O(n)（层序）。也可以只 `import std;` 然后使用 `std.heap.*`。`(h).length()`、`for ... in h`（层序）、JSON 编码（数组）和类型标注 `heap` 均支持；`heap` 没有默认值，声明时必须提供初始值。
 
 ### std.route
 
@@ -5596,21 +5599,25 @@ POSIX 使用 `:`，Windows 使用 `;`。
 ## 7. 内置函数
 
 内置转换函数 `int` / `float` / `bool` / `str` / `char` / `byte` 仍是词法识别的
-转换函数，同时也是类型名。原有 prelude 值绑定已移除，必须 `import std;` 后通过
-规范路径调用：
+转换函数，同时也是类型名。`std` 是语言级默认根绑定，无需 `import std;`；默认裸值
+只有 `list` / `dict` / `input` / `print` / `println`，其余使用规范路径：
 
 ```text
-import std;
-std.utils.len       std.utils.range
-std.io.print        std.io.println      std.io.input
-std.list.new        std.dict.new
-std.type.kind_of    std.type.name       std.type.package_name
-std.type.module_name                    std.type.source
+list(...)           std.list.new(...)
+dict(...)           std.dict.new(...)
+input()             std.io.input
+print(...)          std.io.print
+println(...)        std.io.println
+                    std.utils.range
+                    std.type.kind_of    std.type.name
+                    std.type.package_name
+                    std.type.module_name                    std.type.source
 ```
 
-`list` / `dict` 仅保留类型命名空间中的 `list[T]` / `dict[K, V]` 写法。
+`len` / `iter!` 已移除；容器长度用 `x.length()` / `std.list.length(x)` 等，
+迭代用 `x.iter()` / `std.iter.*`。`list[T]` / `dict[K, V]` 是类型命名空间写法。
 
-数学、字符串、格式化、文件与 bytes 函数位于标准库命名空间，使用前需要 `import std;`：
+数学、字符串、格式化、文件与 bytes 函数位于标准库命名空间，`std` 默认可见：
 
 ```text
 import std;
@@ -5663,9 +5670,10 @@ std.math.tau    // 6.283185307179586
 ### 输出和转换
 
 ```text
-print println int float bool str char byte
-len range input list dict
-kind_of type_name type_package type_module_name type_source
+print println int float bool str char byte input list dict
+std.utils.range
+std.type.kind_of std.type.name std.type.package_name
+std.type.module_name std.type.source
 ```
 
 `print` 输出后不追加换行，`println` 输出后自动追加换行符；两者都返回 `null`。
@@ -5742,7 +5750,7 @@ std.string.find std.string.substr
 ```text
 import std;
 std.bytes.from_string std.bytes.to_string
-std.bytes.len std.bytes.get std.bytes.slice std.bytes.concat
+std.bytes.length std.bytes.get std.bytes.slice std.bytes.concat
 std.bytes.hex std.bytes.from_hex
 std.bytes.to_int std.bytes.from_int
 std.fs.read_bytes std.fs.write_bytes std.fs.append_bytes

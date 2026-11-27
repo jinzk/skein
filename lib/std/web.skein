@@ -197,7 +197,7 @@ package web {
       } else if (body != null) {
         detail = std.json.stringify(body);
       }
-      if (std.utils.len(detail) > max_body) {
+      if ((detail).length() > max_body) {
         detail = std.string.substr(detail, 0, max_body);
       }
       logger.error("request_failed", {
@@ -247,7 +247,7 @@ package web {
       let size = 0;
       if (body != null && (std.type.kind_of(body) == "string" ||
                            std.type.kind_of(body) == "bytes")) {
-        size = std.utils.len(body);
+        size = (body).length();
       }
       logger.info("request", {
         "request_id": std.dict.get(req, "request_id", null),

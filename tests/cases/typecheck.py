@@ -140,7 +140,7 @@ def run_cases():
           "struct User { id: int; cache: list[int]; }\n"
           "impl User { func dict_hash(self): int { return self.id; } }\n"
           "let d: dict[User, int] = {};\n"
-          "std.io.println(std.utils.len(d));\n",
+          "std.io.println((d).length());\n",
           stdout="0", not_stderr="type warning")
 
     check("set element contract custom hash",
@@ -158,7 +158,7 @@ def run_cases():
           "impl User { func key_eq(self, other): bool "
           "{ return self.id == other.id; } }\n"
           "let d: dict[User, int] = {};\n"
-          "std.io.println(std.utils.len(d));\n",
+          "std.io.println((d).length());\n",
           stdout="0", not_stderr="type warning")
 
     check("dict hash impl must precede use",
@@ -981,20 +981,20 @@ def run_cases():
           stdout="4", not_stderr="type warning")
 
     check("variadic function as callback",
-          "func count(...xs: int): int { return std.utils.len(xs); }\n"
+          "func count(...xs: int): int { return (xs).length(); }\n"
           "func apply(f: (int, int) -> int): int { return f(1, 2); }\n"
           "std.io.println(apply(count));\n",
           stdout="2", not_stderr="type warning")
 
     check("variadic callback rest type",
-          "func count(...xs: int): int { return std.utils.len(xs); }\n"
+          "func count(...xs: int): int { return (xs).length(); }\n"
           "func apply(f: (string) -> int): int { return f(\"x\"); }\n"
           "apply(count);\n",
           stderr="type error: expected (string) -> int, "
                  "got (...int) -> int")
 
     check("variadic function value rest check",
-          "func count(...xs: int): int { return std.utils.len(xs); }\n"
+          "func count(...xs: int): int { return (xs).length(); }\n"
           "let f = count;\n"
           "let g: (int, int) -> int = f;\n"
           "std.io.println(g(1, 2));\n"
@@ -1057,7 +1057,7 @@ def run_cases():
           "import std;\n"
           "let inner = std.fn.compose("
           "func(x: bool): int -> 1, "
-          "func(x: string): bool -> std.utils.len(x) > 0);\n"
+          "func(x: string): bool -> (x).length() > 0);\n"
           "let outer = std.fn.compose("
           "func(x: int): string -> str(x), inner);\n"
           "let f: (string) -> string = outer;\n"
@@ -1238,7 +1238,7 @@ def run_cases():
           "func typed(): generator[int, string] {\n"
           "  yield 1;\n"
           "  let x = yield 2;\n"
-          "  yield std.utils.len(x);\n"
+          "  yield (x).length();\n"
           "}\n"
           "let g: generator[int, string] = typed();\n"
           "std.io.println(std.generator.next(g, \"ok\"));\n",

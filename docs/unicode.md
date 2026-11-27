@@ -109,7 +109,7 @@ target_compile_definitions(skein_utf8proc PUBLIC UTF8PROC_STATIC=1)
 
 ### 4.1 不自动归一化
 
-`==`、`+`、下标、`len`、`std.string.find` 等操作保持现有码点序列语义，不做 NFC/NFKC。
+`==`、`+`、下标、`length()`、`std.string.find` 等操作保持现有码点序列语义，不做 NFC/NFKC。
 这样不会改变已有程序行为，也避免输入边界产生隐式数据变化。
 
 ### 4.2 标识符 NFC 归一化

@@ -122,6 +122,14 @@ bool check_builtin(BuiltinContext &context, const std::string &path,
         return true;
     }
 
+    if (path == "std.string.length" || path == "std.bytes.length") {
+        if (!require_kind(
+                0, path == "std.string.length" ? TYPE_STRING : TYPE_BYTES))
+            return true;
+        result = type_builtin(TYPE_INT);
+        return true;
+    }
+
     if (path == "std.iter.take" || path == "std.iter.drop") {
         const TypeNode *element = args.empty()
                                       ? type_any()
@@ -323,7 +331,7 @@ bool check_builtin(BuiltinContext &context, const std::string &path,
         if (!check_arg(0, target_list, false))
             return true;
 
-        if (name == "len") {
+        if (name == "length") {
             result = type_builtin(TYPE_INT);
             return true;
         }
@@ -544,7 +552,7 @@ bool check_builtin(BuiltinContext &context, const std::string &path,
         if (!check_arg(0, target_dict, false))
             return true;
 
-        if (name == "len") {
+        if (name == "length") {
             result = type_builtin(TYPE_INT);
             return true;
         }
@@ -667,7 +675,7 @@ bool check_builtin(BuiltinContext &context, const std::string &path,
                                     {element, type_any()});
             return true;
         }
-        if (name == "size") {
+        if (name == "size" || name == "length") {
             result = type_builtin(TYPE_INT);
             return true;
         }
@@ -734,7 +742,7 @@ bool check_builtin(BuiltinContext &context, const std::string &path,
                                     {element, type_any()});
             return true;
         }
-        if (name == "size") {
+        if (name == "size" || name == "length") {
             result = type_builtin(TYPE_INT);
             return true;
         }
@@ -790,7 +798,7 @@ bool check_builtin(BuiltinContext &context, const std::string &path,
                                     {element, type_any()});
             return true;
         }
-        if (name == "size") {
+        if (name == "size" || name == "length") {
             result = type_builtin(TYPE_INT);
             return true;
         }
@@ -895,7 +903,7 @@ const TypeNode *builtin_polymorphic_type(const std::string &path) {
 
     if (path == "std.list.new")
         return poly_builtin({any_type()}, list_t, 1);
-    if (path == "std.list.len")
+    if (path == "std.list.length")
         return poly_builtin({list_t}, integer_type);
     if (path == "std.list.iter")
         return poly_builtin({list_t}, poly_generator(T));
@@ -1152,8 +1160,14 @@ const TypeNode *builtin_polymorphic_type(const std::string &path) {
 
     if (path == "std.dict.new")
         return poly_builtin({any_type()}, dict_kv, 1);
-    if (path == "std.dict.len")
+    if (path == "std.dict.length")
         return poly_builtin({dict_kv}, integer_type);
+    if (path == "std.set.length")
+        return poly_builtin({set_t}, integer_type);
+    if (path == "std.deque.length")
+        return poly_builtin({deque_t}, integer_type);
+    if (path == "std.heap.length")
+        return poly_builtin({heap_t}, integer_type);
     if (path == "std.dict.has")
         return poly_builtin({dict_kv, K}, bool_type);
     if (path == "std.dict.keys")

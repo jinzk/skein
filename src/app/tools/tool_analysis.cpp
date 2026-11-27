@@ -166,6 +166,7 @@ analysis_result analyze_source_text(const std::string &source,
     diag_collect_begin(options.suppress_text);
     {
         check_only_guard check_only;
+        package_install_default_std();
         yyparse();
     }
     result.diagnostics = diag_collect_end();

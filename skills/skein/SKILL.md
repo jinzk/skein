@@ -25,8 +25,6 @@ skein -i                          # REPL
 最小程序：
 
 ```skein
-import std;
-
 func main() {
   std.io.println("hello");
 }
@@ -34,9 +32,11 @@ func main() {
 main();
 ```
 
-`main` 不会自动执行；顶层代码按顺序执行。标准库 `std.*` 需要
-`import std;`，`print` / `println` / `str` / `len` / `range` / `int` /
-`float` / `bool` 等是全局内置。
+`main` 不会自动执行；顶层代码按顺序执行。`std` 是语言级默认根绑定，`std.*`
+无需 `import std;`；显式导入合法且幂等。默认裸值只有 `list` / `dict` /
+`input` / `print` / `println`；`str` / `int` / `float` / `bool` 等是词法识别的
+转换函数。`len` / `iter!` 已移除，长度用 `x.length()`，迭代用 `x.iter()`，
+`range` 用 `std.utils.range`。
 
 ## 管道与占位符
 
@@ -261,7 +261,7 @@ std.io.println(str(n));
 | `runtime error: two-variable for-in requires dict, got list` | list 不能用 `for i, x in xs`；用 `std.iter.for_each` |
 | `runtime error: match: no arm matched` | match 未穷尽且没有 `default` |
 | `runtime error: cannot assign to constant` | 给 `const` 重新赋值 |
-| `runtime error: symbol not found X` | 名字拼错，或忘了 `import std;` |
+| `runtime error: symbol not found X` | 名字拼错；`std.*` 默认可见，但 `std.lru` 等包仍需显式 import |
 
 ## 查标准库，不要猜
 
@@ -274,8 +274,8 @@ grep -n 'std\.iter' docs/stdlib.md SYNTAX.md
 ```
 
 也可以看 `src/interpreter/std_namespace.cpp` 和
-`src/interpreter/package.cpp` 的注册表。没有 `import std;` 时 `std.*` 不可用；
-模块清单在 `docs/stdlib.md` 的「模块：」代码块中。
+`src/interpreter/package.cpp` 的注册表。`std.*` 默认可见；其他包按模块清单显式
+导入。模块清单在 `docs/stdlib.md` 的「模块：」代码块中。
 
 ## 语法地图（SYNTAX.md）
 
@@ -304,4 +304,4 @@ grep -n 'std\.iter' docs/stdlib.md SYNTAX.md
 - [ ] for-in 没写 `let`，双变量 for-in 只用于 dict；
 - [ ] 字符串拼接里的非字符串都套了 `str()`；
 - [ ] dict 可疑 key 用了 `std.dict.get` / `std.dict.has`；
-- [ ] 用到的 `std.*` 函数在 `docs/stdlib.md` 中存在，且已 `import std;`。
+- [ ] 用到的 `std.*` 函数在 `docs/stdlib.md` 中存在；`std` 默认可见，其他包已显式导入。

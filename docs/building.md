@@ -78,7 +78,7 @@ python3 tools/startup_profile.py --bin ./build/skein --verbose
 只占约 `0.4 ms`。其余来自进程创建、OS loader、CRT 和动态库初始化。因此：
 
 - `std` 命名空间的 eager 构建本身约 `0.1 ms`，不是启动瓶颈；
-- `import std` 的 `main()` 成本约 `0.9 ms`，主要花在容器 adapter 的解析与执行；
+- 默认 `std` 绑定的 `main()` 成本约 `0.9 ms`，主要花在容器 adapter 的解析与执行；显式 `import std;` 是幂等的，不会重复构建；
 - `lib/std/*.skein` 已经是按需加载，导入单个内嵌包约 `1.2–1.6 ms`，主要成本是
   解析对应源码；
 - 内嵌包由编译器内置并随解释器一起测试，启动时不再跑类型检查；

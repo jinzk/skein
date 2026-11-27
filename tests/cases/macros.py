@@ -81,6 +81,11 @@ def run_cases():
             stderr="is not a known built-in or user-defined macro",
         )
     check(
+        "iter! is not a default binding",
+        'import std;\niter!([1, 2, 3]);\n',
+        stderr="is not a known built-in or user-defined macro",
+    )
+    check(
         "macro wrong arity",
         'import std;\nstd.log.info!();\n',
         stderr="expects 1 or 2 expression arguments",

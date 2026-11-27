@@ -63,11 +63,11 @@ package kv {
   }
 
   func _valid_table(name) {
-    if (std.type.kind_of(name) != "string" || name == "" || std.utils.len(name) > 64) {
+    if (std.type.kind_of(name) != "string" || name == "" || (name).length() > 64) {
       return false;
     }
     let i = 0;
-    while (i < std.utils.len(name)) {
+    while (i < (name).length()) {
       let c = name[i];
       if (c == '_') {
         i = i + 1;
@@ -91,7 +91,7 @@ package kv {
   }
 
   func _prefix_upper(prefix) {
-    let i = std.utils.len(prefix) - 1;
+    let i = (prefix).length() - 1;
     while (i >= 0) {
       let current = std.bytes.get(prefix, i);
       if (current < 255) {
@@ -117,7 +117,7 @@ package kv {
       let k = _as_bytes(key, "key");
       let rows = std.db.query(
         db, "SELECT value FROM " + table + " WHERE key = ?", [k]);
-      if (std.utils.len(rows) == 0) {
+      if ((rows).length() == 0) {
         return null;
       }
       return rows[0]["value"];
@@ -132,7 +132,7 @@ package kv {
       let k = _as_bytes(key, "key");
       let rows = std.db.query(
         db, "SELECT 1 AS found FROM " + table + " WHERE key = ?", [k]);
-      return std.utils.len(rows) > 0;
+      return (rows).length() > 0;
     };
     let scan = func(prefix = "", limit = 0) {
       let p = _as_bytes(prefix, "prefix");
@@ -141,7 +141,7 @@ package kv {
       }
       let sql = "SELECT key, value FROM " + table;
       let params = [];
-      if (std.utils.len(p) > 0) {
+      if ((p).length() > 0) {
         let upper = _prefix_upper(p);
         if (upper == null) {
           sql = sql + " WHERE key >= ?";

@@ -30,6 +30,10 @@ bool load_cached_module_native(const std::string &path,
 void package_configure(const std::string &source_path,
                        const std::vector<std::string> &cli_dirs);
 
+/* Install the default root-scope `std` binding and seed its import cache.
+ * Safe to call more than once in the same scope context. */
+void package_install_default_std();
+
 /* True while an imported package file is being parsed/evaluated. */
 bool package_is_loading();
 

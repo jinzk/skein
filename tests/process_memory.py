@@ -40,7 +40,7 @@ def main():
             'std.io.println("parent_rss=" + str(std.process.rss(parent) > 0));\n'
             'std.io.println("leaf_rss=" + str(std.process.rss(leaf_pid) > 0));\n'
             'let kids = std.process.children(parent);\n'
-            'std.io.println("kids=" + str(std.utils.len(kids) >= 1));\n'
+            'std.io.println("kids=" + str((kids).length() >= 1));\n'
             'std.io.println("tree=" + str(std.process.tree_rss(parent) >= '
             'std.process.rss(parent)));\n'
             "std.process.wait(parent);\n"

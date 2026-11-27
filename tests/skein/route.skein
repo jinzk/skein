@@ -25,7 +25,7 @@ ts_test("route static params empty", func() {
   let seen = {"params": null};
   app.get("/static", func(req) {
     seen["params"] = req["params"];
-    return {"status": 200, "body": str(std.utils.len(req["params"]))};
+    return {"status": 200, "body": str((req["params"]).length())};
   });
   let resp = app.dispatch(ts_route_req("GET", "/static"));
   ts_eq(seen["params"], {});
@@ -181,7 +181,7 @@ ts_test("route inspect", func() {
   app.get("/a", func(req) { return null; });
   app.post("/b/:id", func(req) { return null; });
   let items = app.inspect();
-  ts_eq(std.utils.len(items), 2);
+  ts_eq((items).length(), 2);
   ts_eq(items[0]["method"] + " " + items[0]["pattern"], "GET /a");
   ts_eq(items[1]["method"] + " " + items[1]["pattern"], "POST /b/:id");
 });
@@ -293,7 +293,7 @@ ts_test("route many routes", func() {
     });
   }
   ts_eq(app.dispatch(ts_route_req("GET", "/r999"))["body"], "ok");
-  ts_eq(std.utils.len(app.inspect()), 1000);
+  ts_eq((app.inspect()).length(), 1000);
 });
 
 ts_test("route param name conflict", func() {

@@ -31,7 +31,7 @@ package lru {
 
   func _index(order, key) {
     let i = 0;
-    while (i < std.list.len(order)) {
+    while (i < (order).length()) {
       if (order[i] == key) {
         return i;
       }
@@ -94,7 +94,7 @@ package lru {
     order = std.list.append(order, key);
 
     let evicted = null;
-    if (std.list.len(order) > l.cap) {
+    if ((order).length() > l.cap) {
       let old_key = order[0];
       evicted = {"key": old_key, "value": map[old_key]};
       order = std.list.slice(order, 1);
@@ -136,7 +136,7 @@ package lru {
   }
 
   export func size(l) {
-    return std.list.len(l.order);
+    return (l.order).length();
   }
 
   export func capacity(l) {

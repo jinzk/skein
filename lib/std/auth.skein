@@ -6,7 +6,7 @@ package auth {
     encoded = std.string.replace(encoded, "+", "-");
     encoded = std.string.replace(encoded, "/", "_");
     while (std.string.ends_with(encoded, "=")) {
-      encoded = std.string.substr(encoded, 0, std.utils.len(encoded) - 1);
+      encoded = std.string.substr(encoded, 0, (encoded).length() - 1);
     }
     return encoded;
   }
@@ -14,7 +14,7 @@ package auth {
   func _b64url_decode_bytes(text) {
     let encoded = std.string.replace(text, "-", "+");
     encoded = std.string.replace(encoded, "_", "/");
-    while (std.utils.len(encoded) % 4 != 0) {
+    while ((encoded).length() % 4 != 0) {
       encoded = encoded + "=";
     }
     return std.encoding.base64_decode(encoded);
@@ -22,7 +22,7 @@ package auth {
 
   func _b64url_valid(text) {
     if (std.type.kind_of(text) != "string" || text == "" ||
-        std.utils.len(text) % 4 == 1) {
+        (text).length() % 4 == 1) {
       return false;
     }
     for (let c in text) {
@@ -58,12 +58,12 @@ package auth {
   export func constant_time_equal(a, b) {
     if (a == null || b == null || std.type.kind_of(a) != std.type.kind_of(b) ||
         (std.type.kind_of(a) != "string" && std.type.kind_of(a) != "bytes") ||
-        std.utils.len(a) != std.utils.len(b)) {
+        (a).length() != (b).length()) {
       return false;
     }
     let different = 0;
     let i = 0;
-    while (i < std.utils.len(a)) {
+    while (i < (a).length()) {
       if (a[i] != b[i]) {
         different = 1;
       }
@@ -405,7 +405,7 @@ package auth {
       return null;
     }
     let parts = std.string.split(token, ".");
-    if (std.utils.len(parts) != 3 || !_b64url_valid(parts[0]) ||
+    if ((parts).length() != 3 || !_b64url_valid(parts[0]) ||
         !_b64url_valid(parts[1]) || !_b64url_valid(parts[2])) {
       return null;
     }
@@ -504,7 +504,7 @@ package auth {
       }
       return [value];
     }
-    if (std.type.kind_of(value) != "list" || std.utils.len(value) == 0) {
+    if (std.type.kind_of(value) != "list" || (value).length() == 0) {
       std.error.fail!("auth." + what + " must be a string or non-empty list");
     }
     for (let item in value) {
@@ -628,7 +628,7 @@ package auth {
       return null;
     }
     let parts = std.string.split(token, ".");
-    if (std.utils.len(parts) != 2 || parts[0] == "" || parts[1] == "") {
+    if ((parts).length() != 2 || parts[0] == "" || parts[1] == "") {
       return null;
     }
     let expected = std.crypto.hmac_sha256(secret, parts[0]);

@@ -25,7 +25,7 @@ package metrics {
       parts = std.list.append(
         parts, extra_key + "=\"" + _escape_label(str(extra_value)) + "\"");
     }
-    if (std.utils.len(parts) == 0) {
+    if ((parts).length() == 0) {
       return "";
     }
     return "{" + std.string.join(parts, ",") + "}";
@@ -160,7 +160,7 @@ package metrics {
       }
       let counts = record.counts;
       let i = 0;
-      while (i < std.utils.len(record.buckets)) {
+      while (i < (record.buckets).length()) {
         if (float(value) <= float(record.buckets[i])) {
           counts[i] = counts[i] + 1;
         }
@@ -189,7 +189,7 @@ package metrics {
       for (let key in std.dict.keys(histograms)) {
         let record = histograms[key];
         let i = 0;
-        while (i < std.utils.len(record.buckets)) {
+        while (i < (record.buckets).length()) {
           lines = std.list.append(
             lines,
             record.name + "_bucket" +

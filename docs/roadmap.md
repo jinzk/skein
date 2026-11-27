@@ -38,9 +38,9 @@
 | 对象抽象 / `proto` / `ref` / Channel 模型（M8） | 功能已完成 | Channel 端点对、结构化 `proto`、struct 内联方法、`_` 包私有成员，以及 `ref` / `weak` / GC / channel payload 拒绝已落地；文档同步完成，仅剩 Windows x64 MinGW/MSVC CI 发布门槛 |
 | 用户自定义泛型（M9） | 已完成 | 泛型 struct/enum/函数/proto、显式实例化、约束、默认类型参数、裸 `Box` 补全、递归、VM/JIT 擦除、`std.meta` 泛型入口和 JSON envelope 已完成；通用二进制值格式不在当前范围，按需再评估 |
 | 断言与内置语法宏（M10） | 已完成 | 第一批已完成：`std.assert` / `std.log.enabled` 与 assert、日志、`capture!` 内置 AST 宏已落地并通过全量验证；`list!` / `dict!` / `try!` 已决定不实现；用户自定义宏不在 M10 |
-| 用户自定义宏与保留字清理（M11，P1 / P2 / P3.1 / P4 含跨包 / P5.1–P5.5 / G1–G6 已完成） | 已完成 | AST 级静态模板、受限片段、hygienic、声明先于使用。`proto`、`import {name} from pkg`、prelude 默认 import、`list` / `dict` 构造器、`fail!` / `recover!` / `pass!` / `wait!` 宏、`launch` / `wait` / `await` 表达式起始 contextual、用户宏 v1 与跨包 `export macro` / `import {name!} from pkg;`，以及 `on` / `error` handler-scoped contextual、`as` / `ref` / `weak` / `is` contextual 均已落地；G1–G6 完成泛型实参 AST 化、受限 `type` 片段、占位符泛型实参、定义期边界强化、formatter / lint / LSP / VM-JIT 同步与核心约束验收；设计见 [`docs/macros_user_defined.md`](macros_user_defined.md) |
+| 用户自定义宏与保留字清理（M11，P1 / P2 / P3.1 / P4 含跨包 / P5.1–P5.5 / G1–G6 已完成） | 已完成 | AST 级静态模板、受限片段、hygienic、声明先于使用。`proto`、`import {name} from pkg`、`std` 默认根绑定与保留的裸构造器、`fail!` / `recover!` / `pass!` / `wait!` 宏、`launch` / `wait` / `await` 表达式起始 contextual、用户宏 v1 与跨包 `export macro` / `import {name!} from pkg;`，以及 `on` / `error` handler-scoped contextual、`as` / `ref` / `weak` / `is` contextual 均已落地；G1–G6 完成泛型实参 AST 化、受限 `type` 片段、占位符泛型实参、定义期边界强化、formatter / lint / LSP / VM-JIT 同步与核心约束验收；设计见 [`docs/macros_user_defined.md`](macros_user_defined.md) |
 | 操作符重载（O0–O4） | O0–O4 已完成 | 自引用 proto 约束、`std.ops` 协议、算术/相等/比较运算符重写，以及标准库算法接入 `Comparable` 均已落地，见 2.9 |
-| 标准库 API 清理（P0–P4 与旧入口移除） | 已完成 | `kv.StoreApi`、`std.ops` 组合协议、`kv.OpenOptions`、`graph` 的 `result` envelope 与 `fsm.MachineApi` 门面已落地；`std.string.split_ws`、`fsm` 包级旧入口和 prelude 裸名绑定已移除，统一使用 `std.*` 规范路径 |
+| 标准库 API 清理（P0–P4 与旧入口移除） | 已完成 | `kv.StoreApi`、`std.ops` 组合协议、`kv.OpenOptions`、`graph` 的 `result` envelope 与 `fsm.MachineApi` 门面已落地；`std.string.split_ws`、`fsm` 包级旧入口、`len` / `iter!` 与多余 prelude 裸名已移除，统一使用 `std.*` 规范路径与 `length()` / `iter()` 方法 |
 | `std.cache`（M7）/ `std.kv` | 已完成 | 维护；Valkey 独立 CI 服务可按需补 |
 | FFI 平台 CI / fuzz | 按需 | Windows x64（MinGW/MSVC）进入正式发布；32 位 / ARM 与 fuzz 按需，见 `architecture.md` |
 
@@ -51,7 +51,7 @@
 - `std.cache` Redis / Valkey 客户端与共享 Session / 限流 store
 - SQLite 单文件 `std.kv`
 - 启动 profiling、AST arena、内存输入 fast path
-- P1 / P2 / P3.1：`proto`、selective import、prelude 默认 import、`list` / `dict` 构造器、`fail!` / `recover!` / `pass!` / `wait!` 宏，以及 `launch` / `wait` / `await` contextual keyword
+- P1 / P2 / P3.1：`proto`、selective import、`std` 默认根绑定与 `list` / `dict` 构造器、`fail!` / `recover!` / `pass!` / `wait!` 宏，以及 `launch` / `wait` / `await` contextual keyword
 - P4：用户自定义宏 v1（四种片段、hygiene、嵌套调用、递归禁止）与跨包
   `export macro` / `import {name!}`（parse-only 包读取、宏命名空间隔离、循环检测）
 - P5.1：`on` / `error` handler-scoped contextual；`std.log.error!` / 用户宏走普通宏路径，`type error` / `.error` 不受影响
@@ -65,7 +65,8 @@
 - 标准库 API 清理 P0–P4：文档对齐默认 import 语义、`kv.StoreApi` 门面、
   `std.ops` 组合约束、`kv.OpenOptions` 具名选项，以及 `graph` 的内置泛型
   `result` envelope 入口；随后移除 `std.string.split_ws`、`fsm` 包级旧入口和
-  prelude 裸名绑定，所有调用统一到 `std.*` / `MachineApi`
+  `len` / `iter!` 与多余 prelude 裸名绑定；保留 `std` 默认根绑定与少量便利裸值，
+  其余调用统一到 `std.*` / `MachineApi`
 
 ### 1.2 推荐执行顺序
 
@@ -523,16 +524,17 @@ keyword（`in` / `export` / `import` / `package` / `include`）已完成。其�
 2. **P1.2（已完成）** 值/类型的 selective import：`import {name} from pkg;`，
    `from` 为 contextual keyword；formatter / lint / LSP、文档与测试已同步，
    check-only 工具不执行被导入的包。
-3. **P2.1（已完成）** 普通内置函数改为默认 import：`len` / `range` 放进
-   `std.utils`（`std.utils.len` / `std.utils.range`），`print` / `println` /
-   `input` → `std.io.*`，类型内省 → `std.type.*`；lexer 不再发
-   `SKEIN_TOK_BUILTIN`；解析优先级为局部绑定 > 显式 import > 默认 import。
-4. **P2.2（已完成）** 内置宏改为 parser 侧默认宏绑定，裸名映射到 `std.log.*!` /
+3. **P2.1（已完成，后续清理）** `std` 成为语言级默认根绑定，默认裸值只保留
+   `list` / `dict` / `input` / `print` / `println`；`len` / `iter!` 已移除，
+   `range` → `std.utils.range`，类型内省 → `std.type.*`；lexer 不再发
+   `SKEIN_TOK_BUILTIN`；解析优先级为局部绑定 > 显式 import > 默认根绑定。
+4. **P2.2（已完成）** 内置宏改为 parser 侧默认宏绑定，保留的裸名映射到
    `std.result.capture!` / `std.error.*!` / `std.task.wait!` 等规范路径；
-   `fail` / `recover` / `pass` / `wait` 的规范形式改为宏，旧关键字形式已移除；
+   `fail` / `recover` / `pass` / `wait` 的规范形式改为宏，旧关键字形式与 `iter!`
+   已移除，迭代统一用 `x.iter()`；
    追加 `name!` 与 `name! x` 两种宏简写；用户宏可遮蔽裸名。
-5. **P2.3（已完成）** `list` / `dict` 改为默认 import，规范路径为
-   `std.list.new` / `std.dict.new`；`std.list.new(x)` / `std.dict.new(x)` 解析为对应构造器，
+5. **P2.3（已完成，后续恢复）** `list` / `dict` 是默认根绑定，规范路径为
+   `std.list.new` / `std.dict.new`；`list(x)` / `dict(x)` 解析为对应构造器，
    值作用域可遮蔽且类型命名空间保持独立；不做 `list!` / `dict!` / `try!`。
 6. **P3.1（已完成）** `wait` 退出保留字，`launch` / `await` 改为表达式
     起始 contextual keyword，`wait` 只作普通标识符，

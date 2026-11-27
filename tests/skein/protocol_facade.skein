@@ -81,7 +81,7 @@ ts_test("protocol facade cache", func() {
 });
 
 ts_test("protocol facade metrics", func() {
-  ts_true(std.utils.len(facade_metrics(metrics.new())) > 0);
+  ts_true((facade_metrics(metrics.new())).length() > 0);
 });
 
 ts_test("protocol facade auth", func() {

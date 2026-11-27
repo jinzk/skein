@@ -65,7 +65,7 @@ package fsm {
       t.gens[slot] = t.gens[slot] + 1;
       t.slots[slot] = _Node { value: value, prev: prev };
     } else {
-      slot = std.utils.len(t.slots);
+      slot = (t.slots).length();
       t.slots[slot] = _Node { value: value, prev: prev };
       t.gens[slot] = 0;
     }
@@ -78,7 +78,7 @@ package fsm {
     let slot = id & _MASK;
     let gen = id >> 32;
 
-    if (slot < 0 || slot >= std.utils.len(t.slots)) {
+    if (slot < 0 || slot >= (t.slots).length()) {
       std.error.fail!("stale fsm history handle");
     }
     if (t.gens[slot] != gen) {
@@ -95,7 +95,7 @@ package fsm {
     let slot = id & _MASK;
     let gen = id >> 32;
 
-    if (slot < 0 || slot >= std.utils.len(t.slots)) {
+    if (slot < 0 || slot >= (t.slots).length()) {
       return false;
     }
     if (t.gens[slot] != gen) {
@@ -108,7 +108,7 @@ package fsm {
     let slot = id & _MASK;
     let gen = id >> 32;
 
-    if (slot < 0 || slot >= std.utils.len(t.slots)) {
+    if (slot < 0 || slot >= (t.slots).length()) {
       std.error.fail!("stale fsm history handle");
     }
     if (t.gens[slot] != gen || t.slots[slot] == null) {
@@ -123,13 +123,13 @@ package fsm {
   }
 
   func _t_check(t) {
-    if (std.utils.len(t.slots) != std.utils.len(t.gens)) {
+    if ((t.slots).length() != (t.gens).length()) {
       return false;
     }
-    if (t.alive < 0 || t.alive > std.utils.len(t.slots)) {
+    if (t.alive < 0 || t.alive > (t.slots).length()) {
       return false;
     }
-    for (let i in std.utils.range(std.utils.len(t.slots))) {
+    for (let i in std.utils.range((t.slots).length())) {
       if (t.slots[i] != null && std.type.kind_of(t.slots[i]) != "struct") {
         return false;
       }
@@ -154,7 +154,7 @@ package fsm {
     let slots = std.deque.new();
     let gens = std.deque.new();
     let i = 0;
-    while (i < std.utils.len(t.slots)) {
+    while (i < (t.slots).length()) {
       let node = t.slots[i];
       if (node == null) {
         slots = std.deque.push_back(slots, null);
@@ -182,7 +182,7 @@ package fsm {
     let slots = {};
     let gens = {};
     let i = 0;
-    while (i < std.utils.len(source_slots)) {
+    while (i < (source_slots).length()) {
       let item = source_slots[i];
       if (item == null) {
         slots[i] = null;
@@ -292,7 +292,7 @@ package fsm {
           ctx._history.gens[slot] = ctx._history.gens[slot] + 1;
           ctx._history.slots[slot] = _Node { value: next, prev: ctx._head };
         } else {
-          slot = std.utils.len(ctx._history.slots);
+          slot = (ctx._history.slots).length();
           ctx._history.slots[slot] = _Node { value: next, prev: ctx._head };
           ctx._history.gens[slot] = 0;
         }
@@ -336,7 +336,7 @@ package fsm {
   }
 
   export func redo(ctx) {
-    let n = std.utils.len(ctx._redo);
+    let n = (ctx._redo).length();
     if (n == 0) {
       return ctx;
     }

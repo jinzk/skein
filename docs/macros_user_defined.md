@@ -21,7 +21,7 @@ typecheck 前展开**。它不应变成编译期任意执行，也不应触碰�
 - 宏调用保持现有 `name!(...)` / `name! { ... }` / `name!(...) { ... }` 形式；
   后续阶段只追加两种简写：`name!`（零参数）与 `name! x`（单个 `NAME`
   参数），所有其他参数仍必须写在括号内；
-- 内置宏也按默认 import 处理：裸名是解析期的隐式绑定，每个宏都有规范路径，
+- 内置宏是 parser 侧默认绑定：裸名是解析期的隐式别名，每个宏都有规范路径，
   用户宏可以遮蔽裸名，但规范路径仍可显式调用（第 3.5 节）；
 - 同文件宏遵循声明先于使用；跨包宏通过 `export macro` 与
   `import {retry!} from util;` 显式导入，`from` 是 contextual keyword；
@@ -51,8 +51,9 @@ macro name(param: expr, label: ident, body: block) {
 
 `macro` 建议作为新的保留声明关键字。宏名使用普通标识符。保留的便利内置宏
 名不是全局保留字，而是默认宏绑定（第 3.5 节）：规范路径包括
-`std.result.capture!`、`std.utils.iter!`、`std.error.fail!` /
-`std.error.recover!` / `std.error.pass!` / `std.task.wait!`。日志与断言宏
+`std.result.capture!`、`std.error.fail!` / `std.error.recover!` /
+`std.error.pass!` / `std.task.wait!`。`iter!` 已移除，迭代使用 `x.iter()`。
+日志与断言宏
 没有裸名别名，使用 `std.log.*!` / `std.assert.*!` 规范路径。
 
 ### 3.2 参数片段
@@ -204,7 +205,7 @@ import {retry! as r} from util;   // 调用时写 r!(...)
 ### 3.5 保留的默认宏绑定
 
 只有下列便利宏保留 parser 侧的默认绑定；裸名是解析期别名，每个宏都有规范
-路径。日志宏不在这个白名单里。当前映射为：
+路径。日志宏不在这个白名单里；`iter!` 已移除，迭代使用 `x.iter()`。当前映射为：
 
 | 裸名 | 规范路径 |
 | --- | --- |
@@ -213,7 +214,6 @@ import {retry! as r} from util;   // 调用时写 r!(...)
 | `recover!` | `std.error.recover!` |
 | `pass!` | `std.error.pass!` |
 | `wait!` | `std.task.wait!` |
-| `iter!` | `std.utils.iter!` |
 
 `std.assert.that!` / `std.assert.schema!` / `std.log.*!` 本身就是规范路径，
 没有裸名别名。
@@ -432,17 +432,18 @@ builtin，调用点已有的泛型值仍可通过 `expr` 片段传入。
 2. **P1.2（已完成）**：值/类型的 selective import `import {name} from pkg;`。
    `from` 只在 `import { ... }` 后 contextual；formatter / lint / LSP、文档与
    测试已同步，check-only 工具不执行被导入的包。
-3. **P2.1（已完成）**：普通内置函数改为默认 import 的 prelude 值。`len` /
-   `range` 放入 `std.utils`；`print` / `println` / `input` → `std.io.*`；
-   `kind_of` / `type_*` → `std.type.*`。lexer 不再发 `SKEIN_TOK_BUILTIN`，初始
-   作用域注入绑定；VM / JIT 的 builtin id 不变。解析优先级为局部绑定 > 显式
-   import > 默认 import。
+3. **P2.1（已完成，后续清理）**：普通内置函数曾改为默认 prelude 值；最终清理后
+   `std` 成为语言级默认根绑定，默认裸值只保留 `list` / `dict` / `input` /
+   `print` / `println`。`len` / `iter!` 已完全移除，`range` → `std.utils.range`；
+   `kind_of` / `type_*` → `std.type.*`。lexer 不再发 `SKEIN_TOK_BUILTIN`；默认
+   绑定安装在根作用域，VM / JIT 的 builtin id 不变。解析优先级为局部绑定 >
+   显式 import > 默认根绑定。
 4. **P2.2（已完成）**：内置宏改为 parser 侧默认宏绑定（第 3.5 节）。裸名只是别名，规范
    路径仍可显式调用；加入 `fail!` / `recover!` / `pass!`（`std.error.*!`）和
    `wait!`（`std.task.wait!`，展开为 `#expr.wait()`）。落地第 3.3 节的
    `name!` / `name! x` 两种简写；旧 bare 关键字形式已移除，统一使用规范宏路径。
-5. **P2.3（已完成）**：`list` / `dict` 改为默认 import，新增 `std.list.new` /
-   `std.dict.new`；`std.list.new(x)` / `std.dict.new(x)` 解析为对应构造器，值作用域可遮蔽，
+5. **P2.3（已完成，后续恢复）**：`list` / `dict` 是默认根绑定，规范路径为
+   `std.list.new` / `std.dict.new`；`list(x)` / `dict(x)` 解析为对应构造器，值作用域可遮蔽，
    类型命名空间保持独立。不做 `list!` / `dict!` / `try!`。
 6. **P3.1（已完成）**：`wait` 退出保留字；`launch` / `wait` / `await` 改为表达式起始 contextual
    keyword。`launch f()` 启动 task，`await f()` 等价 `std.task.wait!(launch f())` 并要求
@@ -485,7 +486,7 @@ formatter / lint / LSP 的片段覆盖、双位置诊断与 VM/JIT differential�
 2. `macro` 作为新保留关键字；
 3. 同文件宏声明先于使用；跨包宏通过 `export macro` / `import {name!} from pkg;` 显式导入；
 4. 禁止递归和隐式跨模块宏；
-5. 内置宏改为默认 import 的解析期绑定；同文件用户宏可遮蔽裸名，规范路径仍可
+5. 内置宏是 parser 侧默认绑定；同文件用户宏可遮蔽裸名，规范路径仍可
    显式调用（已确认，以第 3.5 节为准）；
 6. 用户宏作为 M11，不回写已完成的 M10；
 7. 跨包 selective import 采用 `import {name} from pkg;`，宏写作
@@ -496,18 +497,20 @@ formatter / lint / LSP 的片段覆盖、双位置诊断与 VM/JIT differential�
    `launch` / `await` 走表达式起始 contextual；
 10. `in`、`export`、`package`、`import`、`include` 同属低风险 contextual
    keyword，在 Phase 1 处理；`module` 仅用于 manifest，不占 `.skein` 保留字；
-11. 普通内置函数改为默认 import；`len` / `range` 放进 `std.utils`
-   模块，而不是 `std.prelude`；解析优先级为局部绑定 > 显式 import > 默认
-   import；
-12. `list` / `dict` 作为默认 import 的 `std.list` / `std.dict`，裸构造调用与
-   其他类型构造器统一，降糖为 `std.list.new` / `std.dict.new`；
+11. `std` 是语言级默认根绑定，显式 `import std;` 幂等；默认裸值只有
+    `list` / `dict` / `input` / `print` / `println`；`len` / `iter!` 已移除，
+   `range` 只放在 `std.utils` 模块；解析优先级为局部绑定 > 显式 import >
+   默认根绑定；
+12. `list` / `dict` 是默认根绑定的构造器，降糖为 `std.list.new` /
+   `std.dict.new`；类型命名空间独立；
 13. `fail` / `recover` / `pass` 通过内置宏消除保留字，不再采用 statement-start
    或 handler-scoped contextual 方案；诊断仍由现有 handler 栈检查产生；
 14. 宏简写只支持 `name!` 与 `name! x`；列表、字典、表达式、嵌套宏和成员链
    一律写括号；`foo! { ... }` 始终是 block；
 15. `on` / `error` 已按 handler-scoped contextual 落地：`std.log.error!` 与用户宏走普通宏路径，类型与字段位置不受影响；
 16. 保留的默认宏绑定采用第 3.5 节的表；`std.error.fail!` /
-    `std.error.recover!` / `std.error.pass!` 是规范路径，裸关键字形式已移除；
+    `std.error.recover!` / `std.error.pass!` 是规范路径，裸关键字形式与 `iter!`
+    已移除；
 17. 协议声明关键字 `protocol` 重命名为 `proto`，作为全局保留字；泛型约束列表中
     的 `proto` / `type` 是地位相同的 contextual 标记，只在类型参数约束位置
     生效；反射 kind 字符串同步改为 `"proto"`，不保留 `"protocol"` 别名；

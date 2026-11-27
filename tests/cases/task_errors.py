@@ -385,7 +385,7 @@ def run_cases():
         "let r = std.result.capture(func() { return 1 / 0; });\n"
         "let e = std.result.error(r);\n"
         'std.io.println(str(std.error.location(e)["line"]));\n'
-        "std.io.println(str(std.utils.len(std.error.trace(e))));\n"
+        "std.io.println(str((std.error.trace(e)).length()));\n"
         "std.io.println(std.error.format_trace(e));\n",
         stdout_all=["2", "1", "runtime: division by zero",
                     "in <anonymous>() called from line 2"],
@@ -405,7 +405,7 @@ def run_cases():
             "let r = t.join();\n"
             'let e = r["error"];\n'
             'std.io.println(str(std.error.location(e)["line"]));\n'
-            "std.io.println(str(std.utils.len(std.error.trace(e))));\n"
+            "std.io.println(str((std.error.trace(e)).length()));\n"
             "std.io.println(std.error.format_trace(e));\n",
             stdout_all=["2", "1", "fail: thread boom",
                         "in main() called from"],
@@ -932,26 +932,27 @@ def run_cases():
     )
     check(
         "std net resolve",
-        'import std;\nstd.utils.len(std.net.resolve("localhost")) > 0\n',
+        'import std;\n(std.net.resolve("localhost")).length() > 0\n',
         stdout="= true",
     )
     check(
         "std net resolve ipv4",
-        'import std;\nstd.utils.len(std.net.resolve("localhost", 1000, "ipv4")) > 0\n',
+        'import std;\n'
+        '(std.net.resolve("localhost", 1000, "ipv4")).length() > 0\n',
         stdout="= true",
     )
     check(
         "std net resolve async",
         "import std;\n"
         'let t = std.net.resolve_task("localhost", 1000, "ipv4");\n'
-        "std.utils.len(std.task.wait(t)) > 0\n",
+        "(std.task.wait(t)).length() > 0\n",
         stdout="= true",
     )
     check(
         "std net resolve task",
         "import std;\n"
         'let t = std.net.resolve_task("localhost", 1000, "ipv4");\n'
-        "std.utils.len(std.task.wait(t)) > 0\n",
+        "(std.task.wait(t)).length() > 0\n",
         stdout="= true",
     )
     check(
@@ -960,7 +961,7 @@ def run_cases():
         'let a = std.net.resolve_task("localhost", 1000, "ipv4");\n'
         'let b = std.net.resolve_task("localhost", 1000, "ipv4");\n'
         "let values = std.task.wait_all([a, b]);\n"
-        "std.utils.len(values) == 2 && std.utils.len(values[0]) > 0 && std.utils.len(values[1]) > 0\n",
+        "(values).length() == 2 && (values[0]).length() > 0 && (values[1]).length() > 0\n",
         stdout="= true",
     )
     check(
@@ -1028,7 +1029,7 @@ def run_cases():
           '}\n'
           'let r = std.task.bounded_parallel_map(\n'
           '  [1, 2, 3], 2, func(x) { return launch work(x); });\n'
-          'std.io.print(std.utils.len(r));\n'
+          'std.io.print((r).length());\n'
           'std.io.print(std.result.value(r[0]));\n'
           'std.io.print(std.result.is_err(r[1]));\n'
           'std.io.print(std.result.value(r[2]));\n',

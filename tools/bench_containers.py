@@ -45,7 +45,7 @@ std.io.print(std.heap.size(h));
 let xs = [];
 let i = 0;
 while (i < {n}) { xs = std.list.append(xs, i); i = i + 1; }
-std.io.print(std.utils.len(xs));
+std.io.print((xs).length());
 """,
     },
     {
@@ -57,7 +57,7 @@ std.io.print(std.utils.len(xs));
 let d = {};
 let i = 0;
 while (i < {n}) { d[i] = i; i = i + 1; }
-std.io.print(std.utils.len(d));
+std.io.print((d).length());
 """,
     },
     {
@@ -85,7 +85,7 @@ let i = 0;
 while (i < {n}) { d[i] = i; i = i + 1; }
 i = 0;
 while (i < {n}) { d = std.dict.delete(d, i); i = i + 1; }
-std.io.print(std.utils.len(d));
+std.io.print((d).length());
 """,
     },
     {
@@ -109,7 +109,7 @@ std.io.print(std.set.size(s));
 let d = {};
 let i = 0;
 while (i < {n}) { d[(i, i + 1)] = i; i = i + 1; }
-std.io.print(std.utils.len(d));
+std.io.print((d).length());
 """,
     },
     {
@@ -136,7 +136,7 @@ struct Key { id: int; tag: string; }
 let d = {};
 let i = 0;
 while (i < {n}) { d[Key { id: i, tag: \"x\" }] = i; i = i + 1; }
-std.io.print(std.utils.len(d));
+std.io.print((d).length());
 """,
     },
     {
@@ -149,7 +149,7 @@ enum Key { Item { id: int; }; }
 let d = {};
 let i = 0;
 while (i < {n}) { d[Key.Item { id: i }] = i; i = i + 1; }
-std.io.print(std.utils.len(d));
+std.io.print((d).length());
 """,
     },
     {
@@ -165,7 +165,7 @@ impl Key {
 let d = {};
 let i = 0;
 while (i < {n}) { d[Key { id: i, cache: [] }] = i; i = i + 1; }
-std.io.print(std.utils.len(d));
+std.io.print((d).length());
 """,
     },
     {
@@ -194,7 +194,7 @@ impl User {
 let d = {};
 let i = 0;
 while (i < {n}) { d[User { id: i, cache: [] }] = i; i = i + 1; }
-std.io.print(std.utils.len(d));
+std.io.print((d).length());
 """,
     },
     {
@@ -230,7 +230,7 @@ let users = std.list.map(std.utils.range({n}), func(i) {
   return User { id: i, cache: [] };
 });
 let d = std.dict.index_by(users, func(u) { return u.id; });
-std.io.print(std.utils.len(d));
+std.io.print((d).length());
 """,
     },
     {
@@ -244,7 +244,7 @@ let users = std.list.map(std.utils.range({n}), func(i) {
   return User { id: i % 1000, cache: [] };
 });
 let d = std.dict.index_by(users, func(u) { return u.id; });
-std.io.print(std.utils.len(d));
+std.io.print((d).length());
 """,
     },
     {
@@ -267,7 +267,7 @@ let edges = std.deque.new();
 let i = 1;
 while (i < {n}) { edges = std.deque.push_back(edges, [i, i + 1]); i = i + 1; }
 let g = graph.from_edges({n}, std.deque.to_list(edges));
-std.io.print(std.utils.len(graph.bfs(g, 1)));
+std.io.print((graph.bfs(g, 1)).length());
 """,
     },
     {
@@ -349,7 +349,7 @@ std.io.print(sum);
         "imports": ("std",),
         "src": """
 let xs = std.utils.range({n});
-std.io.print(std.utils.len(std.list.unique(xs)));
+std.io.print((std.list.unique(xs)).length());
 """,
     },
     {
@@ -359,7 +359,7 @@ std.io.print(std.utils.len(std.list.unique(xs)));
         "imports": ("std",),
         "src": """
 let xs = std.utils.range({n});
-std.io.print(std.utils.len(std.list.top_k(xs, 100)));
+std.io.print((std.list.top_k(xs, 100)).length());
 """,
     },
     {

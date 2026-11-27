@@ -455,6 +455,7 @@ int main(int argc, char **argv) {
     set_active_eval_context(&context);
     eval_begin_root_defers();
     initscope();
+    package_install_default_std();
     if (g_show_prompt)
         repl_history_load();
     if (script_in_memory)

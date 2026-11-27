@@ -155,7 +155,7 @@ ts_test("for in without let iterable uses outer binding", func() {
     out = std.list.append(out, x);
   }
   ts_eq(out, [4, 5]);
-  ts_eq(std.utils.len(x), 2);
+  ts_eq((x).length(), 2);
 });
 
 ts_test("for in without let string", func() {

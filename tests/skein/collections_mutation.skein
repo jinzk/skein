@@ -78,7 +78,7 @@ ts_test("list builder", func() {
   let b = std.list.builder();
   b.push(1);
   b.extend([2, 3]);
-  ts_eq(b.len(), 3);
+  ts_eq(b.length(), 3);
   ts_eq(b.build(), [1, 2, 3]);
   ts_eq(b.build(), [1, 2, 3]);
 });
@@ -87,7 +87,7 @@ ts_test("string builder", func() {
   let b = std.string.builder();
   b.push("ab");
   b.push('c');
-  ts_eq(b.len(), 3);
+  ts_eq(b.length(), 3);
   ts_eq(b.build(), "abc");
 });
 
@@ -106,7 +106,7 @@ ts_test("list append keeps aliases", func() {
 
 ts_test("list append fallback path", func() {
   let c = [1];
-  c = std.list.append(c, str(std.utils.len(c)));
+  c = std.list.append(c, str((c).length()));
   ts_eq(c, [1, "1"]);
   ts_eq(c[1] + "x", "1x");
 });

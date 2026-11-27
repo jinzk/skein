@@ -329,7 +329,7 @@ ts_test("key index_by duplicate last wins", func() {
   ];
   let by_id = std.dict.index_by(users, func(u) { return u.id; });
   ts_eq(by_id[1].name, "b");
-  ts_eq(std.utils.len(by_id), 1);
+  ts_eq((by_id).length(), 1);
 });
 
 ts_test("key index_by composite projection", func() {

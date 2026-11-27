@@ -792,7 +792,7 @@ static const char *builtin_field_name(int functype) {
         case B_hypot: return "hypot";
         case B_min: return "min";
         case B_max: return "max";
-        case B_len: return "len";
+        case B_len: return "length";
         case B_range: return "range";
         case B_print: return "print";
         case B_println: return "println";

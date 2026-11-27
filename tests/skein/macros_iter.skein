@@ -1,78 +1,78 @@
 import std;
 include "_support.skein";
 
-ts_test("iter macro list", func() {
+ts_test("iter method list", func() {
   let xs: list[int] = [1, 2, 3];
   let out = [];
-  for x in iter!(xs) {
+  for x in (xs).iter() {
     out = std.list.append(out, x);
   }
   ts_eq(out, [1, 2, 3]);
 });
 
-ts_test("iter macro dict entries", func() {
+ts_test("iter method dict entries", func() {
   let d: dict[string, int] = {"a": 1, "b": 2};
   let out = [];
-  for (k, v) in iter!(d) {
+  for (k, v) in (d).iter() {
     out = std.list.append(out, k + "=" + str(v));
   }
   ts_eq(out, ["a=1", "b=2"]);
 });
 
-ts_test("iter macro canonical path", func() {
+ts_test("iter method canonical container", func() {
   let xs: list[int] = [4, 5];
-  ts_eq(std.iter.collect(std.utils.iter!(xs)), [4, 5]);
+  ts_eq(std.iter.collect((xs).iter()), [4, 5]);
 });
 
-ts_test("iter macro let form equivalence", func() {
+ts_test("iter method let form equivalence", func() {
   let xs: list[int] = [1, 2, 3];
   let without_let = [];
-  for x in iter!(xs) {
+  for x in (xs).iter() {
     without_let = std.list.append(without_let, x);
   }
   let with_let = [];
-  for (let x in iter!(xs)) {
+  for (let x in (xs).iter()) {
     with_let = std.list.append(with_let, x);
   }
   ts_eq(without_let, with_let);
   ts_eq(with_let, [1, 2, 3]);
 });
 
-ts_test("iter macro let form equivalence dict", func() {
+ts_test("iter method let form equivalence dict", func() {
   let d: dict[string, int] = {"a": 1, "b": 2};
   let without_let = [];
-  for k, v in iter!(d) {
+  for k, v in (d).iter() {
     without_let = std.list.append(without_let, k + "=" + str(v));
   }
   let with_let = [];
-  for (let k, v in iter!(d)) {
+  for (let k, v in (d).iter()) {
     with_let = std.list.append(with_let, k + "=" + str(v));
   }
   ts_eq(without_let, with_let);
   ts_eq(with_let, ["a=1", "b=2"]);
 });
 
-ts_test("iter macro let form scoping", func() {
+ts_test("iter method let form scoping", func() {
   let x = 99;
-  for x in iter!([1, 2]) { }
+  for x in ([1, 2]).iter() { }
   ts_eq(x, 99);
-  for (let x in iter!([1, 2])) { }
+  for (let x in ([1, 2]).iter()) { }
   ts_eq(x, 99);
 });
 
-ts_test("iter macro other builtin iterables", func() {
-  let chars = std.iter.collect(iter!("ab"));
-  ts_eq(std.utils.len(chars), 2);
+ts_test("iter method other builtin iterables", func() {
+  let chars = std.iter.collect(("ab").iter());
+  ts_eq((chars).length(), 2);
   ts_eq(str(chars[0]), "a");
   ts_eq(str(chars[1]), "b");
-  ts_eq(std.iter.collect(iter!(std.bytes.from_hex("00ff"))), [0, 255]);
+  ts_eq(std.iter.collect((std.bytes.from_hex("00ff")).iter()), [0, 255]);
 
   func gen(): generator[int] {
     yield 1;
     yield 2;
   }
-  ts_eq(std.iter.collect(iter!(gen())), [1, 2]);
-  ts_eq(std.iter.collect(iter!((1, 2))), [1, 2]);
+  ts_eq(std.iter.collect((gen()).iter()), [1, 2]);
+  ts_eq(std.iter.collect(((1, 2)).iter()), [1, 2]);
 });
 
 struct MacroIterBox {
@@ -83,11 +83,11 @@ struct MacroIterBox {
   }
 }
 
-ts_test("iter macro user method", func() {
+ts_test("iter method user method", func() {
   let b = MacroIterBox { xs: [3, 4] };
-  ts_eq(std.iter.collect(iter!(b)), [3, 4]);
+  ts_eq(std.iter.collect((b).iter()), [3, 4]);
   let any_b: any = MacroIterBox { xs: [5, 6] };
-  ts_eq(std.iter.collect(iter!(any_b)), [5, 6]);
+  ts_eq(std.iter.collect((any_b).iter()), [5, 6]);
 });
 
 ts_finish();

@@ -1358,6 +1358,66 @@ value_t *import_external_module(const std::string &path,
                                 package_out, error);
 }
 
+static bool ensure_std_namespace(std::string &error) {
+    std::string hidden = package_cache_key("builtin:std");
+    if (value_t *cached = lookup_global_symbol(hidden.c_str())) {
+        if (cached && cached->type != T_null)
+            return true;
+    }
+    value_t *namespace_value = NULL;
+    {
+        skein::startup_profile::span_scope namespace_span("std_namespace");
+        namespace_value = skein::stdlib::build_namespace();
+    }
+    if (!namespace_value) {
+        error = "cannot build the standard library namespace";
+        return false;
+    }
+    save_global_symbol(hidden.c_str(), namespace_value);
+
+    auto parse_adapter = [](const std::string &source,
+                            const std::string &source_name,
+                            const std::string &expected_name,
+                            const std::string &package_name,
+                            value_t *&result, std::string &parse_error) {
+        return parse_package_source(source, source_name, expected_name,
+                                    package_name, "", import_base, result,
+                                    parse_error, false);
+    };
+    std::string adapter_error;
+    {
+        skein::startup_profile::span_scope adapter_span("std_adapters");
+        if (!skein::stdlib::install_adapters(namespace_value, parse_adapter,
+                                             adapter_error)) {
+            error = "cannot load std container adapter: " + adapter_error;
+            save_global_symbol(hidden.c_str(), newnull());
+            return false;
+        }
+    }
+    return true;
+}
+
+static void install_default_std_impl() {
+    if (lookup_root_symbol("std"))
+        return;
+    /* The adapter parse below may be the first nested parse in the process.
+     * Flex only defaults yyin to stdin on the first yylex() call, so pin it
+     * here; the scanner checkpoint restore can then put the outer parse back
+     * on stdin instead of leaving it at EOF. */
+    if (!yyin)
+        yyin = stdin;
+    std::string error;
+    if (!ensure_std_namespace(error))
+        return;
+    std::string hidden = package_cache_key("builtin:std");
+    value_t *base = lookup_global_symbol(hidden.c_str());
+    if (!base || base->type == T_null)
+        return;
+    save_root_symbol("std", dupval(base));
+    package_seed_import("builtin:std", dupval(base));
+    package_seed_import_path("std", nullptr, dupval(base));
+}
+
 value_t *package_import_impl(const char *dotted_path, const char *base_dir,
                              std::string *package_out, std::string &error) {
     if (dotted_path && dotted_path[0] == '\x02')
@@ -1409,38 +1469,10 @@ value_t *package_import_impl(const char *dotted_path, const char *base_dir,
 
     /* Only a bare `std` refers to the built-in standard library. */
     if (spec.kind == IMPORT_ABSOLUTE && spec.dotted == "std") {
+        if (!ensure_std_namespace(error))
+            return NULL;
         std::string hidden = package_cache_key("builtin:std");
-        if (value_t *cached = lookup_global_symbol(hidden.c_str()))
-            return dupval(cached);
-        value_t *namespace_value = NULL;
-        {
-            skein::startup_profile::span_scope namespace_span(
-                "std_namespace");
-            namespace_value = skein::stdlib::build_namespace();
-        }
-        save_global_symbol(hidden.c_str(), namespace_value);
-
-        auto parse_adapter = [](const std::string &source,
-                                const std::string &source_name,
-                                const std::string &expected_name,
-                                const std::string &package_name,
-                                value_t *&result, std::string &parse_error) {
-            return parse_package_source(source, source_name, expected_name,
-                                        package_name, "", import_base, result,
-                                        parse_error, false);
-        };
-        std::string adapter_error;
-        {
-            skein::startup_profile::span_scope adapter_span("std_adapters");
-            if (!skein::stdlib::install_adapters(namespace_value,
-                                                 parse_adapter,
-                                                 adapter_error)) {
-                error = "cannot load std container adapter: " + adapter_error;
-                save_global_symbol(hidden.c_str(), newnull());
-                return NULL;
-            }
-        }
-        return dupval(namespace_value);
+        return dupval(lookup_global_symbol(hidden.c_str()));
     }
 
     if (spec.kind == IMPORT_ABSOLUTE) {
@@ -2044,6 +2076,8 @@ value_t *import_embedded_package(const std::string &dotted,
 }
 
 } // namespace
+
+void package_install_default_std() { install_default_std_impl(); }
 
 bool package_load_exported_macros(const char *path, const char *base_dir,
                                   std::string *key_out, std::string &error) {

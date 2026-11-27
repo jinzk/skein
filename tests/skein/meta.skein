@@ -103,7 +103,7 @@ ts_test("meta protocol info", func() {
   ts_eq(std.meta.type_info("MetaProtocolP")["protocols"],
         ["main.MetaProtocolD", "std.traits.Hashable"]);
   ts_eq(std.meta.type_info("MetaProtocolD")["kind"], "proto");
-  ts_eq(std.utils.len(std.meta.type_info("MetaProtocolD")["methods"][0]["params"]), 0);
+  ts_eq((std.meta.type_info("MetaProtocolD")["methods"][0]["params"]).length(), 0);
   ts_eq(std.meta.fields("MetaProtocolD"), []);
   ts_eq(std.meta.variants("MetaProtocolD"), []);
 });

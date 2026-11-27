@@ -118,10 +118,10 @@ value_t *list_builder_get_field(value_t *self, void *data, const char *name) {
             return newnull();
         });
     }
-    if (std::strcmp(name, "len") == 0) {
-        return method([shared](const std::vector<value_t *> &args) {
+    if (std::strcmp(name, "length") == 0) {
+        return newnativeval([shared](const std::vector<value_t *> &args) {
             if (!args.empty()) {
-                yyerror("builder.len expects 0 arguments");
+                yyerror("builder.length expects 0 arguments");
                 return (value_t *)NULL;
             }
             return newintval((long long)shared->items.size());
@@ -172,10 +172,10 @@ value_t *string_builder_get_field(void *data, const char *name) {
             return newnull();
         }, shared);
     }
-    if (std::strcmp(name, "len") == 0) {
+    if (std::strcmp(name, "length") == 0) {
         return newnativeval([shared](const std::vector<value_t *> &args) {
             if (!args.empty()) {
-                yyerror("builder.len expects 0 arguments");
+                yyerror("builder.length expects 0 arguments");
                 return (value_t *)NULL;
             }
             return newintval((long long)shared->text.size());

@@ -67,12 +67,12 @@ for (let f in mapped) { map_total = map_total + f(); }
 std.io.println(\"map \" + str(map_total));
 
 let kept = std.list.filter([1, 2, 3], slow_true);
-std.io.println(\"filter \" + str(std.list.len(kept)));
+std.io.println(\"filter \" + str((kept).length()));
 
 std.io.println(\"reduce \" + str(std.list.reduce([1, 2, 3], func(a, b) { return a + b; }, 0)));
 
 let uniq = std.list.unique_by([1, 1, 2, 3], slow_key);
-std.io.println(\"unique \" + str(std.list.len(uniq)));
+std.io.println(\"unique \" + str((uniq).length()));
 
 let sorted = std.list.sort([3, 1, 2], slow_cmp);
 std.io.println(\"sort \" + str(sorted));
@@ -81,7 +81,7 @@ let top = std.list.top_k([5, 4, 3], 2, slow_cmp);
 std.io.println(\"top \" + str(top));
 
 let groups = std.list.group_by([1, 2, 3], func(v) { return v % 2; });
-std.io.println(\"groups \" + str(std.list.len(std.dict.keys(groups))));
+std.io.println(\"groups \" + str((std.dict.keys(groups)).length()));
 
 func stage(n) {
   let x = n;
@@ -141,7 +141,7 @@ func iter_total(n) {
   while (i < n) { xs = std.list.append(xs, i); i = i + 1; }
   let total = 0;
   for (let x in xs) { total = total + x; }
-  for (let k, v in {\"a\": 1, \"b\": 2}) { total = total + std.utils.len(k) + v; }
+  for (let k, v in {\"a\": 1, \"b\": 2}) { total = total + (k).length() + v; }
   return total;
 }
 let iter_sum = 0;

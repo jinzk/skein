@@ -91,7 +91,7 @@ ts_test("error log middleware", func() {
   let response = {"status": 500, "headers": {}, "body": "boom"};
   middleware(request, response);
   logger.flush();
-  ts_eq(std.utils.len(records), 1);
+  ts_eq((records).length(), 1);
   ts_eq(std.string.contains(records[0], "request_failed"), 1);
   ts_eq(std.string.contains(records[0], "trace-1"), 1);
   ts_eq(std.string.contains(records[0], "boom"), 1);

@@ -59,7 +59,7 @@ name! x     // 单个 NAME 参数
 只保留下列便利宏的默认解析期绑定；右侧规范路径始终可以显式调用。用户自定义
 宏可以遮蔽裸名，规范路径不受影响，见
 [`docs/macros_user_defined.md`](macros_user_defined.md)。日志宏没有裸名别名，
-必须写 `std.log.*!`。
+必须写 `std.log.*!`。`iter!` 已移除，迭代使用 `x.iter()`。
 
 | 裸名 | 规范路径 |
 | --- | --- |
@@ -68,7 +68,6 @@ name! x     // 单个 NAME 参数
 | `recover!` | `std.error.recover!` |
 | `pass!` | `std.error.pass!` |
 | `wait!` | `std.task.wait!` |
-| `iter!` | `std.utils.iter!` |
 
 `std.assert.that!` / `std.assert.schema!` 本身就是规范路径，没有裸名别名。
 
@@ -180,26 +179,19 @@ let w = wait!(t);
 ```
 
 零参数写法 `fail!` / `recover!` / `pass!` 与单 NAME 写法 `recover! value`
-均可用；其他表达式必须放在括号内。旧关键字形式暂时保留作为兼容别名。
+均可用；其他表达式必须放在括号内。裸关键字形式 `fail` / `recover` / `pass` /
+`wait` 已移除。
 
-### 3.6 迭代器宏
+### 3.6 迭代器方法
 
-```text
-iter!(xs)
-```
-
-展开为：
+`iter!` 宏已移除；统一使用内置容器、迭代器或用户类型的 `iter()` 方法：
 
 ```text
-xs.iter()
+(xs).iter()
 ```
 
-要求：
-
-- 恰好一个表达式参数；
-- 不接受 block；
-- 不接受 spread；
-- 等价于对接收者调用 `iter()`；接收者可以是具体内置容器类型、`std.traits.Iterable` 类型的值，或声明了 `iter()` 方法的用户类型。
+接收者可以是具体内置容器类型、`std.traits.Iterable` 类型的值，或声明了
+`iter()` 方法的用户类型。
 
 支持的内置可迭代类型：
 
@@ -214,11 +206,11 @@ dict 的 `iter()` 产出 entry pair；string / bytes 分别产出 char / byte；
 generator 产出自身元素；pair / tuple 产出成员。
 
 ```text
-for x in iter!([1, 2, 3]) { ... }
-for (k, v) in iter!({"a": 1}) { ... }
+for x in ([1, 2, 3]).iter() { ... }
+for (k, v) in ({"a": 1}).iter() { ... }
 ```
 
-`for x in iter!(xs)` 与 `for (let x in iter!(xs))` 语义等价：两者都使用一个新的
+`for x in (xs).iter()` 与 `for (let x in (xs).iter())` 语义等价：两者都使用一个新的
 块级循环变量，外层同名变量不受影响。
 
 ## 4. 边界

@@ -349,13 +349,6 @@ def run_cases():
         stderr="type fragment expects a type name",
     )
     check(
-        "user macro type fragment rejects constraint markers",
-        'macro bad(T: type) { let x: #T = 1; return x; }\n'
-        'func test(): int { return bad!(hashable); }\n'
-        'println(str(test()));\n',
-        stderr="hashable and iterable require a constraint fragment",
-    )
-    check(
         "user macro type fragment cannot be a value",
         'macro bad(T: type) { let x = #T; return 1; }\n'
         'func test(): int { return bad!(int); }\n'

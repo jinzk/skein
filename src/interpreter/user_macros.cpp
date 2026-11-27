@@ -208,13 +208,6 @@ void report_at(int line, int column, const char *message,
         runtime_error_clear_related();
 }
 
-/* `hashable` / `iterable` are generic constraint markers, not ordinary type
- * namespace values.  They need a dedicated constraint fragment in a later
- * stage, so a `type` fragment refuses them explicitly. */
-bool is_constraint_marker_name(const std::string &name) {
-    return name == "hashable" || name == "iterable";
-}
-
 bool type_name_from_arg(const struct ast *arg, std::string &out) {
     if (!arg)
         return false;
@@ -276,12 +269,6 @@ struct type_constraint *type_from_arg(const struct ast *arg, int line,
     }
     std::string name;
     if (type_name_from_arg(arg, name)) {
-        if (is_constraint_marker_name(name)) {
-            report_at(line, column,
-                      "hashable and iterable require a constraint fragment",
-                      name.c_str());
-            return NULL;
-        }
         enum type_constraint_kind kind;
         if (type_constraint_kind_for_builtin_name(name.c_str(), kind))
             return new_type_constraint(kind);

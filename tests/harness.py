@@ -872,6 +872,21 @@ def check_extended_stdlib():
             'std.worker.shutdown(pool);\n',
             stdout_all=["5", "[3, 7, 11]"],
         )
+        check(
+            "std.worker method interface and rpc protos",
+            "import std;\n"
+            f'let pool = std.worker.pool(1, "{worker_path}");\n'
+            'print(std.result.unwrap(pool.call("add", [2, 3])));\n'
+            'let job = pool.submit("add", [4, 5]);\n'
+            'print(str(pool is RpcClient));\n'
+            'print(str(job is RpcJob));\n'
+            'print(std.result.unwrap(job.wait(5000)));\n'
+            'print(std.meta.protocols(pool)[0]);\n'
+            'print(std.meta.protocols(job)[0]);\n'
+            'pool.shutdown();\n',
+            stdout_all=["5", "true", "true", "9",
+                        "std.traits.RpcClient", "std.traits.RpcJob"],
+        )
         restart_script = os.path.join(worker_tmp, "restart.skein")
         with open(restart_script, "w", encoding="utf-8") as handle:
             handle.write(

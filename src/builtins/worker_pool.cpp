@@ -33,7 +33,7 @@ struct worker_slot {
     int failures = 0;
 };
 
-struct worker_job {
+struct worker_job : std::enable_shared_from_this<worker_job> {
     std::weak_ptr<worker_pool> pool;
     long long id = 0;
     std::string request;
@@ -51,7 +51,7 @@ struct worker_job {
 void close_worker(worker_slot &slot, bool kill_if_running,
                   bool force = false);
 
-struct worker_pool {
+struct worker_pool : std::enable_shared_from_this<worker_pool> {
     std::vector<worker_slot> workers;
     std::vector<std::shared_ptr<worker_job>> queue;
     std::string script;
@@ -68,6 +68,9 @@ struct worker_pool {
     }
 };
 
+value_t *worker_pool_get_field(void *data, const char *name);
+value_t *worker_job_get_field(void *data, const char *name);
+
 const native_type kWorkerPoolType = {
     "worker_pool",
     [](const void *data) {
@@ -77,6 +80,9 @@ const native_type kWorkerPoolType = {
         return "<worker_pool: " + std::to_string(pool->workers.size()) +
                " workers>";
     },
+    nullptr,
+    worker_pool_get_field,
+    nullptr,
     nullptr,
 };
 
@@ -98,6 +104,9 @@ const native_type kWorkerJobType = {
                (job->done ? " done>" : ">");
     },
     nullptr,
+    worker_job_get_field,
+    nullptr,
+    nullptr,
 };
 
 value_t *new_job_value(std::shared_ptr<worker_job> job) {
@@ -106,6 +115,146 @@ value_t *new_job_value(std::shared_ptr<worker_job> job) {
     value->meta = &kWorkerJobType;
     value->data = std::move(job);
     return (value_t *)value;
+}
+
+value_t *pool_builtin_call(const std::shared_ptr<worker_pool> &pool,
+                           int functype,
+                           const std::vector<value_t *> &args) {
+    std::vector<value_t *> call_args;
+    call_args.reserve(args.size() + 1);
+    call_args.push_back(new_pool_value(pool));
+    for (value_t *arg : args)
+        call_args.push_back(dupval(arg));
+    value_t *result = call_worker_builtin(functype, call_args);
+    for (value_t *arg : call_args)
+        freeval(arg);
+    return result;
+}
+
+value_t *job_builtin_call(const std::shared_ptr<worker_job> &job,
+                          int functype,
+                          const std::vector<value_t *> &args) {
+    std::vector<value_t *> call_args;
+    call_args.reserve(args.size() + 1);
+    call_args.push_back(new_job_value(job));
+    for (value_t *arg : args)
+        call_args.push_back(dupval(arg));
+    value_t *result = call_worker_builtin(functype, call_args);
+    for (value_t *arg : call_args)
+        freeval(arg);
+    return result;
+}
+
+value_t *worker_pool_get_field(void *data, const char *name) {
+    worker_pool *raw = static_cast<worker_pool *>(data);
+    if (!raw || !name) {
+        yyerror("worker_pool has no field");
+        return nullptr;
+    }
+    auto pool = raw->shared_from_this();
+    if (std::strcmp(name, "call") == 0) {
+        return newnativeval([pool](const std::vector<value_t *> &args) {
+            if (args.size() < 2 || args.size() > 3) {
+                yyerror("worker_pool.call expects method, args[, timeout_ms]");
+                return (value_t *)nullptr;
+            }
+            return pool_builtin_call(pool, B_worker_call, args);
+        }, pool);
+    }
+    if (std::strcmp(name, "call_bytes") == 0) {
+        return newnativeval([pool](const std::vector<value_t *> &args) {
+            if (args.size() < 3 || args.size() > 4) {
+                yyerror("worker_pool.call_bytes expects method, args, body[, timeout_ms]");
+                return (value_t *)nullptr;
+            }
+            return pool_builtin_call(pool, B_worker_call_bytes, args);
+        }, pool);
+    }
+    if (std::strcmp(name, "submit") == 0) {
+        return newnativeval([pool](const std::vector<value_t *> &args) {
+            if (args.size() != 2) {
+                yyerror("worker_pool.submit expects method and args");
+                return (value_t *)nullptr;
+            }
+            return pool_builtin_call(pool, B_worker_submit, args);
+        }, pool);
+    }
+    if (std::strcmp(name, "submit_bytes") == 0) {
+        return newnativeval([pool](const std::vector<value_t *> &args) {
+            if (args.size() != 3) {
+                yyerror("worker_pool.submit_bytes expects method, args and body");
+                return (value_t *)nullptr;
+            }
+            return pool_builtin_call(pool, B_worker_submit_bytes, args);
+        }, pool);
+    }
+    if (std::strcmp(name, "map") == 0) {
+        return newnativeval([pool](const std::vector<value_t *> &args) {
+            if (args.size() < 2 || args.size() > 3) {
+                yyerror("worker_pool.map expects method, items[, timeout_ms]");
+                return (value_t *)nullptr;
+            }
+            return pool_builtin_call(pool, B_worker_map, args);
+        }, pool);
+    }
+    if (std::strcmp(name, "shutdown") == 0) {
+        return newnativeval([pool](const std::vector<value_t *> &args) {
+            if (!args.empty()) {
+                yyerror("worker_pool.shutdown expects no arguments");
+                return (value_t *)nullptr;
+            }
+            return pool_builtin_call(pool, B_worker_shutdown, args);
+        }, pool);
+    }
+    if (std::strcmp(name, "stats") == 0) {
+        return newnativeval([pool](const std::vector<value_t *> &args) {
+            if (!args.empty()) {
+                yyerror("worker_pool.stats expects no arguments");
+                return (value_t *)nullptr;
+            }
+            return pool_builtin_call(pool, B_worker_stats, args);
+        }, pool);
+    }
+    yyerror("worker_pool has no field %s", name);
+    return nullptr;
+}
+
+value_t *worker_job_get_field(void *data, const char *name) {
+    worker_job *raw = static_cast<worker_job *>(data);
+    if (!raw || !name) {
+        yyerror("worker_job has no field");
+        return nullptr;
+    }
+    auto job = raw->shared_from_this();
+    if (std::strcmp(name, "wait") == 0) {
+        return newnativeval([job](const std::vector<value_t *> &args) {
+            if (args.size() > 1) {
+                yyerror("worker_job.wait expects at most one timeout");
+                return (value_t *)nullptr;
+            }
+            return job_builtin_call(job, B_worker_wait, args);
+        }, job);
+    }
+    if (std::strcmp(name, "id") == 0) {
+        return newnativeval([job](const std::vector<value_t *> &args) {
+            if (!args.empty()) {
+                yyerror("worker_job.id expects no arguments");
+                return (value_t *)nullptr;
+            }
+            return newintval(job->id);
+        }, job);
+    }
+    if (std::strcmp(name, "done") == 0) {
+        return newnativeval([job](const std::vector<value_t *> &args) {
+            if (!args.empty()) {
+                yyerror("worker_job.done expects no arguments");
+                return (value_t *)nullptr;
+            }
+            return newboolval(job->done);
+        }, job);
+    }
+    yyerror("worker_job has no field %s", name);
+    return nullptr;
 }
 
 bool get_job(value_t *value, std::shared_ptr<worker_job> &job) {

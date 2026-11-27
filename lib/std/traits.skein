@@ -17,4 +17,11 @@ package traits {
   // bound methods, and native callables.
   proto Callable {
   }
+
+  // Marker protocols for RPC clients and pending RPC jobs.
+  proto RpcClient {
+  }
+
+  proto RpcJob {
+  }
 }

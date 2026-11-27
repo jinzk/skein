@@ -2596,6 +2596,29 @@ std.meta.implements("builtin", "Callable"); // true
 
 `Callable` 不是内置类型名，`callable` 不再作为类型使用。
 
+`RpcClient` / `RpcJob` 是默认导入的 prelude marker proto：
+
+```text
+worker_pool -> RpcClient
+worker_job  -> RpcJob
+```
+
+`worker_pool` / `worker_job` 同时提供方法式接口：
+
+```text
+pool.call(method, args[, timeout_ms])
+pool.call_bytes(method, args, body[, timeout_ms])
+pool.submit(method, args)
+pool.submit_bytes(method, args, body)
+pool.map(method, items[, timeout_ms])
+pool.shutdown()
+pool.stats()
+
+job.wait([timeout_ms])
+job.id
+job.done
+```
+
 `Iterable[T]` 是结构化迭代器 proto：
 
 ```text

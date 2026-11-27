@@ -415,6 +415,18 @@ struct value_t *value_builtin_protocols(const struct value_t *value) {
             value_satisfies_builtin_protocol(value, protocol))
             matched.push_back(protocol);
     }
+    if (protocol_def *protocol =
+            structtype_find_protocol_by_name(nullptr, "RpcClient")) {
+        if (protocol->builtin_kind == PROTOCOL_BUILTIN_RPC_CLIENT &&
+            value_satisfies_builtin_protocol(value, protocol))
+            matched.push_back(protocol);
+    }
+    if (protocol_def *protocol =
+            structtype_find_protocol_by_name(nullptr, "RpcJob")) {
+        if (protocol->builtin_kind == PROTOCOL_BUILTIN_RPC_JOB &&
+            value_satisfies_builtin_protocol(value, protocol))
+            matched.push_back(protocol);
+    }
     std::vector<std::string> names;
     names.reserve(matched.size());
     for (const protocol_def *protocol : matched)

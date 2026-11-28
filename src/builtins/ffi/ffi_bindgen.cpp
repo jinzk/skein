@@ -796,8 +796,8 @@ void probe_abi(const options &o, abi_info &abi, std::string &warning) {
     abi.pointer_bytes =
         macro_int(macros, "__SIZEOF_POINTER__", abi.pointer_bytes);
     abi.wchar_bytes = macro_int(macros, "__SIZEOF_WCHAR_T__", abi.wchar_bytes);
-    abi.char_unsigned = macros.count("__CHAR_UNSIGNED__") != 0;
-    abi.wchar_unsigned = macros.count("__WCHAR_UNSIGNED__") != 0;
+    abi.char_unsigned = macros.contains("__CHAR_UNSIGNED__");
+    abi.wchar_unsigned = macros.contains("__WCHAR_UNSIGNED__");
 }
 
 bool preprocess(const options &o, const abi_info &abi,
@@ -882,7 +882,7 @@ bool preprocess(const options &o, const abi_info &abi,
                 }
             }
         } else if (o.include_types || targets.count(current_file)) {
-            tokenize_line(line, pack, targets.count(current_file) != 0,
+            tokenize_line(line, pack, targets.contains(current_file),
                           tokens);
         }
 
@@ -952,7 +952,7 @@ bool is_type_keyword(const std::string &word) {
         "void", "char", "short", "int", "long", "float", "double",
         "signed", "unsigned", "_Bool", "bool", "_Complex", "__signed__",
         "__unsigned__", "__int8", "__int16", "__int32", "__int64"};
-    return keywords.count(word) != 0;
+    return keywords.contains(word);
 }
 
 bool is_layout_attribute(const std::string &word) {
@@ -960,14 +960,14 @@ bool is_layout_attribute(const std::string &word) {
         "aligned", "__aligned__", "align", "vector_size",
         "__vector_size__", "mode", "__mode__", "transparent_union",
         "ms_struct", "gcc_struct", "scalar_storage_order"};
-    return attributes.count(word) != 0;
+    return attributes.contains(word);
 }
 
 bool is_calling_convention(const std::string &word) {
     static const std::set<std::string> conventions = {
         "__cdecl", "__stdcall", "__fastcall", "__vectorcall",
         "WINAPI", "CALLBACK", "APIENTRY", "__attribute_cdecl"};
-    return conventions.count(word) != 0;
+    return conventions.contains(word);
 }
 
 struct record_out {

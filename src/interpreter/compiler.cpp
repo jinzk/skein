@@ -1022,7 +1022,7 @@ struct Compiler {
         std::unordered_set<std::string> seen;
         auto add = [&](const std::string &name,
                        skein::bc::DeferCaptureKind kind, uint32_t index) {
-            if (name.empty() || referenced.count(name) == 0 ||
+            if (name.empty() || !referenced.contains(name) ||
                 !seen.insert(name).second)
                 return;
             skein::bc::DeferCapture capture;
@@ -1161,7 +1161,7 @@ struct Compiler {
 
 
     int param_index(const char *name) const {
-        if (!name || declared_names.count(name) != 0)
+        if (!name || declared_names.contains(name))
             return -1;
         for (size_t i = 0; i < param_names.size(); ++i) {
             if (param_names[i] == name)
@@ -1171,7 +1171,7 @@ struct Compiler {
     }
 
     int upvalue_index(const char *name) const {
-        if (!name || declared_names.count(name) != 0)
+        if (!name || declared_names.contains(name))
             return -1;
         for (size_t i = 0; i < upvalue_names.size(); ++i) {
             if (upvalue_names[i] == name)
@@ -1182,7 +1182,7 @@ struct Compiler {
 
     int global_index(const char *name) const {
         if (!slot_fast_path || !name ||
-            declared_names.count(name) != 0)
+            declared_names.contains(name))
             return -1;
         int slot = global_symbol_slot(name);
         if (slot < 0 || slot > UINT16_MAX)
@@ -1640,7 +1640,7 @@ struct Compiler {
                 if (slot_fast_path && !slot_scopes.empty() &&
                     def->name) {
                     SlotScope &scope = slot_scopes.back();
-                    if (scope.names.count(def->name) != 0) {
+                    if (scope.names.contains(def->name)) {
                         uint32_t message = add_name(
                             std::string("symbol repeated ") + def->name);
                         emit(Op::RuntimeError, 0, 0, message, here);
@@ -2252,7 +2252,7 @@ struct Compiler {
                 if (field && node->l && node->l->nodetype == 'N') {
                     const char *base = ((struct symref *)node->l)->name;
                     if (base && (!name_is_resolved(base) ||
-                                 selective_bindings.count(base) != 0)) {
+                                 selective_bindings.contains(base))) {
                         uint32_t desc = add_field_or_enum(
                             proto.package.c_str(), base, field);
                         emit(Op::GetFieldOrEnum, 0, 0, desc, here);
@@ -2334,7 +2334,7 @@ struct Compiler {
                     if (slot_fast_path && !def->exported &&
                         !slot_scopes.empty()) {
                         SlotScope &scope = slot_scopes.back();
-                        if (scope.names.count(def->name) != 0) {
+                        if (scope.names.contains(def->name)) {
                             uint32_t message = add_name(
                                 std::string("symbol repeated ") + def->name);
                             emit(Op::RuntimeError, 0, 0, message, here);
@@ -2478,7 +2478,7 @@ struct Compiler {
                              sel; sel = sel->next) {
                             const char *binding =
                                 sel->alias ? sel->alias : sel->name;
-                            if (binding && scope.names.count(binding) != 0) {
+                            if (binding && scope.names.contains(binding)) {
                                 uint32_t message = add_name(
                                     std::string("symbol repeated ") + binding);
                                 emit(Op::RuntimeError, 0, 0, message, here);
@@ -3486,7 +3486,7 @@ struct Compiler {
             if (label && *label) {
                 diag_set_location(loc.line, loc.column);
                 bool exists =
-                    function_labels.find(label) != function_labels.end();
+                    function_labels.contains(label);
                 if (exists)
                     used_function_labels.insert(label);
                 std::string message = skein::labels::target_error(
@@ -3908,7 +3908,7 @@ ProtoPtr compile_function_body_impl(struct function_code *code,
         compiler.slot_scopes.emplace_back();
     compiler.proto.params_direct = compiler.slot_fast_path;
     for (const std::string &name : compiler.param_names) {
-        if (compiler.declared_names.count(name) != 0) {
+        if (compiler.declared_names.contains(name)) {
             compiler.proto.params_direct = false;
             break;
         }
@@ -3972,7 +3972,7 @@ ProtoPtr compile_function_body_impl(struct function_code *code,
         return nullptr;
     }
     for (const auto &entry : compiler.function_labels) {
-        if (compiler.used_function_labels.count(entry.first) != 0)
+        if (compiler.used_function_labels.contains(entry.first))
             continue;
         std::string message = "label " + entry.first + " is never used";
         diag_report_warning(entry.second.line, entry.second.column,

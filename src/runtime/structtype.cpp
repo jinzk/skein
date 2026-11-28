@@ -718,7 +718,7 @@ bool structtype_is_exported_type(const char *package, const char *name) {
     if (enumeration != logical_enums.end() && enumeration->second &&
         enumeration->second->exported)
         return true;
-    return logical_protocols.find(key) != logical_protocols.end();
+    return logical_protocols.contains(key);
 }
 
 static bool lookup_def_visible(const char *importer_source,
@@ -997,8 +997,8 @@ bool structtype_type_exists(const char *source, const char *name) {
     std::lock_guard<std::recursive_mutex> lock(type_registry_mutex);
     if (!name) return false;
     std::string key = type_key(source, name);
-    if (struct_types.count(key) != 0 || protocol_types.count(key) != 0 ||
-        enum_types.count(key) != 0)
+    if (struct_types.contains(key) || protocol_types.contains(key) ||
+        enum_types.contains(key))
         return true;
     resolved_type resolved = resolve_named(source, name, true);
     return resolved.structure != NULL || resolved.protocol != NULL ||
@@ -1019,9 +1019,9 @@ bool structtype_prepare_struct(const char *source, const char *package,
         return false;
     }
     std::string logical_key = type_key(package, name);
-    if (logical_structs.count(logical_key) != 0 ||
-        logical_protocols.count(logical_key) != 0 ||
-        logical_enums.count(logical_key) != 0) {
+    if (logical_structs.contains(logical_key) ||
+        logical_protocols.contains(logical_key) ||
+        logical_enums.contains(logical_key)) {
         error = std::string("type repeated ") + name +
                 " in package " + (package ? package : "");
         return false;
@@ -1146,9 +1146,9 @@ bool structtype_create_protocol(const char *source, const char *package,
         return false;
     }
     std::string logical_key = type_key(package, name);
-    if (logical_structs.count(logical_key) != 0 ||
-        logical_protocols.count(logical_key) != 0 ||
-        logical_enums.count(logical_key) != 0) {
+    if (logical_structs.contains(logical_key) ||
+        logical_protocols.contains(logical_key) ||
+        logical_enums.contains(logical_key)) {
         error = std::string("type repeated ") + name +
                 " in package " + (package ? package : "");
         return false;
@@ -1313,9 +1313,9 @@ bool structtype_prepare_enum(const char *source, const char *package,
         return false;
     }
     std::string logical_key = type_key(package, name);
-    if (logical_structs.count(logical_key) != 0 ||
-        logical_protocols.count(logical_key) != 0 ||
-        logical_enums.count(logical_key) != 0) {
+    if (logical_structs.contains(logical_key) ||
+        logical_protocols.contains(logical_key) ||
+        logical_enums.contains(logical_key)) {
         error = std::string("type repeated ") + name +
                 " in package " + (package ? package : "");
         return false;
@@ -1442,7 +1442,7 @@ bool structtype_add_method(type_def *def, const std::string &name,
         error = "invalid type owner";
         return false;
     }
-    if (def->methods.count(name) != 0) {
+    if (def->methods.contains(name)) {
         /*
          * A later explicit impl may replace a method that was supplied by a
          * protocol default.  Explicit duplicates are still rejected.
@@ -1470,9 +1470,9 @@ bool structtype_set_default_method(type_def *def, const std::string &name,
         error = "invalid proto default method";
         return false;
     }
-    if (def->explicit_methods.count(name) != 0)
+    if (def->explicit_methods.contains(name))
         return true;
-    if (def->methods.count(name) != 0)
+    if (def->methods.contains(name))
         return true;
     def->methods.emplace(name, std::move(code));
     def->default_methods.emplace(name, protocol);
@@ -1582,7 +1582,7 @@ bool structtype_add_protocol_default(protocol_def *protocol, const std::string &
         error = "invalid proto default method";
         return false;
     }
-    if (protocol->defaults.count(name) != 0) {
+    if (protocol->defaults.contains(name)) {
         error = "proto default method repeated " + name;
         return false;
     }
@@ -1728,7 +1728,7 @@ bool structtype_satisfies_protocol(
     }
     std::unordered_map<std::string, struct type_constraint> bindings;
     for (const method_sig &sig : protocol->methods) {
-        bool is_default = def->default_methods.count(sig.name) != 0;
+        bool is_default = def->default_methods.contains(sig.name);
         std::shared_ptr<function_def> method;
         if (!is_default) {
             method = structtype_method(def, sig.name);
@@ -1797,7 +1797,7 @@ bool structtype_refresh_protocol_defaults(type_def *def, std::string &error) {
             providers;
         for (const protocol_def *protocol : candidates) {
             for (const method_sig &sig : protocol->methods) {
-                if (protocol->defaults.count(sig.name) != 0)
+                if (protocol->defaults.contains(sig.name))
                     providers[sig.name].push_back(protocol);
             }
         }
@@ -1807,7 +1807,7 @@ bool structtype_refresh_protocol_defaults(type_def *def, std::string &error) {
         std::unique_lock<std::shared_mutex> method_lock(type_method_mutex);
         for (auto &entry : providers) {
             const std::string &name = entry.first;
-            if (def->explicit_methods.count(name) != 0)
+            if (def->explicit_methods.contains(name))
                 continue;
             if (entry.second.size() > 1) {
                 error = "proto " + entry.second.front()->name +
@@ -1816,7 +1816,7 @@ bool structtype_refresh_protocol_defaults(type_def *def, std::string &error) {
                         "it explicitly";
                 return false;
             }
-            if (def->methods.count(name) != 0)
+            if (def->methods.contains(name))
                 continue;
             const protocol_def *provider = entry.second.front();
             auto fallback = provider->defaults.find(name);

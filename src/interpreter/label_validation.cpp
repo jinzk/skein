@@ -165,7 +165,7 @@ void skein_check_function_labels(struct function_code *code,
 
     if (!state.unresolved_controls.empty()) {
         const label_control_ref &ref = state.unresolved_controls.front();
-        bool exists = state.labels.count(ref.name) != 0;
+        bool exists = state.labels.contains(ref.name);
         std::string message =
             skein::labels::target_error(ref.is_break, ref.name, exists);
         diag_set_location(ref.line, ref.column);
@@ -175,7 +175,7 @@ void skein_check_function_labels(struct function_code *code,
 
     std::vector<std::string> unused;
     for (const auto &entry : state.labels) {
-        if (state.used.count(entry.first) == 0)
+        if (!state.used.contains(entry.first))
             unused.push_back(entry.first);
     }
     std::sort(unused.begin(), unused.end());

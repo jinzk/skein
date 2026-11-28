@@ -702,7 +702,7 @@ int run_get_tool(const std::vector<std::string> &args,
     for (const auto &entry : selected) {
         updated.requirements.push_back(
             {entry.first, entry.second.version,
-             entry.second.indirect || direct.count(entry.first) == 0});
+             entry.second.indirect || !direct.contains(entry.first)});
     }
     if (!skein::modfile::update_sums(root, sums.updates, error)) {
         std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());
@@ -943,7 +943,7 @@ int run_mod_tidy_tool(const std::vector<std::string> &args,
     for (const auto &entry : selected) {
         updated.requirements.push_back(
             {entry.first, entry.second.version,
-             direct.count(entry.first) == 0});
+             !direct.contains(entry.first)});
     }
     if (!skein::modfile::update_sums(root, sums.updates, error)) {
         std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());

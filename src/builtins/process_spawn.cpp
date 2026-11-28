@@ -1509,7 +1509,7 @@ value_t *call_process_spawn_builtin(
             std::vector<long long> children;
             if (process_child_pids(current, children)) {
                 for (long long child : children)
-                    if (visited.count(child) == 0)
+                    if (!visited.contains(child))
                         pending.push_back(child);
             }
         }

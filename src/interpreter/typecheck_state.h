@@ -86,7 +86,7 @@ struct Env {
 
     Env *owner_of(const std::string &name) {
         for (Env *env = this; env; env = env->parent) {
-            if (env->vars.find(name) != env->vars.end())
+            if (env->vars.contains(name))
                 return env;
         }
         return nullptr;

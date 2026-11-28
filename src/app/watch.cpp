@@ -160,7 +160,7 @@ std::vector<std::string> diff_snapshot(const file_snapshot &previous,
             changed.push_back(entry.first);
     }
     for (const auto &entry : previous) {
-        if (current.find(entry.first) == current.end())
+        if (!current.contains(entry.first))
             changed.push_back(entry.first);
     }
     return changed;

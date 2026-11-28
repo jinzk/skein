@@ -692,7 +692,7 @@ std::string resolve_placeholder_or_name(const char *name, expansion_state &state
         return name ? name : "";
     }
     if (state.expansion_id > 0 &&
-        state.declared.find(name ? name : "") != state.declared.end())
+        state.declared.contains(name ? name : ""))
         return hygienic_name(state.expansion_id, name);
     return name ? name : "";
 }
@@ -2086,7 +2086,7 @@ void user_macros_clear_exports() {
 }
 
 bool user_macros_has_exports(const char *key) {
-    return key && g_exported_macros.count(key) != 0;
+    return key && g_exported_macros.contains(key);
 }
 
 bool user_macro_import_exported(const char *key, const char *name,

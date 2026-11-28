@@ -1643,7 +1643,7 @@ bool evaluate_include_source_impl(const char *path, std::string &error) {
     const std::string canonical = canonical_file(requested);
     const std::string key = diag_current_package_name() + '\x1f' +
                             diag_current_module_name() + '\x1f' + canonical;
-    if (include_once_paths.count(key) != 0)
+    if (include_once_paths.contains(key))
         return true;
     if (std::find(include_stack.begin(), include_stack.end(), canonical) !=
         include_stack.end()) {

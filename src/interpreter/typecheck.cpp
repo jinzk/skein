@@ -218,7 +218,7 @@ struct Checker : public BuiltinContext {
 
     bool callee_is_builtin(const std::string &name, int functype,
                            Env &env) {
-        if (env.lookup(name) || functions.find(name) != functions.end())
+        if (env.lookup(name) || functions.contains(name))
             return false;
         struct symbol *sym = lookupsym(name.c_str());
         if (!sym || !sym->val || sym->val->type != T_builtin)
@@ -1835,7 +1835,7 @@ struct Checker : public BuiltinContext {
         if (generic_meta) {
             for (std::size_t i = 0; i < generic_meta->params.size(); ++i) {
                 const std::string &param = generic_meta->params[i];
-                if (bindings.find(param) != bindings.end())
+                if (bindings.contains(param))
                     continue;
                 if (i < generic_meta->defaults.size() &&
                     generic_meta->defaults[i])
@@ -2597,7 +2597,7 @@ struct Checker : public BuiltinContext {
                 path.find('.') == std::string::npos)
                 return false;
             std::string root = path_root(path);
-            if (env.lookup(root) || functions.find(root) != functions.end())
+            if (env.lookup(root) || functions.contains(root))
                 return false;
             struct value_t *value = NULL;
             if (!resolve_namespace_value(path, value) || !value ||

@@ -174,7 +174,7 @@ void thread_env_all(
         entries.erase(
             std::remove_if(entries.begin(), entries.end(),
                            [&state](const auto &entry) {
-                               return state.removed.count(entry.first) != 0;
+                               return state.removed.contains(entry.first);
                            }),
             entries.end());
     }

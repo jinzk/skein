@@ -3,18 +3,18 @@
 This directory contains a pinned copy of [asmjit](https://github.com/asmjit/asmjit)
 used by the optional `SKEIN_ENABLE_JIT` build.
 
-- Upstream commit: `1da9e4d957fc8c48d1eac68c76c1b139b3691a24`
-- `ASMJIT_LIBRARY_VERSION`: `1.11.0` (2023-11-15)
-- Source: `https://codeload.github.com/asmjit/asmjit/tar.gz/1da9e4d`
-- Tarball SHA-256: `55f587823502112028c25b0d36e2e7237dadc31755f3e354470ad2265fc9ca86`
-- Vendored contents: `CMakeLists.txt`, `src/`, `LICENSE.md`, `README.md`
+- Upstream commit: `c5e044a02494a0f01c2399940b7cd50e59880d67`
+- `ASMJIT_LIBRARY_VERSION`: `1.25.0` (2026-11-25)
+- Source: `https://codeload.github.com/asmjit/asmjit/tar.gz/c5e044a`
+- Tarball SHA-256: `e28998d5f5ad2272a382902d68764355be4dfde0b44bd48b6050814e22136250`
+- Vendored contents: `CMakeLists.txt`, `asmjit/`, `LICENSE.md`, `README.md`
 
-Only the library sources are vendored; asmjit's `test/`, `tools/`, `db/`
-and `.github/` directories are intentionally omitted.
+Only the library sources are vendored; asmjit's `asmjit-testing/`, `tools/`,
+`db/` and `.github/` directories are intentionally omitted.  This is the same
+upstream snapshot as the `mingw-w64-ucrt-x86_64-asmjit` package shipped by
+MSYS2.
 
-The Skein JIT currently targets the asmjit 1.11 API.  Newer asmjit
-versions (for example the 1.21 snapshot shipped by MSYS2) renamed many
-public methods to snake_case, so upgrading this directory requires a JIT
-API migration.
+The Skein JIT targets the asmjit 1.25 API (snake_case methods, `asmjit/x86.h`
+and friends).  Do not downgrade this directory without migrating `src/jit/`.
 
 asmjit is distributed under the zlib license; see `LICENSE.md`.

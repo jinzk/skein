@@ -17,10 +17,11 @@ cmake --build build
 [bytecode.md](bytecode.md)。JIT spike 的路线、依赖和验收标准见
 [roadmap.md](roadmap.md)。
 
-JIT 使用仓库内置的 `third_party/asmjit`（固定 1.11.0，版本与来源见
-`third_party/asmjit/VERSION.md`），无需额外安装 asmjit。在 Linux / Windows 的 x86-64
-上 `SKEIN_ENABLE_JIT` 默认 ON，普通配置即可编译 JIT；其他架构默认 OFF，
-可用 `-DSKEIN_ENABLE_JIT=ON` 显式开启（要求 64-bit x86）：
+JIT 使用仓库内置的 `third_party/asmjit`（固定 1.25.0，版本与来源见
+`third_party/asmjit/VERSION.md`），无需额外安装 asmjit；该版本要求 CMake
+3.24 以上。在 Linux / Windows 的 x86-64 上 `SKEIN_ENABLE_JIT` 默认 ON，
+普通配置即可编译 JIT；其他架构默认 OFF，可用 `-DSKEIN_ENABLE_JIT=ON`
+显式开启（要求 64-bit x86）：
 
 ```bash
 cmake -S . -B build -G Ninja

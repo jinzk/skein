@@ -1,2 +1,6 @@
 # Use LF everywhere: the repository stores LF, and tools/*.sh need it.
 * text=auto eol=lf
+
+# Vendored upstream sources are kept byte-for-byte as published; do not fail
+# git diff --check on their whitespace (for example blank lines at EOF).
+third_party/asmjit/** -whitespace

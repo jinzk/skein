@@ -14,7 +14,7 @@
 #include "value_runtime.h"
 #include "vm_eval.h"
 
-#include <asmjit/asmjit.h>
+#include <asmjit/x86.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -832,22 +832,22 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
 
     asmjit::JitRuntime &rt = runtime_state().runtime;
     asmjit::CodeHolder code;
-    if (code.init(rt.environment(), rt.cpuFeatures()) != asmjit::kErrorOk)
+    if (code.init(rt.environment(), rt.cpu_features()) != asmjit::kErrorOk)
         return nullptr;
 
     asmjit::StringLogger logger;
     const bool dump = read_bool_env("SKEIN_JIT_DUMP", false);
     if (dump)
-        code.setLogger(&logger);
+        code.set_logger(&logger);
 
     asmjit::x86::Assembler a(&code);
 
     std::vector<asmjit::Label> labels(proto.code.size());
     for (asmjit::Label &label : labels)
-        label = a.newLabel();
-    const asmjit::Label end_label = a.newLabel();
-    const asmjit::Label abort_label = a.newLabel();
-    const asmjit::Label epilogue_label = a.newLabel();
+        label = a.new_label();
+    const asmjit::Label end_label = a.new_label();
+    const asmjit::Label abort_label = a.new_label();
+    const asmjit::Label epilogue_label = a.new_label();
 
     /* Bytecode targets of PUSH_*_HANDLER, used by the abort trampoline. */
     std::vector<uint32_t> handler_targets;
@@ -868,7 +868,7 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
          * push site instead of stack_depth[target]. */
         handler_depths.push_back(
             pc < proto.stack_depth.size() ? proto.stack_depth[pc] + 1 : 0);
-        handler_dispatch.push_back(a.newLabel());
+        handler_dispatch.push_back(a.new_label());
     }
 
     /*
@@ -961,7 +961,7 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
      * work; allocate a branch around the helper for the uncommon case.
      */
     auto free_int_slot = [&](int depth) {
-        asmjit::Label skip = a.newLabel();
+        asmjit::Label skip = a.new_label();
         a.mov(asmjit::x86::rdi,
               asmjit::x86::qword_ptr(asmjit::x86::rbp, stack_off(depth)));
         a.cmp(asmjit::x86::byte_ptr(
@@ -1134,8 +1134,8 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
             }
 
             case skein::bc::Op::LoadParam: {
-                const asmjit::Label slow_load = a.newLabel();
-                const asmjit::Label load_done = a.newLabel();
+                const asmjit::Label slow_load = a.new_label();
+                const asmjit::Label load_done = a.new_label();
                 a.mov(asmjit::x86::rax,
                       asmjit::x86::qword_ptr(asmjit::x86::rbp,
                                              param_off(ins.b)));
@@ -2047,8 +2047,8 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
                 asmjit::Label slow_binary;
                 asmjit::Label binary_done;
                 if (int_fast_path) {
-                    slow_binary = a.newLabel();
-                    binary_done = a.newLabel();
+                    slow_binary = a.new_label();
+                    binary_done = a.new_label();
 
                     a.mov(asmjit::x86::rdi,
                           asmjit::x86::qword_ptr(
@@ -2156,8 +2156,8 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
                         default: break;
                     }
 
-                    slow_compare = a.newLabel();
-                    compare_done = a.newLabel();
+                    slow_compare = a.new_label();
+                    compare_done = a.new_label();
                     a.mov(asmjit::x86::rdi,
                           asmjit::x86::qword_ptr(
                               asmjit::x86::rbp, stack_off(left_depth)));
@@ -2265,8 +2265,8 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
             case skein::bc::Op::Call: {
                 const int argc = static_cast<int>(ins.b);
                 const int callee_depth = depth - argc - 1;
-                const asmjit::Label slow_call = a.newLabel();
-                const asmjit::Label call_done = a.newLabel();
+                const asmjit::Label slow_call = a.new_label();
+                const asmjit::Label call_done = a.new_label();
 
                 /*
                  * Fast path: resolve an already-compiled callee and call its
@@ -2369,8 +2369,8 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
                 const int argc = static_cast<int>(ins.a);
                 const int receiver_depth = depth - argc - 1;
                 const std::string &method_name = proto.consts[ins.b].name;
-                const asmjit::Label slow_method = a.newLabel();
-                const asmjit::Label method_done = a.newLabel();
+                const asmjit::Label slow_method = a.new_label();
+                const asmjit::Label method_done = a.new_label();
                 a.mov(asmjit::x86::edi, asmjit::imm(loc.line));
                 a.mov(asmjit::x86::esi, asmjit::imm(loc.column));
                 call_addr(fn_address(&skein_jit_set_call_location));
@@ -2487,7 +2487,7 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
             case skein::bc::Op::TailCall: {
                 const int argc = static_cast<int>(ins.b);
                 const int callee_depth = depth - argc - 1;
-                const asmjit::Label slow_tail = a.newLabel();
+                const asmjit::Label slow_tail = a.new_label();
 
                 /*
                  * Deferred expressions must run after the callee returns.
@@ -2823,7 +2823,7 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
 
     a.bind(abort_label);
     if (proto.uses_handlers) {
-        const asmjit::Label no_handler = a.newLabel();
+        const asmjit::Label no_handler = a.new_label();
         a.mov(asmjit::x86::rdi,
               asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
         a.mov(asmjit::x86::rsi,
@@ -2873,7 +2873,7 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
 
     a.bind(epilogue_label);
     {
-        const asmjit::Label defer_done = a.newLabel();
+        const asmjit::Label defer_done = a.new_label();
         a.mov(asmjit::x86::rdi,
               asmjit::x86::qword_ptr(asmjit::x86::rbp, -kTsOff));
         call_addr(fn_address(&skein_jit_run_frame_defers));
@@ -2929,7 +2929,7 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
         if (err != asmjit::kErrorOk) {
             if (read_bool_env("SKEIN_JIT_DEBUG", false))
                 std::fprintf(stderr, "[jit] asmjit error: %s\n",
-                             asmjit::DebugUtils::errorAsString(err));
+                             asmjit::stringify_error(err));
             return nullptr;
         }
     }
@@ -2938,7 +2938,7 @@ JitCode *compile(const skein::bc::Proto &proto, bool top_level,
     result->proto = &proto;
     result->runtime = &rt;
     result->entry = entry;
-    result->size = code.codeSize();
+    result->size = code.code_size();
     result->top_level = top_level;
     return result;
 }

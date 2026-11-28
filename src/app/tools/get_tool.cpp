@@ -284,8 +284,9 @@ std::string unique_temp_dir(const std::string &cache) {
     const auto stamp = std::chrono::steady_clock::now()
                            .time_since_epoch()
                            .count();
-    return (skein::path_from_utf8(cache) /
-            (".tmp-" + std::to_string(stamp))).u8string();
+    return skein::path_to_utf8(
+        skein::path_from_utf8(cache) /
+        (".tmp-" + std::to_string(stamp)));
 }
 
 /* Git checkouts contain read-only object files.  remove_all() alone cannot
@@ -305,14 +306,14 @@ bool remove_tree(const fs::path &path, std::string &error) {
         }
     }
     if (ec) {
-        error = "cannot prepare module cache for removal: " + path.u8string() +
-                ": " + ec.message();
+        error = "cannot prepare module cache for removal: " +
+                skein::path_to_utf8(path) + ": " + ec.message();
         return false;
     }
     fs::remove_all(path, ec);
     if (ec) {
-        error = "cannot remove module cache: " + path.u8string() + ": " +
-                ec.message();
+        error = "cannot remove module cache: " + skein::path_to_utf8(path) +
+                ": " + ec.message();
         return false;
     }
     return true;
@@ -336,7 +337,7 @@ std::vector<cached_module> list_cached_modules(const fs::path &cache) {
         cache, fs::directory_options::skip_permission_denied, ec);
     const fs::recursive_directory_iterator end;
     for (; !ec && it != end; it.increment(ec)) {
-        const std::string name = it->path().filename().u8string();
+        const std::string name = skein::path_to_utf8(it->path().filename());
         if (!it->is_directory(ec))
             continue;
         if (name == ".build" || name == ".locks" || name == ".git" ||
@@ -356,17 +357,17 @@ std::vector<cached_module> list_cached_modules(const fs::path &cache) {
         const fs::path version_path = relative.parent_path();
         if (version_path.empty() || version_path.parent_path().empty())
             continue;
-        const std::string version = version_path.filename().u8string();
-        const std::string module_name = relative.filename().u8string();
+        const std::string version = skein::path_to_utf8(version_path.filename());
+        const std::string module_name = skein::path_to_utf8(relative.filename());
         const fs::path module_parent = version_path.parent_path();
-        const std::string parent_text = module_parent.generic_u8string();
+        const std::string parent_text = skein::path_to_utf8_generic(module_parent);
         std::string module_path;
         if (skein::modfile::has_version_suffix(parent_text) &&
             skein::modfile::module_name_from_path(parent_text) == module_name) {
             module_path = parent_text;
         } else {
-            module_path =
-                (module_parent / relative.filename()).generic_u8string();
+            module_path = skein::path_to_utf8_generic(
+                module_parent / relative.filename());
         }
         if (!skein::modfile::is_valid_module_path(module_path) ||
             !skein::modfile::is_valid_version(version))
@@ -400,11 +401,11 @@ bool download_module(const std::string &module, const std::string &version,
     std::error_code ec;
     fs::create_directories(cache, ec);
     if (ec) {
-        error = "cannot create module cache: " + cache.u8string();
+        error = "cannot create module cache: " + skein::path_to_utf8(cache);
         return false;
     }
 
-    const std::string temp = unique_temp_dir(cache.u8string());
+    const std::string temp = unique_temp_dir(skein::path_to_utf8(cache));
     const std::string command =
         "git -c advice.detachedHead=false clone --quiet --depth 1 --branch " +
         shell_quote(version) + " " + shell_quote(module_url(module, version)) +
@@ -456,7 +457,8 @@ bool prepare_module(const std::string &root, const std::string &path,
     if (!acquire_module_lock(path, version, lock, lock_mode::exclusive, error))
         return false;
 
-    directory = fs::u8path(skein::modfile::cache_path(path, version));
+    directory = skein::path_from_utf8(
+        skein::modfile::cache_path(path, version));
     const bool cached = fs::is_directory(directory);
     bool have_sum = false;
     std::string expected;
@@ -467,7 +469,7 @@ bool prepare_module(const std::string &root, const std::string &path,
     hash.clear();
     needs_sum = false;
     if (cached && !force && have_sum) {
-        if (!skein::modfile::dirhash(directory.u8string(), hash, error))
+        if (!skein::modfile::dirhash(skein::path_to_utf8(directory), hash, error))
             return false;
         if (hash != expected) {
             error = "checksum mismatch for " + path + "@" + version +
@@ -497,7 +499,7 @@ bool prepare_module(const std::string &root, const std::string &path,
                              skein::modfile::cache_path(path, version),
                              error))
             return false;
-        if (!skein::modfile::dirhash(directory.u8string(), hash, error)) {
+        if (!skein::modfile::dirhash(skein::path_to_utf8(directory), hash, error)) {
             discard_tree(directory);
             return false;
         }
@@ -512,7 +514,7 @@ bool prepare_module(const std::string &root, const std::string &path,
             needs_sum = true;
         }
     }
-    if (!skein::modfile::load(directory.u8string(), mod, error)) {
+    if (!skein::modfile::load(skein::path_to_utf8(directory), mod, error)) {
         if (!cached || force)
             discard_tree(directory);
         return false;
@@ -1002,7 +1004,7 @@ int run_mod_prune_tool(const std::vector<std::string> &args,
     for (const skein::modfile::require_spec &req : mod.requirements)
         keep.insert(req.path + "@" + req.version);
 
-    const fs::path cache = fs::u8path(skein::modfile::cache_dir());
+    const fs::path cache = skein::path_from_utf8(skein::modfile::cache_dir());
     const std::vector<cached_module> cached = list_cached_modules(cache);
     std::vector<cached_module> unused;
     for (const cached_module &entry : cached) {
@@ -1025,7 +1027,7 @@ int run_mod_prune_tool(const std::vector<std::string> &args,
             std::fprintf(stderr, "%s: %s\n", program.c_str(), error.c_str());
             return 1;
         }
-        const fs::path native = fs::u8path(
+        const fs::path native = skein::path_from_utf8(
             skein::modfile::native_build_dir(entry.path, entry.version));
         std::error_code ec;
         if (fs::exists(native, ec) && !remove_tree(native, error)) {
@@ -1101,7 +1103,8 @@ int run_mod_init_tool(const std::vector<std::string> &args,
         return 1;
     }
     std::printf("created %s\n",
-                (skein::path_from_utf8(directory) / "skein.mod").u8string().c_str());
+                skein::path_to_utf8(skein::path_from_utf8(directory) /
+                                    "skein.mod").c_str());
     return 0;
 }
 
@@ -1120,7 +1123,7 @@ bool matches_env_path(const fs::path &candidate, const char *name) {
     if (!thread_env_get(name, value) || value.empty())
         return false;
     std::error_code ec;
-    const fs::path from_env = fs::absolute(fs::u8path(value), ec);
+    const fs::path from_env = fs::absolute(skein::path_from_utf8(value), ec);
     return !ec && same_path(candidate, from_env);
 }
 
@@ -1138,7 +1141,8 @@ bool unsafe_cache_root(const fs::path &root) {
         return true;
     const std::string cwd = thread_cwd();
     if (!cwd.empty()) {
-        const fs::path absolute_cwd = fs::absolute(fs::u8path(cwd), ec);
+        const fs::path absolute_cwd =
+            fs::absolute(skein::path_from_utf8(cwd), ec);
         if (!ec && same_path(absolute, absolute_cwd))
             return true;
     }
@@ -1159,8 +1163,8 @@ int run_mod_clean_tool(const std::vector<std::string> &args,
     if (!options.cache.empty())
         platform_set_env("SKEINMODCACHE", options.cache);
 
-    const fs::path root = fs::u8path(skein::modfile::cache_dir());
-    const std::string display = root.u8string();
+    const fs::path root = skein::path_from_utf8(skein::modfile::cache_dir());
+    const std::string display = skein::path_to_utf8(root);
     if (!options.force && unsafe_cache_root(root)) {
         std::fprintf(stderr,
                      "%s: refusing to clean unsafe cache root %s; "

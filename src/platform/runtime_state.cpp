@@ -1,5 +1,6 @@
 #include "runtime_state.h"
 
+#include "path.h"
 #include "platform.h"
 
 #include <algorithm>
@@ -217,7 +218,7 @@ std::string thread_cwd() {
     fs::path path = fs::current_path(error);
     if (error)
         return std::string();
-    return path.u8string();
+    return skein::path_to_utf8(path);
 }
 
 const std::string &thread_cwd_override() {
@@ -227,7 +228,7 @@ const std::string &thread_cwd_override() {
 bool thread_chdir(const std::string &path, std::string &error) {
     const std::string resolved = thread_resolve_path(path);
     std::error_code fs_error;
-    fs::path target = fs::u8path(resolved);
+    fs::path target = skein::path_from_utf8(resolved);
     if (!fs::is_directory(target, fs_error) || fs_error) {
         error = fs_error ? fs_error.message() : "not a directory";
         return false;
@@ -239,20 +240,21 @@ bool thread_chdir(const std::string &path, std::string &error) {
     }
     thread_environment &state = environment();
     state.has_cwd = true;
-    state.cwd = target.lexically_normal().u8string();
+    state.cwd = skein::path_to_utf8(target.lexically_normal());
     return true;
 }
 
 std::string thread_resolve_path(const std::string &path) {
     if (path.empty())
         return path;
-    fs::path value = fs::u8path(path);
+    fs::path value = skein::path_from_utf8(path);
     if (value.is_absolute())
         return path;
     const std::string base = thread_cwd();
     if (base.empty())
         return path;
-    return (fs::u8path(base) / value).lexically_normal().u8string();
+    return skein::path_to_utf8(
+        (skein::path_from_utf8(base) / value).lexically_normal());
 }
 
 namespace {

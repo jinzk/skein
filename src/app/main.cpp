@@ -23,6 +23,7 @@
 #include "native_async.h"
 #include "net.h"
 #include "package.h"
+#include "path.h"
 #include "platform.h"
 #include "process_spawn.h"
 #include "refvalue.h"
@@ -340,13 +341,15 @@ int main(int argc, char **argv) {
         namespace fs = std::filesystem;
         auto absolute_path = [](const std::string &path) {
             std::error_code error;
-            const fs::path result = fs::absolute(fs::u8path(path), error);
-            return error ? fs::u8path(path) : result;
+            const fs::path result =
+                fs::absolute(skein::path_from_utf8(path), error);
+            return error ? skein::path_from_utf8(path) : result;
         };
 
         std::vector<std::string> watch_roots;
         auto add_root = [&watch_roots](const fs::path &path) {
-            const std::string text = path.lexically_normal().u8string();
+            const std::string text =
+                skein::path_to_utf8(path.lexically_normal());
             for (const std::string &existing : watch_roots) {
                 if (existing == text)
                     return;

@@ -116,36 +116,6 @@ void platform_install_interrupt_handler() {
 
 namespace {
 
-bool widen_utf8(const std::string &text, std::wstring &wide) {
-    wide.clear();
-    if (text.empty())
-        return true;
-    int count = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
-                                    text.data(), (int)text.size(),
-                                    nullptr, 0);
-    if (count <= 0)
-        return false;
-    wide.resize((size_t)count);
-    return MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
-                               text.data(), (int)text.size(),
-                               wide.data(), count) == count;
-}
-
-bool narrow_utf8(const std::wstring &wide, std::string &text) {
-    text.clear();
-    if (wide.empty())
-        return true;
-    int count = WideCharToMultiByte(CP_UTF8, 0, wide.data(),
-                                    (int)wide.size(), nullptr, 0,
-                                    nullptr, nullptr);
-    if (count <= 0)
-        return false;
-    text.resize((size_t)count);
-    return WideCharToMultiByte(CP_UTF8, 0, wide.data(), (int)wide.size(),
-                               text.data(), count, nullptr,
-                               nullptr) == count;
-}
-
 std::wstring command_processor() {
     wchar_t buffer[32768];
     DWORD length = GetEnvironmentVariableW(
@@ -158,7 +128,7 @@ std::wstring command_processor() {
 bool build_command_line(const std::string &command, std::wstring &application,
                         std::wstring &line) {
     std::wstring wide_command;
-    if (!widen_utf8(command, wide_command))
+    if (!platform_utf8_to_wide(command, wide_command))
         return false;
     application = command_processor();
     line = L"\"" + application + L"\" /D /S /C \"" + wide_command + L"\"";
@@ -216,8 +186,8 @@ bool build_environment(
     for (const auto &override_entry : overrides) {
         std::wstring name;
         std::wstring value;
-        if (!widen_utf8(override_entry.first, name) ||
-            !widen_utf8(override_entry.second, value))
+        if (!platform_utf8_to_wide(override_entry.first, name) ||
+            !platform_utf8_to_wide(override_entry.second, value))
             return false;
 
         entries.erase(
@@ -355,6 +325,36 @@ bool spawn_shell(const std::string &command,
 
 }  // namespace
 
+bool platform_utf8_to_wide(const std::string &text, std::wstring &wide) {
+    wide.clear();
+    if (text.empty())
+        return true;
+    int count = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
+                                    text.data(), (int)text.size(),
+                                    nullptr, 0);
+    if (count <= 0)
+        return false;
+    wide.resize((size_t)count);
+    return MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
+                               text.data(), (int)text.size(),
+                               wide.data(), count) == count;
+}
+
+bool platform_wide_to_utf8(const std::wstring &wide, std::string &text) {
+    text.clear();
+    if (wide.empty())
+        return true;
+    int count = WideCharToMultiByte(CP_UTF8, 0, wide.data(),
+                                    (int)wide.size(), nullptr, 0,
+                                    nullptr, nullptr);
+    if (count <= 0)
+        return false;
+    text.resize((size_t)count);
+    return WideCharToMultiByte(CP_UTF8, 0, wide.data(), (int)wide.size(),
+                               text.data(), count, nullptr,
+                               nullptr) == count;
+}
+
 std::vector<std::string> platform_command_line_args(int argc, char **argv) {
     (void)argc;
     (void)argv;
@@ -368,7 +368,7 @@ std::vector<std::string> platform_command_line_args(int argc, char **argv) {
     args.reserve((size_t)wide_argc);
     for (int i = 0; i < wide_argc; ++i) {
         std::string arg;
-        if (!narrow_utf8(wide_argv[i], arg))
+        if (!platform_wide_to_utf8(wide_argv[i], arg))
             arg.clear();
         args.push_back(std::move(arg));
     }
@@ -383,7 +383,7 @@ std::string platform_executable_path() {
     if (length == 0 || length >= sizeof buffer / sizeof buffer[0])
         return std::string();
     std::string result;
-    if (!narrow_utf8(std::wstring(buffer, length), result))
+    if (!platform_wide_to_utf8(std::wstring(buffer, length), result))
         return std::string();
     return result;
 }
@@ -392,7 +392,7 @@ bool platform_get_env(const std::string &name, std::string &value) {
     value.clear();
 
     std::wstring wide_name;
-    if (!widen_utf8(name, wide_name))
+    if (!platform_utf8_to_wide(name, wide_name))
         return false;
 
     DWORD needed = GetEnvironmentVariableW(wide_name.c_str(), nullptr, 0);
@@ -412,7 +412,7 @@ bool platform_get_env(const std::string &name, std::string &value) {
     }
 
     wide_value.resize((size_t)written);
-    return narrow_utf8(wide_value, value);
+    return platform_wide_to_utf8(wide_value, value);
 }
 
 bool platform_set_env(const std::string &name, const std::string &value) {
@@ -420,7 +420,7 @@ bool platform_set_env(const std::string &name, const std::string &value) {
         return false;
     std::wstring wide_name;
     std::wstring wide_value;
-    if (!widen_utf8(name, wide_name) || !widen_utf8(value, wide_value))
+    if (!platform_utf8_to_wide(name, wide_name) || !platform_utf8_to_wide(value, wide_value))
         return false;
     return SetEnvironmentVariableW(wide_name.c_str(), wide_value.c_str()) != 0;
 }
@@ -429,7 +429,7 @@ bool platform_unset_env(const std::string &name) {
     if (name.empty() || name.find('=') != std::string::npos)
         return false;
     std::wstring wide_name;
-    if (!widen_utf8(name, wide_name))
+    if (!platform_utf8_to_wide(name, wide_name))
         return false;
     return SetEnvironmentVariableW(wide_name.c_str(), nullptr) != 0;
 }
@@ -448,10 +448,10 @@ bool platform_environ(
             continue;
         std::string name;
         std::string value;
-        if (!narrow_utf8(
+        if (!platform_wide_to_utf8(
                 std::wstring(entry, static_cast<size_t>(separator - entry)),
                 name) ||
-            !narrow_utf8(std::wstring(separator + 1), value)) {
+            !platform_wide_to_utf8(std::wstring(separator + 1), value)) {
             FreeEnvironmentStringsW(block);
             entries.clear();
             return false;
@@ -516,7 +516,7 @@ bool platform_run_command_status(
 
 FILE *platform_open_file(const std::string &path, const char *mode) {
     std::wstring wide_path;
-    if (!widen_utf8(path, wide_path))
+    if (!platform_utf8_to_wide(path, wide_path))
         return NULL;
     std::wstring wide_mode;
     for (const char *p = mode; *p; ++p)
@@ -530,7 +530,7 @@ bool platform_read_file(const std::string &path, std::string &data,
     error.clear();
 
     std::wstring wide_path;
-    if (!widen_utf8(path, wide_path)) {
+    if (!platform_utf8_to_wide(path, wide_path)) {
         error = "invalid file path";
         return false;
     }
@@ -564,7 +564,7 @@ bool platform_write_file(const std::string &path, const std::string &data,
     error.clear();
 
     std::wstring wide_path;
-    if (!widen_utf8(path, wide_path)) {
+    if (!platform_utf8_to_wide(path, wide_path)) {
         error = "invalid file path";
         return false;
     }
@@ -591,7 +591,7 @@ bool platform_write_file(const std::string &path, const std::string &data,
 
 bool platform_file_exists(const std::string &path) {
     std::wstring wide_path;
-    if (!widen_utf8(path, wide_path))
+    if (!platform_utf8_to_wide(path, wide_path))
         return false;
     return GetFileAttributesW(wide_path.c_str()) != INVALID_FILE_ATTRIBUTES;
 }
@@ -611,7 +611,7 @@ platform_file_ptr platform_file_open(const std::string &path,
                                      std::string &error) {
     error.clear();
     std::wstring wide_path;
-    if (!widen_utf8(path, wide_path)) {
+    if (!platform_utf8_to_wide(path, wide_path)) {
         error = "invalid file path";
         return nullptr;
     }

@@ -763,13 +763,9 @@ struct console_input_guard {
 std::string utf8_from_wchars(const wchar_t *data, int length) {
     if (length <= 0)
         return std::string();
-    const int count = WideCharToMultiByte(CP_UTF8, 0, data, length, nullptr,
-                                          0, nullptr, nullptr);
-    if (count <= 0)
+    std::string out;
+    if (!platform_wide_to_utf8(std::wstring(data, (size_t)length), out))
         return std::string();
-    std::string out((size_t)count, '\0');
-    WideCharToMultiByte(CP_UTF8, 0, data, length, out.data(), count, nullptr,
-                        nullptr);
     return out;
 }
 

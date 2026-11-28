@@ -712,7 +712,7 @@ bool load_cached_module_native_impl(const std::string &path,
                                     std::string &error) {
     const std::string root = skein::modfile::cache_path(path, version);
     const module_manifest *manifest =
-        load_module_manifest(fs::u8path(root), error);
+        load_module_manifest(skein::path_from_utf8(root), error);
     if (!manifest)
         return false;
     out = manifest->native;

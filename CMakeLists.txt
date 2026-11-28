@@ -891,6 +891,7 @@ if(BUILD_TESTING)
   )
   target_include_directories(repl_ui_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/interpreter
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/platform
     ${CMAKE_CURRENT_SOURCE_DIR}/src/runtime
   )
   if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")

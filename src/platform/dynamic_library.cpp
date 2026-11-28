@@ -1,5 +1,7 @@
 #include "dynamic_library.h"
 
+#include "platform.h"
+
 #include <utility>
 
 #ifdef _WIN32
@@ -12,47 +14,20 @@ namespace {
 
 #ifdef _WIN32
 
-std::wstring utf8_to_wide(const std::string &text, bool &ok) {
-    ok = false;
-    if (text.empty()) {
-        ok = true;
-        return std::wstring();
-    }
-    int size = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
-                                   text.data(), (int)text.size(), nullptr, 0);
-    if (size <= 0)
-        return std::wstring();
-    std::wstring out((size_t)size, L'\0');
-    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(),
-                            (int)text.size(), &out[0], size) != size)
-        return std::wstring();
-    ok = true;
-    return out;
-}
-
-std::string wide_to_utf8(const wchar_t *text, int length) {
-    if (!text || length <= 0)
-        return std::string();
-    int size = WideCharToMultiByte(CP_UTF8, 0, text, length, nullptr, 0,
-                                   nullptr, nullptr);
-    if (size <= 0)
-        return std::string();
-    std::string out((size_t)size, '\0');
-    if (WideCharToMultiByte(CP_UTF8, 0, text, length, &out[0], size,
-                            nullptr, nullptr) != size)
-        return std::string();
-    return out;
-}
-
 std::string windows_error_message(DWORD code) {
     wchar_t *buffer = nullptr;
     DWORD length = FormatMessageW(
         FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
             FORMAT_MESSAGE_IGNORE_INSERTS,
         nullptr, code, 0, (LPWSTR)&buffer, 0, nullptr);
-    std::string result = length && buffer
-        ? wide_to_utf8(buffer, (int)length)
-        : "error " + std::to_string(code);
+    std::string result;
+    if (length && buffer) {
+        std::wstring text(buffer, (size_t)length);
+        if (!platform_wide_to_utf8(text, result))
+            result = "error " + std::to_string(code);
+    } else {
+        result = "error " + std::to_string(code);
+    }
     if (buffer)
         LocalFree(buffer);
     while (!result.empty() &&
@@ -89,9 +64,8 @@ std::shared_ptr<dynamic_library> dynamic_library::open(
     const std::string &path, std::string &error) {
     error.clear();
 #ifdef _WIN32
-    bool ok = false;
-    std::wstring wide = utf8_to_wide(path, ok);
-    if (!ok) {
+    std::wstring wide;
+    if (!platform_utf8_to_wide(path, wide)) {
         error = "path is not valid UTF-8";
         return nullptr;
     }

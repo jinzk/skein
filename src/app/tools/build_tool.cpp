@@ -4,6 +4,7 @@
 #include "modfile.h"
 #include "native_artifact.h"
 #include "package.h"
+#include "path.h"
 #include "platform.h"
 #include "runtime_state.h"
 #include "sha256.h"
@@ -95,7 +96,7 @@ bool parse_options(const std::vector<std::string> &args, size_t start,
 bool safe_relative(const std::string &value) {
     if (value.empty())
         return false;
-    fs::path path = fs::u8path(value);
+    fs::path path = skein::path_from_utf8(value);
     if (path.is_absolute())
         return false;
     for (const fs::path &part : path)
@@ -134,21 +135,20 @@ bool build_one(const std::string &root, const std::string &path,
         return false;
     }
 
-    const fs::path source_root = fs::u8path(skein::modfile::cache_path(
-        path, version));
-    const fs::path destination = fs::u8path(
+    const fs::path source_root = skein::path_from_utf8(
+        skein::modfile::cache_path(path, version));
+    const fs::path destination = skein::path_from_utf8(
         skein::modfile::native_build_dir(path, version));
     std::error_code ec;
     fs::create_directories(destination, ec);
     if (ec) {
         error = "cannot create native build directory: " +
-                destination.u8string();
+                skein::path_to_utf8(destination);
         return false;
     }
 
-    const std::string artifact =
-        (destination / skein::modfile::native_library_name(spec.output))
-            .u8string();
+    const std::string artifact = skein::path_to_utf8(
+        destination / skein::modfile::native_library_name(spec.output));
     const std::string compiler = native_compiler_from_env();
     std::string compiler_version;
     bool compiler_available = false;
@@ -157,8 +157,9 @@ bool build_one(const std::string &root, const std::string &path,
                             version_error);
     if (!compiler_available)
         compiler_version = "unknown";
-    const fs::path compiler_path = fs::u8path(compiler);
-    const std::string compiler_name = compiler_path.filename().u8string();
+    const fs::path compiler_path = skein::path_from_utf8(compiler);
+    const std::string compiler_name =
+        skein::path_to_utf8(compiler_path.filename());
     const bool msvc = compiler_name == "cl" || compiler_name == "cl.exe";
 
     std::string build_flags;
@@ -170,7 +171,7 @@ bool build_one(const std::string &root, const std::string &path,
         build_flags += " -Wl,--export-all-symbols -Wl,--no-insert-timestamp";
 #endif
         build_flags += " -ffile-prefix-map=" +
-                       shell_quote(slash_path(source_root.u8string()) + "=.");
+                       shell_quote(slash_path(skein::path_to_utf8(source_root)) + "=.");
     } else {
         build_flags =
             "/nologo /LD /EHsc /O2 /DSKEIN_MODULE_BUILD=1 /Brepro";
@@ -178,25 +179,25 @@ bool build_one(const std::string &root, const std::string &path,
     std::string command = shell_quote(compiler) + " " + build_flags;
 
     if (msvc) {
-        command += " /I" + shell_quote(source_root.u8string());
+        command += " /I" + shell_quote(skein::path_to_utf8(source_root));
         for (const std::string &include : spec.includes) {
             if (!safe_relative(include)) {
                 error = "invalid native include path: " + include;
                 return false;
             }
-            command += " /I" + shell_quote((source_root / fs::u8path(include)).u8string());
+            command += " /I" + shell_quote(skein::path_to_utf8(source_root / skein::path_from_utf8(include)));
         }
         for (const std::string &define : spec.defines)
             command += " /D" + shell_quote(define);
         command += " /Fe:" + shell_quote(artifact);
     } else {
-        command += " -I" + shell_quote(source_root.u8string());
+        command += " -I" + shell_quote(skein::path_to_utf8(source_root));
         for (const std::string &include : spec.includes) {
             if (!safe_relative(include)) {
                 error = "invalid native include path: " + include;
                 return false;
             }
-            command += " -I" + shell_quote((source_root / fs::u8path(include)).u8string());
+            command += " -I" + shell_quote(skein::path_to_utf8(source_root / skein::path_from_utf8(include)));
         }
         for (const std::string &define : spec.defines)
             command += " -D" + shell_quote(define);
@@ -208,7 +209,7 @@ bool build_one(const std::string &root, const std::string &path,
             error = "invalid native source path: " + source;
             return false;
         }
-        command += " " + shell_quote((source_root / fs::u8path(source)).u8string());
+        command += " " + shell_quote(skein::path_to_utf8(source_root / skein::path_from_utf8(source)));
     }
     for (const std::string &lib : spec.libs)
         command += msvc ? " " + shell_quote(lib)
@@ -217,8 +218,9 @@ bool build_one(const std::string &root, const std::string &path,
                                : " -l" + shell_quote(lib));
 
     std::string canonical = slash_path(command);
-    replace_all(canonical, slash_path(source_root.u8string()), "<source>");
-    replace_all(canonical, slash_path(destination.u8string()), "<build>");
+    replace_all(canonical, slash_path(skein::path_to_utf8(source_root)), "<source>");
+    replace_all(canonical, slash_path(skein::path_to_utf8(destination)),
+                "<build>");
     replace_all(canonical, slash_path(artifact), "<artifact>");
     const std::string command_hash =
         skein_hex_encode(skein_sha256_bytes(canonical));
@@ -235,7 +237,7 @@ bool build_one(const std::string &root, const std::string &path,
         error = "native build failed for " + path + "@" + version;
         return false;
     }
-    if (!fs::is_regular_file(fs::u8path(artifact), ec)) {
+    if (!fs::is_regular_file(skein::path_from_utf8(artifact), ec)) {
         error = "native compiler did not produce " + artifact;
         return false;
     }

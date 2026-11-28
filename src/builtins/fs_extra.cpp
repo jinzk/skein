@@ -174,7 +174,7 @@ struct value_t *call_fs_extra_builtin(
             }
             const fs::directory_iterator end;
             while (it != end) {
-                names.push_back(it->path().filename().u8string());
+                names.push_back(skein::path_to_utf8(it->path().filename()));
                 it.increment(error);
                 if (error) {
                     yyerror("std.fs.listdir: %s",
@@ -571,7 +571,8 @@ struct value_t *call_fs_extra_builtin(
             fs::path parent = pattern.parent_path();
             if (parent.empty())
                 parent = ".";
-            const std::string name_pattern = pattern.filename().u8string();
+            const std::string name_pattern =
+                skein::path_to_utf8(pattern.filename());
             std::vector<std::string> matches;
             std::error_code error;
             if (!name_pattern.empty() && fs::is_directory(parent, error)) {
@@ -579,7 +580,7 @@ struct value_t *call_fs_extra_builtin(
                 fs::directory_iterator end;
                 while (!error && it != end) {
                     const std::string name =
-                        it->path().filename().u8string();
+                        skein::path_to_utf8(it->path().filename());
                     if (wildcard_match(name_pattern, name))
                         matches.push_back(path_text(it->path()));
                     it.increment(error);

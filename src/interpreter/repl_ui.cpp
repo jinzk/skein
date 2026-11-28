@@ -1,5 +1,7 @@
 #include "repl_ui.h"
 
+#include "path.h"
+
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
@@ -422,10 +424,11 @@ std::vector<std::string> path_completions(const std::string &prefix) {
         separator == std::string::npos ? prefix : prefix.substr(separator + 1);
 
     std::error_code ec;
-    fs::directory_iterator it(fs::u8path(base_text), ec);
+    fs::directory_iterator it(skein::path_from_utf8(base_text), ec);
     const fs::directory_iterator end;
     for (; !ec && it != end; it.increment(ec)) {
-        const std::string name = it->path().filename().u8string();
+        const std::string name =
+            skein::path_to_utf8(it->path().filename());
         if (name.rfind(leaf, 0) != 0)
             continue;
         std::string candidate = directory_text + name;

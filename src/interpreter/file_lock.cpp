@@ -1,6 +1,7 @@
 #include "file_lock.h"
 
 #include "modfile.h"
+#include "path.h"
 #include "platform.h"
 
 #include <cerrno>
@@ -63,12 +64,13 @@ file_lock::~file_lock() { release(); }
 bool file_lock::acquire(const std::string &file, const std::string &label,
                         lock_mode mode, std::string &error) {
     std::error_code ec;
-    const fs::path path = fs::u8path(file);
+    const fs::path path = skein::path_from_utf8(file);
     if (!path.parent_path().empty()) {
         fs::create_directories(path.parent_path(), ec);
         if (ec) {
             error = "cannot create lock directory: " +
-                    path.parent_path().u8string() + ": " + ec.message();
+                    skein::path_to_utf8(path.parent_path()) + ": " +
+                    ec.message();
             return false;
         }
     }
@@ -197,26 +199,28 @@ void file_lock::release() {
 bool acquire_module_lock(const std::string &module, const std::string &version,
                          file_lock &lock, lock_mode mode, std::string &error) {
     const fs::path directory =
-        fs::u8path(skein::modfile::cache_dir()) / ".locks";
+        skein::path_from_utf8(skein::modfile::cache_dir()) / ".locks";
     const fs::path file = directory / lock_file_name(module, version);
-    return lock.acquire(file.u8string(),
+    return lock.acquire(skein::path_to_utf8(file),
                         "module " + module + "@" + version, mode, error);
 }
 
 bool acquire_project_lock(const std::string &root, file_lock &lock,
                           lock_mode mode, std::string &error) {
-    const fs::path file = fs::u8path(root) / ".skein" / "lock";
-    return lock.acquire(file.u8string(), "project lock " + root, mode, error);
+    const fs::path file = skein::path_from_utf8(root) / ".skein" / "lock";
+    return lock.acquire(skein::path_to_utf8(file), "project lock " + root, mode,
+                        error);
 }
 
 bool acquire_cache_lock(file_lock &lock, lock_mode mode, std::string &error) {
     /* Keep the lock beside the cache root, not inside it, so `mod clean` can
      * remove the root while still holding the lock. */
-    fs::path file = fs::u8path(skein::modfile::cache_dir());
+    fs::path file = skein::path_from_utf8(skein::modfile::cache_dir());
     if (!file.has_filename())
         file = file.parent_path();
     file += ".lock";
-    return lock.acquire(file.u8string(), "module cache lock", mode, error);
+    return lock.acquire(skein::path_to_utf8(file), "module cache lock", mode,
+                        error);
 }
 
 bool acquire_runtime_cache_lock(std::string &error) {

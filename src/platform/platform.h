@@ -15,6 +15,12 @@
 #include <utility>
 #include <vector>
 
+#ifdef _WIN32
+/* Strict UTF-8 <-> UTF-16 conversion used at Windows wide-API boundaries. */
+bool platform_utf8_to_wide(const std::string &text, std::wstring &wide);
+bool platform_wide_to_utf8(const std::wstring &wide, std::string &text);
+#endif
+
 /* One-time process/platform initialization: console encoding and I/O mode. */
 void platform_init();
 

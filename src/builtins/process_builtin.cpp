@@ -1,6 +1,7 @@
 #include "process_builtin.h"
 
 #include "ast.h"
+#include "path.h"
 #include "platform.h"
 #include "runtime_state.h"
 #include "valuetype.h"
@@ -29,11 +30,11 @@ struct temp_files {
     ~temp_files() {
         std::error_code ignored;
         if (!input.empty())
-            fs::remove(fs::u8path(input), ignored);
+            fs::remove(skein::path_from_utf8(input), ignored);
         if (!output_path.empty())
-            fs::remove(fs::u8path(output_path), ignored);
+            fs::remove(skein::path_from_utf8(output_path), ignored);
         if (!error_path.empty())
-            fs::remove(fs::u8path(error_path), ignored);
+            fs::remove(skein::path_from_utf8(error_path), ignored);
     }
 };
 
@@ -51,7 +52,7 @@ std::string temp_path(const char *suffix) {
     const fs::path directory = fs::temp_directory_path(error);
     if (error)
         return std::string();
-    return (directory / fs::u8path(name)).u8string();
+    return skein::path_to_utf8(directory / skein::path_from_utf8(name));
 }
 
 #ifndef _WIN32

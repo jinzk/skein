@@ -1,6 +1,7 @@
 #include "native_artifact.h"
 
 #include "modfile.h"
+#include "path.h"
 #include "platform.h"
 #include "runtime_state.h"
 #include "sha256.h"
@@ -79,7 +80,8 @@ std::string first_line(std::string text) {
 
 fs::path metadata_path(const std::string &module_path,
                        const std::string &version) {
-    return fs::u8path(skein::modfile::native_build_dir(module_path, version)) /
+    return skein::path_from_utf8(
+               skein::modfile::native_build_dir(module_path, version)) /
            kMetadataName;
 }
 
@@ -102,7 +104,7 @@ bool hash_file(const std::string &path, std::string &hash,
 bool load_metadata(const fs::path &path, std::map<std::string, std::string> &out,
                    std::string &error) {
     std::string data;
-    if (!platform_read_file(path.u8string(), data, error))
+    if (!platform_read_file(skein::path_to_utf8(path), data, error))
         return false;
     std::size_t begin = 0;
     while (begin <= data.size()) {
@@ -182,8 +184,8 @@ bool write_native_artifact_metadata(const std::string &module_path,
     if (!hash_file(artifact, artifact_hash, error))
         return false;
 
-    const fs::path artifact_path = fs::u8path(artifact);
-    const std::string name = artifact_path.filename().u8string();
+    const fs::path artifact_path = skein::path_from_utf8(artifact);
+    const std::string name = skein::path_to_utf8(artifact_path.filename());
     if (!valid_artifact_name(name)) {
         error = "invalid native artifact name: " + name;
         return false;
@@ -194,7 +196,7 @@ bool write_native_artifact_metadata(const std::string &module_path,
     fs::create_directories(path.parent_path(), ec);
     if (ec) {
         error = "cannot create native metadata directory: " +
-                path.parent_path().u8string();
+                skein::path_to_utf8(path.parent_path());
         return false;
     }
 
@@ -216,15 +218,15 @@ bool write_native_artifact_metadata(const std::string &module_path,
     data += "\nartifact_hash=";
     data += artifact_hash;
     data += "\n";
-    return platform_write_file(path.u8string(), data, false, error);
+    return platform_write_file(skein::path_to_utf8(path), data, false, error);
 }
 
 bool validate_native_artifact(const std::string &module_path,
                               const std::string &version,
                               const std::string &output,
                               std::string &artifact, std::string &error) {
-    const fs::path directory =
-        fs::u8path(skein::modfile::native_build_dir(module_path, version));
+    const fs::path directory = skein::path_from_utf8(
+        skein::modfile::native_build_dir(module_path, version));
     const fs::path metadata = metadata_path(module_path, version);
     std::error_code ec;
     if (!fs::is_regular_file(metadata, ec)) {
@@ -277,7 +279,7 @@ bool validate_native_artifact(const std::string &module_path,
     }
 
     std::string artifact_hash;
-    if (!hash_file(candidate.u8string(), artifact_hash, error))
+    if (!hash_file(skein::path_to_utf8(candidate), artifact_hash, error))
         return false;
     if (fields["artifact_hash"] != artifact_hash) {
         error = "native artifact checksum mismatch; run 'skein build " +
@@ -301,6 +303,6 @@ bool validate_native_artifact(const std::string &module_path,
         }
     }
 
-    artifact = candidate.u8string();
+    artifact = skein::path_to_utf8(candidate);
     return true;
 }

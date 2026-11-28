@@ -14,6 +14,7 @@
 #include "native_async.h"
 #include "package.h"
 #include "parser_lock.h"
+#include "path.h"
 #include "platform.h"
 #include "refvalue.h"
 #include "runtime_context.h"
@@ -3594,7 +3595,7 @@ struct value_t *thread_spawn_source(
     std::vector<fs::path> directories;
     const std::string cwd = thread_cwd();
     if (!cwd.empty())
-        directories.emplace_back(fs::u8path(cwd));
+        directories.emplace_back(skein::path_from_utf8(cwd));
     std::error_code fs_error;
     fs::path temp_dir = fs::temp_directory_path(fs_error);
     if (!fs_error && !temp_dir.empty())
@@ -3613,7 +3614,7 @@ struct value_t *thread_spawn_source(
             path = directory /
                    ("skein-thread-source-" + std::to_string(id) +
                     ".skein");
-            if (platform_write_file(path.u8string(), source, false,
+            if (platform_write_file(skein::path_to_utf8(path), source, false,
                                     write_error))
                 break;
             path.clear();
@@ -3628,7 +3629,8 @@ struct value_t *thread_spawn_source(
     }
 
     std::vector<struct value_t *> spawn_args;
-    spawn_args.push_back(newstrval(path.u8string().c_str()));
+    const std::string path_text = skein::path_to_utf8(path);
+    spawn_args.push_back(newstrval(path_text.c_str()));
     spawn_args.push_back(dupval(args[1]));
     if (args.size() == 3)
         spawn_args.push_back(dupval(args[2]));

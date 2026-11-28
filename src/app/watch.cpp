@@ -85,7 +85,7 @@ bool read_write_stamp(const fs::path &path, std::int64_t &stamp) {
 using file_snapshot = std::map<std::string, file_stamp>;
 
 bool ignored_directory(const fs::path &path) {
-    const std::string name = path.filename().u8string();
+    const std::string name = skein::path_to_utf8(path.filename());
     if (name == ".git" || name == ".hg" || name == ".svn" ||
         name == ".cache" || name == "__pycache__" ||
         name == "node_modules" || name == "dist" || name == "target" ||
@@ -99,7 +99,7 @@ bool ignored_directory(const fs::path &path) {
 }
 
 bool is_skein_file(const fs::path &path) {
-    std::string extension = path.extension().u8string();
+    std::string extension = skein::path_to_utf8(path.extension());
     std::transform(extension.begin(), extension.end(), extension.begin(),
                    [](unsigned char ch) {
                        return static_cast<char>(std::tolower(ch));
@@ -115,14 +115,14 @@ void add_file(file_snapshot &snapshot, const fs::path &path) {
     const std::uintmax_t size = fs::file_size(path, error);
     if (error)
         return;
-    snapshot[path.lexically_normal().u8string()] =
+    snapshot[skein::path_to_utf8(path.lexically_normal())] =
         file_stamp{modified, size};
 }
 
 file_snapshot scan_roots(const std::vector<std::string> &roots) {
     file_snapshot snapshot;
     for (const std::string &root : roots) {
-        const fs::path root_path = fs::u8path(root);
+        const fs::path root_path = skein::path_from_utf8(root);
         std::error_code error;
         if (fs::is_regular_file(root_path, error)) {
             if (is_skein_file(root_path))
@@ -168,9 +168,9 @@ std::vector<std::string> diff_snapshot(const file_snapshot &previous,
 
 std::string display_path(const std::string &path) {
     std::error_code error;
-    const fs::path relative =
-        fs::relative(fs::u8path(path), fs::current_path(error), error);
-    return error ? path : relative.u8string();
+    const fs::path relative = fs::relative(
+        skein::path_from_utf8(path), fs::current_path(error), error);
+    return error ? path : skein::path_to_utf8(relative);
 }
 
 std::string format_changes(const std::vector<std::string> &changes) {
@@ -374,7 +374,7 @@ int run_watch_mode(const watch_options &options) {
 
     for (const std::string &root : options.roots) {
         std::error_code error;
-        if (!fs::is_directory(fs::u8path(root), error)) {
+        if (!fs::is_directory(skein::path_from_utf8(root), error)) {
             std::fprintf(stderr, "[watch] not a directory: %s\n",
                          root.c_str());
             return 2;

@@ -1,6 +1,7 @@
 #include "fs_extra.h"
 
 #include "ast.h"
+#include "path.h"
 #include "runtime_state.h"
 #include "valuetype.h"
 
@@ -37,11 +38,11 @@ bool bool_argument(const struct value_t *value, bool &result) {
 }
 
 std::string path_text(const fs::path &path) {
-    return path.u8string();
+    return skein::path_to_utf8(path);
 }
 
 fs::path text_path(const std::string &text) {
-    return fs::u8path(text);
+    return skein::path_from_utf8(text);
 }
 
 fs::path resolved_path(const std::string &text) {

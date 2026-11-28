@@ -1,5 +1,6 @@
 #include "modfile.h"
 
+#include "path.h"
 #include "platform.h"
 #include "runtime_state.h"
 #include "sha256.h"
@@ -19,9 +20,11 @@ namespace {
 
 namespace fs = std::filesystem;
 
-fs::path path_of(const std::string &text) { return fs::u8path(text); }
+fs::path path_of(const std::string &text) {
+    return skein::path_from_utf8(text);
+}
 
-std::string text_of(const fs::path &path) { return path.u8string(); }
+std::string text_of(const fs::path &path) { return skein::path_to_utf8(path); }
 
 std::string trim(const std::string &text) {
     size_t begin = 0;

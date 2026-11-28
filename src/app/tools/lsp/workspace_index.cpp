@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "path.h"
 #include "tools/tool_analysis.h"
 
 namespace skein {
@@ -56,7 +57,7 @@ std::string path_to_uri(const fs::path &path) {
     fs::path absolute = fs::absolute(path, ec);
     if (ec)
         absolute = path;
-    std::string text = absolute.generic_string();
+    std::string text = skein::path_to_utf8_generic(absolute);
     if (!starts_with(text, "/"))
         text = "/" + text;
     return "file://" + percent_encode_path(text);
@@ -282,7 +283,7 @@ void index_module(const fs::path &module_root,
         // Collect type/callable metadata via the check-only front end.  The
         // source name is the absolute file path so relative imports resolve.
         analysis_options options;
-        options.source_name = file.generic_string();
+        options.source_name = skein::path_to_utf8_generic(file);
         options.encoding = "utf-8";
         options.package_dirs = package_dirs;
         options.typecheck_mode = skein::typecheck::Mode::Off;
@@ -334,7 +335,7 @@ void workspace_index::rebuild(const std::vector<std::string> &roots) {
     entries_.clear();
     for (const std::string &root_text : roots) {
         std::error_code ec;
-        fs::path root = fs::u8path(root_text);
+        fs::path root = skein::path_from_utf8(root_text);
         if (!fs::is_directory(root, ec))
             continue;
         for (fs::recursive_directory_iterator it(root, ec), end;

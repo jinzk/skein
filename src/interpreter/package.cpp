@@ -12,6 +12,7 @@
 #include "modfile.h"
 #include "parser.hpp"
 #include "parser_lock.h"
+#include "path.h"
 #include "platform.h"
 #include "repl.h"
 #include "runtime_state.h"
@@ -160,11 +161,11 @@ std::vector<std::string> split_dotted(const std::string &path) {
 }
 
 fs::path path_from_utf8(const std::string &text) {
-    return fs::u8path(text);
+    return skein::path_from_utf8(text);
 }
 
 std::string path_to_utf8(const fs::path &path) {
-    return path.u8string();
+    return skein::path_to_utf8(path);
 }
 
 std::string normalize_dir(const std::string &dir) {

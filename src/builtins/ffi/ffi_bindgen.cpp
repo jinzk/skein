@@ -1,5 +1,6 @@
 #include "ffi_bindgen.h"
 
+#include "path.h"
 #include "platform.h"
 
 #include <algorithm>
@@ -173,10 +174,10 @@ std::string trim(const std::string &text) {
 
 std::string canonical_path(const std::string &path) {
     std::error_code ec;
-    fs::path result = fs::weakly_canonical(fs::u8path(path), ec);
+    fs::path result = fs::weakly_canonical(skein::path_from_utf8(path), ec);
     if (ec)
         return path;
-    return result.u8string();
+    return skein::path_to_utf8(result);
 }
 
 std::string shell_quote(const std::string &value) {
@@ -2516,8 +2517,8 @@ bool detect_cpp(const std::vector<token> &tokens, std::string &what) {
 }
 
 std::string default_module(const std::string &header) {
-    fs::path path = fs::u8path(header);
-    std::string stem = path.stem().u8string();
+    fs::path path = skein::path_from_utf8(header);
+    std::string stem = skein::path_to_utf8(path.stem());
     if (stem.empty())
         return "ffi";
     return stem;

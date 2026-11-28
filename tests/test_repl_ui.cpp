@@ -1,4 +1,5 @@
 #include "completion_index.h"
+#include "path.h"
 #include "repl_ui.h"
 
 #include <algorithm>
@@ -138,7 +139,7 @@ void test_path_completions() {
     std::ofstream(root / "alpha.skein") << "x";
     std::ofstream(root / "alpine.txt") << "x";
 
-    const std::string prefix = (root / "al").u8string();
+    const std::string prefix = skein::path_to_utf8(root / "al");
     const std::vector<std::string> candidates =
         skein::repl_ui::path_completions(prefix);
     require(candidates.size() == 3, "path completion count");

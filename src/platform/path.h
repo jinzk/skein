@@ -58,34 +58,21 @@ inline bool is_valid_utf8(std::string_view text) {
 
 /* Convert UTF-8 text to a native filesystem path.  On Windows this must not
  * use fs::path(std::string), which interprets bytes using the active ANSI
- * code page.  C++20 deprecated fs::u8path; the char8_t branch is ready for it
- * without changing any call site. */
+ * code page.  C++20 removed fs::u8path, so construct from char8_t text. */
 inline fs::path path_from_utf8(std::string_view text) {
-#if defined(__cpp_char8_t) || (defined(__cplusplus) && __cplusplus >= 202002L)
     return fs::path(std::u8string(text.begin(), text.end()));
-#else
-    return fs::u8path(std::string(text));
-#endif
 }
 
 /* Convert a native path back to UTF-8 text. */
 inline std::string path_to_utf8(const fs::path &path) {
-#if defined(__cpp_char8_t) || (defined(__cplusplus) && __cplusplus >= 202002L)
     const std::u8string u8 = path.u8string();
     return std::string(u8.begin(), u8.end());
-#else
-    return path.u8string();
-#endif
 }
 
 /* UTF-8 text with generic ('/') separators, for URIs and serialized paths. */
 inline std::string path_to_utf8_generic(const fs::path &path) {
-#if defined(__cpp_char8_t) || (defined(__cplusplus) && __cplusplus >= 202002L)
     const std::u8string u8 = path.generic_u8string();
     return std::string(u8.begin(), u8.end());
-#else
-    return path.generic_u8string();
-#endif
 }
 
 } // namespace skein

@@ -15,6 +15,7 @@
 #include "gc_roots.h"
 #include "package.h"
 #include "pattern.h"
+#include "platform.h"
 #include "runtime_state.h"
 #include "refvalue.h"
 #include "scopestack.h"
@@ -6359,9 +6360,10 @@ void skein_vm_stats_report() {
     skein_vm_stats_merge_thread();
     std::lock_guard<std::mutex> lock(vm_stats_total_mutex);
     const vm_stats_data &stats = vm_stats_total;
-    const char *coverage_path = std::getenv("SKEIN_VM_COVERAGE_FILE");
-    if (coverage_path && *coverage_path) {
-        FILE *out = std::fopen(coverage_path, "a");
+    std::string coverage_path;
+    if (platform_get_env("SKEIN_VM_COVERAGE_FILE", coverage_path) &&
+        !coverage_path.empty()) {
+        FILE *out = platform_open_file(coverage_path, "a");
         if (out) {
             for (size_t i = 0; i < stats.opcodes.size(); ++i) {
                 if (stats.opcodes[i] == 0)

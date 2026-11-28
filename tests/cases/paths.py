@@ -3,20 +3,19 @@
 
 The cases live in tests/skein/paths.skein; this module keeps the existing
 ctest module name and shard wiring.  One Python golden stays here as an
-independent check of list/string formatting.  Windows additionally exercises
+independent check of list/string formatting.  Both Windows and POSIX exercise
 non-ASCII paths through the CLI, FFI generation, SQLite, and std.log.
 """
 import json
 import os
 import shutil
 import subprocess
-import sys
 import tempfile
 
 from harness import BIN, check, run, run_file, run_skein, skein_string
 
 
-def _windows_utf8_cases():
+def _utf8_path_cases():
     with tempfile.TemporaryDirectory(prefix="skein_路径_") as directory:
         script = os.path.join(directory, "脚本.skein")
         with open(script, "w", encoding="utf-8") as handle:
@@ -72,5 +71,4 @@ def run_cases():
         'std.io.print(p["normalized"]);\n',
         stdout_all=["posix", "[a, b, .., c.txt]", "/a/c.txt"],
     )
-    if sys.platform == "win32":
-        _windows_utf8_cases()
+    _utf8_path_cases()

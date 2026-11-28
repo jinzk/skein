@@ -15,6 +15,7 @@
 #include "structtype.h"
 #include "symbol.h"
 #include "valuetype.h"
+#include "platform.h"
 #include "runtime_context.h"
 #include "runtime_state.h"
 #include "vm_host.h"
@@ -197,9 +198,9 @@ uint64_t elapsed_ns(std::chrono::steady_clock::time_point start) {
 
 void record_fallback_reason(const std::string &reason,
                             const std::string &context = std::string()) {
-    const char *path = std::getenv("SKEIN_VM_FALLBACK_FILE");
-    if (path && *path) {
-        FILE *out = std::fopen(path, "a");
+    std::string path;
+    if (platform_get_env("SKEIN_VM_FALLBACK_FILE", path) && !path.empty()) {
+        FILE *out = platform_open_file(path, "a");
         if (out) {
             std::fprintf(out, "%s\t%s\n",
                          reason.empty() ? "unknown" : reason.c_str(),

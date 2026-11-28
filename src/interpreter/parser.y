@@ -36,6 +36,24 @@ extern int yyparse();
 
 /* Defined by the lexer; see tokens.l. */
 extern void skein_lexer_finish_do_expression();
+extern void skein_lexer_abort_pending_do();
+
+/*
+ * Parser errors abandon the current statement.  Drop any pending `do`
+ * bookkeeping first, otherwise the lexer keeps swallowing newlines and the
+ * REPL cannot recover to the next top-level statement.  Lexer-side diagnostics
+ * keep using the runtime yyerror directly.
+ */
+static void parser_report_error(const char *s, ...);
+#define yyerror parser_report_error
+
+static void parser_report_error(const char *s, ...) {
+    skein_lexer_abort_pending_do();
+    va_list ap;
+    va_start(ap, s);
+    yyerror_v(s, ap);
+    va_end(ap);
+}
 
 thread_local bool g_include_collect = false;
 thread_local bool g_macro_only_parse = false;
@@ -3514,6 +3532,8 @@ void parser_end_nested_parse() {
 }
 
 int yyreport_syntax_error(const yypcontext_t *ctx) {
+    /* Bison reports syntax errors through this hook rather than yyerror. */
+    skein_lexer_abort_pending_do();
     if (diag_lexical_error_on_line(g_token_line)) {
         clear_func_locations();
         return 0;

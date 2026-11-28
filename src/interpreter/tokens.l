@@ -321,6 +321,12 @@ void skein_lexer_finish_do_expression() {
         do_stack.pop_back();
 }
 
+/* A syntax error abandons the statement, so a pending `do` must not keep
+ * swallowing newlines while the parser recovers. */
+void skein_lexer_abort_pending_do() {
+    do_stack.clear();
+}
+
 /* How a `while` token relates to a preceding `do`. */
 enum class while_kind { Normal, DoWhile, InvalidDoWhile };
 

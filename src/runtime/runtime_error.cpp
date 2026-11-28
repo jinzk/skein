@@ -9,15 +9,12 @@
  * skein_context::error; without one we fall back to stderr so standalone
  * embedding cannot silently lose errors.
  */
-void yyerror(const char *s, ...) {
+void yyerror_v(const char *s, va_list ap) {
     if (g_interrupted)
         return;
 
     char buffer[2048];
-    va_list ap;
-    va_start(ap, s);
     std::vsnprintf(buffer, sizeof(buffer), s, ap);
-    va_end(ap);
 
     struct skein_context *ctx = skein_context_current();
     if (ctx && ctx->error) {
@@ -25,4 +22,11 @@ void yyerror(const char *s, ...) {
         return;
     }
     std::fprintf(stderr, "%s\n", buffer);
+}
+
+void yyerror(const char *s, ...) {
+    va_list ap;
+    va_start(ap, s);
+    yyerror_v(s, ap);
+    va_end(ap);
 }

@@ -136,6 +136,11 @@ def run_cases():
     check("ans and underscore reference last result",
           "1 + 2\nans * 4\n_\n_ + 1\n",
           stdout_all=["= 3", "= 12", "= 12", "= 13"])
+    check("syntax error after bare do block recovers in REPL",
+          "1;\ndo { 7; }\ndo { 7; };\n_\n1 + 2\n",
+          stdout_all=["= 1", "= 3"],
+          not_stdout="= 7",
+          stderr="syntax error: unexpected do")
     check("hex integer literal out of range", "0x8000000000000000\n",
           stderr="hexadecimal integer literal out of range")
     check("invalid binary digit", "0b102\n",

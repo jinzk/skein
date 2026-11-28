@@ -1,8 +1,10 @@
 #ifndef _SYMBOL_H_
 #define _SYMBOL_H_
+#include <cstdarg>
 #include "valuetype.h"
 extern int yylineno;
 void yyerror(const char *s, ...);
+void yyerror_v(const char *s, va_list ap);
 
 enum type_constraint_kind {
     TYPE_ANY,

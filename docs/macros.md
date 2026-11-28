@@ -217,8 +217,8 @@ for (k, v) in ({"a": 1}).iter() { ... }
 
 早期第一批不包含：
 
-- 用户自定义 `macro` 声明：现已实现，设计提案见
-  [`docs/macros_user_defined.md`](macros_user_defined.md)；
+- 用户自定义 `macro` 声明：现已实现，模板用 `#name`，调用点尾部 block 用
+  `#N` 按位置读取实参，详见 [`docs/macros_user_defined.md`](macros_user_defined.md)；
 - `list!` / `dict!` / `try!`：已决定不实现；列表和字典直接使用普通字面量，
   错误捕获使用 `std.result.capture` 或 `on error`；
 - `pattern` / `module` / `operator` 片段；第一类 `type` 片段见用户宏文档；

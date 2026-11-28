@@ -7,6 +7,7 @@
 #include "structeval.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -22,6 +23,7 @@ namespace {
 
 constexpr std::size_t kParamPrefixLen = sizeof(USER_MACRO_PARAM_PREFIX) - 1;
 constexpr std::size_t kExpandPrefixLen = sizeof(USER_MACRO_EXPAND_PREFIX) - 1;
+constexpr std::size_t kArgPrefixLen = sizeof(USER_MACRO_ARG_PREFIX) - 1;
 
 struct macro_entry {
     std::string name;
@@ -47,6 +49,10 @@ thread_local std::unordered_map<std::string,
     g_exported_macros;
 thread_local std::string g_export_key;
 thread_local bool g_template_mode = false;
+/* Macro calls written inside a call-site trailing block must stay deferred
+ * until the enclosing macro expands; otherwise they would see `#N` before
+ * that macro's argument table exists. */
+thread_local int g_defer_block_calls = 0;
 thread_local int g_next_expansion_id = 1;
 thread_local int g_expansion_depth = 0;
 
@@ -66,9 +72,18 @@ struct param_value {
     struct type_constraint *type = NULL;
 };
 
+struct positional_arg {
+    const param_value *value = NULL;
+    std::size_t list_index = 0;
+    std::string name;
+};
+
 struct expansion_state {
     const user_macro_template *macro = NULL;
     std::unordered_map<std::string, param_value> values;
+    /* Call arguments in declaration order, flattened for `expr...`.  `#N`
+     * inside a trailing block resolves through this table. */
+    std::vector<positional_arg> positional;
     std::unordered_set<std::string> declared;
     /* Shared with fragment copies so usage inside a spliced argument still
      * counts as a use of that parameter. */
@@ -81,6 +96,12 @@ struct expansion_state {
      * applications are allowed here, but type fragments cannot enter generic
      * argument lists; call-site fragments may contain either. */
     bool template_body = false;
+    /* True only while cloning the trailing block supplied at the call site.
+     * That is the sole context where `#N` is legal. */
+    bool block_clone = false;
+    /* While deferring a nested macro call's block, leave its `#N` untouched so
+     * the nested expansion can bind it to its own arguments. */
+    bool preserve_arg_placeholders = false;
 };
 
 char *copy_string(const char *text) {
@@ -114,6 +135,32 @@ bool expand_placeholder_of(const char *name, std::string *out) {
     return true;
 }
 
+bool macro_arg_index_of(const char *name, std::string *out) {
+    if (!name || std::strncmp(name, USER_MACRO_ARG_PREFIX,
+                              kArgPrefixLen) != 0)
+        return false;
+    if (out)
+        *out = name + kArgPrefixLen;
+    return true;
+}
+
+bool parse_macro_arg_index(const std::string &text, std::size_t *index) {
+    if (text.empty() || (text.size() > 1 && text[0] == '0'))
+        return false;
+    std::size_t value = 0;
+    for (char ch : text) {
+        if (ch < '0' || ch > '9')
+            return false;
+        if (value > (SIZE_MAX - (std::size_t)(ch - '0')) / 10)
+            return false;
+        value = value * 10 + (std::size_t)(ch - '0');
+    }
+    if (value == 0)
+        return false;
+    *index = value - 1;
+    return true;
+}
+
 bool is_expand_node(const struct ast *node, std::string *name = NULL) {
     return node && node->nodetype == 'N' &&
            expand_placeholder_of(((const struct symref *)node)->name, name);
@@ -124,7 +171,8 @@ bool is_internal_name(const char *name) {
         return false;
     if (name[0] == '#')
         return true;
-    return placeholder_of(name, NULL) || expand_placeholder_of(name, NULL);
+    return placeholder_of(name, NULL) || expand_placeholder_of(name, NULL) ||
+           macro_arg_index_of(name, NULL);
 }
 
 std::string hygienic_name(int id, const char *name) {
@@ -192,6 +240,19 @@ void report_at(int line, int column, const char *message,
         yyerror("%s", message);
     if (attach)
         runtime_error_clear_related();
+}
+
+void report_at_numbered(int line, int column, const char *prefix,
+                        std::size_t number, const char *suffix) {
+    std::string message =
+        std::string(prefix) + std::to_string(number) + suffix;
+    report_at(line, column, message.c_str());
+}
+
+void report_at_arg_text(int line, int column, const char *prefix,
+                        const std::string &text, const char *suffix) {
+    std::string message = std::string(prefix) + text + suffix;
+    report_at(line, column, message.c_str());
 }
 
 bool type_name_from_arg(const struct ast *arg, std::string &out) {
@@ -274,11 +335,22 @@ bool macro_type_placeholder(const struct type_constraint *type,
     return placeholder_of(type->name, param);
 }
 
+bool macro_type_arg_index(const struct type_constraint *type,
+                          std::string *text) {
+    if (!type)
+        return false;
+    return macro_arg_index_of(type->name, text);
+}
+
 bool invalid_template_generic_args(const struct generic_type_arg *args,
                                    const char *error) {
     (void)args;
     return error != NULL;
 }
+
+const positional_arg *find_positional_arg(expansion_state &state,
+                                          std::size_t index, int line,
+                                          int column);
 
 /* Replace `#T` nodes anywhere inside an interned type graph with the
  * call-site type.  Generic arguments are captured in the graph rather than in
@@ -290,6 +362,50 @@ const skein::typecheck::TypeNode *substitute_type_node(
     if (!node)
         return skein::typecheck::type_any();
     std::string param_name;
+    std::string arg_text;
+    if (macro_arg_index_of(node->name.c_str(), &arg_text)) {
+        if (state.preserve_arg_placeholders)
+            return node;
+        if (!state.block_clone) {
+            report_at_arg_text(line, column, "macro argument placeholder #",
+                               arg_text, " is only valid in a macro block");
+            state.failed = true;
+            return skein::typecheck::type_any();
+        }
+        std::size_t index = 0;
+        if (!parse_macro_arg_index(arg_text, &index)) {
+            report_at_arg_text(line, column,
+                               "invalid macro argument placeholder #", arg_text,
+                               "");
+            state.failed = true;
+            return skein::typecheck::type_any();
+        }
+        const positional_arg *arg = find_positional_arg(state, index, line,
+                                                        column);
+        if (!arg)
+            return skein::typecheck::type_any();
+        if (arg->value->kind != user_macro_param_kind::type ||
+            !arg->value->type) {
+            report_at_numbered(line, column, "macro argument #", index + 1,
+                               " cannot be used as a type");
+            state.failed = true;
+            return skein::typecheck::type_any();
+        }
+        mark_used(state, arg->name);
+        changed = true;
+        const skein::typecheck::TypeNode *substituted =
+            skein::typecheck::type_from_constraint(arg->value->type);
+        return node->nullable ? skein::typecheck::type_nullable(substituted)
+                              : substituted;
+    }
+    if ((state.block_clone || state.preserve_arg_placeholders) &&
+        placeholder_of(node->name.c_str(), &param_name)) {
+        report_at_arg_text(line, column, "named macro placeholder #",
+                           param_name,
+                           " is not valid in a macro block; use #N");
+        state.failed = true;
+        return skein::typecheck::type_any();
+    }
     if (placeholder_of(node->name.c_str(), &param_name)) {
         auto it = state.values.find(param_name);
         if (it == state.values.end()) {
@@ -338,6 +454,51 @@ struct type_constraint *substitute_type(const struct type_constraint *type,
     if (!type)
         return NULL;
     std::string param_name;
+    std::string arg_text;
+    if (macro_type_arg_index(type, &arg_text)) {
+        if (state.preserve_arg_placeholders)
+            return dup_type(type);
+        if (!state.block_clone) {
+            report_at_arg_text(line, column, "macro argument placeholder #",
+                               arg_text, " is only valid in a macro block");
+            state.failed = true;
+            return new_type_constraint(TYPE_ANY);
+        }
+        std::size_t index = 0;
+        if (!parse_macro_arg_index(arg_text, &index)) {
+            report_at_arg_text(line, column,
+                               "invalid macro argument placeholder #", arg_text,
+                               "");
+            state.failed = true;
+            return new_type_constraint(TYPE_ANY);
+        }
+        const positional_arg *arg = find_positional_arg(state, index, line,
+                                                        column);
+        if (!arg)
+            return new_type_constraint(TYPE_ANY);
+        if (arg->value->kind != user_macro_param_kind::type ||
+            !arg->value->type) {
+            report_at_numbered(line, column, "macro argument #", index + 1,
+                               " cannot be used as a type");
+            state.failed = true;
+            return new_type_constraint(TYPE_ANY);
+        }
+        mark_used(state, arg->name);
+        struct type_constraint *copy = dup_type(arg->value->type);
+        if (type->kind == TYPE_REF || type->kind == TYPE_WEAK)
+            copy = skein::typecheck::type_apply_prefix(type->kind, copy);
+        if (type->nullable && copy && !copy->nullable)
+            copy = skein::typecheck::type_apply_nullable(copy);
+        return copy;
+    }
+    if ((state.block_clone || state.preserve_arg_placeholders) &&
+        placeholder_of(type->name, &param_name)) {
+        report_at_arg_text(line, column, "named macro placeholder #",
+                           param_name,
+                           " is not valid in a macro block; use #N");
+        state.failed = true;
+        return new_type_constraint(TYPE_ANY);
+    }
     if (macro_type_placeholder(type, &param_name)) {
         auto it = state.values.find(param_name);
         if (it == state.values.end()) {
@@ -403,20 +564,112 @@ static T *copy_node(const T *source) {
 struct ast *clone_node(const struct ast *node, expansion_state &state,
                        clone_context context);
 
-expansion_state fragment_state_for(const expansion_state &state) {
+expansion_state fragment_state_for(const expansion_state &state,
+                                   bool block_clone = false) {
     expansion_state fragment = state;
     fragment.expansion_id = 0;
     fragment.declared.clear();
     /* Fragment values always come from the call site, even when cloned while
      * substituting a placeholder in the template body. */
     fragment.template_body = false;
+    fragment.block_clone = block_clone;
     return fragment;
+}
+
+const positional_arg *find_positional_arg(expansion_state &state,
+                                          std::size_t index, int line,
+                                          int column) {
+    if (index >= state.positional.size()) {
+        report_at_numbered(line, column, "macro argument placeholder #",
+                           index + 1, " is out of range");
+        state.failed = true;
+        return NULL;
+    }
+    return &state.positional[index];
+}
+
+struct ast *substitute_positional_arg(const positional_arg &arg,
+                                      std::size_t index,
+                                      expansion_state &state,
+                                      clone_context context, int line,
+                                      int column) {
+    if (!arg.value)
+        return NULL;
+    mark_used(state, arg.name);
+    if (arg.value->kind == user_macro_param_kind::ident) {
+        if (context == clone_context::stmt) {
+            report_at_numbered(line, column, "macro argument #", index + 1,
+                               " cannot be used as a statement");
+            state.failed = true;
+            return newref(copy_string(arg.value->ident.c_str()));
+        }
+        struct ast *result = newref(copy_string(arg.value->ident.c_str()));
+        result->line = line;
+        result->column = column;
+        return result;
+    }
+    if (arg.value->kind == user_macro_param_kind::expr ||
+        arg.value->kind == user_macro_param_kind::expr_list) {
+        if (context == clone_context::name || context == clone_context::stmt) {
+            report_at_numbered(line, column, "macro argument #", index + 1,
+                               " cannot be used as a name");
+            state.failed = true;
+            return newref(copy_string(""));
+        }
+        struct ast *source = arg.value->kind == user_macro_param_kind::expr
+                                 ? arg.value->expr
+                                 : arg.value->exprs[arg.list_index];
+        expansion_state fragment = fragment_state_for(state);
+        return clone_node(source, fragment, clone_context::expr);
+    }
+    report_at_numbered(line, column, "macro argument #", index + 1,
+                       " cannot be used as a value");
+    state.failed = true;
+    return newref(copy_string(""));
 }
 
 std::string resolve_placeholder_or_name(const char *name, expansion_state &state,
                                         clone_context context, int line,
                                         int column) {
     std::string param_name;
+    std::string arg_text;
+    if (macro_arg_index_of(name, &arg_text)) {
+        if (state.preserve_arg_placeholders)
+            return arg_text;
+        if (!state.block_clone) {
+            report_at_arg_text(line, column, "macro argument placeholder #",
+                               arg_text, " is only valid in a macro block");
+            state.failed = true;
+            return arg_text;
+        }
+        std::size_t index = 0;
+        if (!parse_macro_arg_index(arg_text, &index)) {
+            report_at_arg_text(line, column,
+                               "invalid macro argument placeholder #", arg_text,
+                               "");
+            state.failed = true;
+            return arg_text;
+        }
+        const positional_arg *arg = find_positional_arg(state, index, line,
+                                                        column);
+        if (!arg)
+            return arg_text;
+        mark_used(state, arg->name);
+        if (arg->value->kind == user_macro_param_kind::ident)
+            return arg->value->ident;
+        report_at_numbered(line, column, "macro argument #", index + 1,
+                           " cannot be used as a name");
+        state.failed = true;
+        return arg_text;
+    }
+    if ((state.block_clone || state.preserve_arg_placeholders) &&
+        placeholder_of(name, &param_name)) {
+        report_at_arg_text(line, column, "named macro placeholder #",
+                           param_name,
+                           " is not valid in a macro block; use #N");
+        state.failed = true;
+        return param_name;
+    }
     if (placeholder_of(name, &param_name)) {
         auto it = state.values.find(param_name);
         if (it == state.values.end()) {
@@ -634,6 +887,45 @@ struct ast *clone_node(const struct ast *node, expansion_state &state,
                 report_at(node->line, node->column,
                           "expr... fragment must be used in an argument list",
                           param_name.c_str());
+                state.failed = true;
+                return newref(copy_string(param_name.c_str()));
+            }
+            std::string arg_text;
+            if (macro_arg_index_of(ref->name, &arg_text)) {
+                if (state.preserve_arg_placeholders) {
+                    struct ast *result =
+                        newref(copy_string(ref->name));
+                    result->line = node->line;
+                    result->column = node->column;
+                    return result;
+                }
+                if (!state.block_clone) {
+                    report_at_arg_text(node->line, node->column,
+                                       "macro argument placeholder #", arg_text,
+                                       " is only valid in a macro block");
+                    state.failed = true;
+                    return newref(copy_string(arg_text.c_str()));
+                }
+                std::size_t index = 0;
+                if (!parse_macro_arg_index(arg_text, &index)) {
+                    report_at_arg_text(node->line, node->column,
+                                       "invalid macro argument placeholder #",
+                                       arg_text, "");
+                    state.failed = true;
+                    return newref(copy_string(arg_text.c_str()));
+                }
+                const positional_arg *arg =
+                    find_positional_arg(state, index, node->line, node->column);
+                if (!arg)
+                    return newref(copy_string(arg_text.c_str()));
+                return substitute_positional_arg(*arg, index, state, context,
+                                                 node->line, node->column);
+            }
+            if ((state.block_clone || state.preserve_arg_placeholders) &&
+                placeholder_of(ref->name, &param_name)) {
+                report_at_arg_text(node->line, node->column,
+                                   "named macro placeholder #", param_name,
+                                   " is not valid in a macro block; use #N");
                 state.failed = true;
                 return newref(copy_string(param_name.c_str()));
             }
@@ -1073,11 +1365,16 @@ struct ast *clone_node(const struct ast *node, expansion_state &state,
                     node->line, node->column, source->generator != 0);
             }
             /* Substitute this macro's fragments into the deferred call before
-             * expanding the nested macro. */
+             * expanding the nested macro.  A trailing block belongs to the
+             * nested call, so its `#N` references must be left for that call
+             * rather than resolved against the enclosing block's arguments. */
+            expansion_state nested_state = state;
+            nested_state.block_clone = false;
+            nested_state.preserve_arg_placeholders = true;
             struct ast *deferred = new_user_macro_call(
                 clone_node(source->callee, state, clone_context::expr),
                 clone_call_args(source->args, state),
-                clone_node(source->block, state, clone_context::stmt),
+                clone_node(source->block, nested_state, clone_context::stmt),
                 node->line, node->column, source->generator != 0);
             struct ast *result = expand_deferred_macro(deferred);
             if (!result)
@@ -1512,13 +1809,13 @@ struct ast *expand_user_macro(macro_entry *entry, struct ast *args,
 
     std::vector<struct ast *> arg_values;
     collect_args(args, arg_values);
-    const std::size_t positional = macro.params.size() -
-        (!macro.params.empty() &&
-         macro.params.back().kind == user_macro_param_kind::block ? 1 : 0);
-    const bool variadic = !macro.params.empty() &&
-        macro.params.back().kind == user_macro_param_kind::expr_list;
     const bool expects_block = !macro.params.empty() &&
         macro.params.back().kind == user_macro_param_kind::block;
+    const std::size_t positional = macro.params.size() -
+        (expects_block ? 1 : 0);
+    const bool variadic = positional > 0 &&
+        macro.params[positional - 1].kind ==
+            user_macro_param_kind::expr_list;
 
     bool ok = true;
     if (expects_block) {
@@ -1624,8 +1921,30 @@ struct ast *expand_user_macro(macro_entry *entry, struct ast *args,
     if (expects_block && block) {
         param_value value;
         value.kind = user_macro_param_kind::block;
-        value.block = clone_node(block, fragment_state, clone_context::stmt);
         state.values[macro.params.back().name] = std::move(value);
+    }
+
+    if (ok) {
+        for (const user_macro_param &param : macro.params) {
+            if (param.kind == user_macro_param_kind::block)
+                break;
+            auto it = state.values.find(param.name);
+            if (it == state.values.end())
+                continue;
+            const param_value &value = it->second;
+            if (value.kind == user_macro_param_kind::expr_list) {
+                for (std::size_t j = 0; j < value.exprs.size(); ++j)
+                    state.positional.push_back({&value, j, param.name});
+            } else {
+                state.positional.push_back({&value, 0, param.name});
+            }
+        }
+    }
+
+    if (expects_block && block) {
+        auto it = state.values.find(macro.params.back().name);
+        expansion_state block_state = fragment_state_for(state, true);
+        it->second.block = clone_node(block, block_state, clone_context::stmt);
         block = NULL;
     }
 
@@ -1732,6 +2051,27 @@ void user_macros_set_template_mode(bool enabled) {
     g_template_mode = enabled;
 }
 
+void user_macros_set_defer_block_calls(bool enabled) {
+    if (enabled) {
+        ++g_defer_block_calls;
+    } else if (g_defer_block_calls > 0) {
+        --g_defer_block_calls;
+    }
+}
+
+bool user_macro_arg_placeholder(const char *name, std::string *digits) {
+    return macro_arg_index_of(name, digits);
+}
+
+bool user_macros_in_placeholder_context() {
+    return g_template_mode || g_defer_block_calls > 0;
+}
+
+bool user_macro_callee_is_defined(struct ast *callee) {
+    std::string name;
+    return is_bare_name(callee, &name) && find_macro(name.c_str()) != NULL;
+}
+
 void user_macros_set_export_key(const char *key) {
     g_export_key = key ? key : "";
 }
@@ -1833,8 +2173,11 @@ bool user_macro_define(const char *name,
             treefree(body);
             return false;
         }
-        if (param.kind == user_macro_param_kind::expr_list &&
-            i + 1 != params.size()) {
+        const bool last_non_block =
+            i + 1 == params.size() ||
+            (i + 2 == params.size() &&
+             params.back().kind == user_macro_param_kind::block);
+        if (param.kind == user_macro_param_kind::expr_list && !last_non_block) {
             report_at(param.line, param.column,
                       "expr... fragment must be the last parameter",
                       param.name.c_str());
@@ -1878,8 +2221,16 @@ bool user_macro_define(const char *name,
         treefree(body);
         return false;
     }
+    const bool has_block_param = std::any_of(
+        params.begin(), params.end(), [](const user_macro_param &param) {
+            return param.kind == user_macro_param_kind::block;
+        });
     for (const user_macro_param &param : params) {
-        if (validation.used->find(param.name) != validation.used->end())
+        /* Parameters of a block-taking macro may be referenced from the
+         * call-site block as `#N`, which definition-time validation cannot
+         * see.  Defer that diagnostic instead of producing false positives. */
+        if (has_block_param ||
+            validation.used->find(param.name) != validation.used->end())
             continue;
         std::string message =
             "unused macro fragment '" + param.name + "'";
@@ -1927,7 +2278,7 @@ bool user_macro_define(const char *name,
 struct ast *expand_macro(struct ast *callee, struct ast *args,
                          struct ast *block, int line, int column,
                          bool generator) {
-    if (g_template_mode) {
+    if (g_template_mode || g_defer_block_calls > 0) {
         return new_user_macro_call(callee, args, block, line, column,
                                    generator);
     }

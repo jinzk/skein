@@ -276,6 +276,115 @@ def run_cases():
         stdout="100\n2",
     )
     check(
+        "user macro block positional argument",
+        'macro with_value(value: expr, body: block) { #body }\n'
+        'func test(): int {\n'
+        '  let value = "outer";\n'
+        '  return with_value!(42) {\n'
+        '    println(str(value));\n'
+        '    println(str(#1));\n'
+        '    return #1;\n'
+        '  };\n'
+        '}\n'
+        'println(str(test()));\n',
+        stdout="outer\n42\n42",
+    )
+    check(
+        "user macro block positional argument above nine",
+        'macro many(a1: expr, a2: expr, a3: expr, a4: expr, a5: expr,\n'
+        '           a6: expr, a7: expr, a8: expr, a9: expr, a10: expr,\n'
+        '           a11: expr, body: block) { #body }\n'
+        'func test(): int {\n'
+        '  return many!(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11) {\n'
+        '    println(str(#11));\n'
+        '    return #2;\n'
+        '  };\n'
+        '}\n'
+        'println(str(test()));\n',
+        stdout="11\n2",
+    )
+    check(
+        "user macro block positional argument with expr list",
+        'func add4(a: int, b: int, c: int, d: int): int {\n'
+        '  return a + b + c + d;\n'
+        '}\n'
+        'macro call_all(f: expr, args: expr..., body: block) { #body }\n'
+        'func test(): int {\n'
+        '  return call_all!(add4, 1, 2, 3, 4) {\n'
+        '    return #2 + #3 + #4 + #5;\n'
+        '  };\n'
+        '}\n'
+        'println(str(test()));\n',
+        stdout="10",
+    )
+    check(
+        "user macro block positional ident and type arguments",
+        'macro set_name(name: ident, value: expr, body: block) { #body }\n'
+        'macro make(T: type, v: expr, body: block) { #body }\n'
+        'func test(): int {\n'
+        '  let named = 0;\n'
+        '  let typed = 0;\n'
+        '  set_name!(answer, 42) {\n'
+        '    let #1 = #2;\n'
+        '    named = #1;\n'
+        '  };\n'
+        '  make!(int, 7) {\n'
+        '    let x: #1 = #2;\n'
+        '    typed = x;\n'
+        '  };\n'
+        '  return named + typed;\n'
+        '}\n'
+        'println(str(test()));\n',
+        stdout="49",
+    )
+    check(
+        "user macro nested blocks bind positional arguments to nearest call",
+        'macro outer(value: expr, body: block) { #body }\n'
+        'macro inner(value: expr, body: block) { #body }\n'
+        'func test(): int {\n'
+        '  return outer!(10) {\n'
+        '    return inner!(#1 + 5) {\n'
+        '      return #1;\n'
+        '    };\n'
+        '  };\n'
+        '}\n'
+        'println(str(test()));\n',
+        stdout="15",
+    )
+    check(
+        "user macro block positional zero is rejected",
+        'macro m(v: expr, body: block) { #body }\n'
+        'func test(): int { return m!(1) { return #0; }; }\n'
+        'test();\n',
+        stderr="invalid macro argument placeholder #0",
+    )
+    check(
+        "user macro block positional out of range is rejected",
+        'macro m(v: expr, body: block) { #body }\n'
+        'func test(): int { return m!(1) { return #2; }; }\n'
+        'test();\n',
+        stderr="macro argument placeholder #2 is out of range",
+    )
+    check(
+        "user macro block named placeholder is rejected",
+        'macro m(v: expr, body: block) { #body }\n'
+        'func test(): int { return m!(1) { return #v; }; }\n'
+        'test();\n',
+        stderr="named macro placeholder #v is not valid in a macro block",
+    )
+    check(
+        "user macro template cannot use positional placeholder",
+        'macro m(v: expr) { return #1; }\n'
+        'func test(): int { return m!(1); }\n'
+        'test();\n',
+        stderr="macro argument placeholder #1 is only valid in a macro block",
+    )
+    check(
+        "positional macro placeholder outside block is rejected",
+        'println(str(#1));\n',
+        stderr="macro argument placeholder #1 is only valid in a macro block",
+    )
+    check(
         "user macro uses ordinary bare path distinct from canonical builtin path",
         'import std;\n'
         'macro info(x: expr) { return #x + 100; }\n'

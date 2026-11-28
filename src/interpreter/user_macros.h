@@ -17,6 +17,10 @@ extern thread_local bool g_resolve_imported_macros;
 /* `#name...` in an argument list is lexed separately so expansion can splice
  * a whole expression sequence rather than produce one invalid expression. */
 #define USER_MACRO_EXPAND_PREFIX "\001macroexpand:"
+/* `#N` in a macro call's trailing block is encoded as an ordinary NAME token
+ * with this prefix so existing grammar slots accept it without new rules.
+ * It is resolved positionally against that call's arguments, never by name. */
+#define USER_MACRO_ARG_PREFIX "\001macroarg:"
 
 enum class user_macro_param_kind {
     expr,
@@ -46,6 +50,10 @@ void user_macros_reset();
 void user_macros_push();
 void user_macros_pop();
 void user_macros_set_template_mode(bool enabled);
+void user_macros_set_defer_block_calls(bool enabled);
+bool user_macro_arg_placeholder(const char *name, std::string *digits);
+bool user_macros_in_placeholder_context();
+bool user_macro_callee_is_defined(struct ast *callee);
 
 /* Cross-package macro exports.  The export key is the canonical source path
  * of the package being parsed; it is set only for the nested parse that reads

@@ -257,6 +257,27 @@ static void finish_macro_decl(struct ast *body) {
     g_macro_params.clear();
 }
 
+thread_local std::vector<bool> g_call_block_defer_stack;
+
+static void begin_macro_call_block(struct ast *callee) {
+    push_func_location(g_token_line, g_token_column);
+    ++g_include_function_depth;
+    start_function();
+    bool defer = user_macro_callee_is_defined(callee);
+    g_call_block_defer_stack.push_back(defer);
+    if (defer)
+        user_macros_set_defer_block_calls(true);
+}
+
+static void end_macro_call_block() {
+    bool defer = !g_call_block_defer_stack.empty() &&
+                 g_call_block_defer_stack.back();
+    if (!g_call_block_defer_stack.empty())
+        g_call_block_defer_stack.pop_back();
+    if (defer)
+        user_macros_set_defer_block_calls(false);
+}
+
 static std::string import_selection_key(bool is_macro, const char *name) {
     return std::string(is_macro ? "macro:" : "value:") + (name ? name : "");
 }
@@ -2705,7 +2726,16 @@ exp: exp '+' exp                          { $$ = newarith('+', $1, $3); }
     | exp ON ERROR '(' on_error_name ')' '{' list '}' %prec ON {
         $$ = newonerror($1, $5, $8);
       }
-    | NAME %prec PRIMARY                  { $$ = newref($1); }
+    | NAME %prec PRIMARY {
+        std::string digits;
+        if (user_macro_arg_placeholder($1, &digits) &&
+            !user_macros_in_placeholder_context()) {
+            yyerror("macro argument placeholder #%s is only valid in a macro "
+                    "block", digits.c_str());
+            YYERROR;
+        }
+        $$ = newref($1);
+      }
     | exp '=' exp                         { $$ = newasgn($1, $3); }
     | exp PLUS_ASSIGN exp                 { $$ = newcompound($1, '+', $3); }
     | exp MINUS_ASSIGN exp                { $$ = newcompound($1, '-', $3); }
@@ -2722,23 +2752,27 @@ exp: exp '+' exp                          { $$ = newarith('+', $1, $3); }
         $$ = expand_macro($1, $4, NULL,
                                   @2.first_line, @2.first_column, false);
       }
-    | exp MACRO_BANG '(' macro_explist ')' '{' macro_block_start EMPTY_BLOCK_CLOSE %prec PRIMARY {
+    | exp MACRO_BANG '(' macro_explist ')' '{' { begin_macro_call_block($1); } EMPTY_BLOCK_CLOSE %prec PRIMARY {
         bool generator = finish_function();
+        end_macro_call_block();
         $$ = expand_macro($1, $4, newscope(NULL),
                                   @2.first_line, @2.first_column, generator);
       }
-    | exp MACRO_BANG '(' macro_explist ')' '{' macro_block_start list '}' %prec PRIMARY {
+    | exp MACRO_BANG '(' macro_explist ')' '{' { begin_macro_call_block($1); } list '}' %prec PRIMARY {
         bool generator = finish_function();
+        end_macro_call_block();
         $$ = expand_macro($1, $4, newscope($8),
                                   @2.first_line, @2.first_column, generator);
       }
-    | exp MACRO_BANG '{' macro_block_start EMPTY_BLOCK_CLOSE %prec PRIMARY {
+    | exp MACRO_BANG '{' { begin_macro_call_block($1); } EMPTY_BLOCK_CLOSE %prec PRIMARY {
         bool generator = finish_function();
+        end_macro_call_block();
         $$ = expand_macro($1, NULL, newscope(NULL),
                                   @2.first_line, @2.first_column, generator);
       }
-    | exp MACRO_BANG '{' macro_block_start list '}' %prec PRIMARY {
+    | exp MACRO_BANG '{' { begin_macro_call_block($1); } list '}' %prec PRIMARY {
         bool generator = finish_function();
+        end_macro_call_block();
         $$ = expand_macro($1, NULL, newscope($5),
                                   @2.first_line, @2.first_column, generator);
       }
@@ -2967,15 +3001,6 @@ lambda_start: %empty {
         start_function();
     }
     ;
-
-/* A macro block becomes an anonymous function, so give it function context. */
-macro_block_start: %empty {
-        push_func_location(@$.first_line, @$.first_column);
-        ++g_include_function_depth;
-        start_function();
-    }
-    ;
-
 
 value: INT                                { $$ = newint($1); }
     | FLOAT                               { $$ = newfloat($1); }

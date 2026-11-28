@@ -191,7 +191,7 @@ println(str(first[int]([1, 2, 3])));
 
 ### 宏：语法抽象
 
-宏调用写成 `name!(...)`，尾部 block 写成 `name!(...) { ... }`。用户宏接收调用点片段并用 `#name` 引用，内置宏则以 `std.*!` 为规范路径：
+宏调用写成 `name!(...)`，尾部 block 写成 `name!(...) { ... }`。用户宏定义模板用 `#name` 引用片段，调用点尾部 block 用 `#N` 按实参位置读取；内置宏以 `std.*!` 为规范路径：
 
 ```skein
 macro twice(x: expr) {
@@ -212,7 +212,7 @@ func demo() {
   println(str(twice!(3 + 4)));
   println(str(typed!(int, 21)));
   trace!("work") {
-    println("running");
+    println(str(#1) + ": running");
   };
 }
 
@@ -220,6 +220,7 @@ demo();
 ```
 
 - 片段支持 `expr`、`ident`、`expr...`、`block` 和 `type`；复合类型写作 `type(list[int])`；
+- 尾部 block 中的 `#1`、`#2` 对应括号内实参，从 1 开始且没有 1–9 上限；它们不是变量绑定，不会遮蔽同名标识符；
 - 宏不是文本替换，也不是编译期任意执行；不能生成声明，也不支持 `pattern` / `operator` 片段；
 - `std.task.wait!`、`std.log.info!`、`std.error.recover!` 等是规范路径，部分内置宏还有 `wait!` / `capture!` / `fail!` / `recover!` / `pass!` 裸写法；
 - 泛型负责类型抽象，宏负责语法抽象；详见 [docs/macros.md](docs/macros.md) 和 [docs/macros_user_defined.md](docs/macros_user_defined.md)。

@@ -941,6 +941,24 @@ static int make_macro_expand_token() {
     return make_macro_param_token(USER_MACRO_EXPAND_PREFIX, 4);
 }
 
+/* Encode `#N` as an ordinary NAME with a reserved prefix.  Unlike `#name`,
+ * the digits are not a valid identifier, so copy them verbatim rather than
+ * routing through make_name_token. */
+static int make_macro_arg_token() {
+    const std::size_t prefix_len = std::strlen(USER_MACRO_ARG_PREFIX);
+    const std::size_t digits_len = (std::size_t)yyleng - 1;
+    char *raw = (char *)std::malloc(prefix_len + digits_len + 1);
+    if (!raw) {
+        yyerror("out of space");
+        return 0;
+    }
+    std::memcpy(raw, USER_MACRO_ARG_PREFIX, prefix_len);
+    std::memcpy(raw + prefix_len, yytext + 1, digits_len);
+    raw[prefix_len + digits_len] = '\0';
+    yylval.str = raw;
+    return SKEIN_TOK_NAME;
+}
+
 /*
  * Decide whether an opening brace introduces a block body.  Only syntactic
  * positions that always require a body are treated as blocks; everything else
@@ -1152,6 +1170,13 @@ TYPE_PREFIX_NEXT ([A-Za-z_]|{UTF8_SEQ}|#)
 
 "$" {
     int tok = make_placeholder_token();
+    if (tok == 0)
+        return 0;
+    YYRET(tok);
+}
+
+"#"[0-9]+ {
+    int tok = make_macro_arg_token();
     if (tok == 0)
         return 0;
     YYRET(tok);

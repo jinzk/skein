@@ -62,18 +62,20 @@ macro name(param: expr, label: ident, body: block) {
 | --- | --- | --- | --- |
 | 表达式 | `x: expr` | 表达式位置 | 克隆调用点表达式，必要时加括号保持优先级 |
 | 标识符 | `n: ident` | 名字位置，如 `let #n = ...` | 保留调用点拼写，故意不参与 hygiene 重命名 |
-| 表达式序列 | `xs: expr...` | 最后一个表达式参数 | 展开为逗号分隔的表达式列表 |
+| 表达式序列 | `xs: expr...` | 最后一个表达式参数，可紧接尾部 `block` | 展开为逗号分隔的表达式列表 |
 | 块 | `b: block` | 语句列表位置，写成 `#b` 且不带分号 | 必须是最后一个参数；克隆调用点语句列表 |
 | 类型 | `T: type` | 类型位置，如 `let x: #T`、`#v is #T` | 传入类型名；复合类型用 `type(...)` 包装；调用点拼写与 import 别名保留 |
 
 约束：
 
-- `expr...` 只能有一个，且必须是最后一个表达式参数；
+- `expr...` 只能有一个，且必须是最后一个表达式参数；若宏带尾部 `block`，
+  则 `expr...` 必须紧接在该 `block` 之前；
 - `block` 只能有一个，且必须是整个参数列表的最后一个；
 - `block` 不能放进括号内；
 - `type` 片段不支持 `...`，不能作为值或名字使用；
 - 不支持 `pattern`、`module`、`operator` 片段；
-- `#名字` 只能引用当前宏的参数，未声明的占位符是定义期语法错误。
+- `#名字` 只用于宏定义模板体，只能引用当前宏的参数，未声明的占位符是定义期语法错误；
+- 调用点的尾部 block 使用 `#N` 按位置引用实参，不能写 `#名字`；两者不混用。
 
 示例：
 
@@ -136,6 +138,32 @@ with_value!(x, 1 + 2) {
 
 call_all!(add, 1, 2, 3);
 ```
+
+宏调用的尾部 block 可以用 `#N` 按位置引用本次调用的实参：
+
+```text
+macro with_value(value: expr, body: block) {
+  #body
+}
+
+let it = "outer";
+with_value!(42) {
+  println(str(it));   // outer
+  println(str(#1));   // 42
+}
+```
+
+规则：
+
+- `#N` 从 `1` 开始，只计括号内实参，尾部 block 自身不占编号；
+- `expr...` 展开后的每个表达式各占一个连续位置；
+- 没有 `1..9` 上限，越界、 `#0` 和非数字形式都是错误；
+- `#N` 只能出现在用户宏调用的尾部 block 中；模板体、普通代码和 block 外都报错；
+- block 内只能写 `#N`，写 `#名字` 报错；
+- `expr` 实参只能进入表达式位置，`ident` 只能进入名字位置，`type` 只能进入类型位置；
+- 嵌套宏的 block 中，`#N` 绑定最近的宏调用；内层调用实参中的 `#N` 仍属于外层 block；
+- `#N` 不是普通名字绑定，不会遮蔽 block 内外的同名变量；需要调用点自定义名字时仍用
+  `ident` 片段。
 
 `!` 仍然必须紧贴宏名；普通调用、泛型下标、一元 `!` 和 `!(expr)` 不受影响。
 
@@ -283,7 +311,8 @@ Parser 维护一个 `MacroTable`，键为宏名，值为已验证的 `MacroTempl
 2. `expr` 和 `block` 片段从调用点克隆，保留其原始名字和源码位置。
 3. `ident` 片段保留调用点拼写，用于 `let #name = ...` 这类有意引入绑定的场景。
 4. 模板体是封闭的：不能引用定义处局部变量；需要外部值必须通过参数传入。
-5. 展开完成后不得留下占位符节点或 `#m...` 内部名字出现在面向用户的诊断中。
+5. 调用点 block 的 `#N` 展开为对应实参 AST，不引入绑定，因此不会遮蔽同名变量。
+6. 展开完成后不得留下占位符节点或 `#m...` 内部名字出现在面向用户的诊断中。
 
 例：
 
@@ -353,15 +382,20 @@ builtin，调用点已有的泛型值仍可通过 `expr` 片段传入。
 - 无参数宏收到表达式参数，或需要参数的宏缺少参数；
 - 内置宏裸名与规范路径解析到不同定义时，诊断说明实际命中的来源；
 - 块片段中的控制流位置错误；
+- 调用点 block 中的 `#0`、越界 `#N`、`#名字`，或 block 外 / 模板体中的 `#N`
+  （`invalid macro argument placeholder #0`、
+  `macro argument placeholder #N is out of range`、
+  `named macro placeholder #name is not valid in a macro block; use #N`、
+  `macro argument placeholder #N is only valid in a macro block`）；
 - selective import 缺少 `from` 或路径非法；
 - selective import 的名字未导出、重复或 alias 冲突；
 - `import {name!} from pkg;` 找不到对应宏导出。
 
 ## 8. 工具链
 
-- **formatter**：无损往返 `macro` 声明、`#param` 占位符、`expr...`、`T: type`、
-  类型位置的 `#T`、宏调用和 selective import；CLI 与 LSP 的格式化校验都只做
-  语法检查，不解析宏调用；
+- **formatter**：无损往返 `macro` 声明、`#param` 占位符、调用点 block 的 `#N`、
+  `expr...`、`T: type`、类型位置的 `#T`、宏调用和 selective import；CLI 与 LSP 的
+  格式化校验都只做语法检查，不解析宏调用；
 - **lint**：报告未使用片段、未知宏、模板中的非法占位符与非法片段位置；宏展开
   错误同时给出调用点（主位置）与模板定义点（related location）；
 - **LSP**：宏名与 selective import 宏别名补全、签名 hover、调用点/定义点跳转，
@@ -524,3 +558,5 @@ formatter / lint / LSP 的片段覆盖、双位置诊断与 VM/JIT differential�
     `(await)(f())`。postfix 优先级高于前缀：`await f().xxx` 是
     `await (f().xxx)`，先 await 再取字段写 `(await f()).xxx`。`await f() on error(...)`
     沿用当前 `std.task.wait!(launch f()) on error(...)` 的 handler 语义。
+20. 用户宏调用尾部 block 用 `#N` 按实参位置读取，从 `1` 开始，没有 `1–9` 上限；
+    模板体继续用 `#名字`，不引入 `expose`，`#N` 不创建普通名字绑定。

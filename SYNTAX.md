@@ -887,6 +887,11 @@ name!(expr, ...) { statements }
 跨包用 `export macro` / `import {name!} from pkg;`，详见
 [`docs/macros_user_defined.md`](docs/macros_user_defined.md)。
 
+用户宏定义模板用 `#name` 引用片段；调用点的尾部 block 用 `#N` 按位置引用实参。
+`#N` 从 1 开始，只计括号内实参，没有 1–9 上限；尾部 block 自身不占编号。
+它只在用户宏的尾部 block 内合法，不是普通名字绑定，因此不会遮蔽同名变量。
+`expr...` 的每个展开值各占一个位置；嵌套宏的 block 中 `#N` 绑定最近的宏调用。
+
 首批宏：
 
 ```text

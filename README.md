@@ -157,6 +157,73 @@ func add(a: int, b: int): int {
 - 函数类型支持参数逆变、返回值协变；
 - 检查强度可用 `SKEIN_TYPECHECK=off|loose|warn|strict` 或 `--typecheck=...` 调整。
 
+### 泛型：类型抽象
+
+函数、`struct`、`enum` 和 `proto` 都可以声明类型参数；类型实参只参与静态检查，运行时擦除：
+
+```skein
+struct Box[T any] {
+  value: T;
+}
+
+func first[T any](xs: list[T]): T {
+  return xs[0];
+}
+
+proto Drawable {
+  func draw(self);
+}
+
+func draw_all[T proto Drawable](items: list[T]) {
+  for item in items {
+    item.draw();
+  }
+}
+
+let b = Box[int] { value: 7 };
+println(str(first[int]([1, 2, 3])));
+```
+
+- 约束支持 `[T any]`、`[K type int | string]`、`[V proto Drawable]`、`[T Hashable & Drawable]` 等写法；
+- 泛型实例是 invariant，`Box[int]` 不能赋给 `Box[any]`；
+- 不支持泛型方法、`impl Box[int]` 特化和泛型继承；
+- 完整规则见 [docs/tutorial.md](docs/tutorial.md) 和 [SYNTAX.md](SYNTAX.md)。
+
+### 宏：语法抽象
+
+宏调用写成 `name!(...)`，尾部 block 写成 `name!(...) { ... }`。用户宏接收调用点片段并用 `#name` 引用，内置宏则以 `std.*!` 为规范路径：
+
+```skein
+macro twice(x: expr) {
+  #x * 2;
+}
+
+macro typed(T: type, v: expr) {
+  #v as #T;
+}
+
+macro trace(label: expr, body: block) {
+  println(str(#label) + ": start");
+  #body
+  println(str(#label) + ": done");
+}
+
+func demo() {
+  println(str(twice!(3 + 4)));
+  println(str(typed!(int, 21)));
+  trace!("work") {
+    println("running");
+  };
+}
+
+demo();
+```
+
+- 片段支持 `expr`、`ident`、`expr...`、`block` 和 `type`；复合类型写作 `type(list[int])`；
+- 宏不是文本替换，也不是编译期任意执行；不能生成声明，也不支持 `pattern` / `operator` 片段；
+- `std.task.wait!`、`std.log.info!`、`std.error.recover!` 等是规范路径，部分内置宏还有 `wait!` / `capture!` / `fail!` / `recover!` / `pass!` 裸写法；
+- 泛型负责类型抽象，宏负责语法抽象；详见 [docs/macros.md](docs/macros.md) 和 [docs/macros_user_defined.md](docs/macros_user_defined.md)。
+
 ### 数据处理与模式匹配
 
 管道、占位符、模式匹配、解构、切片和一等函数让常见的数据处理保持紧凑：

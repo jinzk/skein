@@ -3,11 +3,10 @@
 #include "ast.h"
 #include "ffi_value.h"
 #include "json.h"
+#include "platform.h"
 #include "valuetype.h"
 
 #include <cstring>
-#include <fstream>
-#include <iterator>
 #include <set>
 #include <utility>
 
@@ -68,13 +67,10 @@ bool host_is_little_endian() {
 
 bool read_file(const std::string &path, std::string &text,
                std::string &error) {
-    std::ifstream input(path, std::ios::binary);
-    if (!input) {
-        error = "cannot open manifest " + path;
+    if (!platform_read_file(path, text, error)) {
+        error = "cannot open manifest " + path + ": " + error;
         return false;
     }
-    text.assign(std::istreambuf_iterator<char>(input),
-                std::istreambuf_iterator<char>());
     return true;
 }
 

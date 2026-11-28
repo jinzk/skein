@@ -10,7 +10,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
-#include <fstream>
 #include <map>
 #include <memory>
 #include <set>
@@ -2659,9 +2658,12 @@ int run_ffi_gen(const std::vector<std::string> &args, std::string &error) {
             error = "--check requires --output";
             return 2;
         }
-        std::ifstream input(o.output, std::ios::binary);
-        std::string existing((std::istreambuf_iterator<char>(input)),
-                             std::istreambuf_iterator<char>());
+        std::string existing;
+        std::string read_error;
+        if (!platform_read_file(o.output, existing, read_error)) {
+            error = "cannot read " + o.output + ": " + read_error;
+            return 1;
+        }
         if (existing != manifest) {
             error = o.output + " is out of date";
             return 1;
@@ -2673,14 +2675,9 @@ int run_ffi_gen(const std::vector<std::string> &args, std::string &error) {
         std::fwrite(manifest.data(), 1, manifest.size(), stdout);
         return 0;
     }
-    std::ofstream output(o.output, std::ios::binary | std::ios::trunc);
-    if (!output) {
-        error = "cannot write " + o.output;
-        return 1;
-    }
-    output.write(manifest.data(), (std::streamsize)manifest.size());
-    if (!output) {
-        error = "cannot write " + o.output;
+    std::string write_error;
+    if (!platform_write_file(o.output, manifest, false, write_error)) {
+        error = "cannot write " + o.output + ": " + write_error;
         return 1;
     }
     return 0;

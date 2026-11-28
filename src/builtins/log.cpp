@@ -2,6 +2,7 @@
 
 #include "ast.h"
 #include "builtins_internal.h"
+#include "platform.h"
 #include "valuetype.h"
 
 #include <cerrno>
@@ -666,7 +667,7 @@ std::shared_ptr<log_state> make_logger(const std::vector<value_t *> &args) {
             yyerror("std.log.new: output \"file\" requires a path");
             return nullptr;
         }
-        sink->file = std::fopen(path.c_str(), append ? "ab" : "wb");
+        sink->file = platform_open_file(path, append ? "ab" : "wb");
         if (!sink->file) {
             yyerror("std.log.new: cannot open %s: %s", path.c_str(),
                     std::strerror(errno));

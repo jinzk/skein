@@ -17,6 +17,7 @@
 #include "net.h"
 #include "package.h"
 #include "parser_lock.h"
+#include "path.h"
 #include "platform.h"
 #include "process_spawn.h"
 #include "repl.h"
@@ -44,6 +45,7 @@
 #include <chrono>
 #include <cstring>
 #include <deque>
+#include <filesystem>
 #include <memory>
 #include <mutex>
 #include <random>
@@ -4107,8 +4109,10 @@ bool write_worker_bootstrap(const std::string &source, std::string &path,
 struct worker_bootstrap_file {
     std::string path;
     ~worker_bootstrap_file() {
-        if (!path.empty())
-            std::remove(path.c_str());
+        if (!path.empty()) {
+            std::error_code ignored;
+            std::filesystem::remove(skein::path_from_utf8(path), ignored);
+        }
     }
 };
 
@@ -5179,10 +5183,13 @@ value_t *http_serve_processes(const std::vector<value_t *> &args) {
             std::string shared;
             std::string bootstrap;
             ~file_cleanup() {
+                std::error_code ignored;
                 if (!shared.empty())
-                    std::remove(shared.c_str());
+                    std::filesystem::remove(skein::path_from_utf8(shared),
+                                            ignored);
                 if (!bootstrap.empty())
-                    std::remove(bootstrap.c_str());
+                    std::filesystem::remove(skein::path_from_utf8(bootstrap),
+                                            ignored);
             }
         } cleanup_files{shared_path, bootstrap_path};
 

@@ -4,6 +4,7 @@
 #include "diagnostics.h"
 #include "fiber.h"
 #include "builtins_io.h"
+#include "path.h"
 #include "repl.h"
 #include "task.h"
 #include "valuetype.h"
@@ -910,7 +911,7 @@ int alpn_ex_index() {
 bool file_mtime(const std::string &path, int64_t &mtime) {
     std::error_code ec;
     std::filesystem::file_time_type stamp =
-        std::filesystem::last_write_time(path, ec);
+        std::filesystem::last_write_time(skein::path_from_utf8(path), ec);
     if (ec)
         return false;
     mtime = (int64_t)stamp.time_since_epoch().count();

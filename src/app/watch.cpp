@@ -1,5 +1,6 @@
 #include "watch.h"
 
+#include "path.h"
 #include "runtime_state.h"
 
 #include <uv.h>
@@ -279,6 +280,18 @@ void on_exit(uv_process_t *process, int64_t exit_status, int term_signal) {
 void start_child(watch_state &state) {
     if (state.stopping || state.child)
         return;
+
+    const bool utf8_ok =
+        skein::is_valid_utf8(state.options.executable) &&
+        std::all_of(state.options.command.begin(), state.options.command.end(),
+                    [](const std::string &argument) {
+                        return skein::is_valid_utf8(argument);
+                    });
+    if (!utf8_ok) {
+        std::fprintf(stderr, "[watch] command must be valid UTF-8\n");
+        begin_stop(state);
+        return;
+    }
 
     std::vector<char *> argv;
     argv.reserve(state.options.command.size() + 1);

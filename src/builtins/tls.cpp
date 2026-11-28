@@ -5,15 +5,20 @@
 #include "fiber.h"
 #include "builtins_io.h"
 #include "path.h"
+#include "platform.h"
 #include "repl.h"
 #include "task.h"
 #include "valuetype.h"
 
+#include <openssl/bio.h>
 #include <openssl/err.h>
+#include <openssl/evp.h>
+#include <openssl/pem.h>
 #include <openssl/ssl.h>
 #include <openssl/x509v3.h>
 
 #include <algorithm>
+#include <climits>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -73,6 +78,120 @@ void ssl_error_string(std::string &error, const char *prefix) {
     } else {
         error = prefix;
     }
+}
+
+using bio_ptr = std::unique_ptr<BIO, decltype(&BIO_free)>;
+using x509_ptr = std::unique_ptr<X509, decltype(&X509_free)>;
+using pkey_ptr = std::unique_ptr<EVP_PKEY, decltype(&EVP_PKEY_free)>;
+
+/* OpenSSL's *_file APIs take a narrow filename.  Read the PEM bytes through
+ * the platform helper instead, so Windows paths stay UTF-8 end to end. */
+bio_ptr pem_bio(const std::string &path, std::string &error) {
+    std::string data;
+    if (!platform_read_file(path, data, error)) {
+        error = "cannot read " + path + ": " + error;
+        return bio_ptr(nullptr, &BIO_free);
+    }
+    if (data.size() > static_cast<std::size_t>(INT_MAX)) {
+        error = "tls: PEM file is too large: " + path;
+        return bio_ptr(nullptr, &BIO_free);
+    }
+    bio_ptr bio(BIO_new(BIO_s_mem()), &BIO_free);
+    if (!bio) {
+        ssl_error_string(error, "tls: cannot create PEM buffer");
+        return bio;
+    }
+    /* BIO_new_mem_buf borrows `data`; copy it so the BIO outlives this frame. */
+    if (BIO_write(bio.get(), data.data(), (int)data.size()) !=
+        (int)data.size()) {
+        ssl_error_string(error, "tls: cannot buffer PEM file");
+        return bio_ptr(nullptr, &BIO_free);
+    }
+    return bio;
+}
+
+bool use_certificate_chain(SSL_CTX *ctx, const std::string &path,
+                           std::string &error) {
+    bio_ptr bio = pem_bio(path, error);
+    if (!bio)
+        return false;
+    ERR_clear_error();
+    x509_ptr cert(PEM_read_bio_X509_AUX(bio.get(), NULL, NULL, NULL),
+                  &X509_free);
+    if (!cert) {
+        ssl_error_string(error, "tls: cannot load certificate");
+        return false;
+    }
+    if (SSL_CTX_use_certificate(ctx, cert.get()) != 1) {
+        ssl_error_string(error, "tls: cannot use certificate");
+        return false;
+    }
+    for (;;) {
+        x509_ptr extra(PEM_read_bio_X509(bio.get(), NULL, NULL, NULL),
+                       &X509_free);
+        if (!extra)
+            break;
+        if (SSL_CTX_add_extra_chain_cert(ctx, extra.get()) != 1) {
+            ssl_error_string(error, "tls: cannot add chain certificate");
+            return false;
+        }
+        extra.release(); /* SSL_CTX owns the certificate now. */
+    }
+    if (ERR_GET_REASON(ERR_peek_last_error()) != PEM_R_NO_START_LINE) {
+        ssl_error_string(error, "tls: cannot parse certificate chain");
+        return false;
+    }
+    ERR_clear_error();
+    return true;
+}
+
+bool use_private_key(SSL_CTX *ctx, const std::string &path,
+                     std::string &error) {
+    bio_ptr bio = pem_bio(path, error);
+    if (!bio)
+        return false;
+    ERR_clear_error();
+    pkey_ptr key(PEM_read_bio_PrivateKey(
+                     bio.get(), NULL, SSL_CTX_get_default_passwd_cb(ctx),
+                     SSL_CTX_get_default_passwd_cb_userdata(ctx)),
+                 &EVP_PKEY_free);
+    if (!key) {
+        ssl_error_string(error, "tls: cannot load private key");
+        return false;
+    }
+    if (SSL_CTX_use_PrivateKey(ctx, key.get()) != 1) {
+        ssl_error_string(error, "tls: cannot use private key");
+        return false;
+    }
+    return true;
+}
+
+bool load_verify_file(SSL_CTX *ctx, const std::string &path,
+                      std::string &error) {
+    bio_ptr bio = pem_bio(path, error);
+    if (!bio)
+        return false;
+    ERR_clear_error();
+    X509_STORE *store = SSL_CTX_get_cert_store(ctx);
+    bool loaded = false;
+    for (;;) {
+        x509_ptr cert(PEM_read_bio_X509(bio.get(), NULL, NULL, NULL),
+                      &X509_free);
+        if (!cert)
+            break;
+        if (!X509_STORE_add_cert(store, cert.get())) {
+            ssl_error_string(error, "tls: cannot add CA certificate");
+            return false;
+        }
+        loaded = true;
+    }
+    if (!loaded ||
+        ERR_GET_REASON(ERR_peek_last_error()) != PEM_R_NO_START_LINE) {
+        ssl_error_string(error, "tls: cannot load CA file");
+        return false;
+    }
+    ERR_clear_error();
+    return true;
 }
 
 struct tls_stream {
@@ -977,11 +1096,13 @@ SSL_CTX *build_base_server_ctx(const std::string &cert_file,
     static const unsigned char session_context[] = "skein-tls";
     SSL_CTX_set_session_id_context(
         ctx, session_context, (unsigned int)(sizeof(session_context) - 1));
-    if (SSL_CTX_use_certificate_chain_file(ctx, cert_file.c_str()) != 1 ||
-        SSL_CTX_use_PrivateKey_file(ctx, key_file.c_str(),
-                                    SSL_FILETYPE_PEM) != 1 ||
+    std::string load_error;
+    if (!use_certificate_chain(ctx, cert_file, load_error) ||
+        !use_private_key(ctx, key_file, load_error) ||
         SSL_CTX_check_private_key(ctx) != 1) {
-        ssl_error_string(error, "tls: cannot load certificate or key");
+        if (load_error.empty())
+            ssl_error_string(load_error, "tls: key does not match certificate");
+        error = "tls: cannot load certificate or key: " + load_error;
         SSL_CTX_free(ctx);
         return NULL;
     }
@@ -998,8 +1119,9 @@ SSL_CTX *build_base_server_ctx(const std::string &cert_file,
     }
     std::string client_ca = option_string(options, "client_ca_file");
     if (!client_ca.empty()) {
-        if (SSL_CTX_load_verify_locations(ctx, client_ca.c_str(), NULL) != 1) {
-            ssl_error_string(error, "tls: cannot load client CA file");
+        std::string ca_error;
+        if (!load_verify_file(ctx, client_ca, ca_error)) {
+            error = "tls: cannot load client CA file: " + ca_error;
             SSL_CTX_free(ctx);
             return NULL;
         }
@@ -1229,10 +1351,9 @@ value_t *tls_client(const std::vector<value_t *> &args) {
         SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
         std::string ca_file = option_string(options, "ca_file");
         if (!ca_file.empty()) {
-            if (SSL_CTX_load_verify_locations(ctx, ca_file.c_str(), NULL) != 1) {
-                std::string error;
-                ssl_error_string(error, "tls: cannot load CA file");
-                yyerror("%s", error.c_str());
+            std::string ca_error;
+            if (!load_verify_file(ctx, ca_file, ca_error)) {
+                yyerror("tls: cannot load CA file: %s", ca_error.c_str());
                 SSL_CTX_free(ctx);
                 return NULL;
             }
@@ -1252,15 +1373,15 @@ value_t *tls_client(const std::vector<value_t *> &args) {
         return NULL;
     }
     if (!client_cert.empty()) {
-        if (SSL_CTX_use_certificate_chain_file(ctx, client_cert.c_str()) !=
-                1 ||
-            SSL_CTX_use_PrivateKey_file(ctx, client_key.c_str(),
-                                        SSL_FILETYPE_PEM) != 1 ||
+        std::string load_error;
+        if (!use_certificate_chain(ctx, client_cert, load_error) ||
+            !use_private_key(ctx, client_key, load_error) ||
             SSL_CTX_check_private_key(ctx) != 1) {
-            std::string error;
-            ssl_error_string(error, "tls: cannot load client certificate or "
-                                    "key");
-            yyerror("%s", error.c_str());
+            if (load_error.empty())
+                ssl_error_string(load_error,
+                                 "tls: key does not match certificate");
+            yyerror("tls: cannot load client certificate or key: %s",
+                    load_error.c_str());
             SSL_CTX_free(ctx);
             return NULL;
         }

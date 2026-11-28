@@ -1,5 +1,6 @@
 #include "db_internal.h"
 
+#include "path.h"
 #include "symbol.h"
 #include "valuetype.h"
 
@@ -221,6 +222,12 @@ std::unique_ptr<db_backend> db_open_sqlite(const std::string &path,
         }
     }
 
+    /* SQLite takes a UTF-8 filename and converts it on Windows; reject
+     * malformed UTF-8 here instead of letting it become a mojibake path. */
+    if (!skein::is_valid_utf8(path)) {
+        yyerror("std.db open: path must be valid UTF-8");
+        return NULL;
+    }
     std::unique_ptr<sqlite_backend> backend =
         std::make_unique<sqlite_backend>();
     int rc = sqlite3_open_v2(

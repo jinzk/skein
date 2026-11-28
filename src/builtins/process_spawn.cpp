@@ -6,6 +6,7 @@
 #include "builtins_io.h"
 #include "dict.h"
 #include "event_loop.h"
+#include "path.h"
 #include "platform.h"
 #include "runtime_state.h"
 #include "task.h"
@@ -1145,6 +1146,23 @@ value_t *call_process_spawn_builtin(
             cwd = thread_cwd();
         else
             cwd = thread_resolve_path(cwd);
+        const std::string file = ((string_value_t *)args[0])->value;
+        /* libuv converts these narrow strings to UTF-16 on Windows, so reject
+         * invalid UTF-8 before handing them over. */
+        const bool utf8_ok =
+            skein::is_valid_utf8(file) && skein::is_valid_utf8(cwd) &&
+            std::all_of(arguments.begin(), arguments.end(),
+                        [](const std::string &item) {
+                            return skein::is_valid_utf8(item);
+                        }) &&
+            std::all_of(environment.begin(), environment.end(),
+                        [](const std::string &item) {
+                            return skein::is_valid_utf8(item);
+                        });
+        if (!utf8_ok) {
+            yyerror("%s: file, args, cwd, and env must be valid UTF-8", name);
+            return NULL;
+        }
         if (!event_loop_init()) {
             yyerror("%s: cannot initialize event loop", name);
             return NULL;
@@ -1165,7 +1183,6 @@ value_t *call_process_spawn_builtin(
             process->stderr_pipe->kind = 2;
         }
 
-        const std::string file = ((string_value_t *)args[0])->value;
         arguments.insert(arguments.begin(), file);
         std::vector<char *> argv;
         argv.reserve(arguments.size() + 1);

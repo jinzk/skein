@@ -283,7 +283,7 @@ std::string unique_temp_dir(const std::string &cache) {
     const auto stamp = std::chrono::steady_clock::now()
                            .time_since_epoch()
                            .count();
-    return (fs::path(cache) / (".tmp-" + std::to_string(stamp))).u8string();
+    return (fs::u8path(cache) / (".tmp-" + std::to_string(stamp))).u8string();
 }
 
 /* Git checkouts contain read-only object files.  remove_all() alone cannot
@@ -394,7 +394,7 @@ struct pending_sums {
 
 bool download_module(const std::string &module, const std::string &version,
                      const std::string &destination, std::string &error) {
-    const fs::path cache = fs::path(destination).parent_path();
+    const fs::path cache = fs::u8path(destination).parent_path();
     std::error_code ec;
     fs::create_directories(cache, ec);
     if (ec) {
@@ -419,7 +419,7 @@ bool download_module(const std::string &module, const std::string &version,
     }
 
     std::error_code manifest_ec;
-    if (!fs::is_regular_file(fs::path(temp) / "module.skein", manifest_ec) ||
+    if (!fs::is_regular_file(fs::u8path(temp) / "module.skein", manifest_ec) ||
         manifest_ec) {
         discard_tree(temp);
         error = "module " + module + " has no module.skein at its root";
@@ -1076,7 +1076,7 @@ int run_mod_init_tool(const std::vector<std::string> &args,
         return 1;
     }
     std::error_code exists_ec;
-    if (fs::exists(fs::path(directory) / "skein.mod", exists_ec) &&
+    if (fs::exists(fs::u8path(directory) / "skein.mod", exists_ec) &&
         !exists_ec && !options.force) {
         std::fprintf(stderr, "%s: skein.mod already exists (use --force)\n",
                      program.c_str());
@@ -1098,7 +1098,7 @@ int run_mod_init_tool(const std::vector<std::string> &args,
         return 1;
     }
     std::printf("created %s\n",
-                (fs::path(directory) / "skein.mod").u8string().c_str());
+                (fs::u8path(directory) / "skein.mod").u8string().c_str());
     return 0;
 }
 

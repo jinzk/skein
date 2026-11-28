@@ -173,10 +173,10 @@ std::string trim(const std::string &text) {
 
 std::string canonical_path(const std::string &path) {
     std::error_code ec;
-    fs::path result = fs::weakly_canonical(fs::path(path), ec);
+    fs::path result = fs::weakly_canonical(fs::u8path(path), ec);
     if (ec)
         return path;
-    return result.string();
+    return result.u8string();
 }
 
 std::string shell_quote(const std::string &value) {
@@ -2516,8 +2516,8 @@ bool detect_cpp(const std::vector<token> &tokens, std::string &what) {
 }
 
 std::string default_module(const std::string &header) {
-    fs::path path(header);
-    std::string stem = path.stem().string();
+    fs::path path = fs::u8path(header);
+    std::string stem = path.stem().u8string();
     if (stem.empty())
         return "ffi";
     return stem;

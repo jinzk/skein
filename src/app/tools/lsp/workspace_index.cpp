@@ -334,7 +334,7 @@ void workspace_index::rebuild(const std::vector<std::string> &roots) {
     entries_.clear();
     for (const std::string &root_text : roots) {
         std::error_code ec;
-        fs::path root(root_text);
+        fs::path root = fs::u8path(root_text);
         if (!fs::is_directory(root, ec))
             continue;
         for (fs::recursive_directory_iterator it(root, ec), end;

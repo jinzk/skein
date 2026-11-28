@@ -1,6 +1,5 @@
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <filesystem>
 #include <string>
 #include <utility>
@@ -129,38 +128,6 @@ int main(int argc, char **argv) {
     skein::typecheck::set_mode(typecheck_mode);
     skein::startup_profile::mark("typecheck_setup");
 
-    for (int i = 1; i < argc; ++i) {
-        if (std::strcmp(argv[i], "--check-ffi") == 0) {
-#ifdef SKEIN_ENABLE_FFI
-            if (i + 2 >= argc) {
-                std::fprintf(stderr,
-                             "usage: skein --check-ffi <library> <manifest>\n");
-                return 2;
-            }
-            std::string check_error;
-            int check_code =
-                ffi_check::run_check(argv[i + 1], argv[i + 2], check_error);
-            if (check_code != 0 && !check_error.empty())
-                std::fprintf(stderr, "skein: %s\n", check_error.c_str());
-            return check_code;
-#else
-            std::fprintf(stderr, "skein: built without FFI support\n");
-            return 2;
-#endif
-        }
-        if (std::strcmp(argv[i], "--ffi-gen") == 0) {
-            std::vector<std::string> gen_args;
-            for (int j = i + 1; j < argc; ++j)
-                gen_args.emplace_back(argv[j]);
-            std::string gen_error;
-            int code = skein::run_ffi_gen(gen_args, gen_error);
-            if (code != 0 && !gen_error.empty())
-                std::fprintf(stderr, "skein: %s\n", gen_error.c_str());
-            return code;
-        }
-    }
-    skein::startup_profile::mark("pre_scan");
-
     struct skein_context runtime_hooks = {runtime_call,
                                           runtime_call_builtin,
                                           runtime_error_report};
@@ -177,6 +144,41 @@ int main(int argc, char **argv) {
 
     std::vector<std::string> args = platform_command_line_args(argc, argv);
     skein::startup_profile::mark("command_line");
+
+    /* FFI flags need normalized UTF-8 argv on Windows, so handle them after
+     * platform_command_line_args() rather than from the raw narrow argv. */
+    for (std::size_t i = 1; i < args.size(); ++i) {
+        if (args[i] == "--check-ffi") {
+#ifdef SKEIN_ENABLE_FFI
+            if (i + 2 >= args.size()) {
+                std::fprintf(stderr,
+                             "usage: skein --check-ffi <library> <manifest>\n");
+                return 2;
+            }
+            std::string check_error;
+            int check_code = ffi_check::run_check(args[i + 1], args[i + 2],
+                                                  check_error);
+            if (check_code != 0 && !check_error.empty())
+                std::fprintf(stderr, "skein: %s\n", check_error.c_str());
+            return check_code;
+#else
+            std::fprintf(stderr, "skein: built without FFI support\n");
+            return 2;
+#endif
+        }
+        if (args[i] == "--ffi-gen") {
+            std::vector<std::string> gen_args;
+            for (std::size_t j = i + 1; j < args.size(); ++j)
+                gen_args.push_back(args[j]);
+            std::string gen_error;
+            int code = skein::run_ffi_gen(gen_args, gen_error);
+            if (code != 0 && !gen_error.empty())
+                std::fprintf(stderr, "skein: %s\n", gen_error.c_str());
+            return code;
+        }
+    }
+    skein::startup_profile::mark("pre_scan");
+
     const char *program =
         args.empty() || args[0].empty() ? "skein" : args[0].c_str();
 

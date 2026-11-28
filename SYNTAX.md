@@ -942,6 +942,8 @@ opcode。用户宏另有受限 `type` 片段，把调用点的类型放进类型
 1 + 2
 ```
 
+交互模式遵循同一规则：顶层普通表达式、赋值和自增可以省略结尾分号；`let` / `const`（含解构）、`import` / `include`、`defer`、`return` / `break` / `continue` / `goto` 必须写分号；`if` / `while` / `for` / `switch` / `func` / `struct` / `enum` / `proto` / `macro` 等块语句不需要。`do { ... }` 另有限制，见 5.10。
+
 代码块中的表达式语句需要分号：
 
 ```text
@@ -1587,7 +1589,7 @@ if (d == {"a": 1}) { ... }
 if ((Point { x: 1 }) is Point) { ... }
 ```
 
-所有控制流和声明体的 `{` 必须和头部在同一行，`if` / `while` / `for` / `switch` / `match` / `func` / `struct` / `enum` / `proto` / `impl` / `package` / `extern` 都适用；`else` 必须和前面的 `}` 在同一行；`do ... while` 的 `while` 必须和 `}` 在同一行。进入 `{}` 后可以自由换行，表达式和字面量内部的换行仍然会被忽略。
+所有控制流和声明体的 `{` 必须和头部在同一行，`if` / `while` / `for` / `switch` / `match` / `func` / `struct` / `enum` / `proto` / `impl` / `package` / `extern` 都适用；`else` 必须和前面的 `}` 在同一行，`else if` 中的 `if` 也必须紧跟在同一行的 `else` 后面；`do ... while` 的 `while` 必须和 `}` 在同一行。进入 `{}` 后可以自由换行，表达式和字面量内部的换行仍然会被忽略。
 
 ### 5.4 while / do while
 
@@ -2126,7 +2128,7 @@ let safe = do {
 - `on error` 可选；`std.error.recover!` 的值成为整个 `do ... on error` 表达式的值；
 - `return` / `break` / `continue` 直接穿出块；在 `do { ... }` 块表达式中使用 `return` 会发出警告（包括 `-> do { ... }` 和 lambda 体内的 `do { ... }`），推荐用块的最后一条表达式作为值，或改用裸 `{ ... }` 写普通语句块；
 - 该警告只针对 `do { ... }` 块表达式；`do { ... } while (...)` 循环体中的 `return` 不触发警告；`-> { ... }` 直接作为 lambda 块体时也不触发该警告；
-- `do { ... }` 作为独立语句时末尾需要 `;`；
+- `do { ... }` 作为独立语句时末尾需要 `;`；在交互模式中，词法器读到 `}` 后会继续判断同一行是否跟随 `while`，因此会暂时吞掉换行。漏写 `;` 会让下一行被当作续行并报语法错误；该错误只丢弃当前语句，后续输入仍可正常求值；
 - `do { ... } while (...)` 仍然是 do-while 语句，`while` 必须和 `}` 同一行。若想要“块表达式 + 后续 while 循环”，用分号分开：
 
 ```text

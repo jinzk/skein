@@ -4318,8 +4318,9 @@ std.thread.capabilities
 - `std` 是内置包，不参与文件系统查找，也不需要满足目录名规则；
 - `std` 名称保留，不能通过源码包覆盖；
 - `std` 是语言级默认根绑定，无需 `import std;` 即可使用；显式 `import std;` 仍然合法且幂等；
+- 默认导入只提供 `std` 这个根名字，不等于 `import std.*`：`std.list` / `std.math` / `std.type` 等模块及其中的函数都不会展开到全局，新增 std API 不会隐式改变已有脚本的全局空间；
 - `std.*` 是规范形式；通过 `std.list`、`std.string` 等方式访问；
-- 默认裸值只有 `list` / `dict` / `tuple` / `pair` / `input` / `print` / `println`；`len` / `iter!` 已完全移除，`range` 与类型内省裸名也不再提供，分别使用 `std.utils.range` / `std.type.*`；
+- 默认裸值是语言级固定白名单，目前只有 `list` / `dict` / `tuple` / `pair` / `input` / `print` / `println`；新增 std 函数不扩大这份白名单。`len` / `iter!` 已完全移除，`range` 与类型内省裸名也不再提供，分别使用 `std.utils.range` / `std.type.*`；
 - 容器长度统一使用 `length()` 或 `std.*.length`，包括 `deque` / `heap` / `set`、`arena` / `lru` 与 tuple / pair；`size()` 保留为这些类型的兼容别名；迭代器统一使用 `iter()` 或 `std.iter.*`，不再提供 `.len()` / `std.utils.len` / `std.utils.iter!`；
 - 数学、字符串、格式化、文件与 bytes 的旧全局函数（如 `find`、`split`、`bytes_*`、`file_*`）已移除，请改用对应的 `std.math` / `std.string` / `std.fs` / `std.bytes` 函数；
 - `std` 导入得到的是命名空间副本，修改自己的副本不会污染内置缓存；

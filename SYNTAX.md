@@ -66,8 +66,12 @@ contextual keyword，不是全局保留字：`launch f()` 启动 task，`await f
 为 `"proto"`。
 
 `std` 是语言级默认根绑定，无需 `import std;` 即可使用；显式 `import std;` 仍然
-合法且幂等。默认裸值只有 `list` / `dict` / `tuple` / `pair` / `input` / `print` / `println`；
-`len` / `iter!` 已完全移除，`range` 与类型内省使用规范路径 `std.utils.range`、
+合法且幂等。默认只提供 `std` 这个根名字，不等于 `import std.*`：不会把
+`std.list` / `std.math` / `std.type` 等模块或其中的函数展开到全局，具体功能一律
+通过 `std.*` 访问。这样新增标准库 API 不会隐式改变已有脚本的全局空间。
+默认裸值是语言级固定白名单，目前只有 `list` / `dict` / `tuple` / `pair` /
+`input` / `print` / `println`；新增 std 函数不扩大这份白名单。`len` / `iter!`
+已完全移除，`range` 与类型内省使用规范路径 `std.utils.range`、
 `std.type.kind_of` / `std.type.name` / `std.type.package_name` /
 `std.type.module_name` / `std.type.source`。
 容器长度用 `x.length()` 或 `std.list.length(x)` 等规范路径，迭代器用

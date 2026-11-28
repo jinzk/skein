@@ -52,17 +52,6 @@ std::string percent_encode_path(const std::string &path) {
     return out;
 }
 
-std::string path_to_uri(const fs::path &path) {
-    std::error_code ec;
-    fs::path absolute = fs::absolute(path, ec);
-    if (ec)
-        absolute = path;
-    std::string text = skein::path_to_utf8_generic(absolute);
-    if (!starts_with(text, "/"))
-        text = "/" + text;
-    return "file://" + percent_encode_path(text);
-}
-
 bool read_file(const fs::path &path, std::string &text) {
     std::ifstream stream(path, std::ios::binary);
     if (!stream)
@@ -330,6 +319,17 @@ void index_module(const fs::path &module_root,
 }
 
 } // namespace
+
+std::string path_to_uri(const fs::path &path) {
+    std::error_code ec;
+    fs::path absolute = fs::absolute(path, ec);
+    if (ec)
+        absolute = path;
+    std::string text = skein::path_to_utf8_generic(absolute);
+    if (!starts_with(text, "/"))
+        text = "/" + text;
+    return "file://" + percent_encode_path(text);
+}
 
 void workspace_index::rebuild(const std::vector<std::string> &roots) {
     entries_.clear();

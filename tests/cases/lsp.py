@@ -5,6 +5,7 @@ import json
 import pathlib
 import queue
 import subprocess
+import sys
 import tempfile
 import threading
 
@@ -279,6 +280,43 @@ def run_workspace_cases():
             )
             assert alias["detail"] == "selective import", alias
 
+            stderr = session.stop()
+            assert "SKEIN_LSP_SIDE_EFFECT" not in stderr, stderr
+        finally:
+            if session.process.poll() is None:
+                session.process.kill()
+                session.process.wait(timeout=10)
+
+
+def _run_windows_uri_cases():
+    """Exercise UTF-8 path <-> file:// URI conversion with a non-ASCII path."""
+    with tempfile.TemporaryDirectory(prefix="skein_lsp_中文_") as temporary:
+        path = pathlib.Path(temporary) / "程序.skein"
+        text = "import std;\nfunc probe() { std.io.print(\"hi\"); }\n"
+        path.write_text(text, encoding="utf-8")
+        uri = path.resolve().as_uri()
+
+        session = LspSession()
+        try:
+            session.request("initialize", {"capabilities": {}})
+            session.notify("initialized", {})
+            session.notify(
+                "textDocument/didOpen",
+                {
+                    "textDocument": {
+                        "uri": uri,
+                        "languageId": "skein",
+                        "version": 1,
+                        "text": text,
+                    }
+                },
+            )
+            diagnostics = session.wait_for_diagnostics(uri)
+            assert diagnostics == [], diagnostics
+            symbols = session.request(
+                "textDocument/documentSymbol", {"textDocument": {"uri": uri}}
+            )
+            assert any(item["name"] == "probe" for item in symbols), symbols
             stderr = session.stop()
             assert "SKEIN_LSP_SIDE_EFFECT" not in stderr, stderr
         finally:
@@ -619,3 +657,5 @@ def run_cases():
                 session.process.wait(timeout=10)
 
     run_workspace_cases()
+    if sys.platform == "win32":
+        _run_windows_uri_cases()

@@ -1,11 +1,15 @@
 #ifndef SKEIN_LSP_WORKSPACE_INDEX_H
 #define SKEIN_LSP_WORKSPACE_INDEX_H
 
+#include <filesystem>
 #include <string>
 #include <vector>
 
 namespace skein {
 namespace lsp {
+
+/** Convert a native path to a percent-encoded file:// URI (UTF-8 text). */
+std::string path_to_uri(const std::filesystem::path &path);
 
 struct index_entry {
     std::string qualified_name; // 对外可见的限定名，例如 "math.add"

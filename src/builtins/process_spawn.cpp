@@ -200,7 +200,7 @@ bool process_child_pids(long long pid, std::vector<long long> &children) {
     fs::directory_iterator it("/proc", error);
     fs::directory_iterator end;
     while (!error && it != end) {
-        const std::string name = it->path().filename().string();
+        const std::string name = skein::path_to_utf8(it->path().filename());
         const bool numeric =
             !name.empty() &&
             std::all_of(name.begin(), name.end(), [](unsigned char ch) {

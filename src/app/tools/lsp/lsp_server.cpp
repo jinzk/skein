@@ -19,6 +19,7 @@
 #include "json.h"
 #include "json_rpc.h"
 #include "lsp_json.h"
+#include "path.h"
 #include "position.h"
 #include "static_type.h"
 #include "std_namespace.h"
@@ -645,7 +646,7 @@ value_t *location_value(const std::string &uri, const lsp_position &start,
 std::string uri_for_source(const std::string &source) {
     if (starts_with(source, "file://"))
         return source;
-    return "file://" + source;
+    return path_to_uri(skein::path_from_utf8(source));
 }
 
 } // namespace

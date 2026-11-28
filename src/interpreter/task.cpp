@@ -87,8 +87,7 @@ struct task : std::enable_shared_from_this<task> {
         else
             close_timer();
         std::vector<task *> &tasks = task_registry();
-        tasks.erase(std::remove(tasks.begin(), tasks.end(), this),
-                    tasks.end());
+        std::erase(tasks, this);
         for (const task_ptr &child : children) {
             if (child && child->status == TASK_PENDING)
                 child->cancel();
@@ -1199,9 +1198,7 @@ void task_detach(const task_ptr &task) {
     task_ptr parent = task->parent.lock();
     if (parent) {
         std::vector<task_ptr> &children = parent->children;
-        children.erase(
-            std::remove(children.begin(), children.end(), task),
-            children.end());
+        std::erase(children, task);
     }
     task->parent.reset();
 }

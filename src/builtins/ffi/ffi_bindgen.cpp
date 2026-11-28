@@ -2284,18 +2284,12 @@ void parser::keep_symbols(const std::vector<std::string> &patterns) {
         }
         return false;
     };
-    functions_.erase(
-        std::remove_if(functions_.begin(), functions_.end(),
-                       [&](const function_out &function) {
-                           return !keep(function.name);
-                       }),
-        functions_.end());
-    variables_.erase(
-        std::remove_if(variables_.begin(), variables_.end(),
-                       [&](const variable_out &variable) {
-                           return !keep(variable.name);
-                       }),
-        variables_.end());
+    std::erase_if(functions_, [&](const function_out &function) {
+        return !keep(function.name);
+    });
+    std::erase_if(variables_, [&](const variable_out &variable) {
+        return !keep(variable.name);
+    });
     for (auto it = constants_.begin(); it != constants_.end();) {
         if (keep(it->first))
             ++it;

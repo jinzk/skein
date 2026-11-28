@@ -2252,12 +2252,10 @@ bool user_macro_define(const char *name,
     }
 
     /* A same-file definition overrides any imported binding of the same name. */
-    g_macros.erase(std::remove_if(g_macros.begin(), g_macros.end(),
-                                  [&](const macro_entry &candidate) {
-                                      return candidate.imported &&
-                                             candidate.name == name;
-                                  }),
-                   g_macros.end());
+    std::erase_if(g_macros, [&](const macro_entry &candidate) {
+        return candidate.imported &&
+               candidate.name == name;
+    });
     macro_entry entry;
     entry.name = name;
     entry.body = macro;

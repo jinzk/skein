@@ -85,12 +85,9 @@ scope_t::~scope_t() {
 }
 
 void prune_scopes(scope_context &context) {
-    context.all_scopes.erase(
-        std::remove_if(context.all_scopes.begin(), context.all_scopes.end(),
-                       [](const std::weak_ptr<scope_t> &w) {
-                           return w.expired();
-                       }),
-        context.all_scopes.end());
+    std::erase_if(context.all_scopes, [](const std::weak_ptr<scope_t> &w) {
+        return w.expired();
+    });
     /*
      * A scan is O(size).  Scopes can stay alive until the next statement when
      * a loop creates closures (scope <-> closure cycles are reclaimed

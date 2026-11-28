@@ -190,12 +190,9 @@ bool build_environment(
             !platform_utf8_to_wide(override_entry.second, value))
             return false;
 
-        entries.erase(
-            std::remove_if(entries.begin(), entries.end(),
-                           [&](const environment_entry &entry) {
-                               return equal_case_insensitive(entry.name, name);
-                           }),
-            entries.end());
+        std::erase_if(entries, [&](const environment_entry &entry) {
+            return equal_case_insensitive(entry.name, name);
+        });
         entries.push_back({name, value});
     }
 

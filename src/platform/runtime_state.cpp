@@ -171,12 +171,9 @@ void thread_env_all(
     thread_environment &state = environment();
 
     if (!state.removed.empty()) {
-        entries.erase(
-            std::remove_if(entries.begin(), entries.end(),
-                           [&state](const auto &entry) {
-                               return state.removed.contains(entry.first);
-                           }),
-            entries.end());
+        std::erase_if(entries, [&state](const auto &entry) {
+            return state.removed.contains(entry.first);
+        });
     }
 
     for (const auto &override : state.values) {

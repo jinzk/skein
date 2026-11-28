@@ -225,9 +225,7 @@ thread_local std::vector<fiber *> generator_fibers;
 thread_local bool fiber_gc_roots_registered = false;
 
 void forget_generator_fiber(fiber *value) {
-    generator_fibers.erase(
-        std::remove(generator_fibers.begin(), generator_fibers.end(), value),
-        generator_fibers.end());
+    std::erase(generator_fibers, value);
 }
 
 /*
@@ -283,8 +281,7 @@ void ensure_fiber_gc_roots() {
 }
 
 void remove_fiber(fiber *value) {
-    all_fibers.erase(std::remove(all_fibers.begin(), all_fibers.end(), value),
-                     all_fibers.end());
+    std::erase(all_fibers, value);
     delete value;
 }
 

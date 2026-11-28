@@ -377,9 +377,7 @@ bool channel_can_enqueue_nonblocking_locked(const channel_state &state) {
 
 void remove_waiter(std::vector<channel_waiter *> &waiters,
                    channel_waiter *waiter) {
-    waiters.erase(
-        std::remove(waiters.begin(), waiters.end(), waiter),
-        waiters.end());
+    std::erase(waiters, waiter);
 }
 
 void channel_fiber_sleep(long long ms) {

@@ -4,6 +4,7 @@
 #include "structtype.h"
 #include "value_ops.h"
 
+#include <bit>
 #include <cmath>
 #include <cstring>
 #include <vector>
@@ -381,8 +382,7 @@ std::uint64_t hash_key_inner(
                 std::trunc(value) == value) {
                 return mix_hash(0x1, (std::uint64_t)(long long)value);
             }
-            std::uint64_t bits = 0;
-            std::memcpy(&bits, &value, sizeof(bits));
+            std::uint64_t bits = std::bit_cast<std::uint64_t>(value);
             return mix_hash(0x9, bits);
         }
         case T_bool:

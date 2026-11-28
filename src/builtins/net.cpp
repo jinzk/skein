@@ -151,7 +151,7 @@ void remove_accept_async(accept_async_op *op) {
         return;
     std::deque<accept_async_op *> &queue =
         op->listener->pending_async_accepts;
-    queue.erase(std::remove(queue.begin(), queue.end(), op), queue.end());
+    std::erase(queue, op);
 }
 
 void cancel_accept_async(accept_async_op *op) {

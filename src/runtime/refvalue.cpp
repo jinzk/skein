@@ -602,12 +602,9 @@ void gc_sweep_unmarked_refs(uint64_t epoch) {
     }
     for (value_t *value : doomed)
         freeval(value);
-    tls_refs.objects.erase(
-        std::remove_if(tls_refs.objects.begin(), tls_refs.objects.end(),
-                       [](const std::weak_ptr<ref_object> &weak) {
-                           return weak.expired();
-                       }),
-        tls_refs.objects.end());
+    std::erase_if(tls_refs.objects, [](const std::weak_ptr<ref_object> &weak) {
+        return weak.expired();
+    });
 }
 
 void gc_note_ref_allocation() { ++tls_refs.allocations_since_collect; }

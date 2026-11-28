@@ -65,8 +65,7 @@
 
 ```text
 #!/usr/bin/env skein
-std.io.print("hello");
-import std;
+print("hello");
 ```
 
 ```bash
@@ -100,8 +99,7 @@ shebang 行同样会被跳过。
 最小示例：
 
 ```skein
-import std;
-std.io.print("hello, skein");
+println("hello, skein");
 ```
 
 保存为 `hello.skein` 后运行 `./build/skein hello.skein`。
@@ -109,22 +107,21 @@ std.io.print("hello, skein");
 
 ### 读取输入
 
-`std.io.input([prompt])` 从 stdin 读取一行，返回字符串（不含末尾换行）：
+`input([prompt])` 从 stdin 读取一行，返回字符串（不含末尾换行）：
 
 ```skein
-import std;
-let name = std.io.input("Name: ");
+let name = input("Name: ");
 if (name == null) {
-  std.io.println("no input");
+  println("no input");
 } else {
-  std.io.println("hello " + name);
+  println("hello " + name);
 }
 ```
 
 - 可选的 `prompt` 必须是字符串，会原样输出到 stdout；
 - 空行返回空字符串 `""`；
 - 读到 EOF 且没有剩余内容时返回 `null`；最后一行没有换行符时仍返回该行；
-- 读取多个值时，可以用 `std.string.split` 拆分后再转换类型（需要 `import std;`）。
+- 读取多个值时，可以用 `std.string.split` 拆分后再转换类型（`std` 默认可见）。
 
 更完整的规则见后面的“控制台输入”一节。
 
@@ -194,7 +191,6 @@ if (name == null) {
 管道 `|>` 把左侧值作为右侧调用的第一个参数：
 
 ```text
-import std;
 xs |> f              // f(xs)
 xs |> f(a)           // f(xs, a)
 std.utils.range(0, 10) |> std.iter.filter(func(x) -> x % 2 == 0) |> std.iter.collect()
@@ -208,7 +204,6 @@ std.utils.range(0, 10) |> std.iter.filter(func(x) -> x % 2 == 0) |> std.iter.col
 调用参数中的 `$` 是占位符：
 
 ```text
-import std;
 func add(a, b) { return a + b; }
 
 let add2 = add($, 2);     // x -> add(x, 2)
@@ -324,7 +319,6 @@ let d: union[int, string]? = null;
 容器可以写泛型参数，参数只参与静态检查，运行时擦除：
 
 ```text
-import std;
 let xs: list[int] = [1, 2];
 let d: dict[int, list[int]] = {1: [2]};
 let s: set[int] = std.set.from_list([1, 2]);
@@ -458,7 +452,6 @@ a < b             // true
 元数据和序列化：
 
 ```text
-import std;
 std.meta.generic_info("Box[int]")
 std.meta.type_args("Box[int]")       // ["int"]
 std.meta.type_params("Box[int]")     // ["T"]
@@ -474,7 +467,6 @@ std.struct.encode(box, "Box[int]")   // envelope，包含 $type
 内置容器支持值方法调用，方法名和对应命名空间函数一致：
 
 ```text
-import std;
 let xs: list[int] = [1, 2, 3];
 xs.length();
 xs.contains(2);
@@ -501,7 +493,6 @@ for x in (1, 2).iter() { ... }
 方法调用等价于把接收者作为第一个参数：
 
 ```text
-import std;
 xs.length()        == (xs).length()
 d.iter_keys()   == std.dict.iter_keys(d)
 q.push_back(3)  == std.deque.push_back(q, 3)
@@ -610,7 +601,6 @@ x >>= 1;
 列表和字典：
 
 ```text
-import std;
 let a = [1, 2, 3];
 a[0] = 9;
 a
@@ -636,7 +626,6 @@ pair/list 组成的可迭代对象。类型注解里的 `list[T]` / `dict[K, V]`
 切片使用 Python 风格的 `start:stop:step`，支持 list、string 和 bytes：
 
 ```text
-import std;
 
 let xs = [0, 1, 2, 3, 4];
 xs[1:4]        // [1, 2, 3]
@@ -673,11 +662,10 @@ p["x"] + p["y"]
 控制流：
 
 ```text
-import std;
 if (x > 5) {
-  std.io.print("big");
+  print("big");
 } else {
-  std.io.print("small");
+  print("small");
 }
 
 while (x > 0) {
@@ -689,39 +677,38 @@ do {
 } while (x > 0);
 
 for (let i = 0; i < 3; i = i + 1) {
-  std.io.print(i);
+  print(i);
 }
 
 for (let x in [1, 2, 3]) {
-  std.io.print(x);
+  print(x);
 }
 
 for (let key, value in {"a": 1, "b": 2}) {
-  std.io.print(key + "=" + str(value));
+  print(key + "=" + str(value));
 }
 
 for (let i in std.utils.range(0, 3)) {
-  std.io.print(i);
+  print(i);
 }
 
 for (let entry in {"a": 1, "b": 2}) {
-  std.io.print(entry[0] + "=" + str(entry[1]));
+  print(entry[0] + "=" + str(entry[1]));
 }
 
 for (let key in ({"a": 1, "b": 2}).keys()) {
-  std.io.print(key);
+  print(key);
 }
 ```
 
 控制流的条件圆括号也可以省略（Go 风格）：
 
 ```text
-import std;
-if x > 5 { std.io.print("big"); } else { std.io.print("small"); }
+if x > 5 { print("big"); } else { print("small"); }
 while x > 0 { x = x - 1; }
 do { x = x - 1; } while x > 0;
-for let i = 0; i < 3; i = i + 1 { std.io.print(i); }
-switch x { case 1 => std.io.print("one"); default => std.io.print("other"); }
+for let i = 0; i < 3; i = i + 1 { print(i); }
+switch x { case 1 => print("one"); default => print("other"); }
 match x { case 1 => "one"; default => "other"; }
 ```
 
@@ -730,34 +717,32 @@ match x { case 1 => "one"; default => "other"; }
 省略 `let` 和圆括号：
 
 ```text
-import std;
 for x in [1, 2, 3] {
-  std.io.print(x);
+  print(x);
 }
 
 for key, value in {"a": 1, "b": 2} {
-  std.io.print(key + "=" + str(value));
+  print(key + "=" + str(value));
 }
 
 for a, b in [(1, "x"), (2, "y")] {
-  std.io.print(str(a) + ":" + b);
+  print(str(a) + ":" + b);
 }
 
 for a, b, c in [(1, "x", true)] {
-  std.io.print(str(a) + ":" + b + ":" + str(c));
+  print(str(a) + ":" + b + ":" + str(c));
 }
 ```
 
 tuple 解构形式；没有歧义时括号可省略：
 
 ```text
-import std;
 for (a, b) in [(1, "x"), (2, "y")] {
-  std.io.print(str(a) + ":" + b);
+  print(str(a) + ":" + b);
 }
 
 for (a, b, c) in [(1, "x", true), (2, "y", false)] {
-  std.io.print(str(a) + ":" + b + ":" + str(c));
+  print(str(a) + ":" + b + ":" + str(c));
 }
 
 func triples(): list[tuple[int, string, bool]] {
@@ -765,11 +750,11 @@ func triples(): list[tuple[int, string, bool]] {
 }
 
 for (a, b, c) in triples() {
-  std.io.print(str(a) + ":" + b + ":" + str(c));
+  print(str(a) + ":" + b + ":" + str(c));
 }
 
 for a, b, c in triples() {
-  std.io.print(str(a) + ":" + b + ":" + str(c));
+  print(str(a) + ":" + b + ":" + str(c));
 }
 ```
 
@@ -800,11 +785,10 @@ for a, b, c in triples() {
 带标签的 `break` / `continue`：
 
 ```text
-import std;
 outer: for (let i in [1, 2, 3]) {
   for (let j in [1, 2, 3]) {
     if (i == 2 && j == 2) { break outer; }
-    std.io.print(str(i) + "," + str(j));
+    print(str(i) + "," + str(j));
   }
 }
 ```
@@ -817,10 +801,9 @@ outer: for (let i in [1, 2, 3]) {
 - `goto NAME;` 跳到当前块或外层块的标签；不能跳入内层块或兄弟块：
 
   ```text
-import std;
   func f() {
     goto done;
-    std.io.print("skipped");
+    print("skipped");
     done: return 1;
   }
   ```
@@ -830,15 +813,14 @@ import std;
 `switch` 值匹配：
 
 ```text
-import std;
 switch (x) {
-  case 1 => std.io.print("one");
+  case 1 => print("one");
 
   case 2, 3 => {
-    std.io.print("two or three");
+    print("two or three");
   }
 
-  default => std.io.print("other");
+  default => print("other");
 }
 ```
 
@@ -907,7 +889,6 @@ let sum = match point {
 错误处理：
 
 ```text
-import std;
 func parse_positive(text) {
   let n = int(text);
 
@@ -919,7 +900,7 @@ func parse_positive(text) {
 }
 
 let n = parse_positive("0") on error(e) {
-  std.io.print("bad input: " + str(e));
+  print("bad input: " + str(e));
   std.error.recover!(0);
 };
 ```
@@ -927,17 +908,16 @@ let n = parse_positive("0") on error(e) {
 错误值会记录抛出点：
 
 ```text
-import std;
 func inner() { std.error.fail!("boom"); }
 func outer() { inner(); }
 
 let v = outer() on error(e) {
-  std.io.println(std.error.format_trace(e));
+  println(std.error.format_trace(e));
   // example.skein:1:20: fail: boom
   //   in inner() called from line 2
   //   in outer() called from line 3
   let where = std.error.location(e);
-  std.io.println(str(where["line"]));    // 1
+  println(str(where["line"]));    // 1
   std.error.recover!(0);
 };
 ```
@@ -977,12 +957,11 @@ let v = do {
 配合 `on error` 使用：
 
 ```text
-import std;
 let n = do {
   let a = parse_positive(input);
   a * 2;
 } on error(e) {
-  std.io.print("bad input: " + str(e));
+  print("bad input: " + str(e));
   std.error.recover!(0);
 };
 ```
@@ -994,7 +973,6 @@ let n = do {
 设计说明见 [logging.md](logging.md)。
 
 ```text
-import std;
 std.log.new(options?)                  → logger
 std.log.info(message[, fields])        // 默认 logger
 logger.debug / info / warn / error(message[, fields])
@@ -1005,7 +983,6 @@ logger.with(fields)                    → logger
 示例：
 
 ```text
-import std;
 
 let lg = std.log.new({
   "name": "app",
@@ -1029,7 +1006,6 @@ lg.error("failed", {"code": 500});
 JSON 输出：
 
 ```text
-import std;
 let lg = std.log.new({"format": "json", "time": "utc", "name": "app"});
 lg.info("done", {"ms": 12});
 ```
@@ -1041,7 +1017,6 @@ lg.info("done", {"ms": 12});
 写入文件：
 
 ```text
-import std;
 let lg = std.log.new({
   "output": "file",
   "path": "logs/app.log",
@@ -1059,7 +1034,7 @@ let lg = std.log.new({
 - 写入失败默认 `fail`，可用 `on_error` 改为 `warn` / `ignore`；
 - `logger` 不能跨线程传递，`writer` 也是线程本地值。
 
-> 数学函数 `log` 位于 `std.math`（需要 `import std;`），示例中的 logger 变量使用 `lg`。
+> 数学函数 `log` 位于 `std.math`（`std` 默认可见），示例中的 logger 变量使用 `lg`。
 
 #### 函数与闭包
 
@@ -1098,7 +1073,6 @@ c()
 参数可以带可选的类型约束：
 
 ```text
-import std;
 
 func apply(fn: Callable, x: int) {
   return fn(x);
@@ -1168,7 +1142,6 @@ adder(3)(4)
 匿名函数可以使用 `->` 简写；单参数、多参数和零参数都支持。函数体可以是单个表达式，也可以是用 `{ ... }` 包住的块：
 
 ```text
-import std;
 let inc = x -> x + 1;
 let add = (a, b) -> a + b;
 let zero = () -> 7;
@@ -1299,7 +1272,6 @@ sum(0, ...xs)    // 6
 结构体、`impl` 与 `proto`：
 
 ```text
-import std;
 
 struct Point {
   x: int;
@@ -1381,7 +1353,6 @@ let c = Config { ...a, port: 9090 };
 `proto` 定义结构式接口：
 
 ```text
-import std;
 proto Drawable {
   func draw(self);
 }
@@ -1389,7 +1360,7 @@ proto Drawable {
 struct DrawPoint {
   x: int;
   func draw(self) {
-    std.io.print("point");
+    print("point");
   }
 }
 
@@ -1419,9 +1390,8 @@ render(DrawPoint { x: 1 })
 默认方法示例：
 
 ```text
-import std;
 proto Drawable {
-  func draw(self) { std.io.print("default draw"); }
+  func draw(self) { print("default draw"); }
   func area(self);
 }
 
@@ -1467,7 +1437,6 @@ impl Q {
 仍是 COW 值：
 
 ```text
-import std;
 struct Node {
   value: int;
   next: ref Node? = null;   // 强边
@@ -1481,9 +1450,9 @@ a.next = b;
 b.prev = a;
 
 b.bump();                 // ref 接收者上的修改会持久化
-std.io.print(a.next.value);      // 3
-std.io.print(b.prev?.value);     // 3；弱引用失效时为 null
-std.io.print(std.ref.upgrade(b.prev).value);  // 3
+print(a.next.value);      // 3
+print(b.prev?.value);     // 3；弱引用失效时为 null
+print(std.ref.upgrade(b.prev).value);  // 3
 ```
 
 规则：
@@ -1506,12 +1475,11 @@ std.io.print(std.ref.upgrade(b.prev).value);  // 3
 命名函数装饰器：
 
 ```text
-import std;
 func trace(fn) {
   return func(...args) {
-    std.io.print("enter");
+    print("enter");
     let result = fn(...args);
-    std.io.print("exit");
+    print("exit");
     return result;
   };
 }
@@ -1534,12 +1502,11 @@ add(1, 2)      // enter / exit / 3
 方法装饰器：
 
 ```text
-import std;
 func trace(fn) {
   return func(...args) {
-    std.io.print("enter");
+    print("enter");
     let result = fn(...args);
-    std.io.print("exit");
+    print("exit");
     return result;
   };
 }
@@ -1571,7 +1538,6 @@ Point { x: 3, y: 4 }.area()      // enter / exit / 12
 挂起方法：
 
 ```text
-import std;
 
 struct Client { host: string; }
 
@@ -1652,7 +1618,6 @@ impl Shape {
 运行时类型检查：
 
 ```text
-import std;
 std.type.kind_of(x)        // "int" / "list" / "struct" / ...
 std.type.name(x)        // "int" / "Point" / ...
 std.type.package_name(x) // 逻辑包名：入口为 "main"，包类型为包名
@@ -1667,12 +1632,11 @@ x is Drawable
 `any` 只是类型约束，不会丢失运行时类型。遍历异构列表时可以这样分派：
 
 ```text
-import std;
 for (let value in values) {
   if (std.type.kind_of(value) == "struct") {
-    std.io.print(std.type.name(value));
+    print(std.type.name(value));
   } else if (value is int) {
-    std.io.print("int");
+    print("int");
   }
 }
 ```
@@ -1683,10 +1647,9 @@ for (let value in values) {
 
 #### 内置函数
 
-`std` 是语言级默认根绑定，无需 `import std;`；显式导入仍然合法且幂等。默认裸值只有 `list` / `dict` / `input` / `print` / `println`；`len` / `iter!` 已完全移除，`range` 与类型内省使用 `std.utils.*` / `std.type.*` 规范路径。容器长度用 `x.length()`，迭代用 `x.iter()`。`int`、`float`、`bool`、`str`、`char`、`byte` 仍是词法识别的转换函数与类型名。其中类型位置的 `str` 是 `string` 的短别名，规范类型名和诊断、反射输出都是 `string`；值位置只有 `str(x)`，`string` 不是值。数学、字符串、格式化、文件与 bytes 函数位于 `std.math`、`std.string`、`std.fs`、`std.bytes`。内置函数同样是一等值：
+`std` 是语言级默认根绑定，无需 `import std;`；显式导入仍然合法且幂等。默认只提供 `std` 根名字，不等于 `import std.*`：`std.math` / `std.string` 等模块及其中函数都必须写全路径，新增 std API 不会隐式改变已有脚本的全局空间。默认裸值是固定白名单，目前只有 `list` / `dict` / `tuple` / `pair` / `input` / `print` / `println`；新增 std 函数不扩大这份白名单。`len` / `iter!` 已完全移除，`range` 与类型内省使用 `std.utils.*` / `std.type.*` 规范路径。容器长度用 `x.length()`，迭代用 `x.iter()`。`int`、`float`、`bool`、`str`、`char`、`byte` 仍是词法识别的转换函数与类型名。其中类型位置的 `str` 是 `string` 的短别名，规范类型名和诊断、反射输出都是 `string`；值位置只有 `str(x)`，`string` 不是值。数学、字符串、格式化、文件与 bytes 函数位于 `std.math`、`std.string`、`std.fs`、`std.bytes`。内置函数同样是一等值：
 
 ```text
-import std;
 
 let f = std.math.sqrt;
 f(9)
@@ -1733,7 +1696,7 @@ apply(std.math.sqrt, 16)
 - `bool` 类型有 `true` / `false` 两个字面量；`bool(x)` 按真值规则转换。
 - 真值规则：`null`、`false`、`0`、`0.0`、空字符串、空 bytes、空列表、空字典、空 deque、空 heap、空 set 为假；其余值（包括 `true`、函数和内置函数）为真。
 - `str(true)` 得到 `"true"`，`int(true)` 得到 `1`，`float(false)` 得到 `0.0`。
-- `null` 是空值字面量，表示“没有值”：没有 `return` 的用户函数、`print` / `println` 和 `return;` 都返回 `null`。顶层 `null` 结果不会显示，但可以赋值、比较、传递，或通过 `std.io.print(null)` / `std.string.format("{}", null)` 输出。
+- `null` 是空值字面量，表示“没有值”：没有 `return` 的用户函数、`print` / `println` 和 `return;` 都返回 `null`。顶层 `null` 结果不会显示，但可以赋值、比较、传递，或通过 `print(null)` / `std.string.format("{}", null)` 输出。
 - `&&`、`||`、`!` 返回 `bool`，并短路求值。
 - `==` / `!=` 对所有类型有效，返回 `bool`；大小比较只支持数值之间或字符串之间，也返回 `bool`。
 - 列表和字符串下标必须是 `int`，`1.0` 不会被隐式截断；字符串下标按 UTF-8 码点计数，`"你好"[0]` 得到 `你`。
@@ -1762,22 +1725,21 @@ apply(std.math.sqrt, 16)
 
 ### 格式化
 
-`std.string.format(fmt, ...)` 返回格式化后的字符串（需要 `import std;`）；`print` 支持两种参数形式：
+`std.string.format(fmt, ...)` 返回格式化后的字符串（`std` 默认可见）；`print` 支持两种参数形式：
 
-- `std.io.print(x)`：直接打印一个值；
-- `std.io.print(fmt, ...)`：第一个参数是格式串，其余参数用于格式化；
-- `std.io.print()`：输出一个空行。
+- `print(x)`：直接打印一个值；
+- `print(fmt, ...)`：第一个参数是格式串，其余参数用于格式化；
+- `print()`：输出一个空行。
 
 示例：
 
 ```text
-import std;
 
 std.string.format("x = {}", 3)
 std.string.format("{} + {} = {}", 1, 2, 3)
 std.string.format("{1} {0}", "a", "b")
 std.string.format("{{}} = {}", 1)
-std.io.print("x = {:.2f}", 1.5)
+print("x = {:.2f}", 1.5)
 ```
 
 支持的格式：
@@ -1794,7 +1756,7 @@ std.io.print("x = {:.2f}", 1.5)
 | `{:08}` | 零填充 |
 | `{{` / `}}` | 字面量 `{` / `}` |
 
-自动编号 `{}` 和显式编号 `{0}` 不能混用；参数不足会报错，多余参数会被忽略。注意 `std.io.print("x", 1)` 按格式模式处理，输出 `x` 并忽略多余的 `1`。
+自动编号 `{}` 和显式编号 `{0}` 不能混用；参数不足会报错，多余参数会被忽略。注意 `print("x", 1)` 按格式模式处理，输出 `x` 并忽略多余的 `1`。
 
 
 ### 错误信息
@@ -1850,7 +1812,7 @@ std.io.print("x = {:.2f}", 1.5)
 - 语法错误和词法错误按行恢复；
 - 同一行最多报告一条词法错误，并抑制由此产生的重复语法错误；
 - 包加载失败是原子失败：`import` 不会绑定部分命名空间；
-- `std.io.input()` 的 EOF 返回 `null`，不是错误；
+- `input()` 的 EOF 返回 `null`，不是错误；
 - `std.process.command()` 的退出状态不是解释器错误，需要状态时使用 `std.process.command_status()`。
 
 #### 退出码
@@ -1874,7 +1836,6 @@ std.io.print("x = {:.2f}", 1.5)
 ### 字符串处理
 
 ```text
-import std;
 
 std.string.trim(text)                     → 去掉首尾空白
 std.string.split(text[, separator])       → list<string>
@@ -1885,7 +1846,6 @@ std.string.substr(text, start[, length])  → string
 示例：
 
 ```text
-import std;
 
 std.string.trim("  hello\t\n")          → "hello"
 std.string.split("a,b,c", ",")          → ["a", "b", "c"]
@@ -1911,12 +1871,11 @@ std.string.substr("你好世界", 1, 2)      → "好世"
 组合使用：
 
 ```text
-import std;
 
-let parts = std.string.split(std.io.input("请输入两个数: "));
+let parts = std.string.split(input("请输入两个数: "));
 let a = int(parts[0]);
 let b = int(parts[1]);
-std.io.print(a + b);
+print(a + b);
 ```
 
 #### 构建器
@@ -1924,7 +1883,6 @@ std.io.print(a + b);
 频繁追加时使用 builder，避免每次复制整个 list / string：
 
 ```text
-import std;
 
 let lb = std.list.builder();
 for (let i in std.utils.range(1000)) {
@@ -1951,12 +1909,11 @@ let text = sb.build();
 
 ### 控制台输入
 
-`std.io.input([prompt])` 从 stdin 读取一行：
+`input([prompt])` 从 stdin 读取一行：
 
 ```text
-import std;
-let name = std.io.input("Name: ");
-std.io.print("hello " + name);
+let name = input("Name: ");
+print("hello " + name);
 ```
 
 - 返回的字符串不包含末尾换行；
@@ -1964,57 +1921,52 @@ std.io.print("hello " + name);
 - 读到 EOF 且没有剩余内容时返回 `null`；最后一行没有换行符时仍返回该行；
 - 空行返回空字符串；
 - CRLF 会被处理，`\r` 不会进入结果；
-- 控制台负责行编辑和退格；管道输入中的退格会由 `std.io.input` 过滤；
+- 控制台负责行编辑和退格；管道输入中的退格会由 `input` 过滤；
 - 脚本模式下仍然从原始 stdin 读取，不会读脚本文件本身；
-- `std.io.input` 是一等内置函数，可以保存和传递。
+- `input` 是一等内置函数，可以保存和传递。
 
 ```text
-import std;
-let read = std.io.input;
+let read = input;
 read("> ")
 ```
 
 读取多个值：
 
 ```text
-import std;
 
-let parts = std.string.split(std.io.input("x y: "));
+let parts = std.string.split(input("x y: "));
 let x = int(parts[0]);
 let y = int(parts[1]);
-std.io.println(x + y);
+println(x + y);
 ```
 
 示例：
 
 ```text
-import std;
 
-let name = std.io.input("Name: ");
-std.io.print(std.string.format("hello {}", name));
+let name = input("Name: ");
+print(std.string.format("hello {}", name));
 ```
 
 
 ### 文件读写
 
 ```text
-import std;
 std.fs.read_file(path)          → 文件全部内容
 std.fs.write_file(path, text)   → null，覆盖写入
 std.fs.append_file(path, text)  → null，追加写入
 std.fs.exists(path)             → 1 / 0
 ```
 
-需要 `import std;`。
+以上函数通过默认可见的 `std.fs` 使用，无需显式 `import std;`。
 
 示例：
 
 ```text
-import std;
 
 std.fs.write_file("out.txt", "hello\n");
 std.fs.append_file("out.txt", "world\n");
-std.io.print(std.fs.read_file("out.txt"));
+print(std.fs.read_file("out.txt"));
 
 std.fs.exists("out.txt")
 ```
@@ -2036,7 +1988,6 @@ std.fs.exists("out.txt")
 需要在 UTF-8 之外的文本编码之间读写时，使用：
 
 ```text
-import std;
 std.fs.read_text(path, encoding[, errors])       → string
 std.fs.write_text(path, text, encoding[, errors]) → null
 ```
@@ -2047,7 +1998,6 @@ std.fs.write_text(path, text, encoding[, errors]) → null
 示例：
 
 ```text
-import std;
 
 std.fs.write_text("out-gbk.txt", "中国", "gbk");
 std.fs.read_text("out-gbk.txt", "gbk")          // 中国
@@ -2073,7 +2023,6 @@ std.fs.read_text("out-utf16.txt", "utf-16")     // 中
 需要多次操作同一个文件时，可以使用低层文件句柄：
 
 ```text
-import std;
 std.fs.open(path, mode)              → file handle
 std.fs.read(handle[, n])             → string
 std.fs.write(handle, text)           → null
@@ -2089,7 +2038,6 @@ std.fs.flush(handle)                 → null
 示例：
 
 ```text
-import std;
 
 let h = std.fs.open("data.txt", "w+");
 std.fs.write(h, "hello world");
@@ -2113,7 +2061,6 @@ std.fs.close(h)
 当前语言没有方法绑定，但可以用 dict + 闭包实现类似接口：
 
 ```text
-import std;
 func open_file(path) {
   let h = std.fs.open(path, "r");
 
@@ -2176,7 +2123,6 @@ byte(255)
 文本字符串按 UTF-8 处理，不能保存任意字节。二进制数据使用独立的 `bytes` 类型：
 
 ```text
-import std;
 std.bytes.from_string(text)        → bytes
 std.bytes.to_string(bytes)         → string
 std.bytes.length(bytes)            → int
@@ -2201,7 +2147,6 @@ bytes[index] = 0..255
 示例：
 
 ```text
-import std;
 
 let b = std.bytes.from_hex("00ff10");
 std.bytes.length(b)                  → 3
@@ -2250,7 +2195,6 @@ std.bytes.hex(std.bytes.from_int(-1, 2, "little"))
 `std.encoding` 在 `bytes` 和 UTF-8 `string` 之间做显式转码：
 
 ```text
-import std;
 std.encoding.decode(bytes, encoding[, errors])  → string
 std.encoding.encode(string, encoding[, errors]) → bytes
 std.encoding.supports(encoding)                 → bool
@@ -2277,18 +2221,17 @@ gb18030
 示例：
 
 ```text
-import std;
 
 let s = std.encoding.decode(std.bytes.from_hex("d6d0b9fa"), "gbk");
-std.io.print(s);                                      // 中国
+print(s);                                      // 中国
 
-std.io.print(std.bytes.hex(std.encoding.encode("中国", "gbk")));
+print(std.bytes.hex(std.encoding.encode("中国", "gbk")));
                                                // d6d0b9fa
 
-std.io.print(std.bytes.hex(std.encoding.encode("€", "gbk")));
+print(std.bytes.hex(std.encoding.encode("€", "gbk")));
                                                // 80
 
-std.io.print(std.bytes.hex(std.encoding.encode("€", "gb18030")));
+print(std.bytes.hex(std.encoding.encode("€", "gb18030")));
                                                // a2e3
 
 std.encoding.supports("gbk")                   // true
@@ -2311,7 +2254,6 @@ std.encoding.supports("gb18030")               // true
 `std.unicode` 提供显式的 NFC / NFD / NFKC / NFKD 归一化：
 
 ```text
-import std;
 std.unicode.normalize(text, form)      → string
 std.unicode.is_normalized(text, form)  → bool
 std.unicode.version()                  → string
@@ -2323,7 +2265,6 @@ std.unicode.version()                  → string
 示例：
 
 ```text
-import std;
 
 let decomposed = std.encoding.decode(std.bytes.from_hex("65cc81"), "utf-8");
 let composed = std.unicode.normalize(decomposed, "nfc");
@@ -2348,7 +2289,6 @@ std.unicode.version()                              // "16.0.0"
 #### 大小写转换与大小写折叠
 
 ```text
-import std;
 std.string.to_lower(text)              → string
 std.string.to_upper(text)              → string
 std.unicode.casefold(text)             → string
@@ -2358,7 +2298,6 @@ std.unicode.casefold(text)             → string
 用于展示；`casefold` 是**完整大小写折叠**，用于大小写不敏感比较。
 
 ```text
-import std;
 
 std.string.to_lower("ABC")        // "abc"
 std.string.to_upper("ß")          // "SS"
@@ -2388,7 +2327,6 @@ std.unicode.casefold("ς")         // "σ"
 
 
 ```text
-import std;
 std.regex.match(pattern, text[, flags])       → bool（整串匹配）
 std.regex.search(pattern, text[, flags])      → dict / null
 std.regex.find_all(pattern, text[, flags[, limit]]) → list
@@ -2399,7 +2337,6 @@ std.regex.split(pattern, text[, flags])       → list
 示例：
 
 ```text
-import std;
 
 std.regex.match("a+", "aaa")                  // true
 std.regex.match("abc", "ABC", "i")            // true
@@ -2435,7 +2372,6 @@ std.regex.split(",", "a,b,c")                  // [a, b, c]
 
 
 ```text
-import std;
 std.time.now()                    → Unix 秒
 std.time.now_ms()                 → Unix 毫秒
 std.time.monotonic_ms()           → 进程内单调毫秒
@@ -2461,7 +2397,6 @@ std.random.uuid()                 → UUID v4 字符串
 
 
 ```text
-import std;
 std.encoding.base64_encode(bytes) → string
 std.encoding.base64_decode(string) → bytes
 std.encoding.url_encode(string) → string
@@ -2479,7 +2414,6 @@ std.crypto.hmac_sha256(key, data)  → 小写 hex
 
 
 ```text
-import std;
 std.fs.listdir(path)              → list[string]
 std.fs.mkdir(path[, recursive])
 std.fs.remove(path)
@@ -2519,7 +2453,6 @@ std.compress.unzlib(bytes)        → bytes
 std.compress.deflate(bytes)       → bytes
 std.compress.inflate(bytes)       → bytes
 ```
-import std;
 
 `std.fs.stat` 返回：
 
@@ -2532,7 +2465,6 @@ import std;
 二进制文件读写：
 
 ```text
-import std;
 let h = std.fs.open("data.bin", "r+b");
 std.fs.seek(h, 8);
 std.fs.file_write_bytes(h, std.bytes.from_hex("00ff"));
@@ -2544,7 +2476,6 @@ std.fs.close(h)
 读取固定宽度整数：
 
 ```text
-import std;
 let h = std.fs.open("data.bin", "rb");
 let magic = std.bytes.to_int(std.fs.file_read_bytes(h, 4), 4, "big");
 let length = std.bytes.to_int(std.fs.file_read_bytes(h, 4), 4, "little");
@@ -2566,7 +2497,6 @@ contextual keyword，不是全局保留字。
 `await f()` 等价于 `std.task.wait!(launch f())`，启动调用并立即等待：
 
 ```skein
-import std;
 
 func work(n) {
   std.task.sleep(10).wait();
@@ -2576,7 +2506,7 @@ func work(n) {
 let t = launch work(21);
 let value = std.task.wait!(t); // 等价于 t.wait()，也可写 std.task.wait! t
 let same = await work(21);  // 启动后立即等待
-std.io.print(value + same);
+print(value + same);
 ```
 
 规则：
@@ -2605,7 +2535,6 @@ std.io.print(value + same);
 
 
 ```text
-import std;
 std.thread.Channel(capacity) -> (parent_endpoint, child_endpoint)
 std.thread.Channel.unbounded() -> (parent_endpoint, child_endpoint)
 std.thread.Message.from(payload[, handles]) -> message
@@ -2660,7 +2589,6 @@ endpoint.stats -> dict
 示例：
 
 ```skein
-import std;
 
 let ends = std.thread.Channel(2);
 let parent = ends[0];
@@ -2669,8 +2597,8 @@ let msg = std.thread.Message.from({"x": 1});
 parent.send(msg);
 
 let r = child.try_recv();
-std.io.print(r["value"].payload["x"]);
-std.io.print(parent.stats["total_sends"]);
+print(r["value"].payload["x"]);
+print(parent.stats["total_sends"]);
 
 parent.close();
 ```
@@ -2678,7 +2606,6 @@ parent.close();
 无界与 rendezvous：
 
 ```skein
-import std;
 let a = std.thread.Channel.unbounded();   // 每条 lane capacity == -1
 let b = std.thread.Channel(0);            // send 等待 recv
 ```
@@ -2686,7 +2613,6 @@ let b = std.thread.Channel(0);            // send 等待 recv
 #### 线程池
 
 ```text
-import std;
 std.thread.pool(size, script[, options]) -> pool
 
 pool.submit(value[, timeout_ms]) -> future
@@ -2720,15 +2646,14 @@ func handle(payload) {
 使用：
 
 ```skein
-import std;
 
 let pool = std.thread.pool(2, "worker.skein");
 let f1 = pool.submit({"n": 21});
 let f2 = pool.submit({"n": 5});
 let r1 = f1.wait();
 let r2 = f2.wait();
-std.io.print(r1["value"]["n"]);
-std.io.print(r2["value"]["n"]);
+print(r1["value"]["n"]);
+print(r2["value"]["n"]);
 pool.close();
 pool.join();
 ```
@@ -2751,7 +2676,6 @@ pool.join();
 #### 单线程
 
 ```text
-import std;
 std.thread.spawn_script(script, message[, options]) -> thread
 std.thread.spawn_source(source, message[, options]) -> thread
 std.thread.spawn_function(function, message) -> thread
@@ -2778,7 +2702,6 @@ entry     默认 "main"
 Proto 入口：
 
 ```skein
-import std;
 func worker(ctx) {
     return {"v": ctx.payload["n"] + 1};
 }
@@ -2798,7 +2721,6 @@ let t = std.thread.spawn_function(worker, std.thread.Message.from({"n": 4}));
 - `std.thread.spawn_function` 可直接传入满足条件的普通函数，作为低层 Proto 入口；
 - `std.entry.encode(fn)` 把入口及依赖图（Proto、upvalue、全局、模块命名空间）序列化为 `bytes`；`std.thread.spawn_entry(bytes, Message)` 可在另一个进程反序列化并启动线程：
   ```skein
-import std;
   std.fs.write_bytes("entry.bin", std.entry.encode(worker));
   # 另一个进程：
   let t = std.thread.spawn_entry(std.fs.read_bytes("entry.bin"), msg);
@@ -2808,7 +2730,6 @@ import std;
 线程入口接收一个 Message：
 
 ```skein
-import std;
 # thread_worker.skein
 func main(ctx) {
     let signal = ctx.handles["signal"];
@@ -2820,7 +2741,6 @@ func main(ctx) {
 使用：
 
 ```skein
-import std;
 
 let ends = std.thread.Channel(1);
 let msg = std.thread.Message.from(
@@ -2832,9 +2752,9 @@ let t = std.thread.spawn_script("thread_worker.skein", msg);
 let signal = ends[0].recv();
 let result = t.join();
 
-std.io.print(signal.payload["x"]);
-std.io.print(result["ok"]);
-std.io.print(result["value"]["x"]);
+print(signal.payload["x"]);
+print(result["ok"]);
+print(result["value"]["x"]);
 ```
 
 规则：
@@ -2855,7 +2775,6 @@ Channel 是唯一的有方向模型；旧的共享队列与 `std.thread.duplex` 
 `endpoint.child` / `endpoint.peer` 返回对端端点。
 
 ```text
-import std;
 std.thread.spawn_script_with_channel(script, message, capacity[, options]) -> thread
 thread.channel -> endpoint
 ```
@@ -2871,7 +2790,6 @@ thread.channel -> endpoint
 #### select / broadcast
 
 ```text
-import std;
 std.thread.select(endpoints[, timeout_ms]) -> dict
 std.thread.try_broadcast(endpoints, message) -> dict
 std.thread.broadcast(endpoints, message) -> null
@@ -2888,15 +2806,14 @@ std.thread.broadcast(endpoints, message) -> null
 示例：
 
 ```skein
-import std;
 let a = std.thread.Channel(1)[0];
 let ends = std.thread.Channel(1);
 ends[0].send(std.thread.Message.from({"v": "b"}));
 let b = ends[1];
 
 let r = std.thread.select([a, b], 1000);
-std.io.print(r["index"]);
-std.io.print(r["value"].payload["v"]);
+print(r["index"]);
+print(r["value"].payload["v"]);
 ```
 
 规则：
@@ -2914,7 +2831,6 @@ std.io.print(r["value"].payload["v"]);
 #### 能力查询
 
 ```text
-import std;
 std.thread.capabilities() -> dict
 ```
 
@@ -2946,7 +2862,6 @@ std.thread.capabilities() -> dict
 HTTP 侧也可以按策略查询：
 
 ```skein
-import std;
 let caps = std.http.thread_capabilities({"strategy": "auto"});
 let dispatch = std.http.thread_capabilities({"strategy": "dispatch"});
 ```
@@ -2958,7 +2873,6 @@ let dispatch = std.http.thread_capabilities({"strategy": "dispatch"});
 `serve_threads` 的 `require` / `on_unsupported`：
 
 ```skein
-import std;
 let ts = std.http.serve_threads(
   s, 4, "worker.skein",
   {"require": ["http2"],
@@ -2974,7 +2888,6 @@ let ts = std.http.serve_threads(
 
 
 ```text
-import std;
 std.env.get(name[, default])
 std.env.has(name)
 std.env.set(name, value)
@@ -2992,7 +2905,6 @@ std.process.run_command(command[, options]) → dict
 `std.sys` 暴露脚本调用信息：
 
 ```text
-import std;
 std.sys.args()        → list[string]  // 脚本路径之后的参数
 std.sys.script()      → string        // 脚本路径；stdin/REPL 为空
 std.sys.executable()  → string        // 解释器可执行文件
@@ -3032,10 +2944,9 @@ env     dict，覆盖子进程环境
 示例：
 
 ```text
-import std;
 
 let r = std.process.run_command("printf hello");
-std.io.print(std.bytes.to_string(r["stdout"]));
+print(std.bytes.to_string(r["stdout"]));
 
 let r2 = std.process.run_command("cat", {"stdin": "abc"});
 std.bytes.to_string(r2["stdout"])
@@ -3051,11 +2962,10 @@ std.bytes.to_string(r2["stdout"])
 `std.process.command(cmd[, env])` 执行命令并返回标准输出字符串：
 
 ```text
-import std;
 
 std.process.command("echo hi")                    → "hi"
 std.process.command("echo $FOO", {"FOO": "bar"})  → "bar"
-std.io.print(std.process.command("ls"))
+print(std.process.command("ls"))
 ```
 
 - POSIX 使用 `/bin/sh -c`；
@@ -3070,7 +2980,6 @@ std.io.print(std.process.command("ls"))
 如果只需要退出码，使用 `std.process.command_status(cmd[, env])`：
 
 ```text
-import std;
 
 std.process.command_status("exit 0")                     → 0
 std.process.command_status("exit 3")                     → 3
@@ -3083,7 +2992,6 @@ std.process.command_status("exit $CODE", {"CODE": "3"})  → 3
 `std.process.run_command`：
 
 ```text
-import std;
 
 let r = std.process.run_command("printf hello");
 r["status"]
@@ -3093,7 +3001,6 @@ std.bytes.to_string(r["stdout"])
 #### 编码进程入口
 
 ```text
-import std;
 std.process.run_entry(blob, message[, options]) → envelope
 std.process.spawn_entry(blob, message[, options]) → process
 std.process.run_function(function, message[, options]) → envelope
@@ -3111,7 +3018,6 @@ std.process.result(process[, timeout_ms]) → envelope
 - 进程 IPC 不支持 Channel / Thread / Task handle。
 
 ```skein
-import std;
 
 func worker(ctx) {
   return {"v": ctx.payload["n"] + 1};
@@ -3124,7 +3030,6 @@ r["value"]["v"]   // 5
 普通单参数函数即可作为进程入口：
 
 ```skein
-import std;
 
 func entry(ctx) {
   return {"v": ctx.payload["n"] * 2};
@@ -3143,7 +3048,6 @@ r["value"]["v"]   // 42
 #### 长驻进程与管道
 
 ```text
-import std;
 std.process.spawn_command(file[, options]) → process
 std.process.wait(process[, timeout_ms]) → status
 std.process.kill(process[, signal])
@@ -3184,21 +3088,19 @@ stderr "pipe"（默认）或 "inherit"
 管道是普通 `std.io` 流，支持同步和异步读写：
 
 ```text
-import std;
 
 let p = std.process.spawn_command("/bin/cat");
 
 std.io.write_all(p["stdin"], "hello");
 std.io.close(p["stdin"]);
 
-std.io.print(std.bytes.to_string(std.io.read(p["stdout"], 4096)));
-std.io.print(std.process.wait(p));
+print(std.bytes.to_string(std.io.read(p["stdout"], 4096)));
+print(std.process.wait(p));
 ```
 
 task 形式：
 
 ```text
-import std;
 let data = std.io.read_task(p["stdout"], 4096).wait();
 ```
 
@@ -3218,7 +3120,6 @@ let data = std.io.read_task(p["stdout"], 4096).wait();
 worker 脚本：
 
 ```text
-import std;
 
 while (true) {
   let line = std.io.read_line(std.io.stdin);
@@ -3237,16 +3138,15 @@ while (true) {
 父进程：
 
 ```text
-import std;
 
 let p = std.process.spawn_command("skein", {"args": ["worker.skein"]});
 std.io.write_all(p["stdin"],
                  std.bytes.from_string("{\"id\":1,\"params\":[2,3]}\n"));
 std.io.flush(p["stdin"]);
 
-std.io.print(std.bytes.to_string(std.io.read_line(p["stdout"])));
+print(std.bytes.to_string(std.io.read_line(p["stdout"])));
 std.io.close(p["stdin"]);
-std.io.print(std.process.wait(p));
+print(std.process.wait(p));
 ```
 
 #### Worker 池
@@ -3254,7 +3154,6 @@ std.io.print(std.process.wait(p));
 在 spawn + JSON Lines 协议之上提供进程池：
 
 ```text
-import std;
 std.worker.pool(size, script[, options]) -> pool
 std.worker.call(pool, method, args[, timeout_ms]) -> result
 std.worker.call_bytes(pool, method, args, body[, timeout_ms]) -> result
@@ -3299,7 +3198,6 @@ hybrid worker 启动时发送：
 并新增：
 
 ```text
-import std;
 std.worker.call_bytes(pool, method, args, body[, timeout_ms]) -> result
 std.worker.submit_bytes(pool, method, args, body) -> job
 ```
@@ -3315,7 +3213,6 @@ std.worker.submit_bytes(pool, method, args, body) -> job
 worker 脚本读取 hybrid 请求：
 
 ```text
-import std;
 
 let line = std.io.read_line(std.io.stdin);
 let request = std.json.parse(std.bytes.to_string(line));
@@ -3351,7 +3248,6 @@ std.io.flush(std.io.stdout);
 worker 脚本约定使用 JSON Lines，并在启动后先发送 ready 帧：
 
 ```text
-import std;
 
 std.io.write_all(std.io.stdout,
                  std.bytes.from_string("{\"ready\":true,\"version\":1}\n"));
@@ -3374,18 +3270,17 @@ while (true) {
 主进程：
 
 ```text
-import std;
 
 let pool = std.worker.pool(4, "worker.skein");
 let r = std.worker.call(pool, "add", [2, 3]);
-std.io.print(std.result.unwrap(r));
+print(std.result.unwrap(r));
 
-std.io.print(std.worker.map(pool, "add", [[1, 2], [3, 4], [5, 6]]));
+print(std.worker.map(pool, "add", [[1, 2], [3, 4], [5, 6]]));
 
 let a = std.worker.submit(pool, "add", [7, 8]);
 let b = std.worker.submit(pool, "add", [9, 10]);
-std.io.print(std.result.unwrap(std.worker.wait(a)));
-std.io.print(std.result.unwrap(std.worker.wait(b)));
+print(std.result.unwrap(std.worker.wait(a)));
+print(std.result.unwrap(std.worker.wait(b)));
 
 std.worker.shutdown(pool);
 ```
@@ -3464,9 +3359,8 @@ aa/
 ```
 
 ```text
-import std;
 import aa.bb;
-std.io.print(bb.value);
+print(bb.value);
 ```
 
 - 包块名只写叶子名：`aa/bb/cc.skein` 写 `package cc`；
@@ -3702,7 +3596,6 @@ import math.helpers as helpers;
 module 内类型和包的元数据：
 
 ```text
-import std;
 std.type.package_name(x)      // "math.add" / "math.internal.helpers"
 std.type.module_name(x)  // "math"
 std.type.source(x)       // 源文件路径

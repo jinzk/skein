@@ -80,8 +80,7 @@ build\skein.exe
 把下面内容保存为 `hello.skein`：
 
 ```skein
-import std;
-std.io.print("hello, skein");
+println("hello, skein");
 ```
 
 然后运行：
@@ -163,7 +162,6 @@ func add(a: int, b: int): int {
 管道、占位符、模式匹配、解构、切片和一等函数让常见的数据处理保持紧凑：
 
 ```skein
-import std;
 
 let squares = (std.utils.range(0, 10)
   |> std.iter.filter(x -> x % 2 == 0)
@@ -191,7 +189,6 @@ let desc = match (event) {
 `struct` 声明数据和方法，`impl` 可追加方法，`proto` 声明结构式接口；枚举支持带载荷变体和穷尽匹配：
 
 ```skein
-import std;
 proto Drawable {
   func draw(self);
 }
@@ -205,7 +202,7 @@ struct Point {
   }
 
   func draw(self) {
-    std.io.print("point " + str(self.area()));
+    print("point " + str(self.area()));
   }
 }
 
@@ -227,7 +224,6 @@ impl Point {
 task / generator 使用 fiber，线程之间通过 Channel 和 Message 传递数据，不共享可变 `value_t*`：
 
 ```skein
-import std;
 
 func work(n) {
   std.task.sleep(10).wait();
@@ -236,7 +232,7 @@ func work(n) {
 
 let t = launch work(21);
 let value = std.task.wait!(t);       // 等价于 t.wait()
-std.io.print(value);
+print(value);
 
 let total = std.task.scope(func() {
   let a = launch work(1);
@@ -257,9 +253,8 @@ let total = std.task.scope(func() {
 `fail` 抛错，`on error` 在表达式边界恢复，`recover` 的值成为整个表达式的结果：
 
 ```skein
-import std;
 let n = parse_positive("0") on error(e) {
-  std.io.print("bad input: " + str(e));
+  print("bad input: " + str(e));
   std.error.recover!(0);
 };
 ```
@@ -277,7 +272,7 @@ let n = parse_positive("0") on error(e) {
 
 ### 标准库
 
-`std` 是语言级默认绑定，无需 `import std;` 即可使用内置标准库；显式导入仍然合法且幂等：
+`std` 是语言级默认绑定，无需 `import std;` 即可使用内置标准库；默认只提供 `std` 根名字，不展开 `std.*`，显式导入仍然合法且幂等：
 
 - 数据：`std.json`、`std.regex`（PCRE2）、`std.crypto`、`std.compress`、`std.encoding`、`std.unicode`、`std.log`；
 - 系统：`std.fs`、`std.process`、`std.env`、`std.sys`、`std.time`、`std.random`；
@@ -291,7 +286,6 @@ let n = parse_positive("0") on error(e) {
 `std.net` 基于 libuv，HTTP/1.1 解析器使用 vendored llhttp；HTTP/2、WebSocket 和 TLS 都是内置模块：
 
 ```skein
-import std;
 
 let server = std.http.listen("127.0.0.1", 8080);
 
@@ -317,7 +311,6 @@ std.http.close(server);
 字符串按 UTF-8 处理，支持 Unicode 标识符；归一化是显式的，不会在比较或拼接时隐式发生：
 
 ```skein
-import std;
 let café = "café";
 let nfc = std.unicode.normalize(café, "nfc");
 let folded = std.unicode.casefold("Straße");
@@ -377,7 +370,6 @@ cp -r skills/skein ~/.config/opencode/skills/
 ## 项目结构
 
 ```text
-import std;
 src/
   platform/      L0  OS 原语：platform.*、platform_posix.cpp、platform_win.cpp、
                   dynamic_library.*、runtime_state.*

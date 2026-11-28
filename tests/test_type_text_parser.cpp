@@ -86,7 +86,14 @@ int main() {
     check("weak Foo", "weak Foo");
     check("(int, string) -> bool", "(int, string) -> bool");
     check("(list[int]) -> dict[string, int]", "(list[int]) -> dict[string, int]");
+    check("int | string", "union[int, string]");
+    check("int | string | bool", "union[int, string, bool]");
+    check("(int | string)?", "union[int, string, null]");
+    check("int | string?", "union[int, string, null]");
+    check("list[int | string]", "list[union[int, string]]");
+    check("((int | string) -> bool)", "(union[int, string]) -> bool");
     check_list("int, string, bool", 3);
+    check_list("int | string, bool", 2);
     check_list("/* comment */ int, // line\n string", 2);
 
     check_error("");
@@ -94,6 +101,7 @@ int main() {
     check_error("list[int");
     check_error("int string");
     check_error("(int -> bool");
+    check_error("(int, string)");
 
     if (failures == 0)
         std::printf("ok\n");

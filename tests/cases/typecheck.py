@@ -211,8 +211,14 @@ def run_cases():
 
     check("explicit generic parse error keeps bracket position",
            "func identity[T any](x: T): T { return x; }\n"
-           "let y = identity[int | string](1);\n",
+           "let y = identity[int + string](1);\n",
            stderr="2:17: type error: expected ',' or end of type list")
+
+    check("explicit generic call with pipe union argument",
+           "func identity[T any](x: T): T { return x; }\n"
+           "let y = identity[int | string](1);\n"
+           "std.io.println(str(y));\n",
+           stdout="1", not_stderr="type warning")
 
     check("multiline explicit generic call",
            "func identity[T any](x: T): T { return x; }\n"
@@ -1463,6 +1469,62 @@ def run_cases():
           "  };\n"
           "}\n",
           not_stderr="type warning")
+
+    check("pipe union type sugar",
+          "import std;\n"
+          "let x: int | string = 1;\n"
+          "x = \"a\";\n"
+          "let y: union[int, string] = x;\n"
+          "let z: int | string | bool = true;\n"
+          "let xs: list[int | string] = [1, \"a\"];\n"
+          "std.io.println(y); std.io.println(z); std.io.println(xs);\n",
+          stdout_all=["a", "true", "[1, a]"], not_stderr="type warning")
+
+    check("pipe union type sugar mismatch",
+          "let x: int | string = true;\n",
+          stderr="type error: expected union[int, string], got bool")
+
+    check("pipe union sugar nullable forms",
+          "import std;\n"
+          "let a: (int | string)? = null;\n"
+          "a = 1;\n"
+          "let b: int | string? = null;\n"
+          "b = \"a\";\n"
+          "let c: union[int, string, null] = a;\n"
+          "let xs: list[int | string]? = null;\n"
+          "let ys: list[int | string?] = [1, \"a\", null];\n"
+          "std.io.println(a); std.io.println(b); std.io.println(c);\n"
+          "std.io.println(xs); std.io.println(ys);\n",
+          stdout_all=["1", "a", "1", "null", "[1, a, null]"],
+          not_stderr="type warning")
+
+    check("pipe union sugar keeps generic constraint or",
+          "import std;\n"
+          "struct Box[T int | string] { value: T; }\n"
+          "let a = Box[int] { value: 1 };\n"
+          "let b = Box[string] { value: \"x\" };\n"
+          "let c = Box[int | string] { value: \"y\" };\n"
+          "std.io.println(a.value); std.io.println(b.value);\n"
+          "std.io.println(c.value);\n",
+          stdout_all=["1", "x", "y"], not_stderr="type warning")
+
+    check("pipe union sugar function type",
+          "import std;\n"
+          "func apply(f: (int | string) -> int, x: int | string): int {\n"
+          "  return f(x);\n"
+          "}\n"
+          "let g: (int) -> int = func(x: int): int -> x * 2;\n"
+          "std.io.println(str(apply(func(x: int | string): int -> 4, 1)));\n"
+          "std.io.println(str(g(3)));\n",
+          stdout_all=["4", "6"], not_stderr="type warning")
+
+    check("pipe union sugar macro type fragment",
+          "macro cast(T: type, v: expr) { let x = #v as #T; return x; }\n"
+          "func test(): int | string | null {\n"
+          "  return cast!(type((int | string)?), null);\n"
+          "}\n"
+          "std.io.println(str(test()));\n",
+          stdout="null", not_stderr="type error")
 
     check("flat pair arity rejected",
           "let p: pair[int, string, bool] = (1, \"a\", true);\n",

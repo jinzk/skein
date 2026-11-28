@@ -96,6 +96,10 @@ struct type_constraint *type_apply_function(
     const std::vector<struct type_constraint *> &params,
     struct type_constraint *result);
 struct type_constraint *type_apply_nullable(struct type_constraint *base);
+/* Lower source-level `A | B` to the canonical union type.  Both arguments
+ * are consumed, matching the other type_apply_* helpers. */
+struct type_constraint *type_make_union(struct type_constraint *left,
+                                        struct type_constraint *right);
 
 } // namespace typecheck
 } // namespace skein

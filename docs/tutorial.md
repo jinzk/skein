@@ -304,14 +304,15 @@ T? / 包含 null 的 union → null
 - `for` 的初始化部分也支持类型标注：`for (let i: int = 0; i < 3; i++)`。
 
 `T?` 等价于 `union[T, null]`：`int?` 与 `union[int, null]` 可以互相赋值，函数类型也相同；
-两者都接受 `null`，省略初始值时默认为 `null`。`union[A, B]?` 等价于
-`union[A, B, null]`。
+两者都接受 `null`，省略初始值时默认为 `null`。`A | B` 是 `union[A, B]` 的语法糖，
+内部归一化为同一个类型；`(A | B)?`、`A | B?` 和 `union[A, B, null]` 等价。
 
 ```text
 let a: int? = null;
 let b: union[int, null] = a;   // 允许
 let c: int? = b;               // 允许
-let d: union[int, string]? = null;
+let d: (int | string)? = null;
+let e: int | string? = null;
 ```
 
 #### 容器泛型
@@ -330,7 +331,7 @@ let ys = raw as list[int];          // 显式信任边界
 let first = (raw as list[int])[0];  // 对 cast 结果取下标要加括号
 ```
 
-- 支持 `list[T]` / `dict[K,V]` / `set[T]` / `deque[T]` / `heap[T]` / `task[T]` / `generator[T]` / `generator[T, S]` / `pair[A, B]` / `tuple[A, B, ...]` / `union[A, B, ...]`，支持嵌套和可空形式；
+- 支持 `list[T]` / `dict[K,V]` / `set[T]` / `deque[T]` / `heap[T]` / `task[T]` / `generator[T]` / `generator[T, S]` / `pair[A, B]` / `tuple[A, B, ...]` / `union[A, B, ...]`（`A | B` 是语法糖），支持嵌套和可空形式；
 - 支持内建容器类型参数，也支持用户自定义泛型 `struct` / `enum` / `proto` / 函数，见下文“用户自定义泛型”；
 - 用户类型可以作为参数，例如 `list[Point]`；`list` 仍然表示无元素约束；
 - 检查初始化（字面量、`from_list`、构造字段、函数参数、默认值）和插入（下标赋值、`append`、`+=`、`set.add`、`push`、`merge`）；
@@ -539,7 +540,7 @@ struct Handler {
 - `std.iter.collect` 对 `generator[T]` 返回 `list[T]`，`std.iter.map` / `std.iter.filter` 对 generator 返回新的 generator；`std.generator.next(generator[T])` 的 `"value"` 字段类型为 `T`；
 - `pair[A, B]` 表示二元异构结构，可用 `(a, b)` 初始化；`p[0]` / `p[1]` 分别得到 `A` / `B`；`zip`、`dict.items`、`iter.enumerate` 使用 pair；
 - `tuple[A, B, C, ...]` 表示三元及以上异构结构，可用 `(a, b, c, ...)` 初始化；索引和解构按位置得到类型；
-- `union[A, B]` 表示成员之一，支持平铺多个成员，例如 `union[int, string, bool]`；异构 list 字面量会推断为 `list[union[...]]`；赋值和参数按成员检查；`union[T, null]` 与 `T?` 完全等价，`union[A, B]?` 与 `union[A, B, null]` 等价；
+- `union[A, B]` 表示成员之一，`A | B` 是它的语法糖，支持平铺多个成员，例如 `int | string | bool`；异构 list 字面量会推断为 `list[union[...]]`；赋值和参数按成员检查；`union[T, null]` 与 `T?` 完全等价，`(A | B)?` 与 `union[A, B, null]` 等价；
 - union 支持常见控制流收窄：`if (x is T)` 的 then/else、`!`、`&&`、`match` 的 `case is T` 以及后续 `default` 分支；
 - 支持稳定字段路径收窄，例如 `if (b.value is int) { b.value + 1; }`，包括嵌套字段；
 - 对字段/变量的写入、接收者方法调用会撤销相关路径收窄；`||` 只做安全的负向收窄；

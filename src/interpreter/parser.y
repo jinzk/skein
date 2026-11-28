@@ -1161,6 +1161,19 @@ static void free_type_list(struct parsed_type_list *list) {
     }
 }
 
+/* Parentheses group a single type; `(A, B)` is only valid as a function
+ * parameter list when followed by `->`. */
+static struct type_constraint *make_grouped_type(
+    struct parsed_type_list *list) {
+    if (!list || list->next) {
+        yyerror("expected a single type inside parentheses");
+        free_type_list(list);
+        return new_type_constraint(TYPE_INVALID);
+    }
+    struct type_constraint *type = list->type;
+    std::free(list);
+    return type;
+}
 
 static struct type_constraint *make_generic_type_list(
     struct type_constraint *base, struct parsed_type_list *list) {
@@ -1625,7 +1638,7 @@ static struct ast *new_member_or_enum_literal(struct ast *base, char *field) {
 %type <a> decorators decorator decorator_expr
 %type <a> struct_fields struct_field
 %type <sl> param symlist
-%type <type> type type_name func_ret_opt
+%type <type> type type_no_union type_name func_ret_opt
 %type <tl> type_list
 %type <str> importref importpath fieldname
 %type <sel> import_names import_name
@@ -2178,11 +2191,11 @@ generic_constraint_or: generic_constraint_and  { $$ = $1; }
       }
     ;
 
-generic_constraint_and: type                   {
+generic_constraint_and: type_no_union          {
         $$ = (struct ast *)newgenericconstraint(
             GENERIC_CONSTRAINT_SINGLE, $1);
       }
-    | generic_constraint_and '&' type          {
+    | generic_constraint_and '&' type_no_union {
         struct generic_constraint *right =
             newgenericconstraint(GENERIC_CONSTRAINT_SINGLE, $3);
         $$ = (struct ast *)combine_genericconstraint(
@@ -3304,10 +3317,23 @@ symlist: %empty                           { $$ = NULL; }
  * generic argument list and indexing the cast result.  The chosen convention
  * is `(x as Foo)[0]` for postfix access on a cast, so generic arguments win.
  */
-type: type_name %prec AS                  { $$ = $1; }
+/* `|` is available in type positions but not inside generic constraint
+ * lists, where it already separates allowed concrete types.  Splitting the
+ * grammar keeps `[K type int | string]` as a constraint OR while allowing
+ * `let x: int | string` as a union type.  `%prec '?'` on the unit rule keeps
+ * `exp is T ? a : b` as a ternary; the low `%prec RARROW` on `|` gives `?`
+ * higher precedence in type positions and leaves expression bitwise-or after
+ * `as` / `is` untouched. */
+type: type_no_union %prec '?'             { $$ = $1; }
+    | type '|' type_no_union %prec RARROW  {
+        $$ = skein::typecheck::type_make_union($1, $3);
+      }
+    ;
+
+type_no_union: type_name %prec AS         { $$ = $1; }
     | REF type_name                       { $$ = make_ref_type($2); }
     | WEAK type_name                      { $$ = make_weak_type($2); }
-    | type '?'                            { $$ = make_nullable_type($1); }
+    | type_no_union '?'                   { $$ = make_nullable_type($1); }
     | type_name '[' type ']'              {
         $$ = make_generic_type($1, $3, NULL);
       }
@@ -3318,6 +3344,7 @@ type: type_name %prec AS                  { $$ = $1; }
         $$ = make_generic_type_list(
             $1, new_type_list($3, new_type_list($5, $7)));
       }
+    | '(' type_list ')' %prec RARROW      { $$ = make_grouped_type($2); }
     | '(' type_list ')' RARROW type       {
         $$ = make_function_type($2, $5);
       }

@@ -199,13 +199,15 @@ TypeUnion     := ConcreteType ('|' ConcreteType)*
 
 ### 3.4 类型实参 union
 
-`Box[int | string]` 合法，定义为：
+`Box[int | string]` 合法，`A | B` 是 `union[A, B]` 的语法糖，规范形式仍为：
 
 ```skein
 Box[union[int, string]]
 ```
 
-它是一个 Box，字段 `value` 的静态类型是 `int | string`，不是两个 Box 实例化类型。
+它是一个 Box，字段 `value` 的静态类型是 `union[int, string]`，不是两个 Box 实例化类型。
+类型参数约束里的 `|`（如 `[T int | string]`）仍是“允许的具体类型集合”，不是 union
+类型的语法糖；两者在类型实参位置的结果一致，但解析上下文不同。
 
 如果类型参数声明为：
 

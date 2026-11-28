@@ -1047,7 +1047,7 @@ let q: deque[int] = std.deque.from_list([1, 2]);
 let h: heap[int] = std.heap.from_list([1, 2], less);
 ```
 
-- 支持 `list[T]`、`dict[K,V]`、`set[T]`、`deque[T]`、`heap[T]`、`task[T]`、`generator[T]`、`generator[T, S]`、`pair[A, B]`、`tuple[A, B, ...]`、`union[A, B, ...]`，以及嵌套和可空形式，例如 `list[int?]`、`dict[int, list[int]]`、`list[int]?`、`union[int, string]?`；
+- 支持 `list[T]`、`dict[K,V]`、`set[T]`、`deque[T]`、`heap[T]`、`task[T]`、`generator[T]`、`generator[T, S]`、`pair[A, B]`、`tuple[A, B, ...]`、`union[A, B, ...]`（`A | B` 是语法糖），以及嵌套和可空形式，例如 `list[int?]`、`dict[int, list[int]]`、`list[int]?`、`union[int, string]?`、`(int | string)?`；
 - 支持内建容器类型参数，也支持用户自定义泛型 `struct` / `enum` / `proto` / 函数，见下文“用户自定义泛型”；
 - 用户类型可以作为参数，例如 `list[Point]`、`dict[string, Point]`；
 - 不带参数的 `list` / `dict` / `set` / `deque` / `heap` 仍然表示无元素约束。
@@ -1441,6 +1441,21 @@ import std;
   let xs = [1, "a", true];   // list[union[int, string, bool]]
   let ys: list[union[int, string, bool]] = xs;
   ```
+
+  `A | B` 是 `union[A, B]` 的语法糖，内部归一化为同一个类型；支持三个及以上
+  成员平铺（`A | B | C`），也支持括号分组：
+
+  ```text
+  let x: int | string = 1;
+  let y: (int | string)? = null;   // 等价于 int | string | null
+  let z: list[int | string] = [1, "a"];
+  ```
+
+  `?` 的优先级高于 `|`，所以 `A | B?` 表示 `A | (B?)`；顶层展开后仍是
+  `A | B | null`。容器里的区别仍然明显：`list[A | B]?` 是整个 list 可空，
+  `list[A | B?]` 是元素可空。括号只包含一个类型时可以作为分组；多类型括号
+  只有后接 `->` 才是函数类型参数列表。反射/序列化使用的类型描述字符串仍写
+  规范形式 `union[A, B]`。
 
   union 按成员进行赋值/参数检查，并支持常见控制流收窄。`union[A, B, null]`
   与 `union[A, B]?` 等价，默认为 `null`；`union[T, null]` 与 `T?` 完全等价，

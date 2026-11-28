@@ -130,40 +130,62 @@ private:
         return true;
     }
 
+    /* `?` binds tighter than `|`, so `A | B?` means `A | (B?)`.  Both
+     * spellings lower to the same canonical union used by the Bison grammar. */
     bool parse_type(struct type_constraint *&out) {
-        skip_space();
-        if (peek() == '(')
-            return parse_function_type(out);
-
-        bool is_ref = false;
-        bool is_weak = false;
-        std::size_t save = pos_;
-        if (match_word("ref"))
-            is_ref = true;
-        else if (match_word("weak"))
-            is_weak = true;
-        else
-            pos_ = save;
-
         struct type_constraint *base = NULL;
-        if (!parse_type_name(base))
+        if (!parse_primary_type(base))
             return false;
-        if (is_ref)
-            base = type_apply_prefix(TYPE_REF, base);
-        else if (is_weak)
-            base = type_apply_prefix(TYPE_WEAK, base);
-
         skip_space();
-        while (!at_end() && peek() == '?') {
-            ++pos_;
-            base = type_apply_nullable(base);
+        while (consume('|')) {
+            struct type_constraint *right = NULL;
+            if (!parse_primary_type(right)) {
+                free_type_constraint(base);
+                return false;
+            }
+            base = type_make_union(base, right);
             skip_space();
         }
         out = base;
         return true;
     }
 
-    bool parse_function_type(struct type_constraint *&out) {
+    bool parse_primary_type(struct type_constraint *&out) {
+        skip_space();
+        if (peek() == '(') {
+            if (!parse_parenthesized_type(out))
+                return false;
+        } else {
+            bool is_ref = false;
+            bool is_weak = false;
+            std::size_t save = pos_;
+            if (match_word("ref"))
+                is_ref = true;
+            else if (match_word("weak"))
+                is_weak = true;
+            else
+                pos_ = save;
+
+            if (!parse_type_name(out))
+                return false;
+            if (is_ref)
+                out = type_apply_prefix(TYPE_REF, out);
+            else if (is_weak)
+                out = type_apply_prefix(TYPE_WEAK, out);
+        }
+
+        skip_space();
+        while (!at_end() && peek() == '?') {
+            ++pos_;
+            out = type_apply_nullable(out);
+            skip_space();
+        }
+        return true;
+    }
+
+    /* Parentheses either group one type or introduce a function type when
+     * followed by `->`; `(A, B)` without `->` is not a grouped type. */
+    bool parse_parenthesized_type(struct type_constraint *&out) {
         if (!consume('('))
             return false;
         std::vector<struct type_constraint *> params;
@@ -181,20 +203,25 @@ private:
                     break;
                 if (!consume(',')) {
                     free_types(params);
-                    return fail("expected ',' or ')' in function type");
+                    return fail("expected ',' or ')' in parenthesized type");
                 }
             }
         }
-        if (!consume_arrow()) {
-            free_types(params);
-            return fail("expected '->' in function type");
+        if (consume_arrow()) {
+            struct type_constraint *result = NULL;
+            if (!parse_type(result)) {
+                free_types(params);
+                return false;
+            }
+            out = type_apply_function(params, result);
+            return true;
         }
-        struct type_constraint *result = NULL;
-        if (!parse_type(result)) {
+        if (params.size() != 1) {
             free_types(params);
-            return false;
+            return fail("expected a single type inside parentheses");
         }
-        out = type_apply_function(params, result);
+        out = params.front();
+        params.clear();
         return true;
     }
 

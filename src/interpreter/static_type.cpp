@@ -792,5 +792,16 @@ struct type_constraint *type_apply_nullable(struct type_constraint *base) {
     return base;
 }
 
+struct type_constraint *type_make_union(struct type_constraint *left,
+                                        struct type_constraint *right) {
+    struct type_constraint *base = new_type_constraint(TYPE_UNION);
+    std::vector<struct type_constraint *> args;
+    if (left)
+        args.push_back(left);
+    if (right)
+        args.push_back(right);
+    return type_apply_generic_list(base, args);
+}
+
 } // namespace typecheck
 } // namespace skein

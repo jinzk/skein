@@ -146,6 +146,7 @@ if (name == null) {
 - 顶层普通表达式、赋值和 `x++` 可以省略结尾分号；`let` / `const` / `import` / `include` / `defer` / `return` / `break` / `continue` / `goto` 必须写分号；`if` / `while` / `for` / `switch` / `func` / `struct` / `enum` / `proto` / `macro` 等块语句不需要；
 - `else` / `else if` 以及 `do ... while` 的 `while` 必须写在 `}` 同一行；
 - `do { ... }` 作为独立语句必须写 `;`：词法器会等待同一行是否跟随 `while`，因此会暂缓换行；漏写分号会让下一行被当成续行并报错，报错后 REPL 会恢复并继续接收后续输入；
+- 如果只是想开一个局部作用域，写裸 `{ ... }`；`do { ... }` 是块表达式，不要用它代替作用域块；
 - REPL 命令：
   - `:help`
   - `:quit` / `:q`

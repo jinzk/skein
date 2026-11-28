@@ -769,7 +769,7 @@ void probe_abi(const options &o, abi_info &abi, std::string &warning) {
     std::istringstream lines(output);
     std::string line;
     while (std::getline(lines, line)) {
-        if (line.compare(0, 8, "#define ") != 0)
+        if (!line.starts_with("#define "))
             continue;
         size_t start = 8;
         while (start < line.size() &&
@@ -842,7 +842,7 @@ bool preprocess(const options &o, const abi_info &abi,
         std::string trimmed = trim(line);
         if (!trimmed.empty() && trimmed[0] == '#') {
             const std::string marker = "# ";
-            if (trimmed.compare(0, 2, marker) == 0 &&
+            if (trimmed.starts_with(marker) &&
                 trimmed.size() > 3 &&
                 std::isdigit((unsigned char)trimmed[2])) {
                 size_t quote = trimmed.find('"');
@@ -853,9 +853,9 @@ bool preprocess(const options &o, const abi_info &abi,
                             canonical_path(trimmed.substr(quote + 1,
                                                           close - quote - 1));
                 }
-            } else if (trimmed.compare(0, 13, "#pragma pack") == 0) {
+            } else if (trimmed.starts_with("#pragma pack")) {
                 parse_pack_directive(trimmed, pack, pack_stack);
-            } else if (trimmed.compare(0, 7, "#define") == 0 &&
+            } else if (trimmed.starts_with("#define") &&
                        o.emit_constants &&
                        targets.count(current_file)) {
                 size_t i = 7;
@@ -1684,7 +1684,7 @@ private:
                  true);
             if (accept(";")) {
                 if (s.base && s.base->kind == ctype::RECORD &&
-                    s.base->name.rfind("__anon_", 0) == 0)
+                    s.base->name.starts_with("__anon_"))
                     fail("anonymous struct members are not supported", true);
                 continue;
             }
@@ -2055,7 +2055,7 @@ private:
                 ctype_ptr type = apply_type(s.base, d);
                 if (type->kind == ctype::RECORD &&
                     (type->name.empty() ||
-                     type->name.rfind("__anon_", 0) == 0))
+                     type->name.starts_with("__anon_")))
                     rename_anonymous(type, d.name);
                 typedefs_[d.name] = type;
             }

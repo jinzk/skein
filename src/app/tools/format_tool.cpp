@@ -46,9 +46,9 @@ bool parse_options(const std::vector<std::string> &args,
                 return false;
             }
             options.package_dirs.push_back(args[++i]);
-        } else if (arg.rfind("-I", 0) == 0 && arg.size() > 2) {
+        } else if (arg.starts_with("-I") && arg.size() > 2) {
             options.package_dirs.push_back(arg.substr(2));
-        } else if (arg.rfind("--package-path=", 0) == 0) {
+        } else if (arg.starts_with("--package-path=")) {
             options.package_dirs.push_back(arg.substr(15));
         } else if (arg == "--encoding") {
             if (i + 1 >= args.size() || args[i + 1].empty()) {
@@ -56,7 +56,7 @@ bool parse_options(const std::vector<std::string> &args,
                 return false;
             }
             options.encoding = args[++i];
-        } else if (arg.rfind("--encoding=", 0) == 0) {
+        } else if (arg.starts_with("--encoding=")) {
             options.encoding = arg.substr(11);
             if (options.encoding.empty()) {
                 print_usage(program);

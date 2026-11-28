@@ -95,7 +95,7 @@ bool ignored_directory(const fs::path &path) {
     /* Build trees contain no source files but can be huge.  A directory
      * explicitly passed as a watch root is still scanned even if its own
      * name looks like a build directory. */
-    return name == "build" || name.rfind("build-", 0) == 0;
+    return name == "build" || name.starts_with("build-");
 }
 
 bool is_skein_file(const fs::path &path) {

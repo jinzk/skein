@@ -332,7 +332,7 @@ struct ast *expand_builtin_macro(struct ast *callee, struct ast *args,
                                   "expects 1 or 2 expression arguments",
                                   NULL, args, block);
         const std::string level =
-            name.rfind("std.log.", 0) == 0 ? name.substr(8) : name;
+            name.starts_with("std.log.") ? name.substr(8) : name;
         std::vector<struct ast *> values = take_args(args);
         if (any_spread(values)) {
             free_values(values);

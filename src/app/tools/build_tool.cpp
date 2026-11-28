@@ -73,7 +73,7 @@ bool parse_options(const std::vector<std::string> &args, size_t start,
                 return false;
             }
             options.directory = args[++i];
-        } else if (arg.rfind("--project=", 0) == 0) {
+        } else if (arg.starts_with("--project=")) {
             options.directory = arg.substr(10);
         } else if (arg == "--cache") {
             if (i + 1 >= args.size()) {
@@ -81,7 +81,7 @@ bool parse_options(const std::vector<std::string> &args, size_t start,
                 return false;
             }
             options.cache = args[++i];
-        } else if (arg.rfind("--cache=", 0) == 0) {
+        } else if (arg.starts_with("--cache=")) {
             options.cache = arg.substr(8);
         } else if (!arg.empty() && arg[0] == '-') {
             print_build_usage(program);

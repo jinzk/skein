@@ -142,7 +142,7 @@ bool is_identifier(const std::string &name) {
 
 bool is_reserved_main_package(const std::string &dotted) {
     return dotted == "main" ||
-           (dotted.size() > 5 && dotted.compare(0, 5, "main.") == 0);
+           (dotted.size() > 5 && dotted.starts_with("main."));
 }
 
 std::vector<std::string> split_dotted(const std::string &path) {
@@ -1011,7 +1011,7 @@ bool parse_import_spec(const char *raw, import_spec &spec, std::string &error) {
 }
 
 bool is_std_submodule(const std::string &dotted) {
-    return dotted.size() > 4 && dotted.compare(0, 4, "std.") == 0;
+    return dotted.size() > 4 && dotted.starts_with("std.");
 }
 
 value_t *dict_lookup_string(const dict_value_t *dict, const std::string &key) {
@@ -1231,7 +1231,7 @@ bool require_matches_import(const std::string &require_path,
     if (import_path == require_path)
         return true;
     if (import_path.size() <= require_path.size() ||
-        import_path.compare(0, require_path.size(), require_path) != 0 ||
+        !import_path.starts_with(require_path) ||
         import_path[require_path.size()] != '/')
         return false;
     /* A /vN segment after a require path is part of a versioned module path,

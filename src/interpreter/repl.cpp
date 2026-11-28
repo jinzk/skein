@@ -122,7 +122,7 @@ void history_load_once() {
 
 bool starts_with(const std::string &text, const std::string &prefix) {
     return text.size() >= prefix.size() &&
-           text.compare(0, prefix.size(), prefix) == 0;
+           text.starts_with(prefix);
 }
 
 std::string lowercase(std::string text) {
@@ -1081,7 +1081,7 @@ bool handle_command(const std::string &line) {
             std::printf("%4zu  %s\n", i + 1, history[i].c_str());
         return true;
     }
-    if (command.rfind(":load", 0) == 0 &&
+    if (command.starts_with(":load") &&
         (command.size() == 5 ||
          std::isspace((unsigned char)command[5]))) {
         std::string path = trim_copy(command.substr(5));

@@ -77,13 +77,13 @@ bool db_from_value(struct value_t *value,
 }
 
 bool db_is_postgres_uri(const std::string &path) {
-    return path.rfind("postgres://", 0) == 0 ||
-           path.rfind("postgresql://", 0) == 0;
+    return path.starts_with("postgres://") ||
+           path.starts_with("postgresql://");
 }
 
 bool db_is_mysql_uri(const std::string &path) {
-    return path.rfind("mysql://", 0) == 0 ||
-           path.rfind("mariadb://", 0) == 0;
+    return path.starts_with("mysql://") ||
+           path.starts_with("mariadb://");
 }
 
 bool db_valid_identifier(const std::string &name) {

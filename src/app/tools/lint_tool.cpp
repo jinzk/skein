@@ -120,9 +120,9 @@ bool parse_options(const std::vector<std::string> &args,
                 return false;
             }
             options.package_dirs.push_back(args[++i]);
-        } else if (arg.rfind("-I", 0) == 0 && arg.size() > 2) {
+        } else if (arg.starts_with("-I") && arg.size() > 2) {
             options.package_dirs.push_back(arg.substr(2));
-        } else if (arg.rfind("--package-path=", 0) == 0) {
+        } else if (arg.starts_with("--package-path=")) {
             options.package_dirs.push_back(arg.substr(15));
         } else if (arg == "--encoding") {
             if (i + 1 >= args.size() || args[i + 1].empty()) {
@@ -130,7 +130,7 @@ bool parse_options(const std::vector<std::string> &args,
                 return false;
             }
             options.encoding = args[++i];
-        } else if (arg.rfind("--encoding=", 0) == 0) {
+        } else if (arg.starts_with("--encoding=")) {
             options.encoding = arg.substr(11);
             if (options.encoding.empty()) {
                 print_usage(program);
@@ -143,7 +143,7 @@ bool parse_options(const std::vector<std::string> &args,
                 print_usage(program);
                 return false;
             }
-        } else if (arg.rfind("--typecheck=", 0) == 0) {
+        } else if (arg.starts_with("--typecheck=")) {
             if (!parse_mode_value(program, arg.substr(12),
                                   options.typecheck_mode))
                 return false;
@@ -162,7 +162,7 @@ bool parse_options(const std::vector<std::string> &args,
                              program.c_str(), value.c_str());
                 return false;
             }
-        } else if (arg.rfind("--format=", 0) == 0) {
+        } else if (arg.starts_with("--format=")) {
             const std::string value = arg.substr(9);
             if (value == "json")
                 options.json = true;

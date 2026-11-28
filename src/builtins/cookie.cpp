@@ -126,7 +126,7 @@ bool cookie_path_matches(const std::string &request_path,
         return true;
     if (request_path.size() < cookie_path.size())
         return false;
-    if (request_path.compare(0, cookie_path.size(), cookie_path) != 0)
+    if (!request_path.starts_with(cookie_path))
         return false;
     if (!cookie_path.empty() && cookie_path.back() == '/')
         return true;

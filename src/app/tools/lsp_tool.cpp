@@ -52,9 +52,9 @@ int run_lsp_tool(const std::vector<std::string> &args,
                 return 2;
             }
             options.package_dirs.push_back(args[++i]);
-        } else if (arg.rfind("-I", 0) == 0 && arg.size() > 2) {
+        } else if (arg.starts_with("-I") && arg.size() > 2) {
             options.package_dirs.push_back(arg.substr(2));
-        } else if (arg.rfind("--package-path=", 0) == 0) {
+        } else if (arg.starts_with("--package-path=")) {
             options.package_dirs.push_back(arg.substr(15));
         } else if (arg == "--encoding") {
             if (i + 1 >= args.size() || args[i + 1].empty()) {
@@ -62,7 +62,7 @@ int run_lsp_tool(const std::vector<std::string> &args,
                 return 2;
             }
             options.encoding = args[++i];
-        } else if (arg.rfind("--encoding=", 0) == 0) {
+        } else if (arg.starts_with("--encoding=")) {
             options.encoding = arg.substr(11);
             if (options.encoding.empty()) {
                 print_usage(program);
@@ -74,7 +74,7 @@ int run_lsp_tool(const std::vector<std::string> &args,
                 print_usage(program);
                 return 2;
             }
-        } else if (arg.rfind("--typecheck=", 0) == 0) {
+        } else if (arg.starts_with("--typecheck=")) {
             if (!parse_mode(program, arg.substr(12),
                             options.typecheck_mode))
                 return 2;

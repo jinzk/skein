@@ -502,9 +502,9 @@ value_t *ws_receive_impl(ws_connection *connection, long long timeout_ms,
 value_t *ws_connect_impl(const std::string &url, value_t *options,
                          bool async) {
     std::string target = url;
-    if (target.rfind("ws://", 0) == 0)
+    if (target.starts_with("ws://"))
         target = "http://" + target.substr(5);
-    else if (target.rfind("wss://", 0) == 0)
+    else if (target.starts_with("wss://"))
         target = "https://" + target.substr(6);
     value_t *user_headers = dict_get(options, "headers");
     if (user_headers && user_headers->type != T_dict) {

@@ -256,7 +256,7 @@ struct Checker : public BuiltinContext {
                 const std::string &key = it->first;
                 bool same = key == path;
                 bool child = key.size() > path.size() &&
-                             key.compare(0, path.size(), path) == 0 &&
+                             key.starts_with(path) &&
                              key[path.size()] == '.';
                 if (same || child)
                     it = paths.erase(it);
@@ -2279,8 +2279,8 @@ struct Checker : public BuiltinContext {
          */
         bool allow_builtin_check =
             has_path &&
-            (canonical.rfind("std.iter.", 0) == 0 ||
-             canonical.rfind("std.generator.", 0) == 0 ||
+            (canonical.starts_with("std.iter.") ||
+             canonical.starts_with("std.generator.") ||
              canonical == "std.set.from_list" ||
              canonical == "std.dict.index_by" ||
              canonical == "std.list.new" || canonical == "std.dict.new" ||
@@ -2323,11 +2323,11 @@ struct Checker : public BuiltinContext {
                      * defer invalid base types to the runtime builtin.
                      */
                     bool container_builtin_path =
-                        canonical.rfind("std.list.", 0) == 0 ||
-                        canonical.rfind("std.dict.", 0) == 0 ||
-                        canonical.rfind("std.set.", 0) == 0 ||
-                        canonical.rfind("std.deque.", 0) == 0 ||
-                        canonical.rfind("std.heap.", 0) == 0;
+                        canonical.starts_with("std.list.") ||
+                        canonical.starts_with("std.dict.") ||
+                        canonical.starts_with("std.set.") ||
+                        canonical.starts_with("std.deque.") ||
+                        canonical.starts_with("std.heap.");
                     if (!container_builtin_path || allow_builtin_check) {
                         const GenericFunctionMeta *generic_meta = nullptr;
                         if (has_path &&

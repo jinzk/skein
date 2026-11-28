@@ -430,11 +430,11 @@ std::string connection_key(const url_parts &url, bool verify,
 
 bool parse_url(const std::string &url, url_parts &parts, std::string &error) {
     size_t scheme_length = 0;
-    if (url.rfind("http://", 0) == 0) {
+    if (url.starts_with("http://")) {
         parts.tls = false;
         parts.port = 80;
         scheme_length = 7;
-    } else if (url.rfind("https://", 0) == 0) {
+    } else if (url.starts_with("https://")) {
         parts.tls = true;
         parts.port = 443;
         scheme_length = 8;
@@ -695,8 +695,8 @@ value_t *parse_query_string(const std::string &query) {
 void split_request_target(const std::string &target, std::string &path,
                           std::string &query) {
     std::string value = target;
-    if (value.rfind("http://", 0) == 0 ||
-        value.rfind("https://", 0) == 0) {
+    if (value.starts_with("http://") ||
+        value.starts_with("https://")) {
         size_t scheme = value.find("://");
         size_t slash = value.find('/', scheme + 3);
         value = slash == std::string::npos ? "/" : value.substr(slash);
@@ -1391,8 +1391,8 @@ std::string resolve_redirect_url(const std::string &base,
         target = target.substr(0, fragment);
     if (target.empty())
         return base;
-    if (target.rfind("http://", 0) == 0 ||
-        target.rfind("https://", 0) == 0)
+    if (target.starts_with("http://") ||
+        target.starts_with("https://"))
         return target;
 
     url_parts parts;
@@ -1405,7 +1405,7 @@ std::string resolve_redirect_url(const std::string &base,
                         (!parts.tls && parts.port == 80);
     if (!default_port)
         authority += ":" + std::to_string(parts.port);
-    if (target.rfind("//", 0) == 0)
+    if (target.starts_with("//"))
         return scheme + ":" + target;
     if (target[0] == '/')
         return scheme + "://" + authority + target;
@@ -6067,7 +6067,7 @@ void reuse_port_worker_main(
                     if (chunk.size() > preface.size())
                         chunk.resize(preface.size());
                     peeked = std::move(chunk);
-                    if (preface.compare(0, peeked.size(), peeked) != 0)
+                    if (!preface.starts_with(peeked))
                         break;
                     if (peeked.size() == preface.size()) {
                         h2 = true;

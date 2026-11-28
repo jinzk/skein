@@ -33,7 +33,7 @@ struct scanned_symbol {
 
 bool starts_with(const std::string &text, const char *prefix) {
     const std::string p(prefix);
-    return text.size() >= p.size() && text.compare(0, p.size(), p) == 0;
+    return text.size() >= p.size() && text.starts_with(p);
 }
 
 std::string percent_encode_path(const std::string &path) {

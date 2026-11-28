@@ -311,7 +311,7 @@ bool check_builtin(BuiltinContext &context, const std::string &path,
         return true;
     }
 
-    if (path.rfind("std.list.", 0) == 0) {
+    if (path.starts_with("std.list.")) {
         std::string name = path.substr(9);
         if (!require_kind(0, TYPE_LIST))
             return true;
@@ -533,7 +533,7 @@ bool check_builtin(BuiltinContext &context, const std::string &path,
         return true;
     }
 
-    if (path.rfind("std.dict.", 0) == 0) {
+    if (path.starts_with("std.dict.")) {
         std::string name = path.substr(9);
         if (!require_kind(0, TYPE_DICT))
             return true;
@@ -621,7 +621,7 @@ bool check_builtin(BuiltinContext &context, const std::string &path,
         return true;
     }
 
-    if (path.rfind("std.set.", 0) == 0) {
+    if (path.starts_with("std.set.")) {
         std::string name = path.substr(8);
         if (name == "from_list") {
             if (!require_kind(0, TYPE_LIST))
@@ -698,7 +698,7 @@ bool check_builtin(BuiltinContext &context, const std::string &path,
         return true;
     }
 
-    if (path.rfind("std.deque.", 0) == 0) {
+    if (path.starts_with("std.deque.")) {
         std::string name = path.substr(10);
         if (name == "from_list") {
             if (!require_kind(0, TYPE_LIST))
@@ -754,7 +754,7 @@ bool check_builtin(BuiltinContext &context, const std::string &path,
         return true;
     }
 
-    if (path.rfind("std.heap.", 0) == 0) {
+    if (path.starts_with("std.heap.")) {
         std::string name = path.substr(9);
         if (name == "from_list") {
             if (!require_kind(0, TYPE_LIST))

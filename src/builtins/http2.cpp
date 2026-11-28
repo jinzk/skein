@@ -448,11 +448,11 @@ struct url_parts {
 
 bool parse_url(const std::string &url, url_parts &parts, std::string &error) {
     size_t scheme_length = 0;
-    if (url.rfind("http://", 0) == 0) {
+    if (url.starts_with("http://")) {
         parts.tls = false;
         parts.port = 80;
         scheme_length = 7;
-    } else if (url.rfind("https://", 0) == 0) {
+    } else if (url.starts_with("https://")) {
         parts.tls = true;
         parts.port = 443;
         scheme_length = 8;

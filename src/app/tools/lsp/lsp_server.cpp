@@ -48,7 +48,7 @@ int lsp_debounce_ms() {
 
 bool starts_with(const std::string &text, const std::string &prefix) {
     return text.size() >= prefix.size() &&
-           text.compare(0, prefix.size(), prefix) == 0;
+           text.starts_with(prefix);
 }
 
 bool starts_with(const std::string &text, const char *prefix) {

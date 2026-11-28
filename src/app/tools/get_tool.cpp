@@ -105,7 +105,7 @@ bool parse_common(const std::vector<std::string> &args, std::size_t start,
                 return false;
             }
             options.directory = args[++i];
-        } else if (arg.rfind("--project=", 0) == 0) {
+        } else if (arg.starts_with("--project=")) {
             options.directory = arg.substr(10);
         } else if (arg == "--cache") {
             if (i + 1 >= args.size()) {
@@ -113,7 +113,7 @@ bool parse_common(const std::vector<std::string> &args, std::size_t start,
                 return false;
             }
             options.cache = args[++i];
-        } else if (arg.rfind("--cache=", 0) == 0) {
+        } else if (arg.starts_with("--cache=")) {
             options.cache = arg.substr(8);
         } else if (arg == "--force") {
             options.force = true;
@@ -341,7 +341,7 @@ std::vector<cached_module> list_cached_modules(const fs::path &cache) {
         if (!it->is_directory(ec))
             continue;
         if (name == ".build" || name == ".locks" || name == ".git" ||
-            name.rfind(".tmp-", 0) == 0) {
+            name.starts_with(".tmp-")) {
             it.disable_recursion_pending();
             continue;
         }

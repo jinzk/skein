@@ -228,9 +228,9 @@ int main(int argc, char **argv) {
                 return 2;
             }
             package_dirs.push_back(args[++i]);
-        } else if (arg.rfind("-I", 0) == 0 && arg.size() > 2) {
+        } else if (arg.starts_with("-I") && arg.size() > 2) {
             package_dirs.push_back(arg.substr(2));
-        } else if (arg.rfind("--package-path=", 0) == 0) {
+        } else if (arg.starts_with("--package-path=")) {
             package_dirs.push_back(arg.substr(15));
         } else if (arg == "--watch") {
             watch_mode = true;
@@ -240,7 +240,7 @@ int main(int argc, char **argv) {
                 return 2;
             }
             watch_dirs.push_back(args[++i]);
-        } else if (arg.rfind("--watch-dir=", 0) == 0) {
+        } else if (arg.starts_with("--watch-dir=")) {
             const std::string dir = arg.substr(12);
             if (dir.empty()) {
                 print_usage(program);
@@ -253,7 +253,7 @@ int main(int argc, char **argv) {
                 return 2;
             }
             source_encoding = args[++i];
-        } else if (arg.rfind("--encoding=", 0) == 0) {
+        } else if (arg.starts_with("--encoding=")) {
             source_encoding = arg.substr(11);
             if (source_encoding.empty()) {
                 print_usage(program);
@@ -275,7 +275,7 @@ int main(int argc, char **argv) {
             }
             typecheck_mode = parsed;
             skein::typecheck::set_mode(typecheck_mode);
-        } else if (arg.rfind("--typecheck=", 0) == 0) {
+        } else if (arg.starts_with("--typecheck=")) {
             std::string value = arg.substr(12);
             skein::typecheck::Mode parsed;
             if (!skein::typecheck::parse_mode(value.c_str(), parsed)) {
@@ -380,7 +380,7 @@ int main(int argc, char **argv) {
                 ++i;
                 continue;
             }
-            if (arg.rfind("--watch-dir=", 0) == 0)
+            if (arg.starts_with("--watch-dir="))
                 continue;
             child_args.push_back(arg);
         }

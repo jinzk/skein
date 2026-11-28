@@ -224,7 +224,7 @@ std::vector<std::string> filter_and_sort(
     const std::vector<std::string> &candidates, const std::string &prefix) {
     std::vector<std::string> out;
     for (const std::string &candidate : candidates) {
-        if (candidate.rfind(prefix, 0) == 0)
+        if (candidate.starts_with(prefix))
             out.push_back(candidate);
     }
     std::sort(out.begin(), out.end());

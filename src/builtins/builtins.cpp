@@ -125,7 +125,7 @@ static bool resolve_required_module(const std::string &requested,
         const bool match =
             requested == req.path ||
             (requested.size() > req.path.size() &&
-             requested.compare(0, req.path.size(), req.path) == 0 &&
+             requested.starts_with(req.path) &&
              requested[req.path.size()] == '/');
         if (!match)
             continue;

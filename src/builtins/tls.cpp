@@ -1195,7 +1195,7 @@ SSL_CTX *build_server_ctx(const std::string &cert_file,
             return NULL;
         }
         std::shared_ptr<SSL_CTX> child_ptr(child, &SSL_CTX_free);
-        if (spec.server_name.rfind("*.", 0) == 0)
+        if (spec.server_name.starts_with("*."))
             bundle->wildcard[spec.server_name.substr(2)] = child_ptr;
         else
             bundle->exact[spec.server_name] = child_ptr;
